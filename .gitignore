@@ -141,3 +141,40 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python packaging / build artifacts
+*.egg-info/
+build/
+dist/
+
+# Python tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local Python version pin (uv reads from pyproject.toml)
+.python-version
+# NOTE: uv.lock is intentionally NOT ignored — lock files are committed.
+
+# Local env files (in addition to the Node .env rules above)
+.env.local
+.env.*.local
+
+# macOS
+.DS_Store
+
+# Editors / IDEs
+.vscode/*
+!.vscode/settings.json
+.idea/
