@@ -1,0 +1,17 @@
+{
+  "name": "claimit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI agent that monitors post-purchase prices and auto-generates refund claims across multiple platforms",
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "lint": "echo 'Lint runs after ticket 1.6 (Biome) — placeholder' && exit 0",
+    "test": "echo 'Tests run per workspace after scaffolding — placeholder' && exit 0",
+    "build": "echo 'Build runs after ticket 1.5 (Next.js) — placeholder' && exit 0"
+  },
+  "license": "MIT"
+}
