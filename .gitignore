@@ -163,9 +163,8 @@ dist/
 .ruff_cache/
 .mypy_cache/
 
-# Local Python version pin (uv reads from pyproject.toml)
-.python-version
-# NOTE: uv.lock is intentionally NOT ignored — lock files are committed.
+# Python version pin (.python-version) IS committed so the whole team is on 3.12.
+# uv.lock is also intentionally NOT ignored — lock files are committed.
 
 # Local env files (in addition to the Node .env rules above)
 .env.local
