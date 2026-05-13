@@ -2,6 +2,7 @@
 
 import { Bell, ChevronDown, Menu, ShieldCheck } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { FloatingAssistant } from "@/components/layout/floating-assistant";
 import { SidebarContent } from "@/components/layout/sidebar";
@@ -19,6 +20,9 @@ import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/s
 import { cn } from "@/lib/utils";
 
 export default function AuthenticatedLayout({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const isAssistant = pathname.startsWith("/assistant");
+
   return (
     <div className="min-h-screen bg-neutral-0">
       {/* Desktop sidebar */}
@@ -59,16 +63,20 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
 
           {/* Header right */}
           <div className="flex items-center gap-3">
-            <ThemeToggle />
+            {!isAssistant ? (
+              <>
+                <ThemeToggle />
 
-            <button
-              type="button"
-              aria-label="Notifications"
-              className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "relative")}
-            >
-              <Bell className="w-5 h-5 text-neutral-600" aria-hidden="true" />
-              <span className="absolute top-1 right-1 w-2 h-2 bg-semantic-danger rounded-full" />
-            </button>
+                <button
+                  type="button"
+                  aria-label="Notifications"
+                  className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "relative")}
+                >
+                  <Bell className="w-5 h-5 text-neutral-600" aria-hidden="true" />
+                  <span className="absolute top-1 right-1 w-2 h-2 bg-semantic-danger rounded-full" />
+                </button>
+              </>
+            ) : null}
 
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -96,7 +104,7 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
         <main className="flex-1">{children}</main>
       </div>
 
-      <FloatingAssistant />
+      {!isAssistant ? <FloatingAssistant /> : null}
     </div>
   );
 }
