@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  Bell,
+  BotMessageSquare,
   FileText,
   LayoutDashboard,
   Receipt,
@@ -16,6 +18,8 @@ const sidebarLinks = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/purchases", label: "Purchases", icon: ShoppingBag },
   { href: "/claims", label: "Claims", icon: FileText },
+  { href: "/notifications", label: "Notifications", icon: Bell },
+  { href: "/assistant", label: "Assistant", icon: BotMessageSquare },
   { href: "/upload", label: "Upload", icon: Receipt },
   { href: "/settings", label: "Settings", icon: Settings },
 ] as const;
