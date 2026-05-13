@@ -24,7 +24,9 @@ export interface Claim {
   resolvedDate: string | null;
 }
 
-/** Canonical demo claims aligned with dashboard needsAttention IDs (claim_001, claim_002). */
+/** Canonical demo claims aligned with dashboard needsAttention IDs (claim_001, claim_002).
+ *  Detail payloads (draft / evidence / assistant) live in `@/lib/claim-detail`.
+ */
 export const mockClaims: Claim[] = [
   {
     claimId: "claim_001",

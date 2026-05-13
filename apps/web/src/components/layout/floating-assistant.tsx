@@ -5,14 +5,52 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store";
 
+type FloatingAssistantProps = {
+  /** On claim detail, FAB becomes a slim pill toggling embedded pane expansion (batch 6) */
+  variant?: "default" | "pill";
+};
+
 /**
- * Floating Assistant button + placeholder slide-over pane.
- * Real chat panel is wired up in tickets 5.9 / 5.10.
- * State lives in `useUIStore.assistantPaneOpen` so any page can toggle it.
+ * Floating Assistant button + placeholder slide-over (default variant).
+ * On claim detail routes, renders a pill that expands the embedded assistant column.
  */
-export function FloatingAssistant() {
+export function FloatingAssistant({ variant = "default" }: FloatingAssistantProps) {
   const open = useUIStore((s) => s.assistantPaneOpen);
   const toggle = useUIStore((s) => s.toggleAssistantPane);
+
+  const embeddedExpanded = useUIStore((s) => s.claimEmbeddedAssistantExpanded);
+  const toggleEmbedded = useUIStore((s) => s.toggleClaimEmbeddedAssistant);
+
+  if (variant === "pill") {
+    return (
+      <div className="fixed bottom-6 right-6 z-50">
+        <Button
+          type="button"
+          onClick={toggleEmbedded}
+          aria-expanded={embeddedExpanded}
+          aria-label={embeddedExpanded ? "Shrink assistant panel" : "Expand assistant panel"}
+          className={cn(
+            "h-11 rounded-full shadow-lg px-4 gap-2 transition-colors inline-flex items-center justify-center border border-neutral-200",
+            embeddedExpanded
+              ? "bg-neutral-800 text-neutral-0 hover:bg-neutral-700"
+              : "bg-neutral-0 text-neutral-900 hover:bg-neutral-50",
+          )}
+        >
+          {embeddedExpanded ? (
+            <>
+              <X className="w-5 h-5 shrink-0" aria-hidden />
+              <span className="text-sm font-medium">Shrink</span>
+            </>
+          ) : (
+            <>
+              <MessageSquareText className="w-5 h-5 shrink-0 text-brand-primary-600" aria-hidden />
+              <span className="text-sm font-medium text-neutral-900">Assistant</span>
+            </>
+          )}
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed bottom-6 right-6 z-50">
@@ -37,8 +75,7 @@ export function FloatingAssistant() {
         )}
       </Button>
 
-      {/* Placeholder slide-over — real chat content lands in 5.9/5.10. */}
-      {open && (
+      {open ? (
         <div
           id="assistant-pane"
           role="dialog"
@@ -53,7 +90,7 @@ export function FloatingAssistant() {
             Assistant coming soon (ticket 5.9 / 5.10).
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
