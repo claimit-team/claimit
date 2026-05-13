@@ -177,3 +177,13 @@ dist/
 .vscode/*
 !.vscode/settings.json
 .idea/
+
+# Terraform
+# tfvars contain project IDs / secrets — only the example template is committed.
+*.tfvars
+!*.tfvars.example
+# State files (use a remote backend for team-wide state).
+*.tfstate
+*.tfstate.*
+# Provider cache + working dir.
+.terraform/
