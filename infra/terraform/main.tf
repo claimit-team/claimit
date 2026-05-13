@@ -12,12 +12,25 @@ resource "google_artifact_registry_repository" "claimit" {
 }
 
 # ---------- Secret Manager (empty shells; real values added out-of-band) ----------
+# Note: gmail-oauth-client-id and gmail-oauth-client-secret are managed manually
+# (created out-of-band in ticket 1.17) and intentionally NOT declared here —
+# re-declaring would conflict on the next `terraform apply` unless imported
+# first. Bring them under terraform when convenient via:
+#   terraform import 'google_secret_manager_secret.shared["gmail-oauth-client-id"]' \
+#     projects/<PROJECT>/secrets/gmail-oauth-client-id
 locals {
   shared_secret_ids = [
     "mongodb-uri",
     "anthropic-api-key",
     "keepa-api-key",
     "scraperapi-key",
+    "elastic-url",
+    "elastic-api-key",
+    "agent-builder-sa-key",
+    "amadeus-client-id",
+    "amadeus-client-secret",
+    "phoenix-api-key",
+    "demo-password",
   ]
 }
 
