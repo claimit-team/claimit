@@ -1,4 +1,11 @@
-import type { SendMode, SubscriptionTier } from "./types";
+import type {
+  ISODateString,
+  LoyaltyTier,
+  Platform,
+  SendMode,
+  SubscriptionTier,
+  UUID,
+} from "./types";
 
 export interface DefaultLocation {
   city: string;
@@ -8,31 +15,31 @@ export interface DefaultLocation {
 }
 
 export interface LoyaltyMembership {
-  platform: string;
+  platform: Platform;
   member_id: string;
-  tier: string;
+  tier: LoyaltyTier;
 }
 
 export interface GmailIntegration {
   connected: boolean;
-  connected_at: string | null;
+  connected_at: ISODateString | null;
   scopes_granted: string[];
   refresh_token_ref: string | null;
   watch_history_id: string | null;
-  watch_expires_at: string | null;
+  watch_expires_at: ISODateString | null;
   last_processed_message_id: string | null;
 }
 
 export interface SendPreference {
   default_mode: SendMode;
   auto_send_delay_seconds: number;
-  changed_at: string | null;
+  changed_at: ISODateString | null;
 }
 
 export interface IngestionSkiplistEntry {
   sender: string;
   format_hash: string;
-  added_at: string;
+  added_at: ISODateString;
   reason: string;
 }
 
@@ -43,12 +50,13 @@ export interface NotificationPrefs {
 
 export interface Subscription {
   tier: SubscriptionTier;
-  trial_ends: string | null;
-  renewed_at: string | null;
+  trial_ends: ISODateString | null;
+  renewed_at: ISODateString | null;
 }
 
 export interface User {
-  _id: string;
+  _id: UUID;
+  updated_at: ISODateString | null;
   email: string;
   name: string;
   default_location: DefaultLocation;
@@ -58,5 +66,5 @@ export interface User {
   ingestion_skiplist: IngestionSkiplistEntry[];
   notification_prefs: NotificationPrefs;
   subscription: Subscription;
-  created_at: string;
+  created_at: ISODateString;
 }

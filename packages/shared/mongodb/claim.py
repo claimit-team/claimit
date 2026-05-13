@@ -1,6 +1,10 @@
 """Claim collection — mirror of Claim.ts."""
 
-from pydantic import BaseModel
+from datetime import datetime
+from typing import Literal
+from uuid import UUID
+
+from pydantic import BaseModel, Field, model_validator
 
 from .base import BaseDocument
 from .enums import (
@@ -8,6 +12,7 @@ from .enums import (
     ClaimType,
     DenialReason,
     DraftGeneratedBy,
+    Platform,
     SendMode,
     SubmittedVia,
 )
@@ -17,26 +22,34 @@ class DraftVersion(BaseModel):
     version: int
     content: str
     generated_by: DraftGeneratedBy
-    at: str
+    at: datetime
 
 
 class Claim(BaseDocument):
-    purchase_id: str
-    user_id: str
-    platform: str
-    claim_amount: float
-    currency: str
+    # Invariant: draft_content always equals draft_versions[-1].content.
+    # Kept as a top-level field for query convenience. Any update must keep both in sync.
+    purchase_id: UUID
+    user_id: UUID
+    platform: Platform
+    claim_amount: float = Field(gt=0)
+    currency: Literal["USD"]
     claim_type: ClaimType
     draft_content: str
-    draft_versions: list[DraftVersion]
-    redraft_count: int
+    draft_versions: list[DraftVersion] = Field(min_length=1)
+    redraft_count: int = Field(ge=0)
     policy_clause_cited: str
     evidence_screenshot_url: str | None
     send_override: SendMode | None
-    submitted_at: str | None
+    submitted_at: datetime | None
     submitted_via: SubmittedVia | None
     outcome: ClaimOutcome
     outcome_note: str | None
     denial_reason_extracted: DenialReason | None
-    resolved_at: str | None
+    resolved_at: datetime | None
     trace_id: str | None
+
+    @model_validator(mode="after")
+    def _validate_draft_invariant(self) -> "Claim":
+        if self.draft_content != self.draft_versions[-1].content:
+            raise ValueError("draft_content must equal draft_versions[-1].content")
+        return self

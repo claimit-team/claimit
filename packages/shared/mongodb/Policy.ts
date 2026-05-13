@@ -1,8 +1,9 @@
-import type { Category, ClaimType } from "./types";
+import type { Category, ClaimType, ISODateString, Platform, UUID } from "./types";
 
 export interface Policy {
-  _id: string;
-  platform: string;
+  _id: UUID;
+  updated_at: ISODateString | null;
+  platform: Platform;
   category: Category;
   window_days: number;
   window_days_member: number | null;
@@ -20,6 +21,6 @@ export interface Policy {
   policy_url: string;
   policy_text_full: string;
   policy_text_relevant_clause: string;
-  last_verified: string;
+  last_verified: ISODateString;
   active: boolean;
 }

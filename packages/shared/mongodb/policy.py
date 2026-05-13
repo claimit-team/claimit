@@ -1,11 +1,13 @@
 """Policy collection — mirror of Policy.ts."""
 
+from datetime import datetime
+
 from .base import BaseDocument
-from .enums import Category, ClaimType
+from .enums import Category, ClaimType, Platform
 
 
 class Policy(BaseDocument):
-    platform: str
+    platform: Platform
     category: Category
     window_days: int
     window_days_member: int | None
@@ -23,5 +25,5 @@ class Policy(BaseDocument):
     policy_url: str
     policy_text_full: str
     policy_text_relevant_clause: str
-    last_verified: str
+    last_verified: datetime
     active: bool

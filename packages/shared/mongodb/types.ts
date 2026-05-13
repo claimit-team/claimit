@@ -4,12 +4,52 @@
  * both as runtime values (validation, fixtures, Pydantic mirrors) and as types.
  */
 
+/**
+ * Branded string for UUIDv4 document references (`_id`, `*_id` foreign keys).
+ * At runtime it's just a string; the brand only narrows TypeScript inference.
+ */
+export type UUID = string & { readonly __brand: unique symbol };
+
+/**
+ * Branded string for ISO 8601 timestamps (e.g. "2026-05-09T12:08:20Z").
+ * At runtime it's just a string; mirrors `datetime` on the Python side.
+ */
+export type ISODateString = string & { readonly __brand: unique symbol };
+
 export const Category = {
   RETAIL: "retail",
   AIRLINE: "airline",
   HOTEL: "hotel",
 } as const;
 export type Category = (typeof Category)[keyof typeof Category];
+
+export const Platform = {
+  BEST_BUY: "best_buy",
+  AMAZON: "amazon",
+  TARGET: "target",
+  WALMART: "walmart",
+  MARRIOTT: "marriott",
+  HILTON: "hilton",
+  DELTA: "delta",
+  UNITED: "united",
+  AMERICAN: "american",
+} as const;
+export type Platform = (typeof Platform)[keyof typeof Platform];
+
+export const LoyaltyTier = {
+  MY_BEST_BUY: "my_best_buy",
+  MY_BEST_BUY_PLUS: "my_best_buy_plus",
+  MY_BEST_BUY_TOTAL: "my_best_buy_total",
+  MARRIOTT_SILVER: "marriott_silver",
+  MARRIOTT_GOLD: "marriott_gold",
+  MARRIOTT_PLATINUM: "marriott_platinum",
+  DELTA_SILVER: "delta_silver",
+  DELTA_GOLD: "delta_gold",
+  DELTA_PLATINUM: "delta_platinum",
+  DELTA_DIAMOND: "delta_diamond",
+  NONE: "none",
+} as const;
+export type LoyaltyTier = (typeof LoyaltyTier)[keyof typeof LoyaltyTier];
 
 export const ClaimType = {
   EMAIL: "email",

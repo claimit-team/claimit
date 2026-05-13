@@ -13,6 +13,32 @@ class Category(StrEnum):
     HOTEL = "hotel"
 
 
+class Platform(StrEnum):
+    BEST_BUY = "best_buy"
+    AMAZON = "amazon"
+    TARGET = "target"
+    WALMART = "walmart"
+    MARRIOTT = "marriott"
+    HILTON = "hilton"
+    DELTA = "delta"
+    UNITED = "united"
+    AMERICAN = "american"
+
+
+class LoyaltyTier(StrEnum):
+    MY_BEST_BUY = "my_best_buy"
+    MY_BEST_BUY_PLUS = "my_best_buy_plus"
+    MY_BEST_BUY_TOTAL = "my_best_buy_total"
+    MARRIOTT_SILVER = "marriott_silver"
+    MARRIOTT_GOLD = "marriott_gold"
+    MARRIOTT_PLATINUM = "marriott_platinum"
+    DELTA_SILVER = "delta_silver"
+    DELTA_GOLD = "delta_gold"
+    DELTA_PLATINUM = "delta_platinum"
+    DELTA_DIAMOND = "delta_diamond"
+    NONE = "none"
+
+
 class ClaimType(StrEnum):
     EMAIL = "email"
     CHAT_SCRIPT = "chat_script"

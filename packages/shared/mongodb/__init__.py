@@ -1,8 +1,8 @@
 """ClaimIt MongoDB Pydantic v2 models.
 
 Mirrors the TypeScript definitions in this same directory (User.ts, Purchase.ts, ...).
-Wire format (snake_case keys, ISO 8601 string timestamps, `_id` field) is identical
-across both languages by design.
+Wire format (snake_case keys, ISO 8601 timestamps (datetime in Python, branded
+ISODateString in TypeScript), `_id` field) is identical across both languages by design.
 """
 
 from .base import BaseDocument
@@ -17,7 +17,9 @@ from .enums import (
     DenialReason,
     DraftGeneratedBy,
     IngestionSource,
+    LoyaltyTier,
     MessageRole,
+    Platform,
     PriceSource,
     PurchaseDateBasis,
     PurchaseStatus,
@@ -58,8 +60,10 @@ __all__ = [
     "IngestionSkiplistEntry",
     "IngestionSource",
     "LoyaltyMembership",
+    "LoyaltyTier",
     "MessageRole",
     "NotificationPrefs",
+    "Platform",
     "Policy",
     "PriceHistory",
     "PriceSource",

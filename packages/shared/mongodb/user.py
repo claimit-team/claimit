@@ -1,9 +1,11 @@
 """User collection — mirror of User.ts."""
 
+from datetime import datetime
+
 from pydantic import BaseModel
 
 from .base import BaseDocument
-from .enums import SendMode, SubscriptionTier
+from .enums import LoyaltyTier, Platform, SendMode, SubscriptionTier
 
 
 class DefaultLocation(BaseModel):
@@ -14,31 +16,31 @@ class DefaultLocation(BaseModel):
 
 
 class LoyaltyMembership(BaseModel):
-    platform: str
+    platform: Platform
     member_id: str
-    tier: str
+    tier: LoyaltyTier
 
 
 class GmailIntegration(BaseModel):
     connected: bool
-    connected_at: str | None
+    connected_at: datetime | None
     scopes_granted: list[str]
     refresh_token_ref: str | None
     watch_history_id: str | None
-    watch_expires_at: str | None
+    watch_expires_at: datetime | None
     last_processed_message_id: str | None
 
 
 class SendPreference(BaseModel):
     default_mode: SendMode
     auto_send_delay_seconds: int
-    changed_at: str | None
+    changed_at: datetime | None
 
 
 class IngestionSkiplistEntry(BaseModel):
     sender: str
     format_hash: str
-    added_at: str
+    added_at: datetime
     reason: str
 
 
@@ -49,8 +51,8 @@ class NotificationPrefs(BaseModel):
 
 class Subscription(BaseModel):
     tier: SubscriptionTier
-    trial_ends: str | None
-    renewed_at: str | None
+    trial_ends: datetime | None
+    renewed_at: datetime | None
 
 
 class User(BaseDocument):
@@ -63,4 +65,4 @@ class User(BaseDocument):
     ingestion_skiplist: list[IngestionSkiplistEntry]
     notification_prefs: NotificationPrefs
     subscription: Subscription
-    created_at: str
+    created_at: datetime
