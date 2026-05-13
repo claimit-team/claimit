@@ -73,6 +73,8 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  packages/shared/mongodb: {}
+
 packages:
 
   '@alloc/quick-lru@5.2.0':

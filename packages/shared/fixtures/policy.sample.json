@@ -1,0 +1,30 @@
+{
+  "_id": "44444444-4444-4444-8444-444444444444",
+  "updated_at": "2026-05-01T08:00:00Z",
+  "platform": "best_buy",
+  "category": "retail",
+  "window_days": 15,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": true,
+  "claim_type": "self_service",
+  "claim_url": "https://www.bestbuy.com/site/help-topics/price-match-guarantee/pcmcat297300050000.c",
+  "claim_email": null,
+  "claim_phone": "1-888-237-8289",
+  "loyalty_required": false,
+  "award_ticket_eligible": null,
+  "bundle_exclusions": true,
+  "key_exclusions": [
+    "marketplace third-party sellers",
+    "clearance and open-box items",
+    "bundle and package pricing",
+    "limited-quantity / doorbuster offers",
+    "rebate offers and financing offers"
+  ],
+  "policy_url": "https://www.bestbuy.com/site/help-topics/price-match-guarantee/pcmcat297300050000.c",
+  "policy_text_full": "At the time of sale, we price match products purchased at Best Buy against local retail competitors and online retailers including amazon.com, bhphotovideo.com, crutchfield.com, dell.com, hp.com, target.com and walmart.com. We will also match products purchased at Best Buy if the same item drops in price at Best Buy within the customer's return and exchange period. Exclusions apply, including but not limited to clearance, open-box, marketplace, refurbished, and bundle offers.",
+  "policy_text_relevant_clause": "If the price of an identical, immediately-available product drops at Best Buy within the customer's return and exchange period (15 days for standard members, 60 days for My Best Buy Plus and My Best Buy Total members), Best Buy will refund the difference upon request.",
+  "last_verified": "2026-05-01T08:00:00Z",
+  "active": true
+}
