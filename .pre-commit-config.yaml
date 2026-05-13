@@ -1,0 +1,39 @@
+# See https://pre-commit.com for usage and config
+default_install_hook_types: [pre-commit]
+default_stages: [pre-commit]
+
+# Pin Python interpreter to project standard (3.12 — matches .python-version + ticket 1.4).
+# Also avoids macOS brew Python 3.14's pyexpat/libexpat ABI mismatch.
+default_language_version:
+  python: python3.12
+
+repos:
+  # Basic file hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-json
+        exclude: '\.vscode/.*\.json$|tsconfig.*\.json$|\.devcontainer/.*\.json$'
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: check-merge-conflict
+      - id: check-case-conflict
+
+  # Biome — TypeScript / JavaScript / JSON format + lint
+  - repo: https://github.com/biomejs/pre-commit
+    rev: v2.4.15
+    hooks:
+      - id: biome-check
+        additional_dependencies: ["@biomejs/biome@2.4.15"]
+
+  # Ruff — Python lint + format
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.12
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format

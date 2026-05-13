@@ -42,10 +42,61 @@ See [Implementation Plan Attachment 3 §8](https://www.notion.so/ClaimIt-Impleme
 
 ## Getting Started
 
-Setup instructions will be added as scaffolding tickets complete:
-- pnpm workspaces config (ticket 1.3)
-- Python project scaffold (ticket 1.4)
-- Next.js scaffold (ticket 1.5)
+### Prerequisites
+
+- Node 20+ via [volta](https://volta.sh) (recommended) or nvm
+- Python 3.12 via [uv](https://docs.astral.sh/uv/)
+- [pnpm](https://pnpm.io) 9+ (managed by volta or corepack)
+- [pre-commit](https://pre-commit.com) (`uv tool install pre-commit` — uses uv which is already required for Python agents)
+
+### First-time setup
+
+```bash
+# Clone
+git clone https://github.com/claimit-team/claimit
+cd claimit
+
+# Install Node tooling
+pnpm install
+
+# Install Python tooling (per agent)
+cd apps/ingest-agent && uv sync && cd ../..
+cd apps/monitor-agent && uv sync && cd ../..
+cd apps/claim-agent && uv sync && cd ../..
+cd apps/assistant-agent && uv sync && cd ../..
+
+# Install pre-commit (managed by uv to avoid brew Python conflicts)
+uv tool install pre-commit
+
+# Install git hooks
+pre-commit install
+```
+
+### Running services locally
+
+```bash
+# Frontend (port 3000)
+pnpm --filter web dev
+
+# Backend agents (one per terminal)
+cd apps/ingest-agent && uv run uvicorn src.main:app --reload --port 8001
+cd apps/monitor-agent && uv run uvicorn src.main:app --reload --port 8002
+cd apps/claim-agent && uv run uvicorn src.main:app --reload --port 8003
+cd apps/assistant-agent && uv run uvicorn src.main:app --reload --port 8004
+```
+
+### Linting & formatting
+
+```bash
+# All TS/JSON via Biome
+pnpm exec biome check .
+pnpm exec biome check --write .
+
+# Python (per agent)
+cd apps/ingest-agent && uv run ruff check . && uv run ruff format .
+```
+
+These also run automatically on every commit via pre-commit hooks.
 
 ## License
 
