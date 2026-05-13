@@ -1,0 +1,12 @@
+{
+  "name": "@claimit/mongodb-types",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared TypeScript types for ClaimIt MongoDB collections (users, purchases, price_history, policies, claims, conversations)",
+  "main": "index.ts",
+  "types": "index.ts",
+  "files": [
+    "*.ts"
+  ],
+  "license": "MIT"
+}
