@@ -56,7 +56,7 @@ const mockDashboardData = {
   needsAttention: [
     {
       type: "review_draft" as const,
-      claimId: "claim_bestbuy_001",
+      claimId: "claim_001",
       platform: "Best Buy",
       title: "Sony WH-1000XM5",
       claimType: "chat_script",
@@ -64,7 +64,7 @@ const mockDashboardData = {
     },
     {
       type: "update_needed" as const,
-      claimId: "claim_hilton_002",
+      claimId: "claim_002",
       platform: "Hilton",
       title: "Hilton Waikiki stay",
       submittedDaysAgo: 6,
