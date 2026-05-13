@@ -3,7 +3,7 @@
 import { Bell, ChevronDown, Menu, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
 import { FloatingAssistant } from "@/components/layout/floating-assistant";
 import { SidebarContent } from "@/components/layout/sidebar";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
@@ -18,10 +18,21 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { useUIStore } from "@/store";
 
 export default function AuthenticatedLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const isAssistant = pathname.startsWith("/assistant");
+  const isClaimDetail = /^\/claims\/[^/]+$/.test(pathname);
+  const setClaimEmbeddedAssistantExpanded = useUIStore((s) => s.setClaimEmbeddedAssistantExpanded);
+
+  useEffect(() => {
+    if (!isClaimDetail) {
+      setClaimEmbeddedAssistantExpanded(false);
+    }
+  }, [isClaimDetail, setClaimEmbeddedAssistantExpanded]);
+
+  const floatingAssistantVariant = isClaimDetail ? ("pill" as const) : ("default" as const);
 
   return (
     <div className="min-h-screen bg-neutral-0">
@@ -104,7 +115,7 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
         <main className="flex-1">{children}</main>
       </div>
 
-      {!isAssistant ? <FloatingAssistant /> : null}
+      {!isAssistant ? <FloatingAssistant variant={floatingAssistantVariant} /> : null}
     </div>
   );
 }

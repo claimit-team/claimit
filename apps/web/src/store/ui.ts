@@ -13,6 +13,11 @@ type UIState = {
   // Assistant chat pane (used by 5.9, 5.10)
   assistantPaneOpen: boolean;
   toggleAssistantPane: () => void;
+
+  /** On /claims/[id]: maximizes embedded assistant pane in the layout (batch 6) */
+  claimEmbeddedAssistantExpanded: boolean;
+  setClaimEmbeddedAssistantExpanded: (expanded: boolean) => void;
+  toggleClaimEmbeddedAssistant: () => void;
 };
 
 export const useUIStore = create<UIState>((set) => ({
@@ -22,4 +27,12 @@ export const useUIStore = create<UIState>((set) => ({
 
   assistantPaneOpen: false,
   toggleAssistantPane: () => set((state) => ({ assistantPaneOpen: !state.assistantPaneOpen })),
+
+  claimEmbeddedAssistantExpanded: false,
+  setClaimEmbeddedAssistantExpanded: (claimEmbeddedAssistantExpanded) =>
+    set({ claimEmbeddedAssistantExpanded }),
+  toggleClaimEmbeddedAssistant: () =>
+    set((state) => ({
+      claimEmbeddedAssistantExpanded: !state.claimEmbeddedAssistantExpanded,
+    })),
 }));
