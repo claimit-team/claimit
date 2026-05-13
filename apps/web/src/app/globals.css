@@ -46,6 +46,57 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* ============================================================ */
+  /* ClaimIt tokens exposed as Tailwind utilities                 */
+  /* (bg-brand-primary-500, text-neutral-700, etc.)               */
+  /* ============================================================ */
+
+  /* Brand — Primary (Navy) */
+  --color-brand-primary-50: var(--brand-primary-50);
+  --color-brand-primary-100: var(--brand-primary-100);
+  --color-brand-primary-200: var(--brand-primary-200);
+  --color-brand-primary-300: var(--brand-primary-300);
+  --color-brand-primary-400: var(--brand-primary-400);
+  --color-brand-primary-500: var(--brand-primary-500);
+  --color-brand-primary-600: var(--brand-primary-600);
+  --color-brand-primary-700: var(--brand-primary-700);
+  --color-brand-primary-800: var(--brand-primary-800);
+  --color-brand-primary-900: var(--brand-primary-900);
+
+  /* Brand — Accent (Forest Green) */
+  --color-brand-accent-50: var(--brand-accent-50);
+  --color-brand-accent-100: var(--brand-accent-100);
+  --color-brand-accent-200: var(--brand-accent-200);
+  --color-brand-accent-300: var(--brand-accent-300);
+  --color-brand-accent-400: var(--brand-accent-400);
+  --color-brand-accent-500: var(--brand-accent-500);
+  --color-brand-accent-600: var(--brand-accent-600);
+  --color-brand-accent-700: var(--brand-accent-700);
+
+  /* Neutral */
+  --color-neutral-0: var(--neutral-0);
+  --color-neutral-50: var(--neutral-50);
+  --color-neutral-100: var(--neutral-100);
+  --color-neutral-200: var(--neutral-200);
+  --color-neutral-300: var(--neutral-300);
+  --color-neutral-400: var(--neutral-400);
+  --color-neutral-500: var(--neutral-500);
+  --color-neutral-600: var(--neutral-600);
+  --color-neutral-700: var(--neutral-700);
+  --color-neutral-800: var(--neutral-800);
+  --color-neutral-900: var(--neutral-900);
+
+  /* Semantic */
+  --color-semantic-success: var(--semantic-success);
+  --color-semantic-success-bg: var(--semantic-success-bg);
+  --color-semantic-warning: var(--semantic-warning);
+  --color-semantic-warning-bg: var(--semantic-warning-bg);
+  --color-semantic-warning-muted: var(--semantic-warning-bg);
+  --color-semantic-danger: var(--semantic-danger);
+  --color-semantic-danger-bg: var(--semantic-danger-bg);
+  --color-semantic-info: var(--semantic-info);
+  --color-semantic-info-bg: var(--semantic-info-bg);
 }
 
 :root {
@@ -81,6 +132,57 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* ============================================================ */
+  /* ClaimIt design tokens (design-system.md §2.1)                */
+  /* ============================================================ */
+
+  /* Brand — Primary (Deep Navy) */
+  --brand-primary-50: hsl(217, 33%, 97%);
+  --brand-primary-100: hsl(217, 30%, 92%);
+  --brand-primary-200: hsl(217, 28%, 82%);
+  --brand-primary-300: hsl(217, 28%, 65%);
+  --brand-primary-400: hsl(217, 32%, 45%);
+  --brand-primary-500: hsl(217, 50%, 30%);
+  --brand-primary-600: hsl(217, 60%, 22%);
+  --brand-primary-700: hsl(217, 70%, 17%);
+  --brand-primary-800: hsl(217, 75%, 13%);
+  --brand-primary-900: hsl(217, 80%, 9%);
+
+  /* Brand — Accent (Forest Green) — RECLAIMED MONEY ONLY */
+  --brand-accent-50: hsl(142, 50%, 95%);
+  --brand-accent-100: hsl(142, 50%, 88%);
+  --brand-accent-200: hsl(142, 50%, 75%);
+  --brand-accent-300: hsl(142, 55%, 55%);
+  --brand-accent-400: hsl(142, 60%, 42%);
+  --brand-accent-500: hsl(142, 65%, 32%);
+  --brand-accent-600: hsl(142, 70%, 25%);
+  --brand-accent-700: hsl(142, 75%, 19%);
+  --brand-accent-800: hsl(142, 80%, 13%);
+  --brand-accent-900: hsl(142, 85%, 9%);
+
+  /* Neutral (cool, slightly navy-tinted) */
+  --neutral-0: hsl(0, 0%, 100%);
+  --neutral-50: hsl(220, 20%, 98%);
+  --neutral-100: hsl(220, 18%, 95%);
+  --neutral-200: hsl(220, 15%, 90%);
+  --neutral-300: hsl(220, 12%, 80%);
+  --neutral-400: hsl(220, 10%, 60%);
+  --neutral-500: hsl(220, 10%, 45%);
+  --neutral-600: hsl(220, 13%, 32%);
+  --neutral-700: hsl(220, 15%, 22%);
+  --neutral-800: hsl(220, 18%, 14%);
+  --neutral-900: hsl(220, 22%, 8%);
+
+  /* Semantic */
+  --semantic-success: var(--brand-accent-500);
+  --semantic-success-bg: var(--brand-accent-50);
+  --semantic-warning: hsl(35, 90%, 50%);
+  --semantic-warning-bg: hsl(35, 100%, 96%);
+  --semantic-danger: hsl(0, 70%, 50%);
+  --semantic-danger-bg: hsl(0, 80%, 97%);
+  --semantic-info: hsl(210, 90%, 55%);
+  --semantic-info-bg: hsl(210, 100%, 97%);
 }
 
 .dark {
@@ -115,6 +217,55 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+
+  /* ============================================================ */
+  /* ClaimIt design tokens — dark mode (design-system.md §2.4)    */
+  /* ============================================================ */
+
+  /* Dark mode neutrals — inverted with slight navy tint */
+  --neutral-0: hsl(220, 25%, 4%);
+  --neutral-50: hsl(220, 22%, 7%);
+  --neutral-100: hsl(220, 18%, 11%);
+  --neutral-200: hsl(220, 15%, 17%);
+  --neutral-300: hsl(220, 12%, 28%);
+  --neutral-400: hsl(220, 10%, 50%);
+  --neutral-500: hsl(220, 10%, 65%);
+  --neutral-600: hsl(220, 12%, 75%);
+  --neutral-700: hsl(220, 15%, 85%);
+  --neutral-800: hsl(220, 18%, 92%);
+  --neutral-900: hsl(220, 20%, 97%);
+
+  /* Dark mode brand — lifted ~30% */
+  --brand-primary-50: hsl(217, 30%, 14%);
+  --brand-primary-100: hsl(217, 35%, 20%);
+  --brand-primary-200: hsl(217, 40%, 28%);
+  --brand-primary-300: hsl(217, 50%, 40%);
+  --brand-primary-400: hsl(217, 60%, 55%);
+  --brand-primary-500: hsl(217, 75%, 68%);
+  --brand-primary-600: hsl(217, 80%, 76%);
+  --brand-primary-700: hsl(217, 85%, 83%);
+  --brand-primary-800: hsl(217, 90%, 88%);
+  --brand-primary-900: hsl(217, 95%, 93%);
+
+  --brand-accent-50: hsl(142, 30%, 13%);
+  --brand-accent-100: hsl(142, 35%, 18%);
+  --brand-accent-200: hsl(142, 40%, 25%);
+  --brand-accent-300: hsl(142, 50%, 38%);
+  --brand-accent-400: hsl(142, 55%, 52%);
+  --brand-accent-500: hsl(142, 65%, 65%);
+  --brand-accent-600: hsl(142, 70%, 75%);
+  --brand-accent-700: hsl(142, 75%, 82%);
+  --brand-accent-800: hsl(142, 80%, 88%);
+  --brand-accent-900: hsl(142, 85%, 93%);
+
+  --semantic-success: var(--brand-accent-500);
+  --semantic-success-bg: hsl(142, 35%, 14%);
+  --semantic-warning: hsl(35, 80%, 65%);
+  --semantic-warning-bg: hsl(35, 40%, 14%);
+  --semantic-danger: hsl(0, 70%, 65%);
+  --semantic-danger-bg: hsl(0, 40%, 14%);
+  --semantic-info: hsl(210, 80%, 70%);
+  --semantic-info-bg: hsl(210, 40%, 14%);
 }
 
 @layer base {
