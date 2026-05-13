@@ -13,5 +13,8 @@
     "test": "echo 'Tests run per workspace after scaffolding — placeholder' && exit 0",
     "build": "echo 'Build runs after ticket 1.5 (Next.js) — placeholder' && exit 0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.15"
+  }
 }

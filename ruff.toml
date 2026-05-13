@@ -1,0 +1,31 @@
+# Ruff config — format + lint for Python
+target-version = "py312"
+line-length = 100
+indent-width = 4
+
+extend-exclude = [
+    ".venv",
+    "uv.lock",
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "**/.ruff_cache",
+    "**/.mypy_cache",
+]
+
+[lint]
+# Sensible default rule set
+# E/W = pycodestyle, F = pyflakes, I = isort, B = bugbear, UP = pyupgrade,
+# N = naming, SIM = simplify, RUF = ruff-specific
+select = ["E", "W", "F", "I", "B", "UP", "N", "SIM", "RUF"]
+ignore = [
+    "E501",  # line too long — formatter handles it
+    "B008",  # do not perform function call in argument defaults (FastAPI Depends() pattern)
+]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401"]  # unused imports OK in __init__.py
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

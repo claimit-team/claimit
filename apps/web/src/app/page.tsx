@@ -5,9 +5,7 @@ export default function Home() {
       <p className="text-lg text-zinc-600">
         AI agent that monitors post-purchase prices and auto-generates refund claims.
       </p>
-      <p className="text-sm text-zinc-400 mt-8">
-        Frontend scaffold — ticket 1.5
-      </p>
+      <p className="text-sm text-zinc-400 mt-8">Frontend scaffold — ticket 1.5</p>
     </main>
   );
 }
