@@ -1,0 +1,30 @@
+import Link from "next/link";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+export function TeamHero() {
+  return (
+    <section className="bg-neutral-0 py-16 sm:py-24">
+      <div className="mx-auto max-w-3xl px-4 text-center sm:px-6 lg:px-8">
+        <h1 className="text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl lg:text-5xl">
+          The team building ClaimIt.
+        </h1>
+        <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-neutral-700">
+          We are building a practical agent system for a tedious consumer workflow: finding eligible
+          post-purchase price drops and preparing the right claim material.
+        </p>
+        <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
+          <Link href="/login" className={cn(buttonVariants())}>
+            Try free
+          </Link>
+          <Link
+            href="/how-it-works"
+            className="text-sm font-medium text-brand-primary-500 transition-colors hover:text-brand-primary-600"
+          >
+            See how it works
+          </Link>
+        </div>
+      </div>
+    </section>
+  );
+}

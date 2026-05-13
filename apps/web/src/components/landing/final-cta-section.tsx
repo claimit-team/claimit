@@ -1,0 +1,31 @@
+import { ArrowRight } from "lucide-react";
+import Link from "next/link";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+export function FinalCtaSection() {
+  return (
+    <section className="border-t border-neutral-200 px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
+      <div className="mx-auto max-w-2xl text-center">
+        <h2 className="text-balance text-2xl font-semibold text-neutral-900 sm:text-3xl">
+          Start with one receipt
+        </h2>
+        <p className="mt-4 text-pretty text-neutral-700">
+          Upload a purchase or connect Gmail, then let ClaimIt watch the price windows.
+        </p>
+        <div className="mt-8 flex justify-center">
+          <Link
+            href="/login"
+            className={cn(
+              buttonVariants({ size: "lg" }),
+              "gap-2 w-full sm:w-auto inline-flex justify-center bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600 px-10",
+            )}
+          >
+            Try Free
+            <ArrowRight className="size-4 shrink-0" aria-hidden />
+          </Link>
+        </div>
+      </div>
+    </section>
+  );
+}
