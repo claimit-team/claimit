@@ -1,21 +1,28 @@
 /**
  * Coherent demo state for settings routes (replaced by Identity Platform in 5.2).
  */
-export const mockUser = {
+export const mockUser: {
+  displayName: string;
+  email: string;
+  initials: string;
+} = {
   displayName: "Erdun",
   email: "erdun@claimit.app",
   initials: "E",
-} as const;
+};
 
-export const mockGmail = {
+export const mockGmail: {
+  connected: boolean;
+  connectedEmail: string;
+  scopes: readonly ["gmail.readonly", "gmail.send"];
+} = {
   connected: true,
   connectedEmail: "erdun@gmail.com",
-  /** Only scopes we request in the product spec — do not add gmail.modify in mock UI. */
-  scopes: ["gmail.readonly", "gmail.send"] as const,
-} as const;
+  scopes: ["gmail.readonly", "gmail.send"],
+};
 
-export const mockPreferences = {
-  defaultSendMode: "approval" as "approval" | "auto",
-} as const;
+export const mockPreferences: { defaultSendMode: "approval" | "auto" } = {
+  defaultSendMode: "approval",
+};
 
-export const mockPlan = "pro" as "free" | "pro" | "family";
+export const mockPlan: "free" | "pro" | "family" = "pro";
