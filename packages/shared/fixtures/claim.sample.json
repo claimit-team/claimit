@@ -1,0 +1,36 @@
+{
+  "_id": "55555555-5555-4555-8555-555555555555",
+  "updated_at": "2026-05-09T12:10:00Z",
+  "purchase_id": "22222222-2222-4222-8222-222222222222",
+  "user_id": "11111111-1111-4111-8111-111111111111",
+  "platform": "best_buy",
+  "claim_amount": 50.0,
+  "currency": "USD",
+  "claim_type": "self_service",
+  "draft_content": "Hello Best Buy Customer Care,\n\nI placed order BBY-987654 on 2026-05-04 for the Sony WH-1000XM5 Wireless Noise Cancelling Headphones (SKU 6505729) at $349.99. As of 2026-05-09, the identical item is listed on bestbuy.com at $299.99 — a $50.00 reduction within the price-match window described in your Price Match Guarantee.\n\nPlease apply a one-time price match refund of $50.00 to the original payment method.\n\nThank you,\nJane Doe\nMy Best Buy Plus #MBBY-7711224488",
+  "draft_versions": [
+    {
+      "version": 1,
+      "content": "Hello Best Buy Customer Care,\n\nI placed order BBY-987654 on 2026-05-04 for the Sony WH-1000XM5 (SKU 6505729) at $349.99. As of 2026-05-09 the same item is listed at $299.99 — a $50.00 reduction within the price-match window.\n\nPlease apply a price match refund.\n\nThank you,\nJane Doe",
+      "generated_by": "agent",
+      "at": "2026-05-09T12:05:00Z"
+    },
+    {
+      "version": 2,
+      "content": "Hello Best Buy Customer Care,\n\nI placed order BBY-987654 on 2026-05-04 for the Sony WH-1000XM5 Wireless Noise Cancelling Headphones (SKU 6505729) at $349.99. As of 2026-05-09, the identical item is listed on bestbuy.com at $299.99 — a $50.00 reduction within the price-match window described in your Price Match Guarantee.\n\nPlease apply a one-time price match refund of $50.00 to the original payment method.\n\nThank you,\nJane Doe\nMy Best Buy Plus #MBBY-7711224488",
+      "generated_by": "assistant_redraft",
+      "at": "2026-05-09T12:08:14Z"
+    }
+  ],
+  "redraft_count": 1,
+  "policy_clause_cited": "If the price of an identical, immediately-available product drops at Best Buy within the customer's return and exchange period (15 days for standard members, 60 days for My Best Buy Plus and My Best Buy Total members), Best Buy will refund the difference upon request.",
+  "evidence_screenshot_url": "gs://claimit-evidence/33333333-screenshot.png",
+  "send_override": null,
+  "submitted_at": "2026-05-09T12:10:00Z",
+  "submitted_via": "self_service_link",
+  "outcome": "pending",
+  "outcome_note": null,
+  "denial_reason_extracted": null,
+  "resolved_at": null,
+  "trace_id": "trace-7a3f1c92"
+}

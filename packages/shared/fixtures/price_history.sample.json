@@ -1,0 +1,15 @@
+{
+  "_id": "33333333-3333-4333-8333-333333333333",
+  "updated_at": "2026-05-09T12:00:00Z",
+  "purchase_id": "22222222-2222-4222-8222-222222222222",
+  "platform": "best_buy",
+  "product_id": "6505729",
+  "price_member": null,
+  "price_non_member": 299.99,
+  "member_tier_required": null,
+  "currency": "USD",
+  "checked_at": "2026-05-09T12:00:00Z",
+  "source": "scraperapi",
+  "evidence_screenshot_url": "gs://claimit-evidence/33333333-screenshot.png",
+  "raw_response_hash": "sha256:c4d2e9..."
+}
