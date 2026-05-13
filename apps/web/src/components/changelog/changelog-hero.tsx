@@ -1,0 +1,30 @@
+import { ArrowRight } from "lucide-react";
+import Link from "next/link";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+export function ChangelogHero() {
+  return (
+    <section className="mb-12">
+      <h1 className="text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+        Changelog
+      </h1>
+      <p className="mt-4 text-lg leading-relaxed text-neutral-700 text-pretty">
+        Product updates, interface changes, and implementation notes as ClaimIt moves from MVP to
+        working demo.
+      </p>
+      <div className="mt-6 flex flex-wrap items-center gap-4">
+        <Link href="/how-it-works" className={cn(buttonVariants(), "inline-flex items-center")}>
+          See how it works
+          <ArrowRight className="ml-2 h-4 w-4" />
+        </Link>
+        <Link
+          href="/blog"
+          className="text-sm font-medium text-brand-primary-500 transition-colors hover:text-brand-primary-600"
+        >
+          Read the blog
+        </Link>
+      </div>
+    </section>
+  );
+}
