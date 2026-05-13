@@ -210,3 +210,185 @@ function emptyExtraction(purchaseId: string): ConfirmExtractionPayload {
 export function getConfirmExtractionForPurchase(purchaseId: string): ConfirmExtractionPayload {
   return extractionsById[purchaseId] ?? emptyExtraction(purchaseId);
 }
+
+// --- Purchase detail (Batch 6) ---
+
+export type PurchaseDetailMonitoringStatus =
+  | "monitoring"
+  | "eligible_drop"
+  | "claim_active"
+  | "claim_resolved"
+  | "window_expired"
+  | "stopped";
+
+export type RelatedClaimBriefStatus =
+  | "draft"
+  | "awaiting_approval"
+  | "approved"
+  | "rejected"
+  | "resolved";
+
+export type RelatedClaimType = "chat_script" | "email_template" | "phone_guide";
+
+export interface RelatedClaimBrief {
+  claimId: string;
+  status: RelatedClaimBriefStatus;
+  claimType: RelatedClaimType;
+  amount: number;
+  currency: string;
+  createdAt: string;
+}
+
+export interface PriceHistoryPointVm {
+  date: string;
+  price: number;
+  dropDetected: boolean;
+}
+
+export type PurchaseDetailOriginalSource = "upload" | "email" | "api";
+
+export interface PurchaseDetailExtension {
+  monitoringStatus: PurchaseDetailMonitoringStatus;
+  purchaseDate: string;
+  orderId: string;
+  pricePaid: number;
+  currency: string;
+  priceHistory: PriceHistoryPointVm[];
+  currentPrice: number;
+  lowestSeen: number;
+  highestSeen: number;
+  lastCheckedIso: string;
+  windowEndDate: string;
+  daysRemaining: number;
+  policySummary: string;
+  policyFullUrl: string;
+  relatedClaims: RelatedClaimBrief[];
+  memberTier?: string;
+  sourceEmail?: string;
+  purchaseSource?: PurchaseDetailOriginalSource;
+}
+
+/** Row used by `/purchases/[id]` merged from list + extensions. */
+export interface PurchaseDetailViewModel extends Purchase {
+  monitoringStatus: PurchaseDetailMonitoringStatus;
+  purchaseDate: string;
+  orderId: string;
+  pricePaid: number;
+  currency: string;
+  priceHistory: PriceHistoryPointVm[];
+  currentPrice: number;
+  lowestSeen: number;
+  highestSeen: number;
+  lastCheckedIso: string;
+  windowEndDate: string;
+  daysRemaining: number;
+  policySummary: string;
+  policyFullUrl: string;
+  relatedClaims: RelatedClaimBrief[];
+  memberTier?: string;
+  sourceEmail?: string;
+  purchaseSource: PurchaseDetailOriginalSource;
+}
+
+const purchaseDetailExtensions: Partial<Record<string, PurchaseDetailExtension>> = {
+  purchase_001: {
+    monitoringStatus: "eligible_drop",
+    purchaseDate: "2026-05-01",
+    orderId: "BBY-987654",
+    pricePaid: 299.99,
+    currency: "USD",
+    priceHistory: [
+      { date: "2026-05-01", price: 299.99, dropDetected: false },
+      { date: "2026-05-03", price: 299.99, dropDetected: false },
+      { date: "2026-05-05", price: 289.99, dropDetected: false },
+      { date: "2026-05-08", price: 269.99, dropDetected: false },
+      { date: "2026-05-10", price: 249.99, dropDetected: true },
+      { date: "2026-05-13", price: 249.99, dropDetected: false },
+    ],
+    currentPrice: 249.99,
+    lowestSeen: 249.99,
+    highestSeen: 299.99,
+    lastCheckedIso: "2026-05-13T18:00:00Z",
+    windowEndDate: "2026-05-31",
+    daysRemaining: 11,
+    policySummary: "Best Buy matches identical product price within 30 days of purchase.",
+    policyFullUrl: "/mock/policies/best-buy",
+    relatedClaims: [
+      {
+        claimId: "claim_001",
+        status: "awaiting_approval",
+        claimType: "chat_script",
+        amount: 45,
+        currency: "USD",
+        createdAt: "2026-05-10",
+      },
+    ],
+    purchaseSource: "upload",
+  },
+};
+
+export function getPurchaseDetailViewModel(
+  purchaseId: string,
+): PurchaseDetailViewModel | undefined {
+  const base = getPurchaseById(purchaseId);
+  const ext = purchaseDetailExtensions[purchaseId];
+  if (!base || !ext) return undefined;
+  if (base.confirmationState !== "confirmed") return undefined;
+
+  return {
+    ...base,
+    monitoringStatus: ext.monitoringStatus,
+    purchaseDate: ext.purchaseDate,
+    orderId: ext.orderId,
+    pricePaid: ext.pricePaid,
+    currency: ext.currency,
+    priceHistory: ext.priceHistory,
+    currentPrice: ext.currentPrice,
+    lowestSeen: ext.lowestSeen,
+    highestSeen: ext.highestSeen,
+    lastCheckedIso: ext.lastCheckedIso,
+    windowEndDate: ext.windowEndDate,
+    daysRemaining: ext.daysRemaining,
+    policySummary: ext.policySummary,
+    policyFullUrl: ext.policyFullUrl,
+    relatedClaims: ext.relatedClaims,
+    memberTier: ext.memberTier,
+    sourceEmail: ext.sourceEmail,
+    purchaseSource: ext.purchaseSource ?? "upload",
+  };
+}
+
+export function formatPurchaseCurrency(amount: number, currency = "USD"): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+  }).format(amount);
+}
+
+export function formatPurchaseDate(dateString: string): string {
+  return new Date(dateString).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+export function formatPurchaseShortDate(dateString: string): string {
+  return new Date(dateString).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+export function getPurchaseRelativeTime(dateString: string): string {
+  const date = new Date(dateString);
+  const diffMs = Date.now() - date.getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+
+  if (diffHours < 1) return "Just now";
+  if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? "s" : ""} ago`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays} day${diffDays > 1 ? "s" : ""} ago`;
+}
