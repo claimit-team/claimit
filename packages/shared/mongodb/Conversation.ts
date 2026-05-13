@@ -1,8 +1,4 @@
-import type {
-  ConversationMode,
-  ConversationStatus,
-  MessageRole,
-} from "./types";
+import type { ConversationMode, ConversationStatus, MessageRole } from "./types";
 
 export interface ToolCall {
   tool: string;

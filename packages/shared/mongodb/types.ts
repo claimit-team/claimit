@@ -31,8 +31,7 @@ export const SubscriptionTier = {
   PRO: "pro",
   FAMILY: "family",
 } as const;
-export type SubscriptionTier =
-  (typeof SubscriptionTier)[keyof typeof SubscriptionTier];
+export type SubscriptionTier = (typeof SubscriptionTier)[keyof typeof SubscriptionTier];
 
 export const PurchaseDateBasis = {
   ORDER_DATE: "order_date",
@@ -40,8 +39,7 @@ export const PurchaseDateBasis = {
   PICKUP_DATE: "pickup_date",
   CHECK_IN_DATE: "check_in_date",
 } as const;
-export type PurchaseDateBasis =
-  (typeof PurchaseDateBasis)[keyof typeof PurchaseDateBasis];
+export type PurchaseDateBasis = (typeof PurchaseDateBasis)[keyof typeof PurchaseDateBasis];
 
 export const PurchaseStatus = {
   PENDING_CONFIRMATION: "pending_confirmation",
@@ -53,16 +51,14 @@ export const PurchaseStatus = {
   REFUNDED: "refunded",
   DISMISSED: "dismissed",
 } as const;
-export type PurchaseStatus =
-  (typeof PurchaseStatus)[keyof typeof PurchaseStatus];
+export type PurchaseStatus = (typeof PurchaseStatus)[keyof typeof PurchaseStatus];
 
 export const IngestionSource = {
   GMAIL: "gmail",
   UPLOAD_PDF: "upload_pdf",
   UPLOAD_IMAGE: "upload_image",
 } as const;
-export type IngestionSource =
-  (typeof IngestionSource)[keyof typeof IngestionSource];
+export type IngestionSource = (typeof IngestionSource)[keyof typeof IngestionSource];
 
 export const PriceSource = {
   KEEPA: "keepa",
@@ -78,8 +74,7 @@ export const DraftGeneratedBy = {
   USER_EDIT: "user_edit",
   ASSISTANT_REDRAFT: "assistant_redraft",
 } as const;
-export type DraftGeneratedBy =
-  (typeof DraftGeneratedBy)[keyof typeof DraftGeneratedBy];
+export type DraftGeneratedBy = (typeof DraftGeneratedBy)[keyof typeof DraftGeneratedBy];
 
 export const SubmittedVia = {
   GMAIL_SEND: "gmail_send",
@@ -117,8 +112,7 @@ export const ConversationMode = {
   GENERAL: "general",
   CLAIM_FOCUSED: "claim_focused",
 } as const;
-export type ConversationMode =
-  (typeof ConversationMode)[keyof typeof ConversationMode];
+export type ConversationMode = (typeof ConversationMode)[keyof typeof ConversationMode];
 
 export const MessageRole = {
   USER: "user",
@@ -130,5 +124,4 @@ export const ConversationStatus = {
   ACTIVE: "active",
   ARCHIVED: "archived",
 } as const;
-export type ConversationStatus =
-  (typeof ConversationStatus)[keyof typeof ConversationStatus];
+export type ConversationStatus = (typeof ConversationStatus)[keyof typeof ConversationStatus];
