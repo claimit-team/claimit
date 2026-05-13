@@ -1,0 +1,51 @@
+# Shared by apps/Dockerfile.agent and apps/monitor-agent/Dockerfile builds.
+# Docker reads this from the build context root, which is the repo root (so
+# `docker build -f apps/Dockerfile.agent --build-arg APP_NAME=... .` from repo
+# root picks it up automatically).
+
+# VCS
+.git
+.gitattributes
+.gitignore
+
+# Editors / OS
+.vscode
+.idea
+.DS_Store
+.claude
+
+# Node
+node_modules
+.next
+.pnpm-store
+out
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.venv
+venv
+env
+.pytest_cache
+.ruff_cache
+.mypy_cache
+*.egg-info
+
+# Local env (never bake secrets into images)
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# CI / IaC / docs not needed at runtime
+.github
+infra
+docs
+
+# Build artifacts
+build
+dist

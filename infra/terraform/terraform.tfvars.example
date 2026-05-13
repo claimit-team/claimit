@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars (gitignored) and fill in real values.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+
+project_id = "your-gcp-project-id-here"
+region     = "us-east1"
+
+# After the first image build + push to Artifact Registry, replace the
+# placeholders below with the real URLs (tag or digest).
+#
+# ingest_agent_image    = "us-east1-docker.pkg.dev/your-gcp-project-id-here/claimit/ingest-agent:latest"
+# monitor_agent_image   = "us-east1-docker.pkg.dev/your-gcp-project-id-here/claimit/monitor-agent:latest"
+# claim_agent_image     = "us-east1-docker.pkg.dev/your-gcp-project-id-here/claimit/claim-agent:latest"
+# assistant_agent_image = "us-east1-docker.pkg.dev/your-gcp-project-id-here/claimit/assistant-agent:latest"
