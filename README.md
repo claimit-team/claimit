@@ -1,5 +1,7 @@
 # ClaimIt
 
+[![CI](https://github.com/claimit-team/claimit/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/claimit-team/claimit/actions/workflows/ci.yml)
+
 AI agent that monitors post-purchase prices and auto-generates refund claims across multiple platforms.
 
 Built for the Google Cloud Rapid Agent Hackathon.
