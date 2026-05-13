@@ -9,6 +9,7 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
+    "postinstall": "node scripts/postinstall.js",
     "lint": "echo 'Lint runs after ticket 1.6 (Biome) — placeholder' && exit 0",
     "test": "echo 'Tests run per workspace after scaffolding — placeholder' && exit 0",
     "build": "echo 'Build runs after ticket 1.5 (Next.js) — placeholder' && exit 0"
