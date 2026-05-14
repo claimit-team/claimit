@@ -80,7 +80,7 @@ const categoryConfig: Record<
   { icon: typeof Package; colorClass: string }
 > = {
   Product: { icon: Package, colorClass: "bg-brand-primary-500 text-white" },
-  Design: { icon: Palette, colorClass: "bg-brand-accent-600 text-white" },
+  Design: { icon: Palette, colorClass: "bg-brand-primary-700 text-white" },
   Engineering: { icon: Code, colorClass: "bg-neutral-700 text-neutral-0" },
   Security: {
     icon: Shield,

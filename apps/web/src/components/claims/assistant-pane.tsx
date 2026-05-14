@@ -50,9 +50,9 @@ function MessageBubble({ message }: { message: ClaimMessage }) {
         )}
       >
         <p className="text-sm leading-relaxed">{message.content}</p>
-        {message.tool_summary ? (
+        {message.toolSummary ? (
           <Badge variant="secondary" className="mt-2 bg-neutral-200/50 text-neutral-500 text-xs">
-            {message.tool_summary}
+            {message.toolSummary}
           </Badge>
         ) : null}
       </div>

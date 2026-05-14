@@ -35,6 +35,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { useUIStore } from "@/store";
 
 // ============================================================================
 // MOCK DATA
@@ -193,10 +194,31 @@ function PageHeader({
         </Button>
         {/* Dev-only userState switcher — not shipped to production builds */}
         {process.env.NODE_ENV !== "production" && (
-          <DevStateSwitcher value={userState} onChange={onUserStateChange} />
+          <>
+            <DevStateSwitcher value={userState} onChange={onUserStateChange} />
+            <DevPulseTrigger />
+          </>
         )}
       </div>
     </div>
+  );
+}
+
+function DevPulseTrigger() {
+  const triggerProactiveEvent = useUIStore((s) => s.triggerProactiveEvent);
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={() => {
+        triggerProactiveEvent();
+        toast.info("Proactive event queued — watch the assistant FAB pulse.");
+      }}
+      className="border-dashed border-neutral-400 text-neutral-600"
+    >
+      Trigger pulse
+    </Button>
   );
 }
 
@@ -357,13 +379,13 @@ function UpdateNeededCard({
   };
 
   const handleSaveApproved = () => {
-    toast.success("Outcome saved. Reclaimed amount updated from your report.");
+    toast.success("Outcome recorded. Reclaimed amount updated from your report.");
     setDismissed(true);
     onDismiss();
   };
 
   const handleSaveDenied = () => {
-    toast.success("Outcome saved. Claim marked denied.");
+    toast.success("Outcome recorded. Claim marked denied.");
     setDismissed(true);
     onDismiss();
   };
@@ -627,7 +649,7 @@ function MonitoredPurchasesSection({
                             purchase.status === "claim drafted" &&
                               "bg-neutral-100 text-neutral-700",
                             purchase.status === "submitted" &&
-                              "bg-brand-accent-50 text-brand-accent-600",
+                              "bg-semantic-info-bg text-semantic-info",
                             isWarning && "bg-semantic-warning-bg text-semantic-warning",
                           )}
                         >

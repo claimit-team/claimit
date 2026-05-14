@@ -26,7 +26,7 @@ function StatusBadge({
   const variants = {
     complete: "border-brand-primary-200 bg-brand-primary-50 text-brand-primary-700",
     monitoring: "border-neutral-200 bg-neutral-50 text-neutral-700",
-    review: "border-brand-accent-200 bg-brand-accent-50 text-brand-accent-700",
+    review: "border-semantic-warning/20 bg-semantic-warning-bg text-semantic-warning",
   };
 
   return (
@@ -40,7 +40,7 @@ function StatusIcon({ type }: { type: "complete" | "monitoring" | "review" }) {
   const iconClass = {
     complete: "text-brand-primary-500",
     monitoring: "text-neutral-500",
-    review: "text-brand-accent-500",
+    review: "text-semantic-warning",
   };
 
   if (type === "complete")
