@@ -299,3 +299,49 @@
     animation: none !important;
   }
 }
+
+/* ============================================================ */
+/* Global polish                                                */
+/* ============================================================ */
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 64px;
+}
+
+::selection {
+  background: var(--brand-primary-200);
+  color: var(--brand-primary-900);
+}
+
+.dark ::selection {
+  background: var(--brand-primary-700);
+  color: var(--brand-primary-50);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--neutral-300);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--neutral-400);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--neutral-300) transparent;
+}
+
+body {
+  font-feature-settings: "cv11", "ss01", "ss03", "cv02";
+}
