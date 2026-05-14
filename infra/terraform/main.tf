@@ -151,3 +151,5 @@ module "assistant_agent" {
 
   depends_on = [google_secret_manager_secret.shared]
 }
+
+# Trigger plan workflow test - Thu May 14 18:22:29 EDT 2026
