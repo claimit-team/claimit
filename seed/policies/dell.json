@@ -14,10 +14,7 @@
   "loyalty_required": false,
   "award_ticket_eligible": null,
   "bundle_exclusions": true,
-  "key_exclusions": [
-    "B2B / commercial accounts",
-    "refurbished items"
-  ],
+  "key_exclusions": ["B2B / commercial accounts", "refurbished items"],
   "policy_url": "https://www.dell.com/en-us/lp/price-match-guarantee",
   "policy_text_full": "Dell's Price Match Guarantee covers price drops at Dell or qualifying competitors within 30 days of purchase. Refund is issued to original tender, submitted via the Order Support Portal. B2B accounts and refurbished items are excluded.",
   "policy_text_relevant_clause": "Within 30 days of purchase, Dell will refund the difference if an identical product drops in price at Dell or a qualified competitor.",

@@ -14,10 +14,7 @@
   "loyalty_required": false,
   "award_ticket_eligible": null,
   "bundle_exclusions": true,
-  "key_exclusions": [
-    "marketplace third-party sellers",
-    "online claim path not supported"
-  ],
+  "key_exclusions": ["marketplace third-party sellers", "online claim path not supported"],
   "policy_url": "https://www.staples.com/stores/price-match-guarantee",
   "policy_text_full": "Staples matches lower prices at Staples or qualifying competitors within 14 days of purchase. Refund is issued to original tender. Claim must be filed in-store — online submission is not supported.",
   "policy_text_relevant_clause": "Within 14 days of purchase, customers must visit a Staples store to request a price match; online claim submission is not offered.",

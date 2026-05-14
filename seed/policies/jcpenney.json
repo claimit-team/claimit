@@ -14,10 +14,7 @@
   "loyalty_required": false,
   "award_ticket_eligible": null,
   "bundle_exclusions": true,
-  "key_exclusions": [
-    "clearance",
-    "special buys"
-  ],
+  "key_exclusions": ["clearance", "special buys"],
   "policy_url": "https://www.jcpenney.com/m/our-lowest-price-guarantee",
   "policy_text_full": "JCPenney's Lowest Price Guarantee matches lower prices at JCPenney or qualifying competitors within 14 days of purchase. Claims must be handled via phone or in-store. Clearance and special buys are excluded.",
   "policy_text_relevant_clause": "Within 14 days of purchase, customers can request a price adjustment by phone or in-store; clearance and special buys are excluded.",

@@ -14,10 +14,7 @@
   "loyalty_required": false,
   "award_ticket_eligible": null,
   "bundle_exclusions": true,
-  "key_exclusions": [
-    "marketplace third-party sellers",
-    "open-box items"
-  ],
+  "key_exclusions": ["marketplace third-party sellers", "open-box items"],
   "policy_url": "https://kb.newegg.com/knowledge-base/price-match-guarantee/",
   "policy_text_full": "Newegg offers a 7-day price adjustment when Newegg's own price drops after purchase. Refund is issued as store credit or original tender. Marketplace third-party listings and open-box items are excluded.",
   "policy_text_relevant_clause": "Within 7 days of purchase, customers can request a price adjustment if Newegg's own price drops; marketplace sellers and open-box items are excluded.",
