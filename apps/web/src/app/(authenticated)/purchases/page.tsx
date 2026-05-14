@@ -20,7 +20,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { mockPurchases, type Purchase, type PurchaseCategory } from "@/lib/mock-purchases";
+import {
+  getPurchasesForListView,
+  type Purchase,
+  type PurchaseCategory,
+} from "@/lib/mock-purchases";
 import { cn } from "@/lib/utils";
 
 function categoryIcon(cat: PurchaseCategory) {
@@ -47,7 +51,7 @@ export default function PurchasesPage() {
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return mockPurchases.filter((p) => {
+    return getPurchasesForListView().filter((p) => {
       if (categoryFilter !== "all" && p.category !== categoryFilter) return false;
       if (!q) return true;
       return (

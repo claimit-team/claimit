@@ -376,7 +376,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
               type="button"
               variant="destructive"
               onClick={confirmDelete}
-              className="bg-semantic-danger hover:bg-red-700"
+              className="bg-semantic-danger hover:bg-semantic-danger/90"
             >
               Delete
             </Button>

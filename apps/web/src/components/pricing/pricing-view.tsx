@@ -60,25 +60,25 @@ const pricingTiers: PricingTier[] = [
   },
   {
     name: "Pro",
-    badge: "Most Popular",
+    badge: "Most popular",
     priceMonthlyLabel: "$4.99 / mo",
     priceAnnualLabel: "$49 / yr",
-    annualSavingsLabel: "Save ~17%",
+    annualSavingsLabel: "Annual ~17% off",
     description: "For individuals who want full claim drafts and broader monitoring.",
     highlights: ["Unlimited monitors", "Claim drafts", "Gmail integration", "Assistant support"],
     promo: "30-day free trial · No credit card required",
-    cta: { label: "Start Pro Trial", href: "/login" },
+    cta: { label: "Start Pro trial", href: "/login" },
     featured: true,
   },
   {
     name: "Family",
     priceMonthlyLabel: "$9.99 / mo",
     priceAnnualLabel: "$99 / yr",
-    annualSavingsLabel: "Save ~17%",
+    annualSavingsLabel: "Annual ~17% off",
     description: "For families who want to use ClaimIt across up to 5 user accounts.",
     highlights: ["Up to 5 users", "All Pro features per user"],
     promo: "30-day free trial · No credit card required",
-    cta: { label: "Start Family Trial", href: "/login" },
+    cta: { label: "Start Family trial", href: "/login" },
   },
 ];
 
@@ -149,7 +149,9 @@ function PricingCard({
           ) : null}
         </div>
         <div className="mt-4">
-          <span className="text-3xl font-semibold text-neutral-900">{price.split(" ")[0]}</span>
+          <span className="text-3xl font-semibold text-neutral-900 tabular-nums">
+            {price.split(" ")[0]}
+          </span>
           {price.includes("/") ? (
             <span className="ml-1 text-sm text-neutral-700">/ {price.split("/ ")[1]}</span>
           ) : null}
@@ -158,9 +160,7 @@ function PricingCard({
           ) : null}
         </div>
         {showAnnualSavings ? (
-          <p className="mt-1 text-sm font-medium text-brand-accent-500">
-            {tier.annualSavingsLabel}
-          </p>
+          <p className="mt-1 text-sm font-medium text-neutral-700">{tier.annualSavingsLabel}</p>
         ) : null}
         {billingCadence === "annual" && tier.name !== "Free" ? (
           <p className="mt-1 text-xs text-neutral-500">Billed annually</p>

@@ -69,12 +69,12 @@ export function AssistantSection() {
               <div className="border-b border-neutral-200 px-4 py-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <FileText className="size-4 shrink-0 text-brand-accent-500" aria-hidden />
+                    <FileText className="size-4 shrink-0 text-neutral-500" aria-hidden />
                     <span className="text-sm font-medium text-neutral-900">Claim Draft</span>
                   </div>
                   <Badge
                     variant="outline"
-                    className="border-brand-accent-200 bg-brand-accent-50 text-brand-accent-700 shrink-0"
+                    className="border-neutral-200 bg-neutral-50 text-neutral-700 shrink-0"
                   >
                     Pending Review
                   </Badge>
