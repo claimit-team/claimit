@@ -1,0 +1,27 @@
+{
+  "_id": "0000a025-0000-4000-8000-000000000025",
+  "platform": "ihg",
+  "category": "hotel",
+  "window_days": 1,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": true,
+  "claim_type": "email",
+  "claim_url": "https://www.ihg.com/content/us/en/customer-care/best-price-guarantee",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": true,
+  "award_ticket_eligible": false,
+  "bundle_exclusions": true,
+  "key_exclusions": [
+    "IHG One Rewards membership required",
+    "regional 48-hour pre-arrival rule may apply in some markets",
+    "strict identical-room rule"
+  ],
+  "policy_url": "https://www.ihg.com/content/us/en/customer-care/best-price-guarantee",
+  "policy_text_full": "IHG's Best Price Guarantee matches a lower publicly available rate within 24 hours of booking. IHG One Rewards membership is required. Bonus: free first night OR 5x base points. Some regions enforce a 48-hour pre-arrival cutoff in addition to the 24-hour booking window.",
+  "policy_text_relevant_clause": "Within 24 hours of booking, IHG One Rewards members can claim BPG; regional 48-hour pre-arrival rule may apply in some markets.",
+  "last_verified": "2026-05-15",
+  "active": true
+}

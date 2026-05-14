@@ -1,0 +1,28 @@
+{
+  "_id": "0000a011-0000-4000-8000-000000000011",
+  "platform": "macys",
+  "category": "retail",
+  "window_days": 10,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": true,
+  "claim_type": "email",
+  "claim_url": "https://www.macys.com/customer-service/articles/how-can-i-get-a-price-adjustment",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": false,
+  "award_ticket_eligible": null,
+  "bundle_exclusions": true,
+  "key_exclusions": [
+    "doorbusters",
+    "Specials",
+    "Last Act clearance",
+    "competitor list limited to selected retailers"
+  ],
+  "policy_url": "https://www.macys.com/customer-service/articles/how-can-i-get-a-price-adjustment",
+  "policy_text_full": "Macy's offers a 10-day price adjustment for own price drops and from selected competitors. Doorbusters, Specials, and Last Act clearance items are excluded. Refund is issued to original tender.",
+  "policy_text_relevant_clause": "Within 10 days of purchase, customers can submit a price adjustment request; doorbusters, Specials, and Last Act items are excluded.",
+  "last_verified": "2026-05-15",
+  "active": true
+}

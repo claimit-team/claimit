@@ -1,0 +1,26 @@
+{
+  "_id": "0000a015-0000-4000-8000-000000000015",
+  "platform": "amazon",
+  "category": "retail",
+  "window_days": 0,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": false,
+  "covers_competitor_drops": false,
+  "claim_type": "email",
+  "claim_url": "https://www.amazon.com/gp/help/customer/display.html?nodeId=G9EAYKPV5YYDB8P7",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": false,
+  "award_ticket_eligible": null,
+  "bundle_exclusions": false,
+  "key_exclusions": [
+    "no formal post-purchase price-match policy",
+    "tracked via Keepa for analytics only"
+  ],
+  "policy_url": "https://www.amazon.com/gp/help/customer/display.html?nodeId=G9EAYKPV5YYDB8P7",
+  "policy_text_full": "Amazon has no formal post-purchase price-match or price-adjustment policy. ClaimIt monitors Amazon prices via Keepa for analytics and price-history purposes only; no claim is filed against Amazon and no refund path exists.",
+  "policy_text_relevant_clause": "Amazon does not publish a post-purchase price-match policy; tracking is informational only via Keepa.",
+  "last_verified": "2026-05-15",
+  "active": false
+}

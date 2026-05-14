@@ -1,0 +1,25 @@
+{
+  "_id": "0000a014-0000-4000-8000-000000000014",
+  "platform": "walmart",
+  "category": "retail",
+  "window_days": 0,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": false,
+  "covers_competitor_drops": false,
+  "claim_type": "email",
+  "claim_url": "https://www.walmart.com/help/article/walmart-price-match-policy/6295d9e1a501489b9aa40a60c899b288",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": false,
+  "award_ticket_eligible": null,
+  "bundle_exclusions": false,
+  "key_exclusions": [
+    "no post-purchase price-match policy"
+  ],
+  "policy_url": "https://www.walmart.com/help/article/walmart-price-match-policy/6295d9e1a501489b9aa40a60c899b288",
+  "policy_text_full": "Walmart does not offer a post-purchase price match or price adjustment policy. ClaimIt tracks Walmart purchases for awareness only — users buying from Walmart are flagged at ingest with an explanatory message that no claim path is available.",
+  "policy_text_relevant_clause": "Walmart has no published post-purchase price match policy; users are notified at ingest that price drops are not actionable.",
+  "last_verified": "2026-05-15",
+  "active": false
+}

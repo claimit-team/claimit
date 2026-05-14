@@ -1,0 +1,27 @@
+{
+  "_id": "0000a022-0000-4000-8000-000000000022",
+  "platform": "hilton",
+  "category": "hotel",
+  "window_days": 1,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": true,
+  "claim_type": "email",
+  "claim_url": "https://www.hilton.com/en/hilton-honors/price-match-guarantee/start-claim/",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": true,
+  "award_ticket_eligible": false,
+  "bundle_exclusions": true,
+  "key_exclusions": [
+    "Hilton Honors membership required",
+    "competitor rate must be publicly available (not opaque or member-only)",
+    "identical-room rule: same hotel, dates, room type, bed type, cancellation policy, rate type"
+  ],
+  "policy_url": "https://www.hilton.com/en/hilton-honors/price-match-guarantee/start-claim/",
+  "policy_text_full": "Hilton's Price Match Guarantee matches a lower publicly available rate from third-party sites within 24 hours of booking. Hilton Honors membership is required. Bonus: matched rate plus an additional 25% off. Strict identical-room rule applies.",
+  "policy_text_relevant_clause": "Within 24 hours of booking, Hilton Honors members can claim a price match if a publicly available rate is lower; bonus is 25% off the matched rate.",
+  "last_verified": "2026-05-15",
+  "active": true
+}

@@ -1,0 +1,27 @@
+{
+  "_id": "0000a004-0000-4000-8000-000000000004",
+  "platform": "costco",
+  "category": "retail",
+  "window_days": 30,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": false,
+  "claim_type": "email",
+  "claim_url": "https://customerservice.costco.com/app/answers/detail/a_id/628",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": true,
+  "award_ticket_eligible": null,
+  "bundle_exclusions": true,
+  "key_exclusions": [
+    "limited-time promotions",
+    "gas station purchases",
+    "food court purchases"
+  ],
+  "policy_url": "https://customerservice.costco.com/app/answers/detail/a_id/628",
+  "policy_text_full": "Costco refunds the price difference if the price of an item drops at Costco within 30 days of purchase. Only Costco's own price drops qualify — competitor matches are not offered. Refund is issued as member account credit; Costco membership is required, and claim path differs for in-warehouse vs. costco.com purchases.",
+  "policy_text_relevant_clause": "Members can request a price adjustment within 30 days if the price of an item drops at Costco; refund is issued as member account credit.",
+  "last_verified": "2026-05-15",
+  "active": true
+}

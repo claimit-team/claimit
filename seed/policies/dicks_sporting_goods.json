@@ -1,0 +1,26 @@
+{
+  "_id": "0000a009-0000-4000-8000-000000000009",
+  "platform": "dicks_sporting_goods",
+  "category": "retail",
+  "window_days": 14,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": true,
+  "claim_type": "chat_script",
+  "claim_url": "https://www.dickssportinggoods.com/s/policy/price-match-policy",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": false,
+  "award_ticket_eligible": null,
+  "bundle_exclusions": true,
+  "key_exclusions": [
+    "clearance",
+    "doorbusters"
+  ],
+  "policy_url": "https://www.dickssportinggoods.com/s/policy/price-match-policy",
+  "policy_text_full": "Dick's Sporting Goods matches qualifying competitor prices within 14 days of purchase. Refund is issued to original tender. Claims can be filed in-store or via online chat; clearance and doorbusters are excluded.",
+  "policy_text_relevant_clause": "Within 14 days of purchase, customers can request a price adjustment if a qualifying competitor advertises the same item at a lower price.",
+  "last_verified": "2026-05-15",
+  "active": true
+}

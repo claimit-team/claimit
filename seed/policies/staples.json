@@ -1,0 +1,26 @@
+{
+  "_id": "0000a008-0000-4000-8000-000000000008",
+  "platform": "staples",
+  "category": "retail",
+  "window_days": 14,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": true,
+  "claim_type": "in_store",
+  "claim_url": "https://www.staples.com/stores/price-match-guarantee",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": false,
+  "award_ticket_eligible": null,
+  "bundle_exclusions": true,
+  "key_exclusions": [
+    "marketplace third-party sellers",
+    "online claim path not supported"
+  ],
+  "policy_url": "https://www.staples.com/stores/price-match-guarantee",
+  "policy_text_full": "Staples matches lower prices at Staples or qualifying competitors within 14 days of purchase. Refund is issued to original tender. Claim must be filed in-store — online submission is not supported.",
+  "policy_text_relevant_clause": "Within 14 days of purchase, customers must visit a Staples store to request a price match; online claim submission is not offered.",
+  "last_verified": "2026-05-15",
+  "active": true
+}

@@ -1,0 +1,27 @@
+{
+  "_id": "0000a026-0000-4000-8000-000000000026",
+  "platform": "wyndham",
+  "category": "hotel",
+  "window_days": 1,
+  "window_days_member": null,
+  "pre_arrival_hours_required": 48,
+  "covers_own_drops": true,
+  "covers_competitor_drops": true,
+  "claim_type": "email",
+  "claim_url": "https://www.wyndhamhotels.com/hotel-deals/best-rate-guarantee",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": true,
+  "award_ticket_eligible": false,
+  "bundle_exclusions": true,
+  "key_exclusions": [
+    "Wyndham Rewards membership required",
+    "claim must be filed at least 48 hours before check-in",
+    "strict identical-room rule"
+  ],
+  "policy_url": "https://www.wyndhamhotels.com/hotel-deals/best-rate-guarantee",
+  "policy_text_full": "Wyndham's Best Rate Guarantee matches a lower publicly available rate within 24 hours of booking. Wyndham Rewards membership is required, AND the claim must be filed at least 48 hours before check-in. Bonus: 25% off the lower rate.",
+  "policy_text_relevant_clause": "Within 24 hours of booking AND at least 48 hours before check-in, Wyndham Rewards members can claim BRG for 25% off the lower rate.",
+  "last_verified": "2026-05-15",
+  "active": true
+}

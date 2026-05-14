@@ -1,0 +1,26 @@
+{
+  "_id": "0000a016-0000-4000-8000-000000000016",
+  "platform": "southwest",
+  "category": "airline",
+  "window_days": 365,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": false,
+  "claim_type": "self_service",
+  "claim_url": "https://support.southwest.com/helpcenter/s/article/changing-cancelling-flights",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": false,
+  "award_ticket_eligible": false,
+  "bundle_exclusions": false,
+  "key_exclusions": [
+    "award / Rapid Rewards bookings excluded from cash-fare refund",
+    "fare difference refunded as Rapid Rewards points (formerly travel funds), not cash"
+  ],
+  "policy_url": "https://support.southwest.com/helpcenter/s/article/changing-cancelling-flights",
+  "policy_text_full": "Southwest allows rebooking at a lower fare at any time before departure, with the fare difference refunded as Rapid Rewards points (formerly travel funds). No fee, no formal claim — handled entirely via self-service rebooking. The easiest rebook policy in the industry.",
+  "policy_text_relevant_clause": "Customers can rebook at any lower advertised fare before departure; the difference is credited to Rapid Rewards points via self-service.",
+  "last_verified": "2026-05-15",
+  "active": true
+}
