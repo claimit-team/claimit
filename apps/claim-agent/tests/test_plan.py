@@ -69,9 +69,7 @@ async def test_happy_path_email() -> None:
 
 @pytest.mark.asyncio
 async def test_happy_path_chat_script() -> None:
-    plan = await plan_claim(
-        _make_event(platform_id="hilton"), _mock_client(ClaimType.CHAT_SCRIPT)
-    )
+    plan = await plan_claim(_make_event(platform_id="hilton"), _mock_client(ClaimType.CHAT_SCRIPT))
     assert plan.claim_type == ClaimType.CHAT_SCRIPT
     assert plan.draft_generator == "type_b_chat"
     assert plan.output_type == "chat_script"
@@ -80,9 +78,7 @@ async def test_happy_path_chat_script() -> None:
 
 @pytest.mark.asyncio
 async def test_happy_path_in_store() -> None:
-    plan = await plan_claim(
-        _make_event(platform_id="target"), _mock_client(ClaimType.IN_STORE)
-    )
+    plan = await plan_claim(_make_event(platform_id="target"), _mock_client(ClaimType.IN_STORE))
     assert plan.claim_type == ClaimType.IN_STORE
     assert plan.draft_generator == "type_c_in_store"
     assert plan.output_type == "in_store_guide"
@@ -91,9 +87,7 @@ async def test_happy_path_in_store() -> None:
 
 @pytest.mark.asyncio
 async def test_happy_path_self_service() -> None:
-    plan = await plan_claim(
-        _make_event(platform_id="delta"), _mock_client(ClaimType.SELF_SERVICE)
-    )
+    plan = await plan_claim(_make_event(platform_id="delta"), _mock_client(ClaimType.SELF_SERVICE))
     assert plan.claim_type == ClaimType.SELF_SERVICE
     assert plan.draft_generator == "type_d_self_service"
     assert plan.output_type == "self_service_steps"
@@ -158,5 +152,7 @@ async def test_invalid_policy_error() -> None:
 async def test_inactive_policy_not_rechecked() -> None:
     # get_policy (task 2.6) filters active: True at the MongoDB query layer.
     # plan_claim trusts this — an inactive platform looks identical to an unknown one.
+    client = _mock_client(None)
     with pytest.raises(UnknownPlatformError):
-        await plan_claim(_make_event(platform_id="inactive_platform"), _mock_client(None))
+        await plan_claim(_make_event(platform_id="inactive_platform"), client)
+    client.get_policy.assert_called_once()

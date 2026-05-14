@@ -138,7 +138,7 @@ output:
       - self_service
     description: Mirrors the input claim_type for downstream validator verification
 
-  version:
+  draft_version:
     type: integer
     description: Draft version number, starts at 1 and increments on each redraft
 
