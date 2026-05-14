@@ -46,23 +46,51 @@ resource "google_secret_manager_secret" "shared" {
 # ---------- Cloud Run services ----------
 # Per-agent secret access. Each map is ENV_VAR_NAME => secret-manager-secret-id;
 # the module both grants secretAccessor and mounts the env var from Secret Manager.
+#
+# Note: gmail-oauth-client-id and gmail-oauth-client-secret are managed manually
+# (see comment above the shared_secret_ids local) and not in google_secret_manager_secret.shared,
+# but they appear in ingest_secrets and claim_secrets below. This works because
+# the module's IAM resource passes secret_id as a string (not a resource ref),
+# so the grant succeeds as long as the secret exists in GCP — which it does.
 locals {
+  # ingest: parses Gmail inboxes → MongoDB; calls Vertex AI via Agent Builder;
+  # scrapes order pages when emails lack structured data.
   ingest_secrets = {
-    MONGODB_URI    = "mongodb-uri"
-    SCRAPERAPI_KEY = "scraperapi-key"
+    MONGODB_URI               = "mongodb-uri"
+    SCRAPERAPI_KEY            = "scraperapi-key"
+    AGENT_BUILDER_SA_KEY      = "agent-builder-sa-key"
+    GMAIL_OAUTH_CLIENT_ID     = "gmail-oauth-client-id"
+    GMAIL_OAUTH_CLIENT_SECRET = "gmail-oauth-client-secret"
   }
+  # monitor: polls current prices via Keepa (Amazon), Amadeus (travel),
+  # ScraperAPI (retail fallback); writes price-history records.
   monitor_secrets = {
-    MONGODB_URI    = "mongodb-uri"
-    KEEPA_API_KEY  = "keepa-api-key"
-    SCRAPERAPI_KEY = "scraperapi-key"
+    MONGODB_URI           = "mongodb-uri"
+    KEEPA_API_KEY         = "keepa-api-key"
+    SCRAPERAPI_KEY        = "scraperapi-key"
+    AMADEUS_CLIENT_ID     = "amadeus-client-id"
+    AMADEUS_CLIENT_SECRET = "amadeus-client-secret"
   }
+  # claim: drafts refund claims via Anthropic + Agent Builder; sends them via
+  # the user's Gmail (OAuth client); telemetry to Elastic.
   claim_secrets = {
-    MONGODB_URI       = "mongodb-uri"
-    ANTHROPIC_API_KEY = "anthropic-api-key"
+    MONGODB_URI               = "mongodb-uri"
+    ANTHROPIC_API_KEY         = "anthropic-api-key"
+    AGENT_BUILDER_SA_KEY      = "agent-builder-sa-key"
+    ELASTIC_URL               = "elastic-url"
+    ELASTIC_API_KEY           = "elastic-api-key"
+    GMAIL_OAUTH_CLIENT_ID     = "gmail-oauth-client-id"
+    GMAIL_OAUTH_CLIENT_SECRET = "gmail-oauth-client-secret"
   }
+  # assistant: conversational orchestrator — Anthropic + Agent Builder for
+  # sub-agent calls; Elastic for telemetry; Phoenix for LLM tracing.
   assistant_secrets = {
-    MONGODB_URI       = "mongodb-uri"
-    ANTHROPIC_API_KEY = "anthropic-api-key"
+    MONGODB_URI          = "mongodb-uri"
+    ANTHROPIC_API_KEY    = "anthropic-api-key"
+    AGENT_BUILDER_SA_KEY = "agent-builder-sa-key"
+    ELASTIC_URL          = "elastic-url"
+    ELASTIC_API_KEY      = "elastic-api-key"
+    PHOENIX_API_KEY      = "phoenix-api-key"
   }
 }
 
