@@ -154,8 +154,14 @@ jobs:
               });
             }
 
+      - name: Fail if Format Failed
+        if: steps.fmt.outcome == 'failure'
+        run: |
+          echo "::error::terraform fmt -check failed. Run 'terraform fmt -recursive' locally to fix."
+          exit 1
+
       - name: Fail if Plan Failed
         if: steps.plan.outcome == 'failure'
         run: |
-          echo "Terraform plan failed. See PR comment for details."
+          echo "::error::Terraform plan failed. See PR comment for details."
           exit 1
