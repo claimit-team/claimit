@@ -35,7 +35,9 @@ export function HeroActiveUser({
                 <FileText className="w-5 h-5 text-brand-primary-600" aria-hidden="true" />
               </div>
               <div>
-                <div className="text-2xl font-semibold text-neutral-900">{claimsInProgress}</div>
+                <div className="text-2xl font-semibold text-neutral-900 tabular-nums">
+                  {claimsInProgress}
+                </div>
                 <div className="text-sm text-neutral-600">Claims in progress</div>
               </div>
             </div>
@@ -47,7 +49,9 @@ export function HeroActiveUser({
                 <ShoppingBag className="w-5 h-5 text-brand-primary-600" aria-hidden="true" />
               </div>
               <div>
-                <div className="text-2xl font-semibold text-neutral-900">{purchasesMonitored}</div>
+                <div className="text-2xl font-semibold text-neutral-900 tabular-nums">
+                  {purchasesMonitored}
+                </div>
                 <div className="text-sm text-neutral-600">Purchases monitored</div>
               </div>
             </div>
@@ -59,7 +63,9 @@ export function HeroActiveUser({
                 <Clock className="w-5 h-5 text-semantic-warning" aria-hidden="true" />
               </div>
               <div>
-                <div className="text-2xl font-semibold text-neutral-900">{windowsEndingSoon}</div>
+                <div className="text-2xl font-semibold text-neutral-900 tabular-nums">
+                  {windowsEndingSoon}
+                </div>
                 <div className="text-sm text-neutral-600">Windows ending soon</div>
               </div>
             </div>

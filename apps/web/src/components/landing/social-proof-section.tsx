@@ -32,7 +32,9 @@ export function SocialProofSection() {
               className="flex flex-col items-center border-neutral-200 bg-neutral-0 p-6 text-center"
             >
               <stat.icon className="size-6 text-neutral-500" aria-hidden />
-              <p className="mt-3 text-2xl font-semibold text-neutral-900">{stat.value}</p>
+              <p className="mt-3 text-2xl font-semibold text-neutral-900 tabular-nums">
+                {stat.value}
+              </p>
               <p className="mt-1 text-sm text-neutral-700">{stat.label}</p>
             </Card>
           ))}
@@ -42,7 +44,7 @@ export function SocialProofSection() {
               className="size-6 text-brand-accent-500"
               aria-hidden
             />
-            <p className="mt-3 text-2xl font-semibold text-brand-accent-500">
+            <p className="mt-3 text-2xl font-semibold text-brand-accent-500 tabular-nums">
               ${socialProofData.exampleReportedReclaimed.amount}
             </p>
             <p className="mt-1 text-sm text-neutral-700">Reclaimed This Month</p>

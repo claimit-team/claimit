@@ -149,7 +149,9 @@ function PricingCard({
           ) : null}
         </div>
         <div className="mt-4">
-          <span className="text-3xl font-semibold text-neutral-900">{price.split(" ")[0]}</span>
+          <span className="text-3xl font-semibold text-neutral-900 tabular-nums">
+            {price.split(" ")[0]}
+          </span>
           {price.includes("/") ? (
             <span className="ml-1 text-sm text-neutral-700">/ {price.split("/ ")[1]}</span>
           ) : null}

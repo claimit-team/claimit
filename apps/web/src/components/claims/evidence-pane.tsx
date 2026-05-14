@@ -100,15 +100,15 @@ export function EvidencePane({ claim, onDoubleClickHeader }: EvidencePaneProps) 
             <CardContent className="space-y-4">
               <div className="flex items-baseline justify-between">
                 <div className="space-y-1">
-                  <div className="text-neutral-500 text-sm">
+                  <div className="text-neutral-500 text-sm tabular-nums">
                     Original: {formatClaimCurrency(evidence.original_price, claim.currency)}
                   </div>
-                  <div className="font-semibold text-2xl text-neutral-900">
+                  <div className="font-semibold text-2xl text-neutral-900 tabular-nums">
                     {formatClaimCurrency(evidence.current_price, claim.currency)}
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="font-semibold text-lg text-semantic-warning">
+                  <div className="font-semibold text-lg text-semantic-warning tabular-nums">
                     -{formatClaimCurrency(priceDifference, claim.currency)}
                   </div>
                   <div className="text-neutral-500 text-xs">difference</div>
