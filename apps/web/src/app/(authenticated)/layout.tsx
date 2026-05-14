@@ -3,22 +3,76 @@
 import { Bell, ChevronDown, Menu, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type ReactNode, useEffect } from "react";
+import { useTheme } from "next-themes";
+import { type ReactNode, useEffect, useState } from "react";
 import { FloatingAssistant } from "@/components/layout/floating-assistant";
 import { SidebarContent } from "@/components/layout/sidebar";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { mockPlan, mockUser } from "@/components/settings/settings-mock";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store";
+
+type ThemeChoice = "light" | "dark" | "system";
+
+const THEME_CHOICES: ReadonlyArray<{ value: ThemeChoice; label: string }> = [
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+  { value: "system", label: "System" },
+];
+
+const PLAN_LABEL: Record<typeof mockPlan, string> = {
+  free: "Free plan",
+  pro: "Pro plan",
+  family: "Family plan",
+};
+
+function ThemeChips() {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const active = (mounted ? theme : "system") as ThemeChoice;
+
+  return (
+    <div className="flex items-center gap-1 px-1.5 py-1">
+      {THEME_CHOICES.map((choice) => {
+        const isActive = active === choice.value;
+        return (
+          <button
+            key={choice.value}
+            type="button"
+            onClick={() => setTheme(choice.value)}
+            aria-pressed={isActive}
+            className={cn(
+              "flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors",
+              isActive
+                ? "bg-brand-primary-100 text-brand-primary-700"
+                : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900",
+            )}
+          >
+            {choice.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function AuthenticatedLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -78,14 +132,14 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
               <>
                 <ThemeToggle />
 
-                <button
-                  type="button"
+                <Link
+                  href="/notifications"
                   aria-label="Notifications"
                   className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "relative")}
                 >
                   <Bell className="w-5 h-5 text-neutral-600" aria-hidden="true" />
                   <span className="absolute top-1 right-1 w-2 h-2 bg-semantic-danger rounded-full" />
-                </button>
+                </Link>
               </>
             ) : null}
 
@@ -95,17 +149,57 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
               >
                 <Avatar className="w-8 h-8">
                   <AvatarFallback className="bg-brand-primary-100 text-brand-primary-700 text-sm">
-                    JD
+                    {mockUser.initials}
                   </AvatarFallback>
                 </Avatar>
                 <span className="hidden sm:inline text-sm font-medium text-neutral-700">
-                  John D.
+                  {mockUser.displayName}
                 </span>
                 <ChevronDown className="w-4 h-4 text-neutral-500" aria-hidden="true" />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem render={<Link href="/settings" />}>Settings</DropdownMenuItem>
+              <DropdownMenuContent align="end" className="w-64">
+                {/* Identity */}
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="px-2 py-2">
+                    <div className="flex flex-col">
+                      <span className="text-sm font-medium text-neutral-900">
+                        {mockUser.displayName}
+                      </span>
+                      <span className="text-xs text-neutral-500">{mockUser.email}</span>
+                    </div>
+                  </DropdownMenuLabel>
+                </DropdownMenuGroup>
                 <DropdownMenuSeparator />
+
+                {/* Plan */}
+                <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+                  <Badge variant="secondary" className="text-xs">
+                    {PLAN_LABEL[mockPlan]}
+                  </Badge>
+                  <Link
+                    href="/settings/billing"
+                    className="text-xs font-medium text-brand-primary-600 hover:underline"
+                  >
+                    Manage
+                  </Link>
+                </div>
+                <DropdownMenuSeparator />
+
+                {/* Navigation */}
+                <DropdownMenuItem render={<Link href="/settings" />}>Settings</DropdownMenuItem>
+                <DropdownMenuItem render={<Link href="/help" />}>Help and support</DropdownMenuItem>
+                <DropdownMenuSeparator />
+
+                {/* Theme chips */}
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="px-2 pt-2 pb-0 text-[10px] uppercase tracking-wider text-neutral-500">
+                    Theme
+                  </DropdownMenuLabel>
+                  <ThemeChips />
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+
+                {/* Sign out */}
                 <DropdownMenuItem className="text-semantic-danger">Sign out</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
