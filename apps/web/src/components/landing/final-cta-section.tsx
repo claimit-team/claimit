@@ -16,7 +16,7 @@ export function FinalCtaSection() {
         transition={{ duration: 0.6, ease: "easeOut" }}
         className="mx-auto max-w-2xl text-center"
       >
-        <h2 className="text-balance text-2xl font-semibold text-neutral-900 sm:text-3xl">
+        <h2 className="text-balance text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
           Start with one receipt
         </h2>
         <p className="mt-4 text-pretty text-neutral-700">

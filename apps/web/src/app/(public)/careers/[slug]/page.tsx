@@ -97,7 +97,7 @@ export default async function CareerDetailPage({ params }: PageProps) {
             </Badge>
             <Badge variant="secondary">{job.area}</Badge>
           </div>
-          <h1 className="text-balance text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+          <h1 className="text-balance text-4xl font-semibold leading-[1.05] tracking-tight text-neutral-900 sm:text-5xl">
             {job.title}
           </h1>
           <p className="mt-4 text-pretty text-lg text-neutral-700">{job.summary}</p>

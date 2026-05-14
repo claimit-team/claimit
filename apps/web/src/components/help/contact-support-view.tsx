@@ -141,7 +141,7 @@ export function ContactSupportView() {
           <ArrowLeft className="h-4 w-4" />
           Back to help
         </Link>
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl text-balance">
+        <h1 className="text-balance text-4xl font-semibold leading-[1.05] tracking-tight text-foreground sm:text-5xl">
           Contact support
         </h1>
         <p className="mt-4 text-lg text-muted-foreground max-w-2xl leading-relaxed">

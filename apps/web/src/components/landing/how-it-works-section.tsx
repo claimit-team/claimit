@@ -47,7 +47,7 @@ export function HowItWorksSection({ isLoading = false }: HowItWorksSectionProps)
         transition={{ duration: 0.6, ease: "easeOut" }}
         className="mx-auto max-w-6xl"
       >
-        <h2 className="text-balance text-center text-2xl font-semibold text-neutral-900 sm:text-3xl">
+        <h2 className="text-balance text-center text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
           How It Works
         </h2>
 

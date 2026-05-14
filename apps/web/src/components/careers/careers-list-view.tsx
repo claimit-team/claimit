@@ -107,10 +107,10 @@ export function CareersListView() {
       {/* Hero Section */}
       <section className="flex min-h-[40vh] flex-col justify-center sm:min-h-[50vh]">
         <div className="mx-auto w-full max-w-2xl px-6 text-center">
-          <h1 className="text-3xl font-semibold tracking-tight text-neutral-900 md:text-4xl text-balance">
+          <h1 className="text-balance text-4xl font-semibold leading-[1.05] tracking-tight text-neutral-900 sm:text-5xl">
             Build practical agents for real-world follow-through.
           </h1>
-          <p className="mt-6 text-lg leading-relaxed text-neutral-700 text-pretty">
+          <p className="mt-6 text-pretty text-lg leading-relaxed text-neutral-600 sm:text-xl">
             ClaimIt is early. We are not hiring broadly yet, but we are interested in people who
             care about reliable agent workflows, user control, and calm financial product design.
           </p>

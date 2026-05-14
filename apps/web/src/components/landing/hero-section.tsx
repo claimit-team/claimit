@@ -33,13 +33,13 @@ export function HeroSection({ isLoading = false }: HeroSectionProps) {
           <div className="text-center lg:col-span-2 lg:text-left">
             <motion.h1
               {...fadeUp(0)}
-              className="text-balance text-5xl font-semibold tracking-tight text-neutral-900 sm:text-6xl lg:text-7xl"
+              className="text-balance text-5xl font-semibold leading-[0.95] tracking-tighter text-neutral-900 sm:text-6xl lg:text-7xl"
             >
               Your Money, Still Yours.
             </motion.h1>
             <motion.p
               {...fadeUp(0.1)}
-              className="mt-6 text-pretty text-base leading-relaxed text-neutral-700 sm:text-lg"
+              className="mt-6 text-pretty text-lg leading-relaxed text-neutral-600 sm:text-xl"
             >
               ClaimIt watches what you bought and quietly gets back what you&apos;re owed.
             </motion.p>

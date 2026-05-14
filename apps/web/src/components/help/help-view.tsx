@@ -44,10 +44,10 @@ export function HelpCenterView() {
       {/* Hero Section */}
       <section className="flex min-h-[40vh] flex-col justify-center border-b border-border bg-muted/30 sm:min-h-[50vh]">
         <div className="mx-auto w-full max-w-3xl px-4 text-center sm:px-6 lg:px-8">
-          <h1 className="text-balance text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+          <h1 className="text-balance text-4xl font-bold leading-[1.05] tracking-tight text-foreground sm:text-5xl">
             How can we help?
           </h1>
-          <p className="mt-4 text-pretty text-lg leading-relaxed text-muted-foreground">
+          <p className="mt-4 text-pretty text-lg leading-relaxed text-muted-foreground sm:text-xl">
             Find answers about connecting Gmail, monitoring purchases, reviewing claims, and
             reporting outcomes.
           </p>

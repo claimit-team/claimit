@@ -22,7 +22,7 @@ export function WhyAgents() {
   return (
     <section className="bg-neutral-50 py-24 sm:py-32 lg:py-40">
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-        <h2 className="mb-4 text-center text-2xl font-semibold text-neutral-900">
+        <h2 className="mb-4 text-center text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
           Why this product needs agents
         </h2>
         <p className="mx-auto mb-10 max-w-2xl text-center text-neutral-700">

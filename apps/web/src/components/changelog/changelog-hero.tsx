@@ -6,10 +6,10 @@ import { cn } from "@/lib/utils";
 export function ChangelogHero() {
   return (
     <section className="mb-12 flex min-h-[40vh] flex-col justify-center sm:min-h-[50vh]">
-      <h1 className="text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+      <h1 className="text-balance text-4xl font-semibold leading-[1.05] tracking-tight text-neutral-900 sm:text-5xl">
         Changelog
       </h1>
-      <p className="mt-4 text-lg leading-relaxed text-neutral-700 text-pretty">
+      <p className="mt-4 text-pretty text-lg leading-relaxed text-neutral-600 sm:text-xl">
         Product updates, interface changes, and implementation notes as ClaimIt moves from MVP to
         working demo.
       </p>

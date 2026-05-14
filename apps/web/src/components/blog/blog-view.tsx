@@ -29,10 +29,10 @@ export function BlogView() {
     <div className="bg-neutral-0">
       <section className="flex min-h-[40vh] flex-col justify-center border-b border-neutral-200 bg-neutral-0 sm:min-h-[50vh]">
         <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
-          <h1 className="text-balance text-4xl font-semibold tracking-tight text-neutral-900 sm:text-5xl">
+          <h1 className="text-balance text-4xl font-semibold leading-[1.05] tracking-tight text-neutral-900 sm:text-5xl">
             ClaimIt blog
           </h1>
-          <p className="mt-6 max-w-2xl text-lg leading-relaxed text-neutral-700">
+          <p className="mt-6 max-w-2xl text-lg leading-relaxed text-neutral-600 sm:text-xl">
             Notes on price protection, agent workflows, user control, and building practical
             automation for post-purchase follow-through.
           </p>

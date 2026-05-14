@@ -45,7 +45,9 @@ export function TeamMemberGrid() {
   return (
     <section className="bg-neutral-0 py-24 sm:py-32 lg:py-40">
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-        <h2 className="mb-10 text-center text-2xl font-semibold text-neutral-900">Meet the team</h2>
+        <h2 className="mb-10 text-center text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+          Meet the team
+        </h2>
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {mockTeamMembers.map((member) => (
             <Card

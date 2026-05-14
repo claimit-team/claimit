@@ -298,8 +298,10 @@ export function PricingView() {
     <div className="bg-neutral-0">
       <section className="flex min-h-[75vh] flex-col justify-center border-b border-neutral-200 sm:min-h-[85vh]">
         <div className="mx-auto w-full max-w-3xl px-4 text-center sm:px-6 lg:px-8">
-          <h1 className="text-4xl font-semibold tracking-tight text-neutral-900">Pricing</h1>
-          <p className="mt-4 text-lg text-neutral-700">
+          <h1 className="text-balance text-5xl font-semibold leading-[0.95] tracking-tighter text-neutral-900 sm:text-6xl lg:text-7xl">
+            Pricing
+          </h1>
+          <p className="mt-6 text-lg leading-relaxed text-neutral-600 sm:text-xl">
             ClaimIt offers a forever-free tier. Paid plans unlock broader monitoring and claim
             drafts. We help you prepare materials, but we do not guarantee refunds.
           </p>
@@ -343,7 +345,7 @@ export function PricingView() {
 
       <section className="border-t border-neutral-200 py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
-          <h2 className="mb-8 text-center text-2xl font-semibold text-neutral-900">
+          <h2 className="mb-8 text-center text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
             Feature Comparison
           </h2>
           <FeatureComparisonTable />
@@ -358,7 +360,7 @@ export function PricingView() {
 
       <section className="border-t border-neutral-200 py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8">
-          <h2 className="mb-8 text-center text-2xl font-semibold text-neutral-900">
+          <h2 className="mb-8 text-center text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
             Frequently Asked Questions
           </h2>
           <PricingFAQ />
@@ -367,7 +369,9 @@ export function PricingView() {
 
       <section className="border-t border-neutral-200 bg-neutral-50 py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-2xl px-4 text-center sm:px-6 lg:px-8">
-          <h2 className="text-2xl font-semibold text-neutral-900">Start with One Receipt</h2>
+          <h2 className="text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+            Start with One Receipt
+          </h2>
           <p className="mt-4 text-neutral-700">
             Upload a purchase receipt or connect Gmail, and review when claim materials are ready.
           </p>
