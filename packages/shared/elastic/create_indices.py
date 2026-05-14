@@ -40,7 +40,7 @@ INDEX_DEFINITIONS: dict[str, dict] = {
                 "status": {"type": "keyword"},
                 "purchase_date": {"type": "date"},
                 "claim_type": {"type": "keyword"},
-                "price_paid": {"type": "float"},
+                "price_paid": {"type": "scaled_float", "scaling_factor": 100},
             }
         }
     },
@@ -50,8 +50,8 @@ INDEX_DEFINITIONS: dict[str, dict] = {
                 "purchase_id": {"type": "keyword"},
                 "platform": {"type": "keyword"},
                 "product_id": {"type": "keyword"},
-                "price_member": {"type": "float"},
-                "price_non_member": {"type": "float"},
+                "price_member": {"type": "scaled_float", "scaling_factor": 100},
+                "price_non_member": {"type": "scaled_float", "scaling_factor": 100},
                 "source": {"type": "keyword"},
                 "checked_at": {"type": "date"},
             }
@@ -63,7 +63,7 @@ INDEX_DEFINITIONS: dict[str, dict] = {
                 "platform": {"type": "keyword"},
                 "outcome": {"type": "keyword"},
                 "denial_reason_extracted": {"type": "keyword"},
-                "claim_amount": {"type": "float"},
+                "claim_amount": {"type": "scaled_float", "scaling_factor": 100},
                 "submitted_at": {"type": "date"},
                 "resolved_at": {"type": "date"},
                 "outcome_note": {"type": "text", "analyzer": "english"},
@@ -87,10 +87,13 @@ async def create_indices(es: AsyncElasticsearch | None = None) -> list[str]:
     created: list[str] = []
     try:
         for name, body in INDEX_DEFINITIONS.items():
-            await es.options(ignore_status=400).indices.create(
+            response = await es.options(ignore_status=400).indices.create(
                 index=name,
                 mappings=body["mappings"],
             )
+            error_type = response.get("error", {}).get("type")
+            if error_type and error_type != "resource_already_exists_exception":
+                raise RuntimeError(f"Failed to create index '{name}': {response.get('error')}")
             created.append(name)
     finally:
         if close_after:
