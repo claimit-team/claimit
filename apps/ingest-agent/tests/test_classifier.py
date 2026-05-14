@@ -95,3 +95,19 @@ def test_format_email_truncates_body_deterministically() -> None:
 
     assert payload["body_text"] == "x" * classifier.MAX_BODY_CHARS
     assert list(payload) == ["body_text", "sender", "snippet", "subject"]
+
+
+def test_run_classifier_agent_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    class SlowRunner:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def run_async(self, **_kwargs: object):
+            await asyncio.sleep(1)
+            yield None
+
+    monkeypatch.setattr(classifier, "Runner", SlowRunner)
+    monkeypatch.setattr(classifier, "CLASSIFIER_TIMEOUT_SECONDS", 0.001)
+
+    with pytest.raises(ClassifierError, match="timed out"):
+        asyncio.run(classifier._run_classifier_agent(_sample_email()))

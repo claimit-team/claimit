@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 from typing import Any
@@ -16,6 +17,7 @@ from pydantic import BaseModel, Field, ValidationError
 MODEL_NAME = "gemini-2.5-flash"
 APP_NAME = "claimit-ingest-classifier"
 MAX_BODY_CHARS = 12_000
+CLASSIFIER_TIMEOUT_SECONDS = 20
 
 CLASSIFIER_SYSTEM_PROMPT = """
 You are an email classifier. Your only job is to decide whether a single email is an ORDER CONFIRMATION from a merchant, sent to the recipient because they just placed a purchase.
@@ -228,13 +230,19 @@ async def _run_classifier_agent(email: EmailForClassification) -> str | None:
     )
 
     final_text: str | None = None
-    async for event in runner.run_async(
-        user_id=user_id,
-        session_id=session_id,
-        new_message=message,
-    ):
-        if event.is_final_response():
-            final_text = _extract_event_text(event)
+    try:
+        async with asyncio.timeout(CLASSIFIER_TIMEOUT_SECONDS):
+            async for event in runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=message,
+            ):
+                if event.is_final_response():
+                    final_text = _extract_event_text(event)
+    except TimeoutError as exc:
+        raise ClassifierError(
+            f"Classifier timed out for user_id={user_id} session_id={session_id}"
+        ) from exc
 
     return final_text
 
