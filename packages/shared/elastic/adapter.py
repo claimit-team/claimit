@@ -8,6 +8,26 @@ import os
 from abc import ABC, abstractmethod
 from typing import Any
 
+_POLICY_FIELDS = frozenset(
+    {
+        "platform",
+        "policy_text_full",
+        "policy_text_relevant_clause",
+        "key_exclusions",
+        "claim_type",
+    }
+)
+_PURCHASE_FIELDS = frozenset(
+    {
+        "platform",
+        "product_name",
+        "category",
+        "status",
+        "price_paid",
+        "purchase_date",
+    }
+)
+
 
 class SearchAdapter(ABC):
     """Common interface for policy and purchase search."""
@@ -59,7 +79,10 @@ class ElasticSearchAdapter(SearchAdapter):
             },
             size=limit,
         )
-        return [hit["_source"] for hit in result["hits"]["hits"]]
+        return [
+            {k: v for k, v in hit["_source"].items() if k in _POLICY_FIELDS}
+            for hit in result["hits"]["hits"]
+        ]
 
     async def search_purchases(
         self, user_id: str, query: str, limit: int = 10
@@ -74,7 +97,10 @@ class ElasticSearchAdapter(SearchAdapter):
             },
             size=limit,
         )
-        return [hit["_source"] for hit in result["hits"]["hits"]]
+        return [
+            {k: v for k, v in hit["_source"].items() if k in _PURCHASE_FIELDS}
+            for hit in result["hits"]["hits"]
+        ]
 
     async def aggregate_claims(self, platform: str | None = None) -> dict[str, Any]:
         query: dict[str, Any] = {"match_all": {}}
@@ -94,7 +120,7 @@ class ElasticSearchAdapter(SearchAdapter):
         avg_value = aggs.get("avg_amount", {}).get("value")
         return {
             "by_outcome": {b["key"]: b["doc_count"] for b in buckets},
-            "avg_amount": avg_value if avg_value is not None else 0,
+            "avg_amount": float(avg_value) if avg_value is not None else 0.0,
         }
 
     async def close(self) -> None:
@@ -111,7 +137,8 @@ class AtlasSearchAdapter(SearchAdapter):
         if not uri:
             raise ValueError("MONGODB_URI required for Atlas Search fallback")
         self._client = AsyncIOMotorClient(uri)
-        self._db = self._client["claimit"]
+        db_name = os.environ.get("MONGODB_DB", "claimit")
+        self._db = self._client[db_name]
 
     async def search_policies(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
         pipeline = [
@@ -193,7 +220,7 @@ class AtlasSearchAdapter(SearchAdapter):
         avg = overall[0].get("avg_amount") if overall else None
         return {
             "by_outcome": {r["_id"]: r["count"] for r in data.get("by_outcome", [])},
-            "avg_amount": avg if avg is not None else 0,
+            "avg_amount": float(avg) if avg is not None else 0.0,
         }
 
     async def close(self) -> None:
