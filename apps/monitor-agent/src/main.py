@@ -1,10 +1,22 @@
 """ClaimIt monitor agent — hello-world entrypoint."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from claimit_observability import init_phoenix
 from fastapi import FastAPI
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    init_phoenix("claimit-monitor-agent")
+    yield
+
 
 app = FastAPI(
     title="ClaimIt monitor agent",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 

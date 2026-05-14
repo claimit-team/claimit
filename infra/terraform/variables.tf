@@ -42,3 +42,9 @@ variable "assistant_agent_image" {
   description = "Container image URL for the assistant agent."
   default     = "us-docker.pkg.dev/cloudrun/container/hello"
 }
+
+variable "web_frontend_url" {
+  type        = string
+  description = "Base URL of the Vercel-hosted web frontend for Pub/Sub push subscriptions."
+  default     = "https://claimitai.vercel.app"
+}
