@@ -1,5 +1,6 @@
 """Stub Google ADK agent for the monitor service. Real tools wired in later tickets."""
 
+from claimit_mcp import get_mongodb_mcp_toolset
 from google.adk import Agent
 
 monitor_agent = Agent(
@@ -11,5 +12,5 @@ monitor_agent = Agent(
         "price drops below the user's purchase price, trigger a claim. Respond with "
         "'Hello from Monitor' for now."
     ),
-    tools=[],
+    tools=[get_mongodb_mcp_toolset(read_only=False)],  # writes price_history
 )
