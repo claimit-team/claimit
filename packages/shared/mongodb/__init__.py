@@ -9,6 +9,7 @@ from .base import BaseDocument
 from .claim import Claim, DraftVersion
 from .client import MongoDBClient
 from .conversation import Conversation, ConversationMessage, ToolCall
+from .create_indexes import INDEX_DEFINITIONS, create_indexes
 from .enums import (
     Category,
     ClaimOutcome,
@@ -43,6 +44,7 @@ from .user import (
 )
 
 __all__ = [
+    "INDEX_DEFINITIONS",
     "BaseDocument",
     "Category",
     "Claim",
@@ -79,4 +81,5 @@ __all__ = [
     "SubscriptionTier",
     "ToolCall",
     "User",
+    "create_indexes",
 ]

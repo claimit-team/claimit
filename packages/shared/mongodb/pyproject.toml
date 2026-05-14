@@ -18,6 +18,7 @@ only-include = [
     "__init__.py",
     "base.py",
     "client.py",
+    "create_indexes.py",
     "enums.py",
     "user.py",
     "purchase.py",
