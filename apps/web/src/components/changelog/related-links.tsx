@@ -23,7 +23,7 @@ export function RelatedLinks() {
               <li key={link.href}>
                 <Link
                   href={link.href}
-                  className="group flex items-center gap-3 rounded-lg border border-neutral-200 p-3 transition-colors hover:border-brand-primary-500 hover:bg-neutral-50"
+                  className="group flex items-center gap-3 rounded-lg border border-neutral-200 p-3 transition-all duration-300 hover:-translate-y-1 hover:border-brand-primary-500 hover:shadow-md"
                 >
                   <Icon className="h-5 w-5 text-neutral-500 transition-colors group-hover:text-brand-primary-500" />
                   <span className="flex-1 text-sm font-medium text-neutral-700">{link.label}</span>

@@ -9,7 +9,7 @@ interface FeaturedPostProps {
 
 export function FeaturedPost({ post }: FeaturedPostProps) {
   return (
-    <article className="group overflow-hidden rounded-xl border border-neutral-200 bg-neutral-0 transition-shadow hover:shadow-md">
+    <article className="group overflow-hidden rounded-xl border border-neutral-200 bg-neutral-0 transition-all duration-300 hover:-translate-y-1 hover:shadow-md">
       <div className="grid gap-0 lg:grid-cols-2">
         {/* Image placeholder */}
         <div className="flex aspect-[4/3] items-center justify-center bg-neutral-100 lg:aspect-auto lg:min-h-[320px]">

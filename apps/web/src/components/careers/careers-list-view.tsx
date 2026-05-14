@@ -105,12 +105,12 @@ export function CareersListView() {
   return (
     <div className="bg-neutral-0">
       {/* Hero Section */}
-      <section className="py-20 md:py-28">
-        <div className="mx-auto max-w-2xl px-6 text-center">
-          <h1 className="text-3xl font-semibold tracking-tight text-neutral-900 md:text-4xl text-balance">
+      <section className="flex min-h-[40vh] flex-col justify-center sm:min-h-[50vh]">
+        <div className="mx-auto w-full max-w-2xl px-6 text-center">
+          <h1 className="text-balance text-4xl font-semibold leading-[1.05] tracking-tight text-neutral-900 sm:text-5xl">
             Build practical agents for real-world follow-through.
           </h1>
-          <p className="mt-6 text-lg leading-relaxed text-neutral-700 text-pretty">
+          <p className="mt-6 text-pretty text-lg leading-relaxed text-neutral-600 sm:text-xl">
             ClaimIt is early. We are not hiring broadly yet, but we are interested in people who
             care about reliable agent workflows, user control, and calm financial product design.
           </p>
@@ -119,7 +119,7 @@ export function CareersListView() {
               href="#interest-form"
               className={cn(
                 buttonVariants(),
-                "bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600",
+                "bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]",
               )}
             >
               Drop your resume
@@ -136,7 +136,7 @@ export function CareersListView() {
       </section>
 
       {/* Current Status Section */}
-      <section className="py-12">
+      <section className="py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-2xl px-6">
           <Card className="border-neutral-200">
             <CardHeader>
@@ -163,7 +163,7 @@ export function CareersListView() {
       </section>
 
       {/* Role Areas Section */}
-      <section className="py-12">
+      <section className="py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-4xl px-6">
           <div className="mb-8">
             <h2 className="text-2xl font-semibold text-neutral-900">Role areas</h2>
@@ -175,7 +175,7 @@ export function CareersListView() {
             {mockCareersData.roles.map((role) => (
               <Card
                 key={role.slug}
-                className="border-neutral-200 transition-shadow hover:shadow-md"
+                className="border-neutral-200 transition-all duration-300 hover:-translate-y-1 hover:shadow-md"
               >
                 <CardHeader>
                   <div className="mb-2">
@@ -205,7 +205,7 @@ export function CareersListView() {
       </section>
 
       {/* How We Work Section */}
-      <section className="py-12">
+      <section className="py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-4xl px-6">
           <h2 className="mb-8 text-2xl font-semibold text-neutral-900">How we work</h2>
           <div className="grid gap-4 md:grid-cols-2">
@@ -224,7 +224,7 @@ export function CareersListView() {
       </section>
 
       {/* Resume Interest Form Section */}
-      <section id="interest-form" className="py-12">
+      <section id="interest-form" className="py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-xl px-6">
           <Card className="border-neutral-200">
             <CardHeader>
@@ -327,7 +327,7 @@ export function CareersListView() {
       </section>
 
       {/* FAQ Section */}
-      <section className="py-12">
+      <section className="py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-2xl px-6">
           <h2 className="mb-8 text-2xl font-semibold text-neutral-900">
             Frequently asked questions
@@ -350,7 +350,7 @@ export function CareersListView() {
       </section>
 
       {/* Final CTA Section */}
-      <section className="border-t border-neutral-200 bg-neutral-100/50 py-16">
+      <section className="border-t border-neutral-200 bg-neutral-100/50 py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-2xl px-6 text-center">
           <h2 className="text-xl font-semibold text-neutral-900">
             Want to understand the product first?

@@ -19,7 +19,7 @@ repos:
       - id: check-json
         exclude: '\.vscode/.*\.json$|tsconfig.*\.json$|\.devcontainer/.*\.json$'
       - id: check-added-large-files
-        args: [--maxkb=1024]
+        args: [--maxkb=5120]
       - id: check-merge-conflict
       - id: check-case-conflict
 

@@ -5,11 +5,11 @@ import { cn } from "@/lib/utils";
 
 export function CareersTeaser() {
   return (
-    <section className="bg-neutral-50 py-12 sm:py-16">
+    <section className="bg-neutral-50 py-24 sm:py-32 lg:py-40">
       <div className="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8">
         <Card className="border-neutral-200 bg-neutral-0">
           <CardContent className="pt-6 text-center">
-            <h2 className="text-xl font-semibold text-neutral-900">
+            <h2 className="text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
               Interested in what we are building?
             </h2>
             <p className="mt-3 text-neutral-700">

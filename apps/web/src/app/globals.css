@@ -279,3 +279,94 @@
     @apply font-sans;
   }
 }
+
+/* ============================================================ */
+/* Landing — logo wall marquee                                  */
+/* ============================================================ */
+
+@keyframes marquee-left {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+@keyframes marquee-right {
+  from { transform: translateX(-50%); }
+  to   { transform: translateX(0); }
+}
+
+.marquee-track-left {
+  animation: marquee-left 90s linear infinite;
+}
+
+.marquee-track-right {
+  animation: marquee-right 90s linear infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 1.5s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track {
+    animation: none !important;
+  }
+
+  .animate-shimmer {
+    animation: none !important;
+  }
+}
+
+/* ============================================================ */
+/* Global polish                                                */
+/* ============================================================ */
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 64px;
+}
+
+::selection {
+  background: var(--brand-primary-200);
+  color: var(--brand-primary-900);
+}
+
+.dark ::selection {
+  background: var(--brand-primary-700);
+  color: var(--brand-primary-50);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--neutral-300);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--neutral-400);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--neutral-300) transparent;
+}
+
+body {
+  font-feature-settings: "cv11", "ss01", "ss03", "cv02";
+}
