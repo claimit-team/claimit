@@ -4,8 +4,8 @@ import { cn } from "@/lib/utils";
 
 export function SecurityHero() {
   return (
-    <section className="border-b border-border">
-      <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8">
+    <section className="flex min-h-[75vh] flex-col justify-center border-b border-border sm:min-h-[85vh]">
+      <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
         <div className="max-w-2xl">
           <h1 className="text-3xl font-semibold tracking-tight text-balance text-foreground sm:text-4xl">
             Security and privacy by design.

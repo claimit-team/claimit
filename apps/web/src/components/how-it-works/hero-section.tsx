@@ -4,8 +4,8 @@ import { cn } from "@/lib/utils";
 
 export function HeroSection() {
   return (
-    <section className="bg-neutral-0 py-16 sm:py-24">
-      <div className="mx-auto max-w-3xl px-4 text-center sm:px-6 lg:px-8">
+    <section className="flex min-h-[75vh] flex-col justify-center bg-neutral-0 sm:min-h-[85vh]">
+      <div className="mx-auto w-full max-w-3xl px-4 text-center sm:px-6 lg:px-8">
         <h1 className="text-balance text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl lg:text-5xl">
           How ClaimIt turns receipts into refund-ready claims.
         </h1>

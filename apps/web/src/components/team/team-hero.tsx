@@ -4,8 +4,8 @@ import { cn } from "@/lib/utils";
 
 export function TeamHero() {
   return (
-    <section className="bg-neutral-50 py-16 sm:py-24">
-      <div className="mx-auto max-w-3xl px-4 text-center sm:px-6 lg:px-8">
+    <section className="flex min-h-[75vh] flex-col justify-center bg-neutral-50 sm:min-h-[85vh]">
+      <div className="mx-auto w-full max-w-3xl px-4 text-center sm:px-6 lg:px-8">
         <h1 className="text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl lg:text-5xl">
           The team building ClaimIt.
         </h1>

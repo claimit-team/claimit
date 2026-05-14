@@ -296,8 +296,8 @@ export function PricingView() {
 
   return (
     <div className="bg-neutral-0">
-      <section className="border-b border-neutral-200 py-16">
-        <div className="mx-auto max-w-3xl px-4 text-center sm:px-6 lg:px-8">
+      <section className="flex min-h-[75vh] flex-col justify-center border-b border-neutral-200 sm:min-h-[85vh]">
+        <div className="mx-auto w-full max-w-3xl px-4 text-center sm:px-6 lg:px-8">
           <h1 className="text-4xl font-semibold tracking-tight text-neutral-900">Pricing</h1>
           <p className="mt-4 text-lg text-neutral-700">
             ClaimIt offers a forever-free tier. Paid plans unlock broader monitoring and claim
