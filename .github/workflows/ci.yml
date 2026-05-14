@@ -125,6 +125,11 @@ jobs:
           enable-cache: true
       - run: uv python install ${{ env.PYTHON_VERSION }}
       - run: uv tool install pre-commit
+      - name: Set up Terraform (for terraform_fmt pre-commit hook)
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.5'
+          terraform_wrapper: false
       - run: pre-commit run --all-files --show-diff-on-failure
 
   ci-success:
