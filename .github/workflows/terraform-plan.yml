@@ -71,7 +71,7 @@ jobs:
 
       - name: Post Plan to PR
         uses: actions/github-script@v7
-        if: github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request'
         env:
           PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
         with:
@@ -80,15 +80,44 @@ jobs:
             const fs = require('fs');
             const path = require('path');
 
-            // Read plan output from file (more reliable than stdout for large plans)
+            const fmtOutcome = '${{ steps.fmt.outcome }}';
+            const initOutcome = '${{ steps.init.outcome }}';
+            const validateOutcome = '${{ steps.validate.outcome }}';
+            const planOutcome = '${{ steps.plan.outcome }}';
+
+            // Build planText defensively: when init or validate failed, plan never
+            // ran, so plan_output.txt either doesn't exist or is irrelevant. Surface
+            // a useful hint instead of "Plan output file not found." so the PR
+            // reviewer doesn't have to dig through the Actions tab to know what broke.
             let planText = '';
-            try {
-              planText = fs.readFileSync(
-                path.join('${{ env.WORKING_DIR }}', 'plan_output.txt'),
-                'utf8'
-              );
-            } catch (e) {
-              planText = 'Plan output file not found.';
+            if (initOutcome === 'failure') {
+              planText =
+                'Terraform Init failed. The plan could not run. ' +
+                'Check the Actions tab for the init step logs.\n\n' +
+                'Common causes:\n' +
+                '- GCS state bucket access denied\n' +
+                '- Missing GCP API (e.g., Cloud Resource Manager)\n' +
+                '- Invalid backend config';
+            } else if (validateOutcome === 'failure') {
+              planText =
+                'Terraform Validate failed. The plan could not run. ' +
+                'Check the Actions tab for the validate step logs.\n\n' +
+                'Common causes:\n' +
+                '- Syntax error in .tf files\n' +
+                '- Variable type mismatch\n' +
+                '- Undefined module reference';
+            } else {
+              // Read plan output from file (more reliable than stdout for large plans).
+              // Plan step uses continue-on-error, so even on plan failure the file is
+              // populated with terraform's own diagnostic output.
+              try {
+                planText = fs.readFileSync(
+                  path.join('${{ env.WORKING_DIR }}', 'plan_output.txt'),
+                  'utf8'
+                );
+              } catch (e) {
+                planText = 'Plan output file not found.';
+              }
             }
 
             // GitHub PR comments have a 65536 char limit. Truncate if needed.
@@ -98,11 +127,6 @@ jobs:
               planText = planText.slice(0, MAX_LEN) + '\n\n... [TRUNCATED] ...';
               truncated = true;
             }
-
-            const fmtOutcome = '${{ steps.fmt.outcome }}';
-            const initOutcome = '${{ steps.init.outcome }}';
-            const validateOutcome = '${{ steps.validate.outcome }}';
-            const planOutcome = '${{ steps.plan.outcome }}';
 
             const icon = (o) => o === 'success' ? '✅' : o === 'failure' ? '❌' : '⚠️';
 
