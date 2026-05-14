@@ -1,25 +1,36 @@
 "use client";
 
-import { Loader2, Shield } from "lucide-react";
+import { Loader2, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
 
+// Brand asset exception per design-system.md §2.5: the Google logo uses the
+// official multicolor SVG and intentionally does NOT inherit currentColor.
 function GoogleMark({ className }: { className?: string }) {
   return (
-    <span
-      aria-hidden
-      className={cn(
-        "flex size-4 items-center justify-center rounded-[3px] border border-current font-sans text-[10px] font-bold leading-none",
-        className,
-      )}
-    >
-      G
-    </span>
+    <svg viewBox="0 0 18 18" className={className ?? "size-4"} role="img">
+      <title>Google</title>
+      <path
+        fill="#4285F4"
+        d="M17.64 9.2045c0-.6381-.0573-1.2518-.1636-1.8409H9v3.4814h4.8436c-.2086 1.125-.8427 2.0782-1.7959 2.7164v2.2581h2.9087c1.7018-1.5668 2.6836-3.874 2.6836-6.615z"
+      />
+      <path
+        fill="#34A853"
+        d="M9 18c2.43 0 4.4673-.806 5.9564-2.1804l-2.9087-2.2581c-.806.54-1.8368.8595-3.0477.8595-2.344 0-4.3282-1.5832-5.036-3.7104H.9573v2.3318C2.4382 15.9832 5.4818 18 9 18z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M3.964 10.71c-.18-.54-.2823-1.1168-.2823-1.71s.1023-1.17.2823-1.71V4.9582H.9573C.3477 6.1732 0 7.5477 0 9c0 1.4523.3477 2.8268.9573 4.0418L3.964 10.71z"
+      />
+      <path
+        fill="#EA4335"
+        d="M9 3.5795c1.3214 0 2.5077.4541 3.4405 1.346l2.5813-2.5814C13.4632.8918 11.426 0 9 0 5.4818 0 2.4382 2.0168.9573 4.9582L3.964 7.29C4.6718 5.1627 6.656 3.5795 9 3.5795z"
+      />
+    </svg>
   );
 }
 
@@ -49,7 +60,7 @@ export function LoginView() {
         <CardContent className="space-y-6">
           <div className="space-y-3 text-center">
             <div className="mx-auto flex size-10 items-center justify-center rounded-lg bg-neutral-100">
-              <Shield className="size-5 text-neutral-700" />
+              <ShieldCheck className="size-5 text-neutral-700" />
             </div>
             <div className="space-y-1">
               <h1 className="text-xl font-semibold text-neutral-900">Sign in to ClaimIt</h1>

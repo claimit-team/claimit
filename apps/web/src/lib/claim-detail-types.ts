@@ -61,7 +61,7 @@ export interface ClaimMessage {
   id: string;
   role: "assistant" | "user";
   content: string;
-  tool_summary?: string;
+  toolSummary?: string;
 }
 
 export interface ClaimConversation {
