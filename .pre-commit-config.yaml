@@ -37,3 +37,9 @@ repos:
       - id: ruff-check
         args: [--fix]
       - id: ruff-format
+
+  # Terraform — fmt check (run before commit to keep CI's strict fmt step green)
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.96.1
+    hooks:
+      - id: terraform_fmt

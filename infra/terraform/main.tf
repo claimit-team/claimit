@@ -97,12 +97,12 @@ locals {
 module "ingest_agent" {
   source = "./modules/cloud-run-agent"
 
-  project_id          = var.project_id
-  region              = var.region
-  service_name        = "claimit-ingest-agent"
-  image               = var.ingest_agent_image
-  secret_ids          = values(local.ingest_secrets)
-  secret_env_map      = local.ingest_secrets
+  project_id     = var.project_id
+  region         = var.region
+  service_name   = "claimit-ingest-agent"
+  image          = var.ingest_agent_image
+  secret_ids     = values(local.ingest_secrets)
+  secret_env_map = local.ingest_secrets
   # Hackathon scope; flip to true once services handle real data.
   deletion_protection = false
 
@@ -151,3 +151,5 @@ module "assistant_agent" {
 
   depends_on = [google_secret_manager_secret.shared]
 }
+
+# Trigger plan workflow test - Thu May 14 18:22:29 EDT 2026
