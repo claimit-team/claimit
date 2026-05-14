@@ -22,6 +22,7 @@ claimit-mcp = { path = "../../packages/shared/mcp" }
 
 [dependency-groups]
 dev = [
+    "pytest>=8.0.0",
     "ruff>=0.6.0",
 ]
 
@@ -31,3 +32,4 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
+force-include = { "classifier.py" = "classifier.py" }
