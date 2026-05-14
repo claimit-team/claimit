@@ -50,12 +50,12 @@ input:
     required: false
     description: >
       User's registered address from users collection.
-      Only required when claim_type is in_store, used for nearest store lookup.
-      [TEAM NOTE] nearest_store_address in metadata depends on this field.
-      Requires a Store Locator API (e.g. Best Buy Store API) or Google Maps
-      Places API to resolve nearest store. Needs team confirmation on which
-      API to use and whether additional credentials are required before
-      in_store flow can be fully implemented.
+      Only required when claim_type is in_store.
+      [DEMO] Store Locator API not integrated yet. When claim_type is in_store,
+      nearest_store_address will use hardcoded demo addresses:
+      Best Buy: 19525 Biscayne Blvd, Aventura, FL 33180
+      Hilton: 1601 Biscayne Blvd, Miami, FL 33132
+      Field retained for future Store Locator API integration.
 
   user_instruction:
     type: string
@@ -173,11 +173,10 @@ output:
         type: string
         required: false
         description: >
-          Nearest store address resolved from user_address.
-          [TEAM NOTE] Requires Store Locator API or Google Maps Places API.
-          Must confirm API choice and credentials with team before
-          in_store flow can go live. Fallback: hardcode demo store
-          address for hackathon demo purposes.
+          Nearest store address for in_store claim type.
+          [DEMO] Currently hardcoded per platform, not resolved from user_address.
+          Will be replaced with Store Locator API / Google Maps Places API lookup
+          in future iteration.
 
       # claim_type: self_service
       portal_url:
