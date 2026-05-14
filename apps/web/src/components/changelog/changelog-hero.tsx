@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 
 export function ChangelogHero() {
   return (
-    <section className="mb-12">
+    <section className="mb-12 flex min-h-[40vh] flex-col justify-center sm:min-h-[50vh]">
       <h1 className="text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
         Changelog
       </h1>

@@ -105,8 +105,8 @@ export function CareersListView() {
   return (
     <div className="bg-neutral-0">
       {/* Hero Section */}
-      <section className="py-20 md:py-28">
-        <div className="mx-auto max-w-2xl px-6 text-center">
+      <section className="flex min-h-[40vh] flex-col justify-center sm:min-h-[50vh]">
+        <div className="mx-auto w-full max-w-2xl px-6 text-center">
           <h1 className="text-3xl font-semibold tracking-tight text-neutral-900 md:text-4xl text-balance">
             Build practical agents for real-world follow-through.
           </h1>

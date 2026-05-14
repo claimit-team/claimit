@@ -42,8 +42,8 @@ export function HelpCenterView() {
   return (
     <div className="bg-background">
       {/* Hero Section */}
-      <section className="border-b border-border bg-muted/30 py-16 sm:py-20">
-        <div className="mx-auto max-w-3xl px-4 text-center sm:px-6 lg:px-8">
+      <section className="flex min-h-[40vh] flex-col justify-center border-b border-border bg-muted/30 sm:min-h-[50vh]">
+        <div className="mx-auto w-full max-w-3xl px-4 text-center sm:px-6 lg:px-8">
           <h1 className="text-balance text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
             How can we help?
           </h1>

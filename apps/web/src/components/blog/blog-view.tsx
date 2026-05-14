@@ -27,8 +27,8 @@ export function BlogView() {
 
   return (
     <div className="bg-neutral-0">
-      <section className="border-b border-neutral-200 bg-neutral-0">
-        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
+      <section className="flex min-h-[40vh] flex-col justify-center border-b border-neutral-200 bg-neutral-0 sm:min-h-[50vh]">
+        <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
           <h1 className="text-balance text-4xl font-semibold tracking-tight text-neutral-900 sm:text-5xl">
             ClaimIt blog
           </h1>
