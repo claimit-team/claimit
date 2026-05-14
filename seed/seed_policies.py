@@ -26,19 +26,28 @@ async def seed_policies(uri: str | None = None, db_name: str | None = None) -> l
 
     database = db_name if db_name is not None else os.environ.get("MONGODB_DB", "claimit")
 
+    policy_files = sorted(POLICIES_DIR.glob("*.json"))
+    if not policy_files:
+        raise ValueError(f"No policy files found in {POLICIES_DIR}")
+
     client: AsyncIOMotorClient = AsyncIOMotorClient(mongo_uri)
     try:
         collection = client[database]["policies"]
         processed: list[str] = []
-        for path in sorted(POLICIES_DIR.glob("*.json")):
+        seen_platforms: set[str] = set()
+        for path in policy_files:
             with path.open(encoding="utf-8") as f:
                 policy = json.load(f)
+            platform = policy["platform"]
+            if platform in seen_platforms:
+                raise ValueError(f"Duplicate platform '{platform}' in {path.name}")
+            seen_platforms.add(platform)
             await collection.replace_one(
-                {"platform": policy["platform"]},
+                {"platform": platform},
                 policy,
                 upsert=True,
             )
-            processed.append(policy["platform"])
+            processed.append(platform)
         return processed
     finally:
         client.close()

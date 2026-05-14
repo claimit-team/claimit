@@ -20,8 +20,8 @@
     "competitor list limited to selected retailers"
   ],
   "policy_url": "https://www.nordstrom.com/browse/customer-service/policy/pricing-policy",
-  "policy_text_full": "Nordstrom offers a 10-day price adjustment for its own price drops and from selected competitors. Submitted via online form. Anniversary Sale items and final sale items are excluded entirely — agent should skip claim attempts during NSale.",
+  "policy_text_full": "Nordstrom offers a 10-day price adjustment for its own price drops and from selected competitors. Submitted via online form. Anniversary Sale items and final sale items are excluded entirely",
   "policy_text_relevant_clause": "Within 10 days of purchase, customers can request a price adjustment for own or selected competitor price drops; Anniversary Sale items do not qualify.",
-  "last_verified": "2026-05-15",
+  "last_verified": "2026-05-14",
   "active": true
 }
