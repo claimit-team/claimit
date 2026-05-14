@@ -26,7 +26,7 @@ const socialProofData = {
 
 export function SocialProofSection() {
   return (
-    <section className="border-t border-neutral-200 bg-neutral-50 px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
+    <section className="border-t border-neutral-200 bg-neutral-50 px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         whileInView={{ opacity: 1, y: 0 }}

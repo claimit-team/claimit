@@ -94,7 +94,7 @@ function MarqueeRow({
 
 export function LogoWallSection() {
   return (
-    <section className="border-t border-neutral-200 bg-neutral-0 py-12 sm:py-16">
+    <section className="border-t border-neutral-200 bg-neutral-0 py-24 sm:py-32 lg:py-40">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         whileInView={{ opacity: 1, y: 0 }}

@@ -136,7 +136,7 @@ export function CareersListView() {
       </section>
 
       {/* Current Status Section */}
-      <section className="py-12">
+      <section className="py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-2xl px-6">
           <Card className="border-neutral-200">
             <CardHeader>
@@ -163,7 +163,7 @@ export function CareersListView() {
       </section>
 
       {/* Role Areas Section */}
-      <section className="py-12">
+      <section className="py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-4xl px-6">
           <div className="mb-8">
             <h2 className="text-2xl font-semibold text-neutral-900">Role areas</h2>
@@ -205,7 +205,7 @@ export function CareersListView() {
       </section>
 
       {/* How We Work Section */}
-      <section className="py-12">
+      <section className="py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-4xl px-6">
           <h2 className="mb-8 text-2xl font-semibold text-neutral-900">How we work</h2>
           <div className="grid gap-4 md:grid-cols-2">
@@ -224,7 +224,7 @@ export function CareersListView() {
       </section>
 
       {/* Resume Interest Form Section */}
-      <section id="interest-form" className="py-12">
+      <section id="interest-form" className="py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-xl px-6">
           <Card className="border-neutral-200">
             <CardHeader>
@@ -327,7 +327,7 @@ export function CareersListView() {
       </section>
 
       {/* FAQ Section */}
-      <section className="py-12">
+      <section className="py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-2xl px-6">
           <h2 className="mb-8 text-2xl font-semibold text-neutral-900">
             Frequently asked questions
@@ -350,7 +350,7 @@ export function CareersListView() {
       </section>
 
       {/* Final CTA Section */}
-      <section className="border-t border-neutral-200 bg-neutral-100/50 py-16">
+      <section className="border-t border-neutral-200 bg-neutral-100/50 py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-2xl px-6 text-center">
           <h2 className="text-xl font-semibold text-neutral-900">
             Want to understand the product first?

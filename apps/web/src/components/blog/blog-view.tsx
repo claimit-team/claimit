@@ -49,13 +49,13 @@ export function BlogView() {
       </section>
 
       <section className="border-b border-neutral-200">
-        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
+        <div className="mx-auto max-w-6xl px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
           <FeaturedPost post={featuredPost} />
         </div>
       </section>
 
       <section className="border-b border-neutral-200">
-        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
+        <div className="mx-auto max-w-6xl px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
           <div className="mb-8">
             <CategoryFilter
               selectedCategory={selectedCategory}
@@ -78,7 +78,7 @@ export function BlogView() {
       </section>
 
       <section>
-        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
+        <div className="mx-auto max-w-6xl px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
           <div className="grid gap-8 lg:grid-cols-2">
             <NewsletterCard />
             <RelatedResources />

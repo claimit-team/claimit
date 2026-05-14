@@ -76,7 +76,7 @@ export function HelpCenterView() {
 
       {/* Quick Topic Cards */}
       {!searchQuery && (
-        <section className="py-12 sm:py-16">
+        <section className="py-24 sm:py-32 lg:py-40">
           <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
             <h2 className="sr-only">Quick topics</h2>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -111,7 +111,7 @@ export function HelpCenterView() {
       )}
 
       {/* FAQ Sections */}
-      <section className="pb-16 sm:pb-20">
+      <section className="py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
           {filteredFaqData.length === 0 ? (
             <div className="py-12 text-center">
@@ -148,7 +148,7 @@ export function HelpCenterView() {
       </section>
 
       {/* Contact Support CTA */}
-      <section className="border-t border-border bg-muted/30 py-16">
+      <section className="border-t border-border bg-muted/30 py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-2xl px-4 text-center sm:px-6 lg:px-8">
           <Card className="bg-card">
             <CardContent className="py-10">

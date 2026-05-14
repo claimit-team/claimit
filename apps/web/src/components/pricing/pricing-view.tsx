@@ -317,7 +317,7 @@ export function PricingView() {
         </div>
       </section>
 
-      <section className="py-16">
+      <section className="py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <div className="mb-10 flex justify-center">
             <Tabs
@@ -341,7 +341,7 @@ export function PricingView() {
         </div>
       </section>
 
-      <section className="border-t border-neutral-200 py-16">
+      <section className="border-t border-neutral-200 py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
           <h2 className="mb-8 text-center text-2xl font-semibold text-neutral-900">
             Feature Comparison
@@ -350,13 +350,13 @@ export function PricingView() {
         </div>
       </section>
 
-      <section className="border-t border-neutral-200 py-16">
+      <section className="border-t border-neutral-200 py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-xl px-4 sm:px-6 lg:px-8">
           <TrialExplanation />
         </div>
       </section>
 
-      <section className="border-t border-neutral-200 py-16">
+      <section className="border-t border-neutral-200 py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8">
           <h2 className="mb-8 text-center text-2xl font-semibold text-neutral-900">
             Frequently Asked Questions
@@ -365,7 +365,7 @@ export function PricingView() {
         </div>
       </section>
 
-      <section className="border-t border-neutral-200 bg-neutral-50 py-16">
+      <section className="border-t border-neutral-200 bg-neutral-50 py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-2xl px-4 text-center sm:px-6 lg:px-8">
           <h2 className="text-2xl font-semibold text-neutral-900">Start with One Receipt</h2>
           <p className="mt-4 text-neutral-700">
