@@ -39,7 +39,7 @@ const compactSteps = [
 
 export function HowItWorksSection({ isLoading = false }: HowItWorksSectionProps) {
   return (
-    <section className="border-t border-neutral-200 px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
+    <section className="px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         whileInView={{ opacity: 1, y: 0 }}
