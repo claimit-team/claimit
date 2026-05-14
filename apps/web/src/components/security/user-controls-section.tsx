@@ -49,7 +49,7 @@ export function UserControlsSection() {
         <div className="grid gap-6 sm:grid-cols-2">
           {controls.map((control) => (
             <Link key={control.title} href={control.href}>
-              <Card className="h-full bg-card transition-colors hover:bg-accent/50">
+              <Card className="h-full bg-card transition-all duration-300 hover:-translate-y-1 hover:shadow-md">
                 <CardHeader>
                   <div className="flex size-10 items-center justify-center rounded-lg bg-secondary">
                     <control.icon className="size-5 text-foreground" />

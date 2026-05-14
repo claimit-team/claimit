@@ -18,7 +18,7 @@ export function HeroSection() {
             href="/login"
             className={cn(
               buttonVariants({ size: "lg" }),
-              "bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600 inline-flex justify-center items-center px-8",
+              "bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600 inline-flex justify-center items-center px-8 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]",
             )}
           >
             Try free

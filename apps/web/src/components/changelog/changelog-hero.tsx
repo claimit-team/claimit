@@ -14,7 +14,13 @@ export function ChangelogHero() {
         working demo.
       </p>
       <div className="mt-6 flex flex-wrap items-center gap-4">
-        <Link href="/how-it-works" className={cn(buttonVariants(), "inline-flex items-center")}>
+        <Link
+          href="/how-it-works"
+          className={cn(
+            buttonVariants(),
+            "inline-flex items-center transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]",
+          )}
+        >
           See how it works
           <ArrowRight className="ml-2 h-4 w-4" />
         </Link>

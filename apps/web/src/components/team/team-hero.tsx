@@ -14,7 +14,13 @@ export function TeamHero() {
           post-purchase price drops and preparing the right claim material.
         </p>
         <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-          <Link href="/login" className={cn(buttonVariants())}>
+          <Link
+            href="/login"
+            className={cn(
+              buttonVariants(),
+              "transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]",
+            )}
+          >
             Try free
           </Link>
           <Link

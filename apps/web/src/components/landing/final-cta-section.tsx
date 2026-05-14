@@ -27,7 +27,7 @@ export function FinalCtaSection() {
             href="/login"
             className={cn(
               buttonVariants({ size: "lg" }),
-              "gap-2 w-full sm:w-auto inline-flex justify-center bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600 px-10 ring-1 ring-brand-accent-500/0 hover:ring-brand-accent-500/40 transition-all",
+              "gap-2 w-full sm:w-auto inline-flex justify-center bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600 px-10 ring-1 ring-brand-accent-500/0 hover:ring-brand-accent-500/40 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]",
             )}
           >
             Try Free

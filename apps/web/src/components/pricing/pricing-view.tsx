@@ -306,7 +306,13 @@ export function PricingView() {
             drafts. We help you prepare materials, but we do not guarantee refunds.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-            <Link href="/login" className={cn(buttonVariants())}>
+            <Link
+              href="/login"
+              className={cn(
+                buttonVariants(),
+                "transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]",
+              )}
+            >
               Get Started Free
             </Link>
             <Link

@@ -66,7 +66,13 @@ export function HelpCenterView() {
           </div>
 
           <div className="mt-6">
-            <Link href="/help/contact" className={cn(buttonVariants(), "inline-flex items-center")}>
+            <Link
+              href="/help/contact"
+              className={cn(
+                buttonVariants(),
+                "inline-flex items-center transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]",
+              )}
+            >
               <MessageCircle className="mr-2 size-4" />
               Contact support
             </Link>
@@ -89,7 +95,7 @@ export function HelpCenterView() {
                     onClick={() => scrollToSection(topic.id)}
                     className="group text-left"
                   >
-                    <Card className="h-full transition-shadow hover:shadow-md">
+                    <Card className="h-full transition-all duration-300 hover:-translate-y-1 hover:shadow-md">
                       <CardContent className="flex items-start gap-4 pt-6">
                         <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                           <Icon className="size-5 text-primary" />

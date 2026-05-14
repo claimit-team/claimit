@@ -102,7 +102,13 @@ export default async function CareerDetailPage({ params }: PageProps) {
           </h1>
           <p className="mt-4 text-pretty text-lg text-neutral-700">{job.summary}</p>
           <div className="mt-6 flex flex-wrap items-center gap-3">
-            <Link href="#interest-form" className={cn(buttonVariants({ size: "lg" }))}>
+            <Link
+              href="#interest-form"
+              className={cn(
+                buttonVariants({ size: "lg" }),
+                "transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]",
+              )}
+            >
               Submit interest
             </Link>
             <Link
@@ -210,7 +216,7 @@ export default async function CareerDetailPage({ params }: PageProps) {
             {job.relatedRoles.map((role) => (
               <Card
                 key={role.slug}
-                className="border-neutral-200 transition-colors hover:border-neutral-300"
+                className="border-neutral-200 transition-all duration-300 hover:-translate-y-1 hover:shadow-md"
               >
                 <CardHeader>
                   <div className="mb-1 flex items-center gap-2">

@@ -15,7 +15,13 @@ export function SecurityHero() {
             limits access to what the workflow needs.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-4">
-            <Link href="/login" className={cn(buttonVariants())}>
+            <Link
+              href="/login"
+              className={cn(
+                buttonVariants(),
+                "transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]",
+              )}
+            >
               Try free
             </Link>
             <Link

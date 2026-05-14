@@ -119,7 +119,7 @@ export function CareersListView() {
               href="#interest-form"
               className={cn(
                 buttonVariants(),
-                "bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600",
+                "bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]",
               )}
             >
               Drop your resume
@@ -175,7 +175,7 @@ export function CareersListView() {
             {mockCareersData.roles.map((role) => (
               <Card
                 key={role.slug}
-                className="border-neutral-200 transition-shadow hover:shadow-md"
+                className="border-neutral-200 transition-all duration-300 hover:-translate-y-1 hover:shadow-md"
               >
                 <CardHeader>
                   <div className="mb-2">

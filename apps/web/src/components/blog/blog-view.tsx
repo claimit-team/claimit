@@ -39,7 +39,10 @@ export function BlogView() {
           <div className="mt-8">
             <Link
               href="/how-it-works"
-              className={cn(buttonVariants({ variant: "outline" }), "inline-flex items-center")}
+              className={cn(
+                buttonVariants({ variant: "outline" }),
+                "inline-flex items-center transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]",
+              )}
             >
               See how it works
               <ArrowRight className="ml-2 size-4" aria-hidden="true" />
