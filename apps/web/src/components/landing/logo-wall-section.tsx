@@ -1,3 +1,7 @@
+"use client";
+
+import { motion } from "motion/react";
+
 type Logo = { name: string; src: string };
 
 // Row 1 scrolls right-to-left, row 2 scrolls left-to-right.
@@ -91,7 +95,13 @@ function MarqueeRow({
 export function LogoWallSection() {
   return (
     <section className="border-t border-neutral-200 bg-neutral-0 py-12 sm:py-16">
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8"
+      >
         <p className="text-center text-sm font-medium text-neutral-500">
           Trusted across 26 platforms
         </p>
@@ -99,7 +109,7 @@ export function LogoWallSection() {
           <MarqueeRow logos={row1} direction="left" prefix="r1" />
           <MarqueeRow logos={row2} direction="right" prefix="r2" />
         </div>
-      </div>
+      </motion.div>
     </section>
   );
 }

@@ -1,4 +1,7 @@
+"use client";
+
 import { FileText, Layers, TrendingUp } from "lucide-react";
+import { motion } from "motion/react";
 import { Card } from "@/components/ui/card";
 
 const socialProofData = {
@@ -24,7 +27,13 @@ const socialProofData = {
 export function SocialProofSection() {
   return (
     <section className="border-t border-neutral-200 bg-neutral-50 px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-      <div className="mx-auto max-w-4xl">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="mx-auto max-w-4xl"
+      >
         <div className="grid gap-6 sm:grid-cols-3">
           {socialProofData.stats.map((stat) => (
             <Card
@@ -53,7 +62,7 @@ export function SocialProofSection() {
             </p>
           </Card>
         </div>
-      </div>
+      </motion.div>
     </section>
   );
 }

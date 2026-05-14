@@ -1,3 +1,5 @@
+"use client";
+
 import {
   CheckCircle2,
   Eye,
@@ -8,6 +10,7 @@ import {
   Sparkles,
   Upload,
 } from "lucide-react";
+import { motion } from "motion/react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -37,7 +40,13 @@ const compactSteps = [
 export function HowItWorksSection({ isLoading = false }: HowItWorksSectionProps) {
   return (
     <section className="border-t border-neutral-200 px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-      <div className="mx-auto max-w-6xl">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="mx-auto max-w-6xl"
+      >
         <h2 className="text-balance text-center text-2xl font-semibold text-neutral-900 sm:text-3xl">
           How It Works
         </h2>
@@ -213,7 +222,7 @@ export function HowItWorksSection({ isLoading = false }: HowItWorksSectionProps)
             Learn How It Works
           </Link>
         </div>
-      </div>
+      </motion.div>
     </section>
   );
 }

@@ -1,4 +1,7 @@
+"use client";
+
 import { ArrowRight } from "lucide-react";
+import { motion } from "motion/react";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -6,7 +9,13 @@ import { cn } from "@/lib/utils";
 export function FinalCtaSection() {
   return (
     <section className="border-t border-neutral-200 px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-      <div className="mx-auto max-w-2xl text-center">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="mx-auto max-w-2xl text-center"
+      >
         <h2 className="text-balance text-2xl font-semibold text-neutral-900 sm:text-3xl">
           Start with one receipt
         </h2>
@@ -25,7 +34,7 @@ export function FinalCtaSection() {
             <ArrowRight className="size-4 shrink-0" aria-hidden />
           </Link>
         </div>
-      </div>
+      </motion.div>
     </section>
   );
 }
