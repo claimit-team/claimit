@@ -50,7 +50,7 @@ export default function TermsPage() {
             >
               MVP placeholder legal text
             </Badge>
-            <h1 className="text-3xl font-bold tracking-tight text-neutral-900 md:text-4xl">
+            <h1 className="text-balance text-4xl font-bold leading-[1.05] tracking-tight text-neutral-900 sm:text-5xl">
               Terms of Service
             </h1>
             <p className="mt-4 text-lg text-neutral-700">

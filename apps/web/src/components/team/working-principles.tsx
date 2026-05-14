@@ -27,9 +27,9 @@ const principles = [
 
 export function WorkingPrinciples() {
   return (
-    <section className="bg-neutral-0 py-12 sm:py-16">
+    <section className="bg-neutral-0 py-24 sm:py-32 lg:py-40">
       <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
-        <h2 className="mb-10 text-center text-2xl font-semibold text-neutral-900">
+        <h2 className="mb-10 text-center text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
           Working principles
         </h2>
         <div className="space-y-6">

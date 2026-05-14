@@ -33,7 +33,7 @@ const controls = [
 export function UserControlsSection() {
   return (
     <section className="border-b border-border">
-      <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
+      <div className="mx-auto max-w-6xl px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
         <div className="mb-12">
           <Badge variant="secondary" className="mb-4">
             User Controls
@@ -49,7 +49,7 @@ export function UserControlsSection() {
         <div className="grid gap-6 sm:grid-cols-2">
           {controls.map((control) => (
             <Link key={control.title} href={control.href}>
-              <Card className="h-full bg-card transition-colors hover:bg-accent/50">
+              <Card className="h-full bg-card transition-all duration-300 hover:-translate-y-1 hover:shadow-md">
                 <CardHeader>
                   <div className="flex size-10 items-center justify-center rounded-lg bg-secondary">
                     <control.icon className="size-5 text-foreground" />

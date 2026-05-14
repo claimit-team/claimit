@@ -1,5 +1,6 @@
 """Stub Google ADK agent for the assistant service. Real tools wired in later tickets."""
 
+from claimit_mcp import get_mongodb_mcp_toolset
 from google.adk import Agent
 
 # Sub-agents will be wired in when real logic is added.
@@ -12,5 +13,5 @@ assistant_agent = Agent(
         "for ingestion, monitoring, and claim generation. Respond with 'Hello from "
         "Assistant' for now."
     ),
-    tools=[],
+    tools=[get_mongodb_mcp_toolset(read_only=True)],  # read-only: conversational queries
 )

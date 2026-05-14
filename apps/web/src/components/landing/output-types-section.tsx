@@ -1,4 +1,7 @@
+"use client";
+
 import { Mail, MapPin, MessageSquareText, MousePointer } from "lucide-react";
+import { motion } from "motion/react";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -35,9 +38,15 @@ const outputTypes = [
 
 export function OutputTypesSection({ isLoading = false }: OutputTypesSectionProps) {
   return (
-    <section className="border-t border-neutral-200 bg-neutral-50 px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-      <div className="mx-auto max-w-6xl">
-        <h2 className="text-balance text-center text-2xl font-semibold text-neutral-900 sm:text-3xl">
+    <section className="bg-neutral-50 px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="mx-auto max-w-6xl"
+      >
+        <h2 className="text-balance text-center text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
           Matches the actual claim process for each platform
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-neutral-700">
@@ -68,7 +77,7 @@ export function OutputTypesSection({ isLoading = false }: OutputTypesSectionProp
             ))}
           </div>
         )}
-      </div>
+      </motion.div>
     </section>
   );
 }

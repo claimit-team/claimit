@@ -8,7 +8,7 @@ interface PostCardProps {
 
 export function PostCard({ post }: PostCardProps) {
   return (
-    <article className="group flex flex-col overflow-hidden rounded-lg border border-neutral-200 bg-neutral-0 transition-shadow hover:shadow-sm">
+    <article className="group flex flex-col overflow-hidden rounded-lg border border-neutral-200 bg-neutral-0 transition-all duration-300 hover:-translate-y-1 hover:shadow-md">
       {/* Image placeholder */}
       <div className="flex aspect-[16/10] items-center justify-center bg-neutral-100">
         <FileText className="size-10 text-neutral-400" strokeWidth={1.5} aria-hidden="true" />
