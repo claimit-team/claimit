@@ -4,7 +4,6 @@ import { FinalCtaSection } from "@/components/landing/final-cta-section";
 import { HeroSection } from "@/components/landing/hero-section";
 import { HowItWorksSection } from "@/components/landing/how-it-works-section";
 import { OutputTypesSection } from "@/components/landing/output-types-section";
-import { ProblemSection } from "@/components/landing/problem-section";
 import { SocialProofSection } from "@/components/landing/social-proof-section";
 
 export const metadata: Metadata = {
@@ -17,7 +16,6 @@ export default function LandingPage() {
   return (
     <>
       <HeroSection />
-      <ProblemSection />
       <HowItWorksSection />
       <OutputTypesSection />
       <AssistantSection />
