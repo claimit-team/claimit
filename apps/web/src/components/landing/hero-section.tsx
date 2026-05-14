@@ -51,7 +51,7 @@ export function HeroSection({ isLoading = false }: HeroSectionProps) {
                 href="/login"
                 className={cn(
                   buttonVariants({ size: "lg" }),
-                  "w-full gap-2 bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600 sm:w-auto inline-flex justify-center items-center",
+                  "w-full gap-2 bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600 sm:w-auto inline-flex justify-center items-center ring-1 ring-brand-accent-500/0 hover:ring-brand-accent-500/40 transition-all",
                 )}
               >
                 Try Free

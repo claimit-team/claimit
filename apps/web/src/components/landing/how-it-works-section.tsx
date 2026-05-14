@@ -216,7 +216,7 @@ export function HowItWorksSection({ isLoading = false }: HowItWorksSectionProps)
             href="/how-it-works"
             className={cn(
               buttonVariants({ variant: "outline" }),
-              "border-neutral-200 text-neutral-700 hover:bg-neutral-50 hover:text-neutral-900 inline-flex px-6",
+              "border-neutral-200 text-neutral-700 hover:bg-neutral-50 hover:text-neutral-900 inline-flex px-6 ring-1 ring-brand-accent-500/0 hover:ring-brand-accent-500/40 transition-all",
             )}
           >
             Learn How It Works
