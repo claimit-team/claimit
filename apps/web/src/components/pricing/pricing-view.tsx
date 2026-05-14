@@ -158,9 +158,7 @@ function PricingCard({
           ) : null}
         </div>
         {showAnnualSavings ? (
-          <p className="mt-1 text-sm font-medium text-brand-accent-500">
-            {tier.annualSavingsLabel}
-          </p>
+          <p className="mt-1 text-sm font-medium text-neutral-700">{tier.annualSavingsLabel}</p>
         ) : null}
         {billingCadence === "annual" && tier.name !== "Free" ? (
           <p className="mt-1 text-xs text-neutral-500">Billed annually</p>

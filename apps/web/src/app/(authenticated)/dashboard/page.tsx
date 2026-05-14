@@ -649,7 +649,7 @@ function MonitoredPurchasesSection({
                             purchase.status === "claim drafted" &&
                               "bg-neutral-100 text-neutral-700",
                             purchase.status === "submitted" &&
-                              "bg-brand-accent-50 text-brand-accent-600",
+                              "bg-semantic-info-bg text-semantic-info",
                             isWarning && "bg-semantic-warning-bg text-semantic-warning",
                           )}
                         >
