@@ -379,13 +379,13 @@ function UpdateNeededCard({
   };
 
   const handleSaveApproved = () => {
-    toast.success("Outcome saved. Reclaimed amount updated from your report.");
+    toast.success("Outcome recorded. Reclaimed amount updated from your report.");
     setDismissed(true);
     onDismiss();
   };
 
   const handleSaveDenied = () => {
-    toast.success("Outcome saved. Claim marked denied.");
+    toast.success("Outcome recorded. Claim marked denied.");
     setDismissed(true);
     onDismiss();
   };

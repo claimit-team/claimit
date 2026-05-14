@@ -38,7 +38,7 @@ export function MarkResultSection({ onMarkResult }: MarkResultSectionProps) {
       return;
     }
     onMarkResult("approved", amount);
-    setSuccessMessage("Saved · You can change this later");
+    setSuccessMessage("Recorded · You can change this later");
     setShowSuccess(true);
     setExpandedForm(null);
     toast.success("Claim marked as approved");
@@ -46,7 +46,7 @@ export function MarkResultSection({ onMarkResult }: MarkResultSectionProps) {
 
   const handleDeniedSave = () => {
     onMarkResult("denied", undefined, denialReason || undefined);
-    setSuccessMessage("Saved · You can change this later");
+    setSuccessMessage("Recorded · You can change this later");
     setShowSuccess(true);
     setExpandedForm(null);
     toast.success("Claim marked as denied");
@@ -54,7 +54,7 @@ export function MarkResultSection({ onMarkResult }: MarkResultSectionProps) {
 
   const handleStillWaiting = () => {
     onMarkResult("no_response");
-    setSuccessMessage("Saved · You can change this later");
+    setSuccessMessage("Recorded · You can change this later");
     setShowSuccess(true);
     toast.success("Status updated");
   };

@@ -56,7 +56,7 @@ const footerGroups = [
   {
     title: "Resources",
     links: [
-      { href: "/help", label: "Help Center" },
+      { href: "/help", label: "Help center" },
       { href: "/blog", label: "Blog" },
       { href: "/changelog", label: "Changelog" },
       { href: "/help/contact", label: "Contact" },
@@ -65,8 +65,8 @@ const footerGroups = [
   {
     title: "Legal",
     links: [
-      { href: "/privacy", label: "Privacy Policy" },
-      { href: "/terms", label: "Terms of Service" },
+      { href: "/privacy", label: "Privacy policy" },
+      { href: "/terms", label: "Terms of service" },
     ],
   },
 ] as const;
