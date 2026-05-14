@@ -18,6 +18,16 @@ type UIState = {
   claimEmbeddedAssistantExpanded: boolean;
   setClaimEmbeddedAssistantExpanded: (expanded: boolean) => void;
   toggleClaimEmbeddedAssistant: () => void;
+
+  /**
+   * Floating Assistant pulse signal — true when a proactive event is queued
+   * (e.g. price drop detected, claim needs review). Drives the accent ring on
+   * the FAB. Cleared automatically when the assistant pane is opened.
+   */
+  hasProactiveEvent: boolean;
+  setHasProactiveEvent: (next: boolean) => void;
+  triggerProactiveEvent: () => void;
+  dismissProactiveEvent: () => void;
 };
 
 export const useUIStore = create<UIState>((set) => ({
@@ -26,7 +36,12 @@ export const useUIStore = create<UIState>((set) => ({
   setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
 
   assistantPaneOpen: false,
-  toggleAssistantPane: () => set((state) => ({ assistantPaneOpen: !state.assistantPaneOpen })),
+  toggleAssistantPane: () =>
+    set((state) => ({
+      assistantPaneOpen: !state.assistantPaneOpen,
+      // Opening the pane acknowledges any queued proactive event.
+      hasProactiveEvent: !state.assistantPaneOpen ? false : state.hasProactiveEvent,
+    })),
 
   claimEmbeddedAssistantExpanded: false,
   setClaimEmbeddedAssistantExpanded: (claimEmbeddedAssistantExpanded) =>
@@ -35,4 +50,9 @@ export const useUIStore = create<UIState>((set) => ({
     set((state) => ({
       claimEmbeddedAssistantExpanded: !state.claimEmbeddedAssistantExpanded,
     })),
+
+  hasProactiveEvent: false,
+  setHasProactiveEvent: (hasProactiveEvent) => set({ hasProactiveEvent }),
+  triggerProactiveEvent: () => set({ hasProactiveEvent: true }),
+  dismissProactiveEvent: () => set({ hasProactiveEvent: false }),
 }));

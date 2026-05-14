@@ -35,6 +35,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { useUIStore } from "@/store";
 
 // ============================================================================
 // MOCK DATA
@@ -193,10 +194,31 @@ function PageHeader({
         </Button>
         {/* Dev-only userState switcher — not shipped to production builds */}
         {process.env.NODE_ENV !== "production" && (
-          <DevStateSwitcher value={userState} onChange={onUserStateChange} />
+          <>
+            <DevStateSwitcher value={userState} onChange={onUserStateChange} />
+            <DevPulseTrigger />
+          </>
         )}
       </div>
     </div>
+  );
+}
+
+function DevPulseTrigger() {
+  const triggerProactiveEvent = useUIStore((s) => s.triggerProactiveEvent);
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={() => {
+        triggerProactiveEvent();
+        toast.info("Proactive event queued — watch the assistant FAB pulse.");
+      }}
+      className="border-dashed border-neutral-400 text-neutral-600"
+    >
+      Trigger pulse
+    </Button>
   );
 }
 

@@ -17,6 +17,7 @@ type FloatingAssistantProps = {
 export function FloatingAssistant({ variant = "default" }: FloatingAssistantProps) {
   const open = useUIStore((s) => s.assistantPaneOpen);
   const toggle = useUIStore((s) => s.toggleAssistantPane);
+  const hasProactiveEvent = useUIStore((s) => s.hasProactiveEvent);
 
   const embeddedExpanded = useUIStore((s) => s.claimEmbeddedAssistantExpanded);
   const toggleEmbedded = useUIStore((s) => s.toggleClaimEmbeddedAssistant);
@@ -52,28 +53,38 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
     );
   }
 
+  const showPulse = hasProactiveEvent && !open;
+
   return (
     <div className="fixed bottom-6 right-6 z-50">
-      <Button
-        type="button"
-        onClick={toggle}
-        size="icon"
-        aria-expanded={open}
-        aria-controls="assistant-pane"
-        aria-label={open ? "Close assistant" : "Open assistant"}
-        className={cn(
-          "w-14 h-14 rounded-full shadow-lg transition-colors",
-          open
-            ? "bg-neutral-800 hover:bg-neutral-700 text-neutral-0"
-            : "bg-brand-primary-500 hover:bg-brand-primary-600 text-neutral-0",
-        )}
-      >
-        {open ? (
-          <X className="w-6 h-6" aria-hidden="true" />
-        ) : (
-          <MessageSquareText className="w-6 h-6" aria-hidden="true" />
-        )}
-      </Button>
+      <div className="relative w-12 h-12 md:w-14 md:h-14">
+        {showPulse ? (
+          <span
+            aria-hidden="true"
+            className="absolute inset-0 rounded-full ring-2 ring-brand-accent-500 animate-ping"
+          />
+        ) : null}
+        <Button
+          type="button"
+          onClick={toggle}
+          size="icon"
+          aria-expanded={open}
+          aria-controls="assistant-pane"
+          aria-label={open ? "Close assistant" : "Open assistant"}
+          className={cn(
+            "relative w-12 h-12 md:w-14 md:h-14 rounded-full shadow-lg transition-colors",
+            open
+              ? "bg-neutral-800 hover:bg-neutral-700 text-neutral-0"
+              : "bg-brand-primary-500 hover:bg-brand-primary-600 text-neutral-0",
+          )}
+        >
+          {open ? (
+            <X className="w-6 h-6" aria-hidden="true" />
+          ) : (
+            <MessageSquareText className="w-6 h-6" aria-hidden="true" />
+          )}
+        </Button>
+      </div>
 
       {open ? (
         <div
