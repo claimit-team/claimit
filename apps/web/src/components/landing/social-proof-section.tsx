@@ -1,7 +1,8 @@
 "use client";
 
 import { FileText, Layers, TrendingUp } from "lucide-react";
-import { motion } from "motion/react";
+import { animate, motion, useInView, useMotionValue, useTransform } from "motion/react";
+import { useEffect, useRef, useState } from "react";
 import { Card } from "@/components/ui/card";
 
 const socialProofData = {
@@ -23,6 +24,28 @@ const socialProofData = {
     qualifier: "Example dashboard, based on user-reported results.",
   },
 } as const;
+
+function AnimatedAmount({ target }: { target: number }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const inView = useInView(ref, { once: true, amount: 0.4 });
+  const motionValue = useMotionValue(0);
+  const rounded = useTransform(motionValue, (v) => Math.round(v));
+  const [display, setDisplay] = useState(0);
+
+  useEffect(() => {
+    const unsubscribe = rounded.on("change", (v) => setDisplay(v));
+    return () => unsubscribe();
+  }, [rounded]);
+
+  useEffect(() => {
+    if (inView) {
+      const controls = animate(motionValue, target, { duration: 1.5, ease: "easeOut" });
+      return () => controls.stop();
+    }
+  }, [inView, motionValue, target]);
+
+  return <span ref={ref}>{display}</span>;
+}
 
 export function SocialProofSection() {
   return (
@@ -54,7 +77,7 @@ export function SocialProofSection() {
               aria-hidden
             />
             <p className="mt-3 text-2xl font-semibold text-brand-accent-500 tabular-nums">
-              ${socialProofData.exampleReportedReclaimed.amount}
+              $<AnimatedAmount target={socialProofData.exampleReportedReclaimed.amount} />
             </p>
             <p className="mt-1 text-sm text-neutral-700">Reclaimed This Month</p>
             <p className="mt-2 text-xs text-neutral-500">
