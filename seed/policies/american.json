@@ -1,0 +1,26 @@
+{
+  "_id": "0000a020-0000-4000-8000-000000000020",
+  "platform": "american",
+  "category": "airline",
+  "window_days": 1,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": false,
+  "claim_type": "self_service",
+  "claim_url": "https://www.aa.com/web/i18n/customer-service/faqs/reservations-tickets-faqs.html",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": false,
+  "award_ticket_eligible": false,
+  "bundle_exclusions": false,
+  "key_exclusions": [
+    "must cancel and rebook (in-place fare adjustment not allowed)",
+    "24-hour window measured from booking timestamp"
+  ],
+  "policy_url": "https://www.aa.com/web/i18n/customer-service/faqs/reservations-tickets-faqs.html",
+  "policy_text_full": "American Airlines lets customers cancel and rebook at a lower fare within 24 hours of booking. Refund is issued to original tender upon cancellation. Same flow as Delta — in-place fare adjustment is not supported.",
+  "policy_text_relevant_clause": "Within 24 hours of booking, customers can cancel and rebook at a lower fare; refund is issued to original tender on cancellation.",
+  "last_verified": "2026-05-14",
+  "active": true
+}

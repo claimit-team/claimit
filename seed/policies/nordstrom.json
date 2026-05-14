@@ -1,0 +1,27 @@
+{
+  "_id": "0000a010-0000-4000-8000-000000000010",
+  "platform": "nordstrom",
+  "category": "retail",
+  "window_days": 10,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": true,
+  "claim_type": "email",
+  "claim_url": "https://www.nordstrom.com/browse/customer-service/policy/pricing-policy",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": false,
+  "award_ticket_eligible": null,
+  "bundle_exclusions": true,
+  "key_exclusions": [
+    "Anniversary Sale items",
+    "final sale items",
+    "competitor list limited to selected retailers"
+  ],
+  "policy_url": "https://www.nordstrom.com/browse/customer-service/policy/pricing-policy",
+  "policy_text_full": "Nordstrom offers a 10-day price adjustment for its own price drops and from selected competitors. Submitted via online form. Anniversary Sale items and final sale items are excluded entirely",
+  "policy_text_relevant_clause": "Within 10 days of purchase, customers can request a price adjustment for own or selected competitor price drops; Anniversary Sale items do not qualify.",
+  "last_verified": "2026-05-14",
+  "active": true
+}

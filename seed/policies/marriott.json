@@ -1,0 +1,26 @@
+{
+  "_id": "0000a023-0000-4000-8000-000000000023",
+  "platform": "marriott",
+  "category": "hotel",
+  "window_days": 1,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": true,
+  "claim_type": "email",
+  "claim_url": "https://www.marriott.com/online-hotel-booking.mi",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": true,
+  "award_ticket_eligible": false,
+  "bundle_exclusions": true,
+  "key_exclusions": [
+    "Marriott Bonvoy membership required",
+    "strict identical-room rule (same dates, room type, bed type, cancellation policy, rate type)"
+  ],
+  "policy_url": "https://www.marriott.com/online-hotel-booking.mi",
+  "policy_text_full": "Marriott's Best Rate Guarantee matches a lower publicly available rate within 24 hours of booking. Marriott Bonvoy membership is required. Bonus: lower rate plus $50 voucher OR 5,000 Bonvoy points. Strict identical-room rule applies.",
+  "policy_text_relevant_clause": "Within 24 hours of booking, Bonvoy members can claim BRG; identical-room rule applies (same dates, room type, bed type, cancellation policy).",
+  "last_verified": "2026-05-14",
+  "active": true
+}
