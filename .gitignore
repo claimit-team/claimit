@@ -178,6 +178,12 @@ dist/
 !.vscode/settings.json
 .idea/
 
+# Personal Claude Code context — not shared with the team.
+# Leading slash anchors to repo root only, so apps/web/CLAUDE.md (team-shared) is NOT ignored.
+/CLAUDE.md
+/AGENTS.md
+/.basic-memory/
+
 # Terraform
 # tfvars contain project IDs / secrets — only the example template is committed.
 *.tfvars
