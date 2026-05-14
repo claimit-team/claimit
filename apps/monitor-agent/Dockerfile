@@ -26,6 +26,7 @@ ENV UV_PYTHON_DOWNLOADS=never \
 WORKDIR /app
 
 COPY apps/${APP_NAME}/pyproject.toml apps/${APP_NAME}/uv.lock ./
+COPY packages/shared/observability /packages/shared/observability
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY apps/${APP_NAME}/src ./src

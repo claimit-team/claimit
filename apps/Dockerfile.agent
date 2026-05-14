@@ -23,7 +23,10 @@ ENV UV_PYTHON_DOWNLOADS=never \
 WORKDIR /app
 
 # Copy lock + manifest first so the deps layer caches separately from source.
+# claimit-observability is a path dep (../../packages/shared/observability),
+# so it must be present at /packages/... before `uv sync`.
 COPY apps/${APP_NAME}/pyproject.toml apps/${APP_NAME}/uv.lock ./
+COPY packages/shared/observability /packages/shared/observability
 RUN uv sync --frozen --no-dev --no-install-project
 
 # Now copy source and install the project itself.
