@@ -2,24 +2,23 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-
-from src.plan import ClaimType
 from src.plan import (
     ClaimPlan,
     ClaimPlanError,
+    ClaimType,
     InvalidPolicyError,
     PriceDroppedEvent,
     UnknownPlatformError,
     plan_claim,
 )
 
-_PURCHASE_DATE = datetime(2026, 1, 1, tzinfo=timezone.utc)
-_DETECTED_AT = datetime(2026, 1, 15, tzinfo=timezone.utc)
+_PURCHASE_DATE = datetime(2026, 1, 1, tzinfo=UTC)
+_DETECTED_AT = datetime(2026, 1, 15, tzinfo=UTC)
 
 
 def _make_event(**overrides: object) -> PriceDroppedEvent:
@@ -55,7 +54,7 @@ def _mock_client(claim_type: ClaimType | str | None, policy_id=None) -> AsyncMoc
 
 
 # ---------------------------------------------------------------------------
-# Happy path × 4 (one per ClaimType)
+# Happy path x 4 (one per ClaimType)
 # ---------------------------------------------------------------------------
 
 

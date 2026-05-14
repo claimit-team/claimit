@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel
-
 from claimit_mongodb_models import ClaimType, MongoDBClient
+from pydantic import BaseModel
 
 _log = logging.getLogger(__name__)
 
@@ -101,7 +100,7 @@ async def plan_claim(
     try:
         claim_type = ClaimType(raw_claim_type)
     except ValueError:
-        raise InvalidPolicyError(event.platform_id, raw_claim_type)
+        raise InvalidPolicyError(event.platform_id, raw_claim_type) from None
 
     routing = CLAIM_TYPE_ROUTING[claim_type]
     _log.debug("Routing %s → %s via %s", event.platform_id, claim_type, routing["draft_generator"])
@@ -120,5 +119,5 @@ async def plan_claim(
         current_price=event.current_price,
         currency=event.currency,
         policy_id=str(policy.id),
-        created_at=datetime.now(tz=timezone.utc),
+        created_at=datetime.now(tz=UTC),
     )
