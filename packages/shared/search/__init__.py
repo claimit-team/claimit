@@ -1,15 +1,4 @@
-"""Unified search interface for ClaimIt agents.
-
-Thin re-export of the search adapter from packages/shared/elastic/adapter.py.
-Per master doc §10 Risk #4, the adapter auto-selects Elastic or Atlas Search.
-"""
-
-from elastic.adapter import (
-    AtlasSearchAdapter,
-    ElasticSearchAdapter,
-    SearchAdapter,
-    get_search_adapter,
-)
+"""Unified search interface for ClaimIt agents."""
 
 __all__ = [
     "AtlasSearchAdapter",
@@ -17,3 +6,21 @@ __all__ = [
     "SearchAdapter",
     "get_search_adapter",
 ]
+
+
+def __getattr__(name: str):
+    if name in __all__:
+        from elastic.adapter import (
+            AtlasSearchAdapter,
+            ElasticSearchAdapter,
+            SearchAdapter,
+            get_search_adapter,
+        )
+
+        return {
+            "AtlasSearchAdapter": AtlasSearchAdapter,
+            "ElasticSearchAdapter": ElasticSearchAdapter,
+            "SearchAdapter": SearchAdapter,
+            "get_search_adapter": get_search_adapter,
+        }[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
