@@ -294,6 +294,14 @@
   to   { transform: translateX(0); }
 }
 
+.marquee-track-left {
+  animation: marquee-left 90s linear infinite;
+}
+
+.marquee-track-right {
+  animation: marquee-right 90s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .marquee-track {
     animation: none !important;

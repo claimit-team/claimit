@@ -44,7 +44,8 @@ const EDGE_MASK =
 const LOGO_CLASSES =
   "h-10 w-auto shrink-0 grayscale opacity-65 transition duration-300 " +
   "hover:grayscale-0 hover:opacity-100 " +
-  "dark:invert-[.85] dark:grayscale dark:opacity-50";
+  "dark:invert-[.85] dark:grayscale dark:opacity-50 " +
+  "dark:hover:invert-0 dark:hover:grayscale-0 dark:hover:opacity-100";
 
 function MarqueeRow({
   logos,
@@ -61,8 +62,7 @@ function MarqueeRow({
       style={{ maskImage: EDGE_MASK, WebkitMaskImage: EDGE_MASK }}
     >
       <div
-        className="marquee-track flex w-max items-center gap-12 group-hover:[animation-play-state:paused]"
-        style={{ animation: `marquee-${direction} 60s linear infinite` }}
+        className={`marquee-track marquee-track-${direction} flex w-max items-center gap-12 group-hover:[animation-play-state:paused]`}
       >
         {logos.map((logo) => (
           // biome-ignore lint/performance/noImgElement: static SVGs with mixed intrinsic sizes; CSS height drives output, next/image cannot
@@ -105,7 +105,7 @@ export function LogoWallSection() {
         <p className="text-center text-sm font-medium text-neutral-500">
           Trusted across 26 platforms
         </p>
-        <div className="mt-8 space-y-6">
+        <div className="mt-8 space-y-4 sm:space-y-8">
           <MarqueeRow logos={row1} direction="left" prefix="r1" />
           <MarqueeRow logos={row2} direction="right" prefix="r2" />
         </div>
