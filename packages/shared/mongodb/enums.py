@@ -125,6 +125,11 @@ class DenialReason(StrEnum):
     OTHER = "other"
 
 
+class ApprovedBy(StrEnum):
+    USER = "user"
+    AUTO = "auto"
+
+
 class ConversationMode(StrEnum):
     GENERAL = "general"
     CLAIM_FOCUSED = "claim_focused"
