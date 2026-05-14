@@ -20,6 +20,7 @@ claimit-observability = { path = "../../packages/shared/observability" }
 
 [dependency-groups]
 dev = [
+    "pytest>=8.0.0",
     "ruff>=0.6.0",
 ]
 
