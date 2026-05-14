@@ -13,10 +13,12 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "google-adk>=1.0.0",
     "claimit-observability",
+    "claimit-mcp",
 ]
 
 [tool.uv.sources]
 claimit-observability = { path = "../../packages/shared/observability" }
+claimit-mcp = { path = "../../packages/shared/mcp" }
 
 [dependency-groups]
 dev = [
