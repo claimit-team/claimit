@@ -1,0 +1,26 @@
+{
+  "_id": "0000a018-0000-4000-8000-000000000018",
+  "platform": "delta",
+  "category": "airline",
+  "window_days": 1,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": false,
+  "claim_type": "self_service",
+  "claim_url": "https://www.delta.com/us/en/booking-information/online-booking/low-fare-commitment",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": false,
+  "award_ticket_eligible": false,
+  "bundle_exclusions": false,
+  "key_exclusions": [
+    "must cancel and rebook (in-place fare adjustment not allowed)",
+    "24-hour window measured from booking timestamp"
+  ],
+  "policy_url": "https://www.delta.com/us/en/booking-information/online-booking/low-fare-commitment",
+  "policy_text_full": "Delta's 24-hour risk-free cancellation lets customers cancel and rebook at a lower fare within 24 hours of original booking. Refund is issued to original tender upon cancellation. The adjustment must be done via cancel-and-rebook — in-place fare changes are not supported.",
+  "policy_text_relevant_clause": "Within 24 hours of booking, customers can cancel and rebook at a lower fare; the adjustment must be done via cancel-and-rebook, not in-place change.",
+  "last_verified": "2026-05-14",
+  "active": true
+}

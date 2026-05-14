@@ -1,0 +1,26 @@
+{
+  "_id": "0000a007-0000-4000-8000-000000000007",
+  "platform": "target",
+  "category": "retail",
+  "window_days": 14,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": false,
+  "claim_type": "chat_script",
+  "claim_url": "https://www.target.com/help/articles/policies-guidelines/price-match-guarantee",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": false,
+  "award_ticket_eligible": null,
+  "bundle_exclusions": true,
+  "key_exclusions": [
+    "competitor matches discontinued July 2025",
+    "RedCard discount stacking edge cases"
+  ],
+  "policy_url": "https://www.target.com/help/articles/policies-guidelines/price-match-guarantee",
+  "policy_text_full": "Target offers a 14-day price adjustment when Target's own price drops after purchase. As of July 2025, competitor price matches were discontinued — only Target's own price drops qualify. Refund is issued to original tender.",
+  "policy_text_relevant_clause": "Within 14 days of purchase, customers can request a price adjustment if Target's own price drops; competitor price matches were discontinued in July 2025.",
+  "last_verified": "2026-05-14",
+  "active": true
+}

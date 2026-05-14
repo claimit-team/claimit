@@ -19,7 +19,7 @@ repos:
       - id: check-json
         exclude: '\.vscode/.*\.json$|tsconfig.*\.json$|\.devcontainer/.*\.json$'
       - id: check-added-large-files
-        args: [--maxkb=1024]
+        args: [--maxkb=5120]
       - id: check-merge-conflict
       - id: check-case-conflict
 
@@ -37,3 +37,9 @@ repos:
       - id: ruff-check
         args: [--fix]
       - id: ruff-format
+
+  # Terraform — fmt check (run before commit to keep CI's strict fmt step green)
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.96.1
+    hooks:
+      - id: terraform_fmt

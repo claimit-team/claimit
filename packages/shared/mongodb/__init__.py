@@ -7,6 +7,7 @@ ISODateString in TypeScript), `_id` field) is identical across both languages by
 
 from .base import BaseDocument
 from .claim import Claim, DraftVersion
+from .client import MongoDBClient
 from .conversation import Conversation, ConversationMessage, ToolCall
 from .enums import (
     Category,
@@ -62,6 +63,7 @@ __all__ = [
     "LoyaltyMembership",
     "LoyaltyTier",
     "MessageRole",
+    "MongoDBClient",
     "NotificationPrefs",
     "Platform",
     "Policy",

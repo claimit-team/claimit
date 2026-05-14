@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
-import { AssistantSection } from "@/components/landing/assistant-section";
 import { FinalCtaSection } from "@/components/landing/final-cta-section";
 import { HeroSection } from "@/components/landing/hero-section";
 import { HowItWorksSection } from "@/components/landing/how-it-works-section";
+import { LogoWallSection } from "@/components/landing/logo-wall-section";
 import { OutputTypesSection } from "@/components/landing/output-types-section";
-import { ProblemSection } from "@/components/landing/problem-section";
 import { SocialProofSection } from "@/components/landing/social-proof-section";
 
 export const metadata: Metadata = {
@@ -17,10 +16,9 @@ export default function LandingPage() {
   return (
     <>
       <HeroSection />
-      <ProblemSection />
+      <LogoWallSection />
       <HowItWorksSection />
       <OutputTypesSection />
-      <AssistantSection />
       <SocialProofSection />
       <FinalCtaSection />
     </>

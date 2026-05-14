@@ -42,12 +42,12 @@ export function HelpCenterView() {
   return (
     <div className="bg-background">
       {/* Hero Section */}
-      <section className="border-b border-border bg-muted/30 py-16 sm:py-20">
-        <div className="mx-auto max-w-3xl px-4 text-center sm:px-6 lg:px-8">
-          <h1 className="text-balance text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+      <section className="flex min-h-[40vh] flex-col justify-center border-b border-border bg-muted/30 sm:min-h-[50vh]">
+        <div className="mx-auto w-full max-w-3xl px-4 text-center sm:px-6 lg:px-8">
+          <h1 className="text-balance text-4xl font-bold leading-[1.05] tracking-tight text-foreground sm:text-5xl">
             How can we help?
           </h1>
-          <p className="mt-4 text-pretty text-lg leading-relaxed text-muted-foreground">
+          <p className="mt-4 text-pretty text-lg leading-relaxed text-muted-foreground sm:text-xl">
             Find answers about connecting Gmail, monitoring purchases, reviewing claims, and
             reporting outcomes.
           </p>
@@ -66,7 +66,13 @@ export function HelpCenterView() {
           </div>
 
           <div className="mt-6">
-            <Link href="/help/contact" className={cn(buttonVariants(), "inline-flex items-center")}>
+            <Link
+              href="/help/contact"
+              className={cn(
+                buttonVariants(),
+                "inline-flex items-center transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]",
+              )}
+            >
               <MessageCircle className="mr-2 size-4" />
               Contact support
             </Link>
@@ -76,7 +82,7 @@ export function HelpCenterView() {
 
       {/* Quick Topic Cards */}
       {!searchQuery && (
-        <section className="py-12 sm:py-16">
+        <section className="py-24 sm:py-32 lg:py-40">
           <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
             <h2 className="sr-only">Quick topics</h2>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -89,7 +95,7 @@ export function HelpCenterView() {
                     onClick={() => scrollToSection(topic.id)}
                     className="group text-left"
                   >
-                    <Card className="h-full transition-shadow hover:shadow-md">
+                    <Card className="h-full transition-all duration-300 hover:-translate-y-1 hover:shadow-md">
                       <CardContent className="flex items-start gap-4 pt-6">
                         <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                           <Icon className="size-5 text-primary" />
@@ -111,7 +117,7 @@ export function HelpCenterView() {
       )}
 
       {/* FAQ Sections */}
-      <section className="pb-16 sm:pb-20">
+      <section className="py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
           {filteredFaqData.length === 0 ? (
             <div className="py-12 text-center">
@@ -148,7 +154,7 @@ export function HelpCenterView() {
       </section>
 
       {/* Contact Support CTA */}
-      <section className="border-t border-border bg-muted/30 py-16">
+      <section className="border-t border-border bg-muted/30 py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-2xl px-4 text-center sm:px-6 lg:px-8">
           <Card className="bg-card">
             <CardContent className="py-10">

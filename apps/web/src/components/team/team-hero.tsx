@@ -4,17 +4,23 @@ import { cn } from "@/lib/utils";
 
 export function TeamHero() {
   return (
-    <section className="bg-neutral-0 py-16 sm:py-24">
-      <div className="mx-auto max-w-3xl px-4 text-center sm:px-6 lg:px-8">
-        <h1 className="text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl lg:text-5xl">
+    <section className="flex min-h-[75vh] flex-col justify-center bg-neutral-50 sm:min-h-[85vh]">
+      <div className="mx-auto w-full max-w-3xl px-4 text-center sm:px-6 lg:px-8">
+        <h1 className="text-balance text-5xl font-semibold leading-[0.95] tracking-tighter text-neutral-900 sm:text-6xl lg:text-7xl">
           The team building ClaimIt.
         </h1>
-        <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-neutral-700">
+        <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-neutral-600 sm:text-xl">
           We are building a practical agent system for a tedious consumer workflow: finding eligible
           post-purchase price drops and preparing the right claim material.
         </p>
         <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-          <Link href="/login" className={cn(buttonVariants())}>
+          <Link
+            href="/login"
+            className={cn(
+              buttonVariants(),
+              "transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]",
+            )}
+          >
             Try free
           </Link>
           <Link

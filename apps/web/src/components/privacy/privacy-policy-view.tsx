@@ -138,7 +138,7 @@ export function PrivacyPolicyView() {
       <div className="border-b border-neutral-200 bg-neutral-0">
         <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-bold tracking-tight text-neutral-900 sm:text-4xl">
+            <h1 className="text-balance text-4xl font-bold leading-[1.05] tracking-tight text-neutral-900 sm:text-5xl">
               Privacy Policy
             </h1>
             <Badge variant="secondary" className="bg-neutral-100 text-neutral-700">

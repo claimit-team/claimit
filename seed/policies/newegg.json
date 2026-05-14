@@ -1,0 +1,23 @@
+{
+  "_id": "0000a013-0000-4000-8000-000000000013",
+  "platform": "newegg",
+  "category": "retail",
+  "window_days": 7,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": false,
+  "claim_type": "email",
+  "claim_url": "https://kb.newegg.com/knowledge-base/price-match-guarantee/",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": false,
+  "award_ticket_eligible": null,
+  "bundle_exclusions": true,
+  "key_exclusions": ["marketplace third-party sellers", "open-box items"],
+  "policy_url": "https://kb.newegg.com/knowledge-base/price-match-guarantee/",
+  "policy_text_full": "Newegg offers a 7-day price adjustment when Newegg's own price drops after purchase. Refund is issued as store credit or original tender. Marketplace third-party listings and open-box items are excluded.",
+  "policy_text_relevant_clause": "Within 7 days of purchase, customers can request a price adjustment if Newegg's own price drops; marketplace sellers and open-box items are excluded.",
+  "last_verified": "2026-05-14",
+  "active": true
+}

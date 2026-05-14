@@ -5,6 +5,7 @@ description = "ClaimIt MongoDB Pydantic v2 models — mirrors the TypeScript def
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.0",
+    "motor>=3.6.0",
 ]
 license = { text = "MIT" }
 
@@ -16,6 +17,7 @@ build-backend = "hatchling.build"
 only-include = [
     "__init__.py",
     "base.py",
+    "client.py",
     "enums.py",
     "user.py",
     "purchase.py",
