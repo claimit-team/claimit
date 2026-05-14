@@ -3,6 +3,7 @@ import { AssistantSection } from "@/components/landing/assistant-section";
 import { FinalCtaSection } from "@/components/landing/final-cta-section";
 import { HeroSection } from "@/components/landing/hero-section";
 import { HowItWorksSection } from "@/components/landing/how-it-works-section";
+import { LogoWallSection } from "@/components/landing/logo-wall-section";
 import { OutputTypesSection } from "@/components/landing/output-types-section";
 import { SocialProofSection } from "@/components/landing/social-proof-section";
 
@@ -16,6 +17,7 @@ export default function LandingPage() {
   return (
     <>
       <HeroSection />
+      <LogoWallSection />
       <HowItWorksSection />
       <OutputTypesSection />
       <AssistantSection />
