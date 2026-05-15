@@ -26,7 +26,8 @@ ARG APP_NAME
 COPY --from=uv /uv /usr/local/bin/uv
 
 ENV UV_PYTHON_DOWNLOADS=never \
-    UV_LINK_MODE=copy
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/app/.venv
 
 # Mirror monorepo structure so ../../packages/shared/... resolves correctly.
 WORKDIR /build/apps/${APP_NAME}
@@ -55,7 +56,7 @@ RUN groupadd --system app && \
 
 WORKDIR /app
 
-COPY --from=builder --chown=app:app /build/apps/${APP_NAME}/.venv /app/.venv
+COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --from=builder --chown=app:app /build/apps/${APP_NAME}/src /app/src
 
 ENV PATH="/app/.venv/bin:$PATH" \
