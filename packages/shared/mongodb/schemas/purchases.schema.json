@@ -1,0 +1,470 @@
+{
+  "$defs": {
+    "Category": {
+      "enum": [
+        "retail",
+        "airline",
+        "hotel"
+      ],
+      "title": "Category",
+      "type": "string"
+    },
+    "ClaimType": {
+      "enum": [
+        "email",
+        "chat_script",
+        "in_store",
+        "self_service"
+      ],
+      "title": "ClaimType",
+      "type": "string"
+    },
+    "ExtractionConfidence": {
+      "properties": {
+        "platform": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Platform",
+          "type": "number"
+        },
+        "price": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Price",
+          "type": "number"
+        },
+        "overall_min": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Overall Min",
+          "type": "number"
+        },
+        "order_id": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Order Id"
+        },
+        "product_name": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Product Name"
+        },
+        "product_id": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Product Id"
+        },
+        "price_paid": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Price Paid"
+        },
+        "member_price_at_purchase": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Price At Purchase"
+        },
+        "purchase_date": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Purchase Date"
+        },
+        "member_tier_at_purchase": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Tier At Purchase"
+        },
+        "variant": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Variant"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
+        }
+      },
+      "required": [
+        "platform",
+        "price",
+        "overall_min"
+      ],
+      "title": "ExtractionConfidence",
+      "type": "object"
+    },
+    "IngestionSource": {
+      "enum": [
+        "gmail",
+        "upload_pdf",
+        "upload_image"
+      ],
+      "title": "IngestionSource",
+      "type": "string"
+    },
+    "Platform": {
+      "enum": [
+        "best_buy",
+        "amazon",
+        "target",
+        "walmart",
+        "marriott",
+        "hilton",
+        "delta",
+        "united",
+        "american"
+      ],
+      "title": "Platform",
+      "type": "string"
+    },
+    "PurchaseDateBasis": {
+      "enum": [
+        "order_date",
+        "ship_date",
+        "pickup_date",
+        "check_in_date"
+      ],
+      "title": "PurchaseDateBasis",
+      "type": "string"
+    },
+    "PurchaseStatus": {
+      "enum": [
+        "pending_confirmation",
+        "pending_user_edit",
+        "monitoring",
+        "monitoring_degraded",
+        "claimed",
+        "expired",
+        "refunded",
+        "dismissed"
+      ],
+      "title": "PurchaseStatus",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "_id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+    },
+    "updated_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Updated At"
+    },
+    "user_id": {
+      "format": "uuid",
+      "title": "User Id",
+      "type": "string"
+    },
+    "platform": {
+      "$ref": "#/$defs/Platform"
+    },
+    "category": {
+      "$ref": "#/$defs/Category"
+    },
+    "product_name": {
+      "title": "Product Name",
+      "type": "string"
+    },
+    "product_id": {
+      "title": "Product Id",
+      "type": "string"
+    },
+    "product_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Product Url"
+    },
+    "variant": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Variant"
+    },
+    "fare_class": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Fare Class"
+    },
+    "room_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Room Type"
+    },
+    "bed_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Bed Type"
+    },
+    "rate_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Rate Type"
+    },
+    "price_paid": {
+      "exclusiveMinimum": 0,
+      "title": "Price Paid",
+      "type": "number"
+    },
+    "member_price_at_purchase": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Member Price At Purchase"
+    },
+    "non_member_price_at_purchase": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Non Member Price At Purchase"
+    },
+    "currency": {
+      "const": "USD",
+      "title": "Currency",
+      "type": "string"
+    },
+    "purchase_date": {
+      "format": "date-time",
+      "title": "Purchase Date",
+      "type": "string"
+    },
+    "purchase_date_basis": {
+      "$ref": "#/$defs/PurchaseDateBasis"
+    },
+    "window_expires": {
+      "format": "date-time",
+      "title": "Window Expires",
+      "type": "string"
+    },
+    "order_id": {
+      "title": "Order Id",
+      "type": "string"
+    },
+    "member_tier_at_purchase": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Member Tier At Purchase"
+    },
+    "status": {
+      "$ref": "#/$defs/PurchaseStatus"
+    },
+    "claim_type": {
+      "$ref": "#/$defs/ClaimType"
+    },
+    "monitoring_cadence_minutes": {
+      "title": "Monitoring Cadence Minutes",
+      "type": "integer"
+    },
+    "ingested_at": {
+      "format": "date-time",
+      "title": "Ingested At",
+      "type": "string"
+    },
+    "ingestion_source": {
+      "$ref": "#/$defs/IngestionSource"
+    },
+    "receipt_storage_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Receipt Storage Url"
+    },
+    "receipt_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Receipt Hash"
+    },
+    "extraction_confidence": {
+      "$ref": "#/$defs/ExtractionConfidence"
+    }
+  },
+  "required": [
+    "_id",
+    "user_id",
+    "platform",
+    "category",
+    "product_name",
+    "product_id",
+    "product_url",
+    "variant",
+    "fare_class",
+    "room_type",
+    "bed_type",
+    "rate_type",
+    "price_paid",
+    "currency",
+    "purchase_date",
+    "purchase_date_basis",
+    "window_expires",
+    "order_id",
+    "member_tier_at_purchase",
+    "status",
+    "claim_type",
+    "monitoring_cadence_minutes",
+    "ingested_at",
+    "ingestion_source",
+    "receipt_storage_url",
+    "receipt_hash",
+    "extraction_confidence"
+  ],
+  "title": "Purchase",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -1,0 +1,207 @@
+{
+  "$defs": {
+    "Category": {
+      "enum": [
+        "retail",
+        "airline",
+        "hotel"
+      ],
+      "title": "Category",
+      "type": "string"
+    },
+    "ClaimType": {
+      "enum": [
+        "email",
+        "chat_script",
+        "in_store",
+        "self_service"
+      ],
+      "title": "ClaimType",
+      "type": "string"
+    },
+    "Platform": {
+      "enum": [
+        "best_buy",
+        "amazon",
+        "target",
+        "walmart",
+        "marriott",
+        "hilton",
+        "delta",
+        "united",
+        "american"
+      ],
+      "title": "Platform",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "_id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+    },
+    "updated_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Updated At"
+    },
+    "platform": {
+      "$ref": "#/$defs/Platform"
+    },
+    "category": {
+      "$ref": "#/$defs/Category"
+    },
+    "window_days": {
+      "title": "Window Days",
+      "type": "integer"
+    },
+    "window_days_member": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Window Days Member"
+    },
+    "pre_arrival_hours_required": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Pre Arrival Hours Required"
+    },
+    "covers_own_drops": {
+      "title": "Covers Own Drops",
+      "type": "boolean"
+    },
+    "covers_competitor_drops": {
+      "title": "Covers Competitor Drops",
+      "type": "boolean"
+    },
+    "claim_type": {
+      "$ref": "#/$defs/ClaimType"
+    },
+    "claim_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Claim Url"
+    },
+    "claim_email": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Claim Email"
+    },
+    "claim_phone": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Claim Phone"
+    },
+    "loyalty_required": {
+      "title": "Loyalty Required",
+      "type": "boolean"
+    },
+    "award_ticket_eligible": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Award Ticket Eligible"
+    },
+    "bundle_exclusions": {
+      "title": "Bundle Exclusions",
+      "type": "boolean"
+    },
+    "key_exclusions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Key Exclusions",
+      "type": "array"
+    },
+    "policy_url": {
+      "title": "Policy Url",
+      "type": "string"
+    },
+    "policy_text_full": {
+      "title": "Policy Text Full",
+      "type": "string"
+    },
+    "policy_text_relevant_clause": {
+      "title": "Policy Text Relevant Clause",
+      "type": "string"
+    },
+    "last_verified": {
+      "format": "date-time",
+      "title": "Last Verified",
+      "type": "string"
+    },
+    "active": {
+      "title": "Active",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "_id",
+    "platform",
+    "category",
+    "window_days",
+    "window_days_member",
+    "pre_arrival_hours_required",
+    "covers_own_drops",
+    "covers_competitor_drops",
+    "claim_type",
+    "claim_url",
+    "claim_email",
+    "claim_phone",
+    "loyalty_required",
+    "award_ticket_eligible",
+    "bundle_exclusions",
+    "key_exclusions",
+    "policy_url",
+    "policy_text_full",
+    "policy_text_relevant_clause",
+    "last_verified",
+    "active"
+  ],
+  "title": "Policy",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

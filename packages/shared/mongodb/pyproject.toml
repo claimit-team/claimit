@@ -13,15 +13,5 @@ license = { text = "MIT" }
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatch.build.targets.wheel.force-include]
-"__init__.py" = "claimit_mongodb_models/__init__.py"
-"base.py" = "claimit_mongodb_models/base.py"
-"client.py" = "claimit_mongodb_models/client.py"
-"create_indexes.py" = "claimit_mongodb_models/create_indexes.py"
-"enums.py" = "claimit_mongodb_models/enums.py"
-"user.py" = "claimit_mongodb_models/user.py"
-"purchase.py" = "claimit_mongodb_models/purchase.py"
-"price_history.py" = "claimit_mongodb_models/price_history.py"
-"policy.py" = "claimit_mongodb_models/policy.py"
-"claim.py" = "claimit_mongodb_models/claim.py"
-"conversation.py" = "claimit_mongodb_models/conversation.py"
+[tool.hatch.build.targets.wheel]
+packages = ["claimit_mongodb_models"]
