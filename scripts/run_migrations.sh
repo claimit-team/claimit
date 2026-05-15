@@ -23,7 +23,7 @@ uv run \
   --no-project \
   --python "3.12" \
   --with "motor>=3.6.0" \
-  python packages/shared/mongodb/create_indexes.py
+  python packages/shared/mongodb/claimit_mongodb_models/create_indexes.py
 
 echo ""
 echo ">>> Elastic: creating indices"
