@@ -1,0 +1,277 @@
+{
+  "$defs": {
+    "ClaimOutcome": {
+      "enum": [
+        "draft_pending",
+        "pending",
+        "approved",
+        "denied",
+        "expired",
+        "user_self_service",
+        "user_cancelled",
+        "no_response"
+      ],
+      "title": "ClaimOutcome",
+      "type": "string"
+    },
+    "ClaimType": {
+      "enum": ["email", "chat_script", "in_store", "self_service"],
+      "title": "ClaimType",
+      "type": "string"
+    },
+    "DenialReason": {
+      "enum": [
+        "clearance",
+        "marketplace",
+        "window_expired",
+        "identical_room_mismatch",
+        "basic_economy",
+        "bundle",
+        "other"
+      ],
+      "title": "DenialReason",
+      "type": "string"
+    },
+    "DraftGeneratedBy": {
+      "enum": ["agent", "user_edit", "assistant_redraft"],
+      "title": "DraftGeneratedBy",
+      "type": "string"
+    },
+    "DraftVersion": {
+      "properties": {
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "generated_by": {
+          "$ref": "#/$defs/DraftGeneratedBy"
+        },
+        "at": {
+          "format": "date-time",
+          "title": "At",
+          "type": "string"
+        }
+      },
+      "required": ["version", "content", "generated_by", "at"],
+      "title": "DraftVersion",
+      "type": "object"
+    },
+    "Platform": {
+      "enum": [
+        "best_buy",
+        "amazon",
+        "target",
+        "walmart",
+        "marriott",
+        "hilton",
+        "delta",
+        "united",
+        "american"
+      ],
+      "title": "Platform",
+      "type": "string"
+    },
+    "SendMode": {
+      "enum": ["approval", "auto"],
+      "title": "SendMode",
+      "type": "string"
+    },
+    "SubmittedVia": {
+      "enum": [
+        "gmail_send",
+        "sendgrid_fallback",
+        "clipboard",
+        "in_store_print",
+        "self_service_link"
+      ],
+      "title": "SubmittedVia",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "_id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+    },
+    "updated_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Updated At"
+    },
+    "purchase_id": {
+      "format": "uuid",
+      "title": "Purchase Id",
+      "type": "string"
+    },
+    "user_id": {
+      "format": "uuid",
+      "title": "User Id",
+      "type": "string"
+    },
+    "platform": {
+      "$ref": "#/$defs/Platform"
+    },
+    "claim_amount": {
+      "exclusiveMinimum": 0,
+      "title": "Claim Amount",
+      "type": "number"
+    },
+    "currency": {
+      "const": "USD",
+      "title": "Currency",
+      "type": "string"
+    },
+    "claim_type": {
+      "$ref": "#/$defs/ClaimType"
+    },
+    "draft_content": {
+      "title": "Draft Content",
+      "type": "string"
+    },
+    "draft_versions": {
+      "items": {
+        "$ref": "#/$defs/DraftVersion"
+      },
+      "minItems": 1,
+      "title": "Draft Versions",
+      "type": "array"
+    },
+    "redraft_count": {
+      "minimum": 0,
+      "title": "Redraft Count",
+      "type": "integer"
+    },
+    "policy_clause_cited": {
+      "title": "Policy Clause Cited",
+      "type": "string"
+    },
+    "evidence_screenshot_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Evidence Screenshot Url"
+    },
+    "send_override": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SendMode"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "submitted_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Submitted At"
+    },
+    "submitted_via": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SubmittedVia"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "outcome": {
+      "$ref": "#/$defs/ClaimOutcome"
+    },
+    "outcome_note": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Outcome Note"
+    },
+    "denial_reason_extracted": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DenialReason"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "resolved_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Resolved At"
+    },
+    "trace_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Trace Id"
+    }
+  },
+  "required": [
+    "_id",
+    "purchase_id",
+    "user_id",
+    "platform",
+    "claim_amount",
+    "currency",
+    "claim_type",
+    "draft_content",
+    "draft_versions",
+    "redraft_count",
+    "policy_clause_cited",
+    "evidence_screenshot_url",
+    "send_override",
+    "submitted_at",
+    "submitted_via",
+    "outcome",
+    "outcome_note",
+    "denial_reason_extracted",
+    "resolved_at",
+    "trace_id"
+  ],
+  "title": "Claim",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
