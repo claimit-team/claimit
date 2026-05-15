@@ -50,7 +50,6 @@ input:
     required: false
     description: >
       User's registered address from users collection.
-      Only required when claim_type is in_store.
       [DEMO] Store Locator API not integrated yet. When claim_type is in_store,
       nearest_store_address will use hardcoded demo addresses:
       Best Buy: 19525 Biscayne Blvd, Aventura, FL 33180
@@ -65,7 +64,6 @@ input:
       Passed in from claim.redraft_requested event when
       user explicitly requests a change.
       e.g. "make it friendlier", "make it more formal".
-      Mutually exclusive with improvement_suggestions.
       When both are present, improvement_suggestions takes priority.
 
   improvement_suggestions:
@@ -76,7 +74,6 @@ input:
       Only present when redraft is triggered by a failed
       quality evaluation, not by user request.
       Each field corresponds to a rubric dimension that failed.
-      Mutually exclusive with user_instruction.
       Takes priority over user_instruction when both are present.
     fields:
       accuracy_fix:
