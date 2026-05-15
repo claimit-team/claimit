@@ -17,11 +17,12 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, TypeVar
+from datetime import UTC, datetime
+from typing import Annotated, Any, TypeVar
 from uuid import UUID
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from .base import BaseDocument
 from .claim import Claim
@@ -100,9 +101,12 @@ class MongoDBClient:
     ) -> str:
         """Replace-or-insert by `_id`. Returns the persisted `_id` as a string.
 
-        The persisted `_id` is taken from the `id` arg, not from `document.id`,
-        so callers can rename / re-key a document if they want. Typical callers
-        pass `document.id`.
+        The `id` arg, `document.id` (for Pydantic input), and `document["_id"]`
+        (for dict input) must all agree — a mismatch raises `ValueError` rather
+        than silently overwriting an unrelated document.
+
+        `updated_at` is set automatically to the current UTC time before the
+        write; callers do not need to provide it.
 
         Schema validation:
         - Pydantic `BaseDocument` instances are trusted (already validated at
@@ -119,6 +123,8 @@ class MongoDBClient:
                 "register the model in COLLECTION_MODELS."
             )
 
+        uid = _coerce_uuid(id)
+
         if isinstance(document, BaseDocument):
             if not isinstance(document, model_cls):
                 raise ValueError(
@@ -126,8 +132,19 @@ class MongoDBClient:
                     f"{type(document).__name__} instance to collection "
                     f"{collection!r} (expects {model_cls.__name__})."
                 )
+            if document.id is not None and document.id != uid:
+                raise ValueError(
+                    f"_id mismatch: id arg {uid} does not match document.id "
+                    f"{document.id}; refusing to overwrite a different document."
+                )
             validated: BaseDocument = document
         else:
+            doc_id = document.get("_id")
+            if doc_id is not None and _coerce_uuid(doc_id) != uid:
+                raise ValueError(
+                    f"_id mismatch: id arg {uid} does not match document['_id'] "
+                    f"{doc_id}; refusing to overwrite a different document."
+                )
             try:
                 validated = model_cls.model_validate(document)
             except ValidationError as exc:
@@ -142,11 +159,63 @@ class MongoDBClient:
                 )
                 raise
 
-        uid = _coerce_uuid(id)
         payload = validated.model_dump(by_alias=True)
         payload["_id"] = uid
+        payload["updated_at"] = datetime.now(UTC)
         await self._db[collection].replace_one({"_id": uid}, payload, upsert=True)
         return str(uid)
+
+    async def partial_update(
+        self,
+        collection: str,
+        id: str | UUID,
+        updates: dict[str, Any],
+        model: type[T] | None = None,
+    ) -> bool:
+        """Apply a `$set` partial update to a single document by `_id`.
+
+        `updated_at` is always set to the current UTC time and `_id` may not
+        appear in `updates` (identity is taken from the `id` arg).
+
+        If `model` is supplied, each field in `updates` is validated against
+        its model field annotation (including `Field(...)` constraints) before
+        the write. Field-level errors are logged and `ValidationError`
+        propagates — no write is attempted. Unknown field names raise
+        `ValueError`.
+
+        Returns True if exactly one document matched the filter, False
+        otherwise (the document does not exist). Use `upsert` to insert.
+        """
+        if "_id" in updates:
+            raise ValueError("`updates` may not contain '_id'; identity is fixed by `id`.")
+
+        if model is not None:
+            for field_name, value in updates.items():
+                field_info = model.model_fields.get(field_name)
+                if field_info is None:
+                    raise ValueError(f"Unknown field {field_name!r} for model {model.__name__}.")
+                annotation = field_info.annotation
+                if field_info.metadata:
+                    annotation = Annotated[(annotation, *field_info.metadata)]
+                try:
+                    TypeAdapter(annotation).validate_python(value)
+                except ValidationError as exc:
+                    sanitized = [
+                        {"loc": (field_name,), "type": e.get("type"), "msg": e.get("msg")}
+                        for e in exc.errors()
+                    ]
+                    logger.error(
+                        "Partial-update validation failed for collection=%s field=%s: %s",
+                        collection,
+                        field_name,
+                        sanitized,
+                    )
+                    raise
+
+        uid = _coerce_uuid(id)
+        set_payload = {**updates, "updated_at": datetime.now(UTC)}
+        result = await self._db[collection].update_one({"_id": uid}, {"$set": set_payload})
+        return result.matched_count > 0
 
     async def count(self, collection: str, filter: dict[str, Any]) -> int:
         """Count documents matching `filter`."""
