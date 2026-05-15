@@ -1,0 +1,196 @@
+name: gemini_generate_draft
+description: >
+  Calls Gemini to generate a refund claim draft based on
+  purchase details, platform policy, and price drop evidence.
+  Supports four output types: email / chat_script / in_store / self_service.
+
+input:
+  purchase_id:
+    type: string
+    required: true
+    description: UUID of the purchase record, used to retrieve order details
+
+  claim_type:
+    type: enum
+    required: true
+    values:
+      - email
+      - chat_script
+      - in_store
+      - self_service
+    description: Determines which format of claim material to generate
+
+  platform:
+    type: string
+    required: true
+    description: Platform identifier, e.g. best_buy / southwest / hilton
+
+  refund_amount:
+    type: number
+    required: true
+    description: Refund amount eligible for claim (USD)
+
+  policy_text:
+    type: string
+    required: true
+    description: Full policy text of the platform, used as generation context
+
+  evidence_snapshot_url:
+    type: string
+    required: true
+    description: GCS URL of the price drop screenshot, used as claim evidence
+
+  user_name:
+    type: string
+    required: true
+    description: User's full name, used for personalization in email salutations
+
+  user_address:
+    type: string
+    required: false
+    description: >
+      User's registered address from users collection.
+      [DEMO] Store Locator API not integrated yet. When claim_type is in_store,
+      nearest_store_address will use hardcoded demo addresses:
+      Best Buy: 19525 Biscayne Blvd, Aventura, FL 33180
+      Hilton: 1601 Biscayne Blvd, Miami, FL 33132
+      Field retained for future Store Locator API integration.
+
+  user_instruction:
+    type: string
+    required: false
+    description: >
+      Optional refinement instruction from the user only.
+      Passed in from claim.redraft_requested event when
+      user explicitly requests a change.
+      e.g. "make it friendlier", "make it more formal".
+      When both are present, improvement_suggestions takes priority.
+
+  improvement_suggestions:
+    type: object
+    required: false
+    description: >
+      Structured fix instructions from gemini_self_evaluate.
+      Only present when redraft is triggered by a failed
+      quality evaluation, not by user request.
+      Each field corresponds to a rubric dimension that failed.
+      Takes priority over user_instruction when both are present.
+    fields:
+      accuracy_fix:
+        type: string
+        required: false
+        description: >
+          Specific factual corrections needed.
+          e.g. "Refund amount is stated as $500, correct value is $50.
+          Order ID is missing, should be BBY-2024-98765."
+
+      policy_compliance_fix:
+        type: string
+        required: false
+        description: >
+          Policy alignment corrections needed.
+          e.g. "Draft does not reference the 15-day price match window.
+          Add citation to Best Buy Price Match Guarantee clause 2."
+
+      completeness_fix:
+        type: string
+        required: false
+        description: >
+          Missing information that must be added.
+          e.g. "Purchase date is missing. Original price not stated."
+
+      tone_fix:
+        type: string
+        required: false
+        description: >
+          Tone adjustments needed.
+          e.g. "Language is too aggressive in paragraph 2.
+          Soften the closing demand into a polite request."
+
+      actionability_fix:
+        type: string
+        required: false
+        description: >
+          Clarity improvements needed.
+          e.g. "Step 3 is ambiguous, specify which menu to navigate to.
+          Missing confirmation of what to do if chat agent is unavailable."
+
+output:
+  draft_content:
+    type: string
+    description: >
+      Generated claim material body text.
+      Content format varies by claim_type:
+      email        → full email body with salutation and closing
+      chat_script  → step-by-step conversation guide
+      in_store     → visit instructions with what to bring and say
+      self_service → portal navigation steps
+
+  claim_type:
+    type: enum
+    values:
+      - email
+      - chat_script
+      - in_store
+      - self_service
+    description: Mirrors the input claim_type for downstream validator verification
+
+  draft_version:
+    type: integer
+    description: Draft version number, starts at 1 and increments on each redraft
+
+  model_used:
+    type: string
+    description: Name of the Gemini model used, recorded for Phoenix observability
+
+  tokens_used:
+    type: integer
+    description: Token count consumed by this call, recorded for Phoenix observability
+
+  metadata:
+    type: object
+    required: false
+    description: >
+      Optional type-specific extra data required to action the draft.
+      Only relevant fields populated based on claim_type.
+    fields:
+      # claim_type: email
+      to_address:
+        type: string
+        required: false
+        description: Platform customer service email address
+
+      subject:
+        type: string
+        required: false
+        description: Email subject line generated by Gemini
+
+      # claim_type: in_store
+      nearest_store_address:
+        type: string
+        required: false
+        description: >
+          Nearest store address for in_store claim type.
+          [DEMO] Currently hardcoded per platform, not resolved from user_address.
+          Will be replaced with Store Locator API / Google Maps Places API lookup
+          in future iteration.
+
+      # claim_type: self_service
+      portal_url:
+        type: string
+        required: false
+        description: Direct URL to the platform's price match portal
+
+      # claim_type: chat_script
+      chat_entry_url:
+        type: string
+        required: false
+        description: Direct URL to the platform's live chat entry point
+
+errors:
+  - PurchaseNotFound
+  - PolicyNotFound
+  - InvalidClaimType
+  - GeminiCallFailed
+  - EvidenceUrlInvalid
+  - StoreLocatorFailed  # only raised when claim_type is in_store
