@@ -7,13 +7,15 @@
 #     baked into the cloud-run-agent module defaults.
 
 # ---------- Slack notification channel ----------
-# auth_token is a placeholder; the Slack OAuth token must be populated out-of-band
-# before alerts will deliver. Either:
-#   a) Set it manually via the GCP console after first apply, OR
-#   b) Add a `slack_auth_token` (sensitive) variable in a follow-up PR and pass
-#      it via TF_VAR_slack_auth_token / Secret Manager.
-# `lifecycle.ignore_changes` on sensitive_labels keeps subsequent plans from
-# clobbering whichever value ends up in place.
+# The Slack webhook URL (sensitive_labels.auth_token) is populated manually in
+# the GCP Console after first apply — the token never lives in this repo or in
+# Terraform state. We deliberately do NOT declare a `sensitive_labels {}` block
+# here, because doing so would make Terraform send `auth_token = ""` on every
+# apply and clobber the real value. `lifecycle.ignore_changes = [sensitive_labels]`
+# is kept as a belt-and-suspenders guard against any provider-side default.
+#
+# To rotate or set the token: GCP Console → Monitoring → Alerting →
+# Notification channels → "ClaimIt Alerts Slack" → Edit → paste new webhook URL.
 resource "google_monitoring_notification_channel" "slack" {
   display_name = "ClaimIt Alerts Slack"
   type         = "slack"
@@ -21,10 +23,6 @@ resource "google_monitoring_notification_channel" "slack" {
 
   labels = {
     channel_name = "#claimit-alerts"
-  }
-
-  sensitive_labels {
-    auth_token = "" # Placeholder — real Slack webhook token added manually.
   }
 
   lifecycle {

@@ -1,0 +1,23 @@
+{
+  "_id": "0000a002-0000-4000-8000-000000000002",
+  "platform": "home_depot",
+  "category": "retail",
+  "window_days": 30,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": true,
+  "claim_type": "email",
+  "claim_url": "https://www.homedepot.com/c/price-match-and-price-check",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": false,
+  "award_ticket_eligible": null,
+  "bundle_exclusions": true,
+  "key_exclusions": ["auctions", "closeouts", "special orders"],
+  "policy_url": "https://www.homedepot.com/c/price-match-and-price-check",
+  "policy_text_full": "Home Depot offers a 30-day price adjustment. If the price drops at Home Depot or a qualifying competitor within 30 days of purchase, Home Depot refunds the difference to original tender or store credit. Auctions, closeouts, and special orders are excluded.",
+  "policy_text_relevant_clause": "Within 30 days of purchase, customers can request a price adjustment if Home Depot or a qualifying competitor advertises the same item at a lower price.",
+  "last_verified": "2026-05-14",
+  "active": true
+}

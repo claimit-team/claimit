@@ -134,10 +134,10 @@ resource "google_pubsub_subscription" "push" {
 # subscription level (not topic level) to forward messages exceeding
 # max_delivery_attempts to the configured dead_letter_topic.
 resource "google_pubsub_subscription_iam_member" "service_agent_dlq_subscriber" {
-  for_each = google_pubsub_subscription.push
+  for_each = local.subscriptions
 
   project      = var.project_id
-  subscription = each.value.name
+  subscription = google_pubsub_subscription.push[each.key].name
   role         = "roles/pubsub.subscriber"
   member       = local.pubsub_service_agent
 }

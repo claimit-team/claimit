@@ -1,0 +1,23 @@
+{
+  "_id": "0000a003-0000-4000-8000-000000000003",
+  "platform": "lowes",
+  "category": "retail",
+  "window_days": 30,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": true,
+  "claim_type": "email",
+  "claim_url": "https://www.lowes.com/l/about/lowest-price-guarantee",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": false,
+  "award_ticket_eligible": null,
+  "bundle_exclusions": true,
+  "key_exclusions": ["clearance", "going-out-of-business sales"],
+  "policy_url": "https://www.lowes.com/l/about/lowest-price-guarantee",
+  "policy_text_full": "Lowe's Lowest Price Guarantee matches lower prices at Lowe's or qualifying competitors within 30 days of purchase. Refund is issued to original tender. Clearance and going-out-of-business sales are excluded.",
+  "policy_text_relevant_clause": "If a customer finds a lower price at Lowe's or a qualifying competitor within 30 days of purchase, Lowe's will refund the difference to the original tender.",
+  "last_verified": "2026-05-14",
+  "active": true
+}

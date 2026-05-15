@@ -1,0 +1,27 @@
+{
+  "_id": "0000a019-0000-4000-8000-000000000019",
+  "platform": "alaska",
+  "category": "airline",
+  "window_days": 1,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": true,
+  "claim_type": "email",
+  "claim_url": "https://www.alaskaair.com/content/about-us/customer-commitment/customer-commitment-lowest-fare",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": false,
+  "award_ticket_eligible": false,
+  "bundle_exclusions": false,
+  "key_exclusions": [
+    "24-hour window measured from booking timestamp",
+    "refund is issued as voucher, not original tender",
+    "customer must submit claim form"
+  ],
+  "policy_url": "https://www.alaskaair.com/content/about-us/customer-commitment/customer-commitment-lowest-fare",
+  "policy_text_full": "Alaska's Best Value Guarantee issues a voucher if Alaska.com or a competitor's site shows a lower fare within 24 hours of booking. Customer must submit a claim form. Refund form is a voucher — not a cash refund to original tender.",
+  "policy_text_relevant_clause": "Within 24 hours of booking, customers can claim a voucher if Alaska or a competitor advertises a lower fare; refund is issued as a voucher, not original tender.",
+  "last_verified": "2026-05-14",
+  "active": true
+}

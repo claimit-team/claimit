@@ -1,0 +1,26 @@
+{
+  "_id": "0000a021-0000-4000-8000-000000000021",
+  "platform": "united",
+  "category": "airline",
+  "window_days": 365,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": false,
+  "claim_type": "self_service",
+  "claim_url": "https://www.united.com/en/us/fly/customer-commitment.html",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": false,
+  "award_ticket_eligible": false,
+  "bundle_exclusions": false,
+  "key_exclusions": [
+    "Basic Economy fares excluded",
+    "credit issued as Future Flight Credit (FFC) with 1-year expiry, not cash"
+  ],
+  "policy_url": "https://www.united.com/en/us/fly/customer-commitment.html",
+  "policy_text_full": "United allows changing to a lower fare any time before departure. The fare difference is issued as Future Flight Credit (FFC) valid for 1 year — not a cash refund. Basic Economy fares are excluded from the policy.",
+  "policy_text_relevant_clause": "Before departure, customers can change to a lower fare; the difference is issued as Future Flight Credit valid 1 year. Basic Economy excluded.",
+  "last_verified": "2026-05-14",
+  "active": true
+}

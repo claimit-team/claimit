@@ -1,0 +1,27 @@
+{
+  "_id": "0000a006-0000-4000-8000-000000000006",
+  "platform": "crutchfield",
+  "category": "retail",
+  "window_days": 60,
+  "window_days_member": null,
+  "pre_arrival_hours_required": null,
+  "covers_own_drops": true,
+  "covers_competitor_drops": true,
+  "claim_type": "email",
+  "claim_url": "https://www.crutchfield.com/support/returns.aspx",
+  "claim_email": null,
+  "claim_phone": null,
+  "loyalty_required": false,
+  "award_ticket_eligible": null,
+  "bundle_exclusions": true,
+  "key_exclusions": [
+    "clearance",
+    "scratch-and-dent items",
+    "competitor must be an authorized dealer"
+  ],
+  "policy_url": "https://www.crutchfield.com/support/returns.aspx",
+  "policy_text_full": "Crutchfield offers a 60-day price guarantee — among the longest in retail. If a price drops at Crutchfield or an authorized competitor dealer within 60 days of purchase, Crutchfield refunds the difference to original tender. Competitor matches are limited to authorized dealers; clearance and scratch-and-dent items are excluded.",
+  "policy_text_relevant_clause": "Within 60 days of purchase, customers can claim a price adjustment if Crutchfield or an authorized-dealer competitor lowers the price.",
+  "last_verified": "2026-05-14",
+  "active": true
+}
