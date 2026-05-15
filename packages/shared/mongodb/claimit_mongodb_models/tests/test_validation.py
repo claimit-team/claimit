@@ -29,9 +29,9 @@ def _valid_policy_dict() -> dict[str, Any]:
     """Build a fresh valid policy dict for each test (so mutations don't leak)."""
     return {
         "_id": _VALID_POLICY_ID,
-        "platform": "alaska",
-        "category": "airline",
-        "window_days": 1,
+        "platform": "best_buy",
+        "category": "retail",
+        "window_days": 14,
         "window_days_member": None,
         "pre_arrival_hours_required": None,
         "covers_own_drops": True,
