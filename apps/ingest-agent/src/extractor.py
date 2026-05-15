@@ -44,6 +44,7 @@ PlatformValue = Literal[
     "delta",
     "united",
     "american",
+    "southwest",
 ]
 CategoryValue = Literal["retail", "airline", "hotel"]
 PurchaseDateBasisValue = Literal["order_date", "ship_date", "pickup_date", "check_in_date"]
@@ -55,7 +56,7 @@ You extract structured purchase fields from one order-confirmation email and any
 Return only facts visible in the supplied email or attachment text. Do not infer product IDs, loyalty tiers, URLs, variants, room details, or fare details unless the text explicitly says them.
 
 Use these normalized enum values:
-- platform: best_buy, amazon, target, walmart, marriott, hilton, delta, united, american
+- platform: best_buy, amazon, target, walmart, marriott, hilton, delta, united, american, southwest
 - category: retail, hotel, airline
 - purchase_date_basis: order_date for normal retail/order confirmations, check_in_date for hotel reservations when the only purchase-like date is check-in, ship_date or pickup_date only when that is the only usable purchase date
 

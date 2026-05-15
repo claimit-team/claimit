@@ -13,7 +13,7 @@
       "category": "retail",
       "product_name": "Sony WH-1000XM5 Wireless Noise Cancelling Headphones",
       "product_id": "6505729",
-      "product_url": "https://www.bestbuy.com/site/sony-wh-1000xm5/6505729.p",
+      "product_url": null,
       "variant": "Black",
       "price_paid": 349.99,
       "purchase_date": "2026-05-04T18:22:31Z",
@@ -153,17 +153,16 @@
       "purchase_date": "2026-04-09T22:00:00Z",
       "purchase_date_basis": "check_in_date",
       "order_id": "88442211",
-      "member_tier_at_purchase": "marriott_gold",
+      "member_tier_at_purchase": null,
       "extraction_confidence": {
         "platform": 0.97,
         "price": 0.95,
-        "overall_min": 0.88,
+        "overall_min": 0.9,
         "order_id": 0.98,
         "product_name": 0.92,
         "product_id": 0.95,
         "price_paid": 0.95,
         "purchase_date": 0.9,
-        "member_tier_at_purchase": 0.88,
         "category": 0.97
       }
     }
@@ -223,17 +222,16 @@
       "purchase_date": "2026-02-14T16:45:00Z",
       "purchase_date_basis": "order_date",
       "order_id": "G7H8JK",
-      "member_tier_at_purchase": "delta_silver",
+      "member_tier_at_purchase": null,
       "extraction_confidence": {
         "platform": 0.97,
         "price": 0.95,
-        "overall_min": 0.9,
+        "overall_min": 0.91,
         "order_id": 0.97,
         "product_name": 0.91,
         "product_id": 0.97,
         "price_paid": 0.95,
         "purchase_date": 0.92,
-        "member_tier_at_purchase": 0.9,
         "category": 0.97
       }
     }

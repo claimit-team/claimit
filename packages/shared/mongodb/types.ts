@@ -33,6 +33,7 @@ export const Platform = {
   DELTA: "delta",
   UNITED: "united",
   AMERICAN: "american",
+  SOUTHWEST: "southwest",
 } as const;
 export type Platform = (typeof Platform)[keyof typeof Platform];
 

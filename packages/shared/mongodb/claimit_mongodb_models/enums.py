@@ -23,6 +23,7 @@ class Platform(StrEnum):
     DELTA = "delta"
     UNITED = "united"
     AMERICAN = "american"
+    SOUTHWEST = "southwest"
 
 
 class LoyaltyTier(StrEnum):
