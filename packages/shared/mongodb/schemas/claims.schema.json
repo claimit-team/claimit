@@ -70,7 +70,8 @@
         "hilton",
         "delta",
         "united",
-        "american"
+        "american",
+        "southwest"
       ],
       "title": "Platform",
       "type": "string"

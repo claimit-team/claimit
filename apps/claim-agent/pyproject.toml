@@ -14,15 +14,19 @@ dependencies = [
     "google-adk>=1.0.0",
     "claimit-observability",
     "claimit-mcp",
+    "claimit-mongodb-models",
 ]
 
 [tool.uv.sources]
 claimit-observability = { path = "../../packages/shared/observability" }
 claimit-mcp = { path = "../../packages/shared/mcp" }
+claimit-mongodb-models = { path = "../../packages/shared/mongodb" }
 
 [dependency-groups]
 dev = [
     "ruff>=0.6.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
 ]
 
 [build-system]
