@@ -18,9 +18,18 @@ from .enums import (
 
 
 class ExtractionConfidence(BaseModel):
-    platform: float
-    price: float
-    overall_min: float
+    platform: float = Field(ge=0.0, le=1.0)
+    price: float = Field(ge=0.0, le=1.0)
+    overall_min: float = Field(ge=0.0, le=1.0)
+    order_id: float | None = Field(default=None, ge=0.0, le=1.0)
+    product_name: float | None = Field(default=None, ge=0.0, le=1.0)
+    product_id: float | None = Field(default=None, ge=0.0, le=1.0)
+    price_paid: float | None = Field(default=None, ge=0.0, le=1.0)
+    member_price_at_purchase: float | None = Field(default=None, ge=0.0, le=1.0)
+    purchase_date: float | None = Field(default=None, ge=0.0, le=1.0)
+    member_tier_at_purchase: float | None = Field(default=None, ge=0.0, le=1.0)
+    variant: float | None = Field(default=None, ge=0.0, le=1.0)
+    category: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class Purchase(BaseDocument):

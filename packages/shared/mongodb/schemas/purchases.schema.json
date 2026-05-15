@@ -13,16 +13,148 @@
     "ExtractionConfidence": {
       "properties": {
         "platform": {
+          "maximum": 1.0,
+          "minimum": 0.0,
           "title": "Platform",
           "type": "number"
         },
         "price": {
+          "maximum": 1.0,
+          "minimum": 0.0,
           "title": "Price",
           "type": "number"
         },
         "overall_min": {
+          "maximum": 1.0,
+          "minimum": 0.0,
           "title": "Overall Min",
           "type": "number"
+        },
+        "order_id": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Order Id"
+        },
+        "product_name": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Product Name"
+        },
+        "product_id": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Product Id"
+        },
+        "price_paid": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Price Paid"
+        },
+        "member_price_at_purchase": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Price At Purchase"
+        },
+        "purchase_date": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Purchase Date"
+        },
+        "member_tier_at_purchase": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Tier At Purchase"
+        },
+        "variant": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Variant"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
         }
       },
       "required": ["platform", "price", "overall_min"],
@@ -44,7 +176,8 @@
         "hilton",
         "delta",
         "united",
-        "american"
+        "american",
+        "southwest"
       ],
       "title": "Platform",
       "type": "string"
