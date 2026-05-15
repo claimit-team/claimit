@@ -25,6 +25,11 @@ All product, technical, and planning docs live in Notion:
 - IaC: Terraform
 - CI/CD: GitHub Actions
 
+## Live Demo
+
+- **Frontend:** https://claimitai.vercel.app (Vercel default — custom domain intentionally deferred)
+- **Cloud Run APIs:** see infra/terraform/main.tf for service URLs
+
 ## Partner Tracks
 
 - MongoDB (primary)
