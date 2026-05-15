@@ -29,36 +29,22 @@
           "title": "Tool Calls"
         }
       },
-      "required": [
-        "role",
-        "content",
-        "at",
-        "tool_calls"
-      ],
+      "required": ["role", "content", "at", "tool_calls"],
       "title": "ConversationMessage",
       "type": "object"
     },
     "ConversationMode": {
-      "enum": [
-        "general",
-        "claim_focused"
-      ],
+      "enum": ["general", "claim_focused"],
       "title": "ConversationMode",
       "type": "string"
     },
     "ConversationStatus": {
-      "enum": [
-        "active",
-        "archived"
-      ],
+      "enum": ["active", "archived"],
       "title": "ConversationStatus",
       "type": "string"
     },
     "MessageRole": {
-      "enum": [
-        "user",
-        "assistant"
-      ],
+      "enum": ["user", "assistant"],
       "title": "MessageRole",
       "type": "string"
     },
@@ -83,12 +69,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "tool",
-        "input",
-        "output_summary",
-        "at"
-      ],
+      "required": ["tool", "input", "output_summary", "at"],
       "title": "ToolCall",
       "type": "object"
     }

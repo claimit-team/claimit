@@ -15,12 +15,7 @@
       "type": "string"
     },
     "ClaimType": {
-      "enum": [
-        "email",
-        "chat_script",
-        "in_store",
-        "self_service"
-      ],
+      "enum": ["email", "chat_script", "in_store", "self_service"],
       "title": "ClaimType",
       "type": "string"
     },
@@ -38,11 +33,7 @@
       "type": "string"
     },
     "DraftGeneratedBy": {
-      "enum": [
-        "agent",
-        "user_edit",
-        "assistant_redraft"
-      ],
+      "enum": ["agent", "user_edit", "assistant_redraft"],
       "title": "DraftGeneratedBy",
       "type": "string"
     },
@@ -65,12 +56,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "version",
-        "content",
-        "generated_by",
-        "at"
-      ],
+      "required": ["version", "content", "generated_by", "at"],
       "title": "DraftVersion",
       "type": "object"
     },
@@ -90,10 +76,7 @@
       "type": "string"
     },
     "SendMode": {
-      "enum": [
-        "approval",
-        "auto"
-      ],
+      "enum": ["approval", "auto"],
       "title": "SendMode",
       "type": "string"
     },
