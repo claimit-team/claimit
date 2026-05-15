@@ -7,6 +7,7 @@ on:
       - "infra/**"
       - "apps/*-agent/**"
       - "!apps/*-agent/src/agent.py"
+      - "apps/sync-worker/**"
       - "apps/web/**"
       - ".github/workflows/deploy-prod.yml"
 
