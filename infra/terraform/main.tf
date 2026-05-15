@@ -26,8 +26,9 @@ locals {
     "scraperapi-key",
     "elastic-url",
     "elastic-api-key",
-    "amadeus-client-id",
-    "amadeus-client-secret",
+    # amadeus-client-id and amadeus-client-secret removed — self-service portal
+    # closing July 2026, no sandbox credentials available. Re-add when an
+    # alternative travel-price source is set up.
     "phoenix-api-key",
     "demo-password",
   ]
@@ -63,11 +64,12 @@ locals {
   # monitor: polls current prices via Keepa (Amazon), Amadeus (travel),
   # ScraperAPI (retail fallback); writes price-history records.
   monitor_secrets = {
-    MONGODB_URI           = "mongodb-uri"
-    KEEPA_API_KEY         = "keepa-api-key"
-    SCRAPERAPI_KEY        = "scraperapi-key"
-    AMADEUS_CLIENT_ID     = "amadeus-client-id"
-    AMADEUS_CLIENT_SECRET = "amadeus-client-secret"
+    MONGODB_URI    = "mongodb-uri"
+    KEEPA_API_KEY  = "keepa-api-key"
+    SCRAPERAPI_KEY = "scraperapi-key"
+    # AMADEUS_CLIENT_ID and AMADEUS_CLIENT_SECRET removed — Amadeus
+    # self-service portal closing July 2026, no sandbox credentials available.
+    # Re-add when an alternative travel-price source is set up.
   }
   # claim: drafts refund claims via Anthropic + Agent Builder; sends them via
   # the user's Gmail (OAuth client); telemetry to Elastic.
