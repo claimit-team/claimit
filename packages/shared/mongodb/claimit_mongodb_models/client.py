@@ -112,23 +112,33 @@ class MongoDBClient:
           and `pydantic.ValidationError` propagates to the caller — no write
           is attempted on invalid input.
         """
+        model_cls = COLLECTION_MODELS.get(collection)
+        if model_cls is None:
+            raise ValueError(
+                f"No Pydantic model registered for collection {collection!r}; "
+                "register the model in COLLECTION_MODELS."
+            )
+
         if isinstance(document, BaseDocument):
+            if not isinstance(document, model_cls):
+                raise ValueError(
+                    f"Model/collection mismatch: cannot write "
+                    f"{type(document).__name__} instance to collection "
+                    f"{collection!r} (expects {model_cls.__name__})."
+                )
             validated: BaseDocument = document
         else:
-            model_cls = COLLECTION_MODELS.get(collection)
-            if model_cls is None:
-                raise ValueError(
-                    f"No Pydantic model registered for collection {collection!r}; "
-                    "pass a BaseDocument instance or register the model in "
-                    "COLLECTION_MODELS."
-                )
             try:
                 validated = model_cls.model_validate(document)
             except ValidationError as exc:
+                sanitized = [
+                    {"loc": e.get("loc"), "type": e.get("type"), "msg": e.get("msg")}
+                    for e in exc.errors()
+                ]
                 logger.error(
                     "Schema validation failed for collection=%s: %s",
                     collection,
-                    exc.errors(),
+                    sanitized,
                 )
                 raise
 
