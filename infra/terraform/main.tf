@@ -26,7 +26,6 @@ locals {
     "scraperapi-key",
     "elastic-url",
     "elastic-api-key",
-    "agent-builder-sa-key",
     "amadeus-client-id",
     "amadeus-client-secret",
     "phoenix-api-key",
@@ -58,7 +57,6 @@ locals {
   ingest_secrets = {
     MONGODB_URI               = "mongodb-uri"
     SCRAPERAPI_KEY            = "scraperapi-key"
-    AGENT_BUILDER_SA_KEY      = "agent-builder-sa-key"
     GMAIL_OAUTH_CLIENT_ID     = "gmail-oauth-client-id"
     GMAIL_OAUTH_CLIENT_SECRET = "gmail-oauth-client-secret"
   }
@@ -76,7 +74,6 @@ locals {
   claim_secrets = {
     MONGODB_URI               = "mongodb-uri"
     ANTHROPIC_API_KEY         = "anthropic-api-key"
-    AGENT_BUILDER_SA_KEY      = "agent-builder-sa-key"
     ELASTIC_URL               = "elastic-url"
     ELASTIC_API_KEY           = "elastic-api-key"
     GMAIL_OAUTH_CLIENT_ID     = "gmail-oauth-client-id"
@@ -85,12 +82,11 @@ locals {
   # assistant: conversational orchestrator — Anthropic + Agent Builder for
   # sub-agent calls; Elastic for telemetry; Phoenix for LLM tracing.
   assistant_secrets = {
-    MONGODB_URI          = "mongodb-uri"
-    ANTHROPIC_API_KEY    = "anthropic-api-key"
-    AGENT_BUILDER_SA_KEY = "agent-builder-sa-key"
-    ELASTIC_URL          = "elastic-url"
-    ELASTIC_API_KEY      = "elastic-api-key"
-    PHOENIX_API_KEY      = "phoenix-api-key"
+    MONGODB_URI       = "mongodb-uri"
+    ANTHROPIC_API_KEY = "anthropic-api-key"
+    ELASTIC_URL       = "elastic-url"
+    ELASTIC_API_KEY   = "elastic-api-key"
+    PHOENIX_API_KEY   = "phoenix-api-key"
   }
 }
 
