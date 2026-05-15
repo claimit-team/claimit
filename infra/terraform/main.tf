@@ -31,6 +31,13 @@ locals {
     # alternative travel-price source is set up.
     "phoenix-api-key",
     "demo-password",
+    # ADK agent IDs - written by scripts/deploy_agents.py after deploying each
+    # agent to Agent Platform Runtime. Used by Cloud Run agents to know their
+    # own deployed runtime resource_name (e.g., when invoking sub-agents).
+    "claimit-ingest-agent-id",
+    "claimit-monitor-agent-id",
+    "claimit-claim-agent-id",
+    "claimit-assistant-agent-id",
   ]
 }
 

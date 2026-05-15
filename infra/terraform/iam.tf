@@ -35,3 +35,11 @@ resource "google_cloud_run_service_iam_member" "ci_invoker" {
   role     = "roles/run.invoker"
   member   = "serviceAccount:claimit-ci@${var.project_id}.iam.gserviceaccount.com"
 }
+
+# CI service account needs aiplatform.user to deploy ADK agent definitions
+# via scripts/deploy_agents.py in the deploy-agents.yml workflow (ticket 1.29).
+resource "google_project_iam_member" "ci_aiplatform_user" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:claimit-ci@${var.project_id}.iam.gserviceaccount.com"
+}
