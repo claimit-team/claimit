@@ -7,29 +7,19 @@
 #     baked into the cloud-run-agent module defaults.
 
 # ---------- Slack notification channel ----------
-# auth_token is a placeholder; the Slack OAuth token must be populated out-of-band
-# before alerts will deliver. Either:
-#   a) Set it manually via the GCP console after first apply, OR
-#   b) Add a `slack_auth_token` (sensitive) variable in a follow-up PR and pass
-#      it via TF_VAR_slack_auth_token / Secret Manager.
-# `lifecycle.ignore_changes` on sensitive_labels keeps subsequent plans from
-# clobbering whichever value ends up in place.
-resource "google_monitoring_notification_channel" "slack" {
+# GCP's Slack notification channel uses OAuth-based authentication
+# (Bot User OAuth Token), which is stored internally by GCP and cannot
+# be exported. As a result, Terraform cannot manage this resource as
+# a `resource` block — any attempt to set auth_token (even to "") will
+# cause GCP API to reject the update.
+#
+# Instead, this is referenced as a data source. The channel must be
+# created manually via GCP Console:
+#   Monitoring → Alerting → Notification Channels → Add New → Slack
+#   → "Connect to Slack" → authorize → select #claimit-alerts
+# The display_name MUST exactly match "ClaimIt Alerts Slack".
+data "google_monitoring_notification_channel" "slack" {
   display_name = "ClaimIt Alerts Slack"
-  type         = "slack"
-  project      = var.project_id
-
-  labels = {
-    channel_name = "#claimit-alerts"
-  }
-
-  sensitive_labels {
-    auth_token = "" # Placeholder — real Slack webhook token added manually.
-  }
-
-  lifecycle {
-    ignore_changes = [sensitive_labels]
-  }
 }
 
 # ---------- Alert 1: Cloud Run error rate > 5% over 5 min ----------
@@ -67,7 +57,7 @@ resource "google_monitoring_alert_policy" "cloud_run_error_rate" {
     }
   }
 
-  notification_channels = [google_monitoring_notification_channel.slack.name]
+  notification_channels = [data.google_monitoring_notification_channel.slack.name]
 }
 
 # ---------- Alert 2: any DLQ topic received a message (immediate) ----------
@@ -99,7 +89,7 @@ resource "google_monitoring_alert_policy" "dlq_message_received" {
     }
   }
 
-  notification_channels = [google_monitoring_notification_channel.slack.name]
+  notification_channels = [data.google_monitoring_notification_channel.slack.name]
 }
 
 # ---------- Alert 3: Cloud Run instance count > 4 (approaching max=5) ----------
@@ -129,5 +119,5 @@ resource "google_monitoring_alert_policy" "cloud_run_instance_count" {
     }
   }
 
-  notification_channels = [google_monitoring_notification_channel.slack.name]
+  notification_channels = [data.google_monitoring_notification_channel.slack.name]
 }

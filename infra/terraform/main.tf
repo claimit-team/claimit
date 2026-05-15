@@ -26,9 +26,9 @@ locals {
     "scraperapi-key",
     "elastic-url",
     "elastic-api-key",
-    "agent-builder-sa-key",
-    "amadeus-client-id",
-    "amadeus-client-secret",
+    # amadeus-client-id and amadeus-client-secret removed — self-service portal
+    # closing July 2026, no sandbox credentials available. Re-add when an
+    # alternative travel-price source is set up.
     "phoenix-api-key",
     "demo-password",
   ]
@@ -58,25 +58,24 @@ locals {
   ingest_secrets = {
     MONGODB_URI               = "mongodb-uri"
     SCRAPERAPI_KEY            = "scraperapi-key"
-    AGENT_BUILDER_SA_KEY      = "agent-builder-sa-key"
     GMAIL_OAUTH_CLIENT_ID     = "gmail-oauth-client-id"
     GMAIL_OAUTH_CLIENT_SECRET = "gmail-oauth-client-secret"
   }
   # monitor: polls current prices via Keepa (Amazon), Amadeus (travel),
   # ScraperAPI (retail fallback); writes price-history records.
   monitor_secrets = {
-    MONGODB_URI           = "mongodb-uri"
-    KEEPA_API_KEY         = "keepa-api-key"
-    SCRAPERAPI_KEY        = "scraperapi-key"
-    AMADEUS_CLIENT_ID     = "amadeus-client-id"
-    AMADEUS_CLIENT_SECRET = "amadeus-client-secret"
+    MONGODB_URI    = "mongodb-uri"
+    KEEPA_API_KEY  = "keepa-api-key"
+    SCRAPERAPI_KEY = "scraperapi-key"
+    # AMADEUS_CLIENT_ID and AMADEUS_CLIENT_SECRET removed — Amadeus
+    # self-service portal closing July 2026, no sandbox credentials available.
+    # Re-add when an alternative travel-price source is set up.
   }
   # claim: drafts refund claims via Anthropic + Agent Builder; sends them via
   # the user's Gmail (OAuth client); telemetry to Elastic.
   claim_secrets = {
     MONGODB_URI               = "mongodb-uri"
     ANTHROPIC_API_KEY         = "anthropic-api-key"
-    AGENT_BUILDER_SA_KEY      = "agent-builder-sa-key"
     ELASTIC_URL               = "elastic-url"
     ELASTIC_API_KEY           = "elastic-api-key"
     GMAIL_OAUTH_CLIENT_ID     = "gmail-oauth-client-id"
@@ -85,12 +84,11 @@ locals {
   # assistant: conversational orchestrator — Anthropic + Agent Builder for
   # sub-agent calls; Elastic for telemetry; Phoenix for LLM tracing.
   assistant_secrets = {
-    MONGODB_URI          = "mongodb-uri"
-    ANTHROPIC_API_KEY    = "anthropic-api-key"
-    AGENT_BUILDER_SA_KEY = "agent-builder-sa-key"
-    ELASTIC_URL          = "elastic-url"
-    ELASTIC_API_KEY      = "elastic-api-key"
-    PHOENIX_API_KEY      = "phoenix-api-key"
+    MONGODB_URI       = "mongodb-uri"
+    ANTHROPIC_API_KEY = "anthropic-api-key"
+    ELASTIC_URL       = "elastic-url"
+    ELASTIC_API_KEY   = "elastic-api-key"
+    PHOENIX_API_KEY   = "phoenix-api-key"
   }
 }
 
