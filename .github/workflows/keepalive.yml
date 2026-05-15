@@ -1,0 +1,43 @@
+name: Keepalive
+
+on:
+  schedule:
+    # Every 5 minutes between 08:00 and 22:00 UTC (covers demo hours).
+    # Per ticket 1.25, master doc §10 Risk #11.
+    - cron: "*/5 8-22 * * *"
+  # Allow manual trigger for testing
+  workflow_dispatch:
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_REGION: us-east1
+
+jobs:
+  keepalive:
+    name: Ping Cloud Run + Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Run keepalive pings
+        run: bash scripts/keepalive.sh
+        env:
+          GCP_REGION: ${{ vars.GCP_REGION || env.GCP_REGION }}
