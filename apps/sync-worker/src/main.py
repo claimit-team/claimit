@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from elasticsearch import AsyncElasticsearch
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from .sync import COLLECTION_INDEX_MAP, watch_collection
@@ -66,10 +66,20 @@ app = FastAPI(
 
 @app.get("/health")
 async def health() -> dict[str, str | int]:
-    """Liveness probe — counts watcher tasks that are still alive."""
+    """Liveness probe — returns 503 if any watcher task has died.
+
+    A dead watcher means a collection has stopped syncing; the orchestrator
+    should restart the container rather than let drift accumulate silently.
+    """
     tasks: list[asyncio.Task[None]] = getattr(app.state, "watcher_tasks", [])
     alive = sum(1 for t in tasks if not t.done())
-    return {"status": "ok", "watchers": alive}
+    expected = len(COLLECTION_INDEX_MAP)
+    if alive < expected:
+        raise HTTPException(
+            status_code=503,
+            detail={"status": "degraded", "watchers": alive, "expected": expected},
+        )
+    return {"status": "ok", "watchers": alive, "expected": expected}
 
 
 @app.get("/")

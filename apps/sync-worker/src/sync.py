@@ -142,8 +142,17 @@ async def watch_collection(
             )
             async with db[collection_name].watch(**watch_kwargs) as stream:
                 async for change in stream:
-                    await _handle_change(es, index_name, change, project_fn)
-                    await _save_resume_token(db, collection_name, change["_id"])
+                    try:
+                        await _handle_change(es, index_name, change, project_fn)
+                    except Exception:
+                        logger.exception(
+                            "Non-retryable event failure collection=%s index=%s token=%s",
+                            collection_name,
+                            index_name,
+                            change.get("_id"),
+                        )
+                    finally:
+                        await _save_resume_token(db, collection_name, change["_id"])
         except Exception:
             logger.exception(
                 "Change stream error collection=%s index=%s — reconnecting in %ds",
