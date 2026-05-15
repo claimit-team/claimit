@@ -1,0 +1,229 @@
+name: gemini_self_evaluate
+description: >
+  Calls Gemini to evaluate the quality of a generated claim draft
+  against a structured rubric. Returns per-dimension scores, a total
+  score, a pass/fail decision, and improvement suggestions if failed.
+  A total score below 35/50 triggers redraft.
+  [TEAM NOTE] Pass threshold is currently set at 35/50 (70%).
+  Can be adjusted after team review.
+
+input:
+  claim_id:
+    type: string
+    required: true
+    description: UUID of the claim being evaluated
+
+  draft_content:
+    type: string
+    required: true
+    description: The generated draft text to be evaluated
+
+  draft_version:
+    type: integer
+    required: true
+    description: >
+      Version number of the draft being evaluated.
+      Passed from gemini_generate_draft output.
+      Used to link evaluation results to the correct
+      draft version in Phoenix traces and MongoDB.
+
+  claim_type:
+    type: enum
+    required: true
+    values:
+      - email
+      - chat_script
+      - in_store
+      - self_service
+    description: >
+      Type of the draft, used to apply type-appropriate
+      evaluation criteria. e.g. tone expectations differ
+      between email and chat_script.
+
+  platform:
+    type: string
+    required: true
+    description: Platform identifier, used to verify policy compliance
+
+  policy_text:
+    type: string
+    required: true
+    description: >
+      Full policy text of the platform, used as ground truth
+      for policy compliance dimension scoring
+
+  purchase_data:
+    type: object
+    required: true
+    description: >
+      Key purchase fields used to verify accuracy of draft content.
+    fields:
+      order_id:
+        type: string
+        description: Used to verify order number is correctly cited in draft
+      purchase_date:
+        type: string
+        description: ISO 8601 date, used to verify date accuracy in draft
+      original_price:
+        type: number
+        description: Used to verify original price is correctly stated
+      current_price:
+        type: number
+        description: Used to verify current price is correctly stated
+      refund_amount:
+        type: number
+        description: Used to verify refund amount is correctly stated
+
+  retry_count:
+    type: integer
+    required: false
+    default: 0
+    description: >
+      Current retry attempt number passed in by Claim Agent.
+      Starts at 0, incremented by Claim Agent after each failed
+      evaluation. When retry_count reaches max_retries and passed
+      is still false, raises MaxRetriesExceeded.
+
+  max_retries:
+    type: integer
+    required: false
+    default: 3
+    description: >
+      Maximum number of redraft attempts allowed before
+      escalating to user for manual review.
+      [TEAM NOTE] Default set to 3, can be adjusted after review.
+
+output:
+  claim_id:
+    type: string
+    description: Mirrors input claim_id for downstream tracking
+
+  draft_version:
+    type: integer
+    description: >
+      Mirrors input draft_version for linking evaluation
+      results to the correct draft in Phoenix and MongoDB.
+
+  passed:
+    type: boolean
+    description: >
+      True if total_score >= 35. Determines whether draft
+      proceeds to output validator or triggers redraft.
+
+  total_score:
+    type: integer
+    description: Sum of all dimension scores, max 50
+
+  rubric_scores:
+    type: object
+    description: Per-dimension breakdown of scores
+    fields:
+      accuracy:
+        type: integer
+        description: >
+          0-10. Checks if order_id, dates, prices, and refund
+          amount in draft match purchase_data exactly.
+      policy_compliance:
+        type: integer
+        description: >
+          0-10. Checks if claim reasoning aligns with platform
+          policy, within refund window, and meets platform requirements.
+      completeness:
+        type: integer
+        description: >
+          0-10. Checks if all required information is present:
+          order_id, purchase_date, original_price, current_price,
+          refund_amount, and clear request statement.
+      tone:
+        type: integer
+        description: >
+          0-10. Checks if draft is professional, polite, and
+          persuasive. Criteria adjusted based on claim_type.
+          email expects formal tone, chat_script expects
+          conversational tone.
+      actionability:
+        type: integer
+        description: >
+          0-10. Checks if user can immediately act on the draft
+          without ambiguity. Steps are clear and complete.
+
+  dimension_feedback:
+    type: object
+    description: >
+      Per-dimension explanation of what was found.
+      Always populated regardless of pass/fail,
+      recorded to Phoenix for pattern analysis.
+    fields:
+      accuracy:
+        type: string
+      policy_compliance:
+        type: string
+      completeness:
+        type: string
+      tone:
+        type: string
+      actionability:
+        type: string
+
+  improvement_suggestions:
+    type: object
+    required: false
+    description: >
+      Only populated when passed is false.
+      Structured fix instructions passed to the next
+      gemini_generate_draft call. Each field maps directly
+      to a rubric dimension that failed, so redraft knows
+      exactly what to fix without reprocessing the full context.
+    fields:
+      accuracy_fix:
+        type: string
+        required: false
+        description: >
+          Specific factual corrections needed.
+          e.g. "Refund amount is stated as $500, correct value is $50.
+          Order ID is missing, should be BBY-2024-98765."
+
+      policy_compliance_fix:
+        type: string
+        required: false
+        description: >
+          Policy alignment corrections needed.
+          e.g. "Draft does not reference the 15-day price match window.
+          Add citation to Best Buy Price Match Guarantee clause 2."
+
+      completeness_fix:
+        type: string
+        required: false
+        description: >
+          Missing information that must be added.
+          e.g. "Purchase date is missing. Original price not stated."
+
+      tone_fix:
+        type: string
+        required: false
+        description: >
+          Tone adjustments needed.
+          e.g. "Language is too aggressive in paragraph 2.
+          Soften the closing demand into a polite request."
+
+      actionability_fix:
+        type: string
+        required: false
+        description: >
+          Clarity improvements needed.
+          e.g. "Step 3 is ambiguous, specify which menu to navigate to.
+          Missing confirmation of what to do if chat agent is unavailable."
+
+  model_used:
+    type: string
+    description: Name of the Gemini model used, recorded for Phoenix observability
+
+  tokens_used:
+    type: integer
+    description: Token count consumed by this call, recorded for Phoenix observability
+
+errors:
+  - ClaimNotFound
+  - InvalidClaimType
+  - GeminiCallFailed
+  - MaxRetriesExceeded  # raised when retry_count reaches max_retries
