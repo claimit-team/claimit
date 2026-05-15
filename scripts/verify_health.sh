@@ -12,7 +12,7 @@ set -euo pipefail
 echo "=== Verifying Cloud Run service health ==="
 
 REGION="${GCP_REGION:-us-east1}"
-AGENTS=(ingest-agent monitor-agent claim-agent assistant-agent)
+AGENTS=(ingest-agent monitor-agent claim-agent assistant-agent sync-worker)
 FAILED=()
 
 for agent in "${AGENTS[@]}"; do
@@ -49,7 +49,7 @@ done
 
 echo ""
 if [ ${#FAILED[@]} -eq 0 ]; then
-  echo "=== All 4 services healthy ✓ ==="
+  echo "=== All ${#AGENTS[@]} services healthy ✓ ==="
   exit 0
 else
   echo "=== Failed: ${FAILED[*]} ==="

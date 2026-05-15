@@ -97,6 +97,13 @@ locals {
     ELASTIC_API_KEY   = "elastic-api-key"
     PHOENIX_API_KEY   = "phoenix-api-key"
   }
+  # sync-worker: tails MongoDB change streams and mirrors writes into
+  # Elasticsearch indices. Not an ADK agent — no Vertex AI dependency.
+  sync_worker_secrets = {
+    MONGODB_URI     = "mongodb-uri"
+    ELASTIC_URL     = "elastic-url"
+    ELASTIC_API_KEY = "elastic-api-key"
+  }
 }
 
 module "ingest_agent" {
@@ -152,6 +159,23 @@ module "assistant_agent" {
   image               = var.assistant_agent_image
   secret_ids          = values(local.assistant_secrets)
   secret_env_map      = local.assistant_secrets
+  deletion_protection = false
+
+  depends_on = [google_secret_manager_secret.shared]
+}
+
+module "sync_worker" {
+  source = "./modules/cloud-run-agent"
+
+  project_id   = var.project_id
+  region       = var.region
+  service_name = "claimit-sync-worker"
+  image        = var.sync_worker_image
+  # Change streams hold long-lived cursors; scale-to-zero would tear them
+  # down and waste the persisted resume token on every cold start.
+  min_instances       = 1
+  secret_ids          = values(local.sync_worker_secrets)
+  secret_env_map      = local.sync_worker_secrets
   deletion_protection = false
 
   depends_on = [google_secret_manager_secret.shared]

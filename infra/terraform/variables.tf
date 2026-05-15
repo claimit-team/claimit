@@ -43,6 +43,12 @@ variable "assistant_agent_image" {
   default     = "us-docker.pkg.dev/cloudrun/container/hello"
 }
 
+variable "sync_worker_image" {
+  type        = string
+  description = "Container image URL for the sync worker."
+  default     = "us-docker.pkg.dev/cloudrun/container/hello"
+}
+
 variable "web_frontend_url" {
   type        = string
   description = "Base URL of the Vercel-hosted web frontend for Pub/Sub push subscriptions."

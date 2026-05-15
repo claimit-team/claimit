@@ -1,11 +1,13 @@
 # syntax=docker/dockerfile:1.7
-# Shared Dockerfile for stateless FastAPI agents (ingest, claim, assistant).
+# Shared Dockerfile for stateless FastAPI agents (ingest, claim, assistant)
+# and the sync worker (long-running MongoDB → Elasticsearch change-stream tailer).
 # monitor-agent uses its own Dockerfile because it needs Playwright + Chromium.
 #
 # Build context: repo root.
 #   docker build -f apps/Dockerfile.agent --build-arg APP_NAME=ingest-agent .
 #   docker build -f apps/Dockerfile.agent --build-arg APP_NAME=claim-agent .
 #   docker build -f apps/Dockerfile.agent --build-arg APP_NAME=assistant-agent .
+#   docker build -f apps/Dockerfile.agent --build-arg APP_NAME=sync-worker .
 #
 # Why we mirror the monorepo layout at /build/ inside the container:
 # uv.lock pins shared packages as `directory = "../../packages/shared/<name>"`,
@@ -39,6 +41,8 @@ COPY apps/${APP_NAME}/pyproject.toml apps/${APP_NAME}/uv.lock ./
 COPY packages/shared/observability /build/packages/shared/observability
 COPY packages/shared/mcp /build/packages/shared/mcp
 COPY packages/shared/mongodb /build/packages/shared/mongodb
+COPY packages/shared/elastic /build/packages/shared/elastic
+COPY packages/shared/search /build/packages/shared/search
 
 # Install deps (../../packages/shared/... now resolves to /build/packages/shared/...).
 RUN uv sync --frozen --no-dev --no-install-project
