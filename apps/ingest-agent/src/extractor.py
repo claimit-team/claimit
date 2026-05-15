@@ -24,6 +24,15 @@ EXTRACTOR_TIMEOUT_SECONDS = 30
 DEFAULT_CLAIM_WINDOW_DAYS = 15
 DEFAULT_MONITORING_CADENCE_MINUTES = 360
 FALLBACK_PRODUCT_ID_CONFIDENCE = 0.2
+MATERIAL_CONFIDENCE_KEYS = (
+    "platform",
+    "price",
+    "category",
+    "product_name",
+    "price_paid",
+    "purchase_date",
+    "order_id",
+)
 
 PlatformValue = Literal[
     "best_buy",
@@ -246,16 +255,19 @@ async def _run_extractor_agent(email: EmailForExtraction) -> str | None:
     return final_text
 
 
+def _recompute_overall_min(payload: dict[str, float | None]) -> None:
+    material_values = [
+        payload[key] for key in MATERIAL_CONFIDENCE_KEYS if payload.get(key) is not None
+    ]
+    if material_values:
+        payload["overall_min"] = min(material_values)
+
+
 def _confidence_payload(confidence: ExtractedFieldConfidence) -> dict[str, float | None]:
     payload = confidence.model_dump()
     if payload["price_paid"] is None:
         payload["price_paid"] = payload["price"]
-
-    material_values = [
-        value for key, value in payload.items() if key != "overall_min" and value is not None
-    ]
-    if material_values:
-        payload["overall_min"] = min(material_values)
+    _recompute_overall_min(payload)
 
     return payload
 
@@ -277,7 +289,7 @@ def _purchase_payload(
         product_id = f"order-{normalized_order_id}"
         fallback_used = True
         confidence["product_id"] = FALLBACK_PRODUCT_ID_CONFIDENCE
-        confidence["overall_min"] = min(value for value in confidence.values() if value is not None)
+        _recompute_overall_min(confidence)
 
     return {
         "_id": uuid4(),

@@ -130,6 +130,7 @@ def test_extract_uses_product_id_fallback_when_absent(monkeypatch: pytest.Monkey
     assert result["product_id"] == "order-a123"
     assert result["status"] == "pending_user_edit"
     assert result["extraction_confidence"]["product_id"] == 0.2
+    assert result["extraction_confidence"]["overall_min"] == 0.95
 
 
 def test_extract_raises_for_malformed_json(monkeypatch: pytest.MonkeyPatch) -> None:
