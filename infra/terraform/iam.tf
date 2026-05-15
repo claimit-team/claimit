@@ -25,3 +25,13 @@ resource "google_project_iam_member" "agent_aiplatform_user" {
   role    = "roles/aiplatform.user"
   member  = "serviceAccount:${each.value}"
 }
+
+# CI service account needs run.invoker on each agent service so the deploy-prod
+# workflow's verify_health step can hit /health with an identity token.
+resource "google_cloud_run_service_iam_member" "ci_invoker" {
+  for_each = toset(["ingest", "monitor", "claim", "assistant"])
+  location = var.region
+  service  = "claimit-${each.value}-agent"
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:claimit-ci@${var.project_id}.iam.gserviceaccount.com"
+}
