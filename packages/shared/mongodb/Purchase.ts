@@ -13,6 +13,15 @@ export interface ExtractionConfidence {
   platform: number;
   price: number;
   overall_min: number;
+  order_id?: number | null;
+  product_name?: number | null;
+  product_id?: number | null;
+  price_paid?: number | null;
+  member_price_at_purchase?: number | null;
+  purchase_date?: number | null;
+  member_tier_at_purchase?: number | null;
+  variant?: number | null;
+  category?: number | null;
 }
 
 export interface Purchase {

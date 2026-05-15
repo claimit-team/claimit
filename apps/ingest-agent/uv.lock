@@ -354,6 +354,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "claimit-mcp" },
+    { name = "claimit-mongodb-models" },
     { name = "claimit-observability" },
     { name = "fastapi" },
     { name = "google-adk" },
@@ -374,6 +375,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "claimit-mcp", directory = "../../packages/shared/mcp" },
+    { name = "claimit-mongodb-models", directory = "../../packages/shared/mongodb" },
     { name = "claimit-observability", directory = "../../packages/shared/observability" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "google-adk", specifier = ">=1.0.0" },
@@ -404,6 +406,21 @@ dependencies = [
 requires-dist = [
     { name = "google-adk", specifier = ">=1.0.0" },
     { name = "mcp", specifier = ">=1.0.0" },
+]
+
+[[package]]
+name = "claimit-mongodb-models"
+version = "0.1.0"
+source = { directory = "../../packages/shared/mongodb" }
+dependencies = [
+    { name = "motor" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "motor", specifier = ">=3.6.0" },
+    { name = "pydantic", specifier = ">=2.0" },
 ]
 
 [[package]]
