@@ -33,7 +33,9 @@ for agent in "${AGENTS[@]}"; do
   echo "  URL: ${URL}"
 
   HEALTH_URL="${URL}/health"
-  HTTP_CODE=$(curl -s -o /tmp/health-response.txt -w "%{http_code}" "${HEALTH_URL}" || echo "000")
+  HTTP_CODE=$(curl -s -o /tmp/health-response.txt -w "%{http_code}" \
+    -H "Authorization: Bearer $(gcloud auth print-identity-token --audiences=${URL})" \
+    "${HEALTH_URL}" || echo "000")
 
   if [ "${HTTP_CODE}" = "200" ]; then
     RESPONSE=$(cat /tmp/health-response.txt)
