@@ -27,6 +27,7 @@ WORKDIR /app
 # so it must be present at /packages/... before `uv sync`.
 COPY apps/${APP_NAME}/pyproject.toml apps/${APP_NAME}/uv.lock ./
 COPY packages/shared/observability /packages/shared/observability
+COPY packages/shared/mcp /packages/shared/mcp
 RUN uv sync --frozen --no-dev --no-install-project
 
 # Now copy source and install the project itself.
