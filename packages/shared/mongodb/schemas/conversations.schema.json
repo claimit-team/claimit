@@ -1,0 +1,194 @@
+{
+  "$defs": {
+    "ConversationMessage": {
+      "properties": {
+        "role": {
+          "$ref": "#/$defs/MessageRole"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "at": {
+          "format": "date-time",
+          "title": "At",
+          "type": "string"
+        },
+        "tool_calls": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ToolCall"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Tool Calls"
+        }
+      },
+      "required": [
+        "role",
+        "content",
+        "at",
+        "tool_calls"
+      ],
+      "title": "ConversationMessage",
+      "type": "object"
+    },
+    "ConversationMode": {
+      "enum": [
+        "general",
+        "claim_focused"
+      ],
+      "title": "ConversationMode",
+      "type": "string"
+    },
+    "ConversationStatus": {
+      "enum": [
+        "active",
+        "archived"
+      ],
+      "title": "ConversationStatus",
+      "type": "string"
+    },
+    "MessageRole": {
+      "enum": [
+        "user",
+        "assistant"
+      ],
+      "title": "MessageRole",
+      "type": "string"
+    },
+    "ToolCall": {
+      "properties": {
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "input": {
+          "additionalProperties": true,
+          "title": "Input",
+          "type": "object"
+        },
+        "output_summary": {
+          "title": "Output Summary",
+          "type": "string"
+        },
+        "at": {
+          "format": "date-time",
+          "title": "At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "input",
+        "output_summary",
+        "at"
+      ],
+      "title": "ToolCall",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "_id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+    },
+    "updated_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Updated At"
+    },
+    "user_id": {
+      "format": "uuid",
+      "title": "User Id",
+      "type": "string"
+    },
+    "mode": {
+      "$ref": "#/$defs/ConversationMode"
+    },
+    "claim_id": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Claim Id"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "messages": {
+      "items": {
+        "$ref": "#/$defs/ConversationMessage"
+      },
+      "title": "Messages",
+      "type": "array"
+    },
+    "trace_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Trace Ids",
+      "type": "array"
+    },
+    "status": {
+      "$ref": "#/$defs/ConversationStatus"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "last_message_at": {
+      "format": "date-time",
+      "title": "Last Message At",
+      "type": "string"
+    },
+    "archived_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Archived At"
+    }
+  },
+  "required": [
+    "_id",
+    "user_id",
+    "mode",
+    "claim_id",
+    "title",
+    "messages",
+    "trace_ids",
+    "status",
+    "created_at",
+    "last_message_at",
+    "archived_at"
+  ],
+  "title": "Conversation",
+  "type": "object"
+}

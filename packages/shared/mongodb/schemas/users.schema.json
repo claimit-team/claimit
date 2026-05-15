@@ -1,0 +1,378 @@
+{
+  "$defs": {
+    "DefaultLocation": {
+      "properties": {
+        "city": {
+          "title": "City",
+          "type": "string"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        },
+        "lat": {
+          "title": "Lat",
+          "type": "number"
+        },
+        "lon": {
+          "title": "Lon",
+          "type": "number"
+        }
+      },
+      "required": [
+        "city",
+        "state",
+        "lat",
+        "lon"
+      ],
+      "title": "DefaultLocation",
+      "type": "object"
+    },
+    "GmailIntegration": {
+      "properties": {
+        "connected": {
+          "title": "Connected",
+          "type": "boolean"
+        },
+        "connected_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Connected At"
+        },
+        "scopes_granted": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Scopes Granted",
+          "type": "array"
+        },
+        "refresh_token_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Refresh Token Ref"
+        },
+        "watch_history_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Watch History Id"
+        },
+        "watch_expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Watch Expires At"
+        },
+        "last_processed_message_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Processed Message Id"
+        }
+      },
+      "required": [
+        "connected",
+        "connected_at",
+        "scopes_granted",
+        "refresh_token_ref",
+        "watch_history_id",
+        "watch_expires_at",
+        "last_processed_message_id"
+      ],
+      "title": "GmailIntegration",
+      "type": "object"
+    },
+    "IngestionSkiplistEntry": {
+      "properties": {
+        "sender": {
+          "title": "Sender",
+          "type": "string"
+        },
+        "format_hash": {
+          "title": "Format Hash",
+          "type": "string"
+        },
+        "added_at": {
+          "format": "date-time",
+          "title": "Added At",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sender",
+        "format_hash",
+        "added_at",
+        "reason"
+      ],
+      "title": "IngestionSkiplistEntry",
+      "type": "object"
+    },
+    "LoyaltyMembership": {
+      "properties": {
+        "platform": {
+          "$ref": "#/$defs/Platform"
+        },
+        "member_id": {
+          "title": "Member Id",
+          "type": "string"
+        },
+        "tier": {
+          "$ref": "#/$defs/LoyaltyTier"
+        }
+      },
+      "required": [
+        "platform",
+        "member_id",
+        "tier"
+      ],
+      "title": "LoyaltyMembership",
+      "type": "object"
+    },
+    "LoyaltyTier": {
+      "enum": [
+        "my_best_buy",
+        "my_best_buy_plus",
+        "my_best_buy_total",
+        "marriott_silver",
+        "marriott_gold",
+        "marriott_platinum",
+        "delta_silver",
+        "delta_gold",
+        "delta_platinum",
+        "delta_diamond",
+        "none"
+      ],
+      "title": "LoyaltyTier",
+      "type": "string"
+    },
+    "NotificationPrefs": {
+      "properties": {
+        "web_push": {
+          "title": "Web Push",
+          "type": "boolean"
+        },
+        "email": {
+          "title": "Email",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "web_push",
+        "email"
+      ],
+      "title": "NotificationPrefs",
+      "type": "object"
+    },
+    "Platform": {
+      "enum": [
+        "best_buy",
+        "amazon",
+        "target",
+        "walmart",
+        "marriott",
+        "hilton",
+        "delta",
+        "united",
+        "american"
+      ],
+      "title": "Platform",
+      "type": "string"
+    },
+    "SendMode": {
+      "enum": [
+        "approval",
+        "auto"
+      ],
+      "title": "SendMode",
+      "type": "string"
+    },
+    "SendPreference": {
+      "properties": {
+        "default_mode": {
+          "$ref": "#/$defs/SendMode"
+        },
+        "auto_send_delay_seconds": {
+          "title": "Auto Send Delay Seconds",
+          "type": "integer"
+        },
+        "changed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Changed At"
+        }
+      },
+      "required": [
+        "default_mode",
+        "auto_send_delay_seconds",
+        "changed_at"
+      ],
+      "title": "SendPreference",
+      "type": "object"
+    },
+    "Subscription": {
+      "properties": {
+        "tier": {
+          "$ref": "#/$defs/SubscriptionTier"
+        },
+        "trial_ends": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Trial Ends"
+        },
+        "renewed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Renewed At"
+        }
+      },
+      "required": [
+        "tier",
+        "trial_ends",
+        "renewed_at"
+      ],
+      "title": "Subscription",
+      "type": "object"
+    },
+    "SubscriptionTier": {
+      "enum": [
+        "trial",
+        "free",
+        "pro",
+        "family"
+      ],
+      "title": "SubscriptionTier",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "_id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+    },
+    "updated_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Updated At"
+    },
+    "email": {
+      "title": "Email",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "default_location": {
+      "$ref": "#/$defs/DefaultLocation"
+    },
+    "loyalty_memberships": {
+      "items": {
+        "$ref": "#/$defs/LoyaltyMembership"
+      },
+      "title": "Loyalty Memberships",
+      "type": "array"
+    },
+    "gmail_integration": {
+      "$ref": "#/$defs/GmailIntegration"
+    },
+    "send_preference": {
+      "$ref": "#/$defs/SendPreference"
+    },
+    "ingestion_skiplist": {
+      "items": {
+        "$ref": "#/$defs/IngestionSkiplistEntry"
+      },
+      "title": "Ingestion Skiplist",
+      "type": "array"
+    },
+    "notification_prefs": {
+      "$ref": "#/$defs/NotificationPrefs"
+    },
+    "subscription": {
+      "$ref": "#/$defs/Subscription"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "_id",
+    "email",
+    "name",
+    "default_location",
+    "loyalty_memberships",
+    "gmail_integration",
+    "send_preference",
+    "ingestion_skiplist",
+    "notification_prefs",
+    "subscription",
+    "created_at"
+  ],
+  "title": "User",
+  "type": "object"
+}

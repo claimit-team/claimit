@@ -1,0 +1,148 @@
+{
+  "$defs": {
+    "Platform": {
+      "enum": [
+        "best_buy",
+        "amazon",
+        "target",
+        "walmart",
+        "marriott",
+        "hilton",
+        "delta",
+        "united",
+        "american"
+      ],
+      "title": "Platform",
+      "type": "string"
+    },
+    "PriceSource": {
+      "enum": [
+        "keepa",
+        "scraperapi",
+        "apify",
+        "amadeus",
+        "direct"
+      ],
+      "title": "PriceSource",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "_id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+    },
+    "updated_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Updated At"
+    },
+    "purchase_id": {
+      "format": "uuid",
+      "title": "Purchase Id",
+      "type": "string"
+    },
+    "platform": {
+      "$ref": "#/$defs/Platform"
+    },
+    "product_id": {
+      "title": "Product Id",
+      "type": "string"
+    },
+    "price_member": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Price Member"
+    },
+    "price_non_member": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Price Non Member"
+    },
+    "member_tier_required": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Member Tier Required"
+    },
+    "currency": {
+      "const": "USD",
+      "title": "Currency",
+      "type": "string"
+    },
+    "checked_at": {
+      "format": "date-time",
+      "title": "Checked At",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/PriceSource"
+    },
+    "evidence_screenshot_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Evidence Screenshot Url"
+    },
+    "raw_response_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Raw Response Hash"
+    }
+  },
+  "required": [
+    "_id",
+    "purchase_id",
+    "platform",
+    "product_id",
+    "member_tier_required",
+    "currency",
+    "checked_at",
+    "source",
+    "evidence_screenshot_url",
+    "raw_response_hash"
+  ],
+  "title": "PriceHistory",
+  "type": "object"
+}
