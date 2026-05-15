@@ -1,0 +1,229 @@
+name: Deploy Prod
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - "infra/**"
+      - "apps/*-agent/**"
+      - "!apps/*-agent/src/agent.py"
+      - "apps/web/**"
+      - ".github/workflows/deploy-prod.yml"
+
+concurrency:
+  group: deploy-prod-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_VERSION: "1.9.5"
+  PYTHON_VERSION: "3.12"
+  GCP_REGION: us-east1
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: terraform-apply
+  # Applies infra changes (Artifact Registry, Secret Manager shells, Cloud Run
+  # service shells, IAM, Pub/Sub, Scheduler) before any image push so that the
+  # downstream `gcloud run deploy` only swaps the image on an already-managed
+  # service.
+  # ---------------------------------------------------------------------------
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: terraform init -input=false
+
+      - name: Terraform Apply
+        working-directory: infra/terraform
+        env:
+          TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+          TF_VAR_region: ${{ vars.GCP_REGION || env.GCP_REGION }}
+        run: terraform apply -auto-approve -input=false
+
+  # ---------------------------------------------------------------------------
+  # Job 2: build-and-push-images
+  # Matrix-builds 4 agent images in parallel and pushes them to Artifact
+  # Registry. fail-fast is off so one bad agent does not cancel the others.
+  # ---------------------------------------------------------------------------
+  build-and-push-images:
+    name: Build & Push (${{ matrix.agent }})
+    needs: terraform-apply
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - agent: ingest-agent
+            dockerfile: apps/Dockerfile.agent
+          - agent: claim-agent
+            dockerfile: apps/Dockerfile.agent
+          - agent: assistant-agent
+            dockerfile: apps/Dockerfile.agent
+          - agent: monitor-agent
+            dockerfile: apps/monitor-agent/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-east1-docker.pkg.dev --quiet
+
+      - name: Build image
+        run: |
+          docker build \
+            -f ${{ matrix.dockerfile }} \
+            --build-arg APP_NAME=${{ matrix.agent }} \
+            -t us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/claimit/${{ matrix.agent }}:${{ github.sha }} \
+            .
+
+      - name: Push image
+        run: docker push us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/claimit/${{ matrix.agent }}:${{ github.sha }}
+
+  # ---------------------------------------------------------------------------
+  # Job 3: deploy-cloud-run
+  # Swaps the freshly-pushed image onto each Cloud Run service. We deliberately
+  # do NOT pass --service-account or --allow-unauthenticated; both are owned by
+  # Terraform via the cloud-run-agent module and re-setting them here would
+  # cause drift on the next plan.
+  # ---------------------------------------------------------------------------
+  deploy-cloud-run:
+    name: Deploy Cloud Run (${{ matrix.agent }})
+    needs: build-and-push-images
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        agent: [ingest-agent, claim-agent, assistant-agent, monitor-agent]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy claimit-${{ matrix.agent }} \
+            --image=us-east1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/claimit/${{ matrix.agent }}:${{ github.sha }} \
+            --region=${{ vars.GCP_REGION || env.GCP_REGION }} \
+            --quiet
+
+  # ---------------------------------------------------------------------------
+  # Job 4: run-migrations
+  # Idempotent index creation for MongoDB + Elasticsearch. Pulls connection
+  # strings from Secret Manager at runtime (never persisted to the workflow
+  # log thanks to ::add-mask::).
+  # ---------------------------------------------------------------------------
+  run-migrations:
+    name: Run Migrations
+    needs: deploy-cloud-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/0.11.14/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Fetch MongoDB URI from Secret Manager
+        run: |
+          SECRET=$(gcloud secrets versions access latest --secret=mongodb-uri --project=${{ secrets.GCP_PROJECT_ID }})
+          echo "::add-mask::$SECRET"
+          echo "MONGODB_URI=$SECRET" >> "$GITHUB_ENV"
+
+      - name: Fetch Elastic URL from Secret Manager
+        run: |
+          SECRET=$(gcloud secrets versions access latest --secret=elastic-url --project=${{ secrets.GCP_PROJECT_ID }})
+          echo "::add-mask::$SECRET"
+          echo "ELASTIC_URL=$SECRET" >> "$GITHUB_ENV"
+
+      - name: Fetch Elastic API key from Secret Manager
+        run: |
+          SECRET=$(gcloud secrets versions access latest --secret=elastic-api-key --project=${{ secrets.GCP_PROJECT_ID }})
+          echo "::add-mask::$SECRET"
+          echo "ELASTIC_API_KEY=$SECRET" >> "$GITHUB_ENV"
+
+      - name: Run migrations
+        run: bash scripts/run_migrations.sh
+
+  # ---------------------------------------------------------------------------
+  # Job 5: verify-health
+  # Probes /health on every Cloud Run service. Fails the workflow if any of
+  # the 4 agents is unreachable or returns non-200.
+  # ---------------------------------------------------------------------------
+  verify-health:
+    name: Verify Health
+    needs: run-migrations
+    runs-on: ubuntu-latest
+    env:
+      GCP_REGION: ${{ vars.GCP_REGION || 'us-east1' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Run health check
+        run: bash scripts/verify_health.sh
