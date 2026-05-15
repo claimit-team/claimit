@@ -41,6 +41,7 @@ def generate_schemas(output_dir: Path = SCHEMAS_DIR) -> list[Path]:
     written: list[Path] = []
     for collection_name, model in COLLECTION_MODELS.items():
         schema = model.model_json_schema()
+        schema.setdefault("$schema", "https://json-schema.org/draft/2020-12/schema")
         path = output_dir / f"{collection_name}.schema.json"
         path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
         written.append(path)
