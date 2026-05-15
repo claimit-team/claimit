@@ -80,12 +80,12 @@ async def backfill(
     results: dict[str, dict[str, int]] = {}
     for collection_name, index_name, project_fn in COLLECTION_INDEX_MAP:
         logger.info("Backfilling collection=%s -> index=%s", collection_name, index_name)
-        success_count, errors = await async_bulk(
+        success_count, error_count = await async_bulk(
             es,
             _iter_actions(db, collection_name, index_name, project_fn),
             raise_on_error=False,
+            stats_only=True,
         )
-        error_count = len(errors) if isinstance(errors, list) else int(errors)
         results[collection_name] = {"ok": success_count, "errors": error_count}
         logger.info(
             "Finished collection=%s: ok=%d errors=%d",

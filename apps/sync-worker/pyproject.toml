@@ -9,7 +9,11 @@ dependencies = [
     "motor>=3.6.0",
     "elasticsearch[async]>=8.15.0",
     "python-dotenv>=1.0.0",
+    "claimit-elastic",
 ]
+
+[tool.uv.sources]
+claimit-elastic = { path = "../../packages/shared/elastic" }
 
 [dependency-groups]
 dev = [
