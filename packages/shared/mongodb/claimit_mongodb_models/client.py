@@ -15,11 +15,13 @@ BSON ↔ Pydantic conventions:
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, TypeVar
 from uuid import UUID
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from pydantic import ValidationError
 
 from .base import BaseDocument
 from .claim import Claim
@@ -30,6 +32,21 @@ from .purchase import Purchase
 from .user import User
 
 T = TypeVar("T", bound=BaseDocument)
+
+logger = logging.getLogger(__name__)
+
+# Maps a Mongo collection name to its Pydantic model. Used by `upsert` to
+# validate dict inputs against the canonical schema before the write hits
+# the database — Pydantic instances are trusted (already validated at
+# construction) and bypass this lookup.
+COLLECTION_MODELS: dict[str, type[BaseDocument]] = {
+    "purchases": Purchase,
+    "claims": Claim,
+    "policies": Policy,
+    "users": User,
+    "price_history": PriceHistory,
+    "conversations": Conversation,
+}
 
 
 class MongoDBClient:
@@ -75,15 +92,48 @@ class MongoDBClient:
         cursor = self._db[collection].find(filter).skip(skip).limit(limit)
         return [model.model_validate(doc) async for doc in cursor]
 
-    async def upsert(self, collection: str, id: str | UUID, document: BaseDocument) -> str:
+    async def upsert(
+        self,
+        collection: str,
+        id: str | UUID,
+        document: BaseDocument | dict[str, Any],
+    ) -> str:
         """Replace-or-insert by `_id`. Returns the persisted `_id` as a string.
 
         The persisted `_id` is taken from the `id` arg, not from `document.id`,
         so callers can rename / re-key a document if they want. Typical callers
         pass `document.id`.
+
+        Schema validation:
+        - Pydantic `BaseDocument` instances are trusted (already validated at
+          construction) and pass through.
+        - dict inputs are validated against `COLLECTION_MODELS[collection]`
+          via `model_validate` before the write. Field-level errors are logged
+          and `pydantic.ValidationError` propagates to the caller — no write
+          is attempted on invalid input.
         """
+        if isinstance(document, BaseDocument):
+            validated: BaseDocument = document
+        else:
+            model_cls = COLLECTION_MODELS.get(collection)
+            if model_cls is None:
+                raise ValueError(
+                    f"No Pydantic model registered for collection {collection!r}; "
+                    "pass a BaseDocument instance or register the model in "
+                    "COLLECTION_MODELS."
+                )
+            try:
+                validated = model_cls.model_validate(document)
+            except ValidationError as exc:
+                logger.error(
+                    "Schema validation failed for collection=%s: %s",
+                    collection,
+                    exc.errors(),
+                )
+                raise
+
         uid = _coerce_uuid(id)
-        payload = document.model_dump(by_alias=True)
+        payload = validated.model_dump(by_alias=True)
         payload["_id"] = uid
         await self._db[collection].replace_one({"_id": uid}, payload, upsert=True)
         return str(uid)
