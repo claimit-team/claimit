@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import glob
 import importlib.util
 import os
 import subprocess
@@ -113,6 +114,33 @@ def import_agent(module_path: str, agent_name: str):
     return getattr(module, agent_name)
 
 
+def get_mcp_wheel_path() -> str:
+    """Find the freshly-built claimit_mcp wheel for extra_packages.
+
+    CI runs 'uv build --wheel' in packages/shared/mcp/ before this
+    script. The wheel must be present for the Agent Engine container
+    to resolve `from claimit_mcp import ...` when cloudpickle.loads()
+    rehydrates the agent at process start.
+
+    Per adk-python#2947 and discuss.google.dev/250649, pre-built .whl
+    + extra_packages is the recommended pattern for multi-agent system
+    deployment where remote unpickling needs workspace-local modules.
+    """
+    repo_root = os.getcwd()
+    pattern = os.path.join(
+        repo_root,
+        "packages/shared/mcp/dist/claimit_mcp-*-py3-none-any.whl",
+    )
+    candidates = sorted(glob.glob(pattern))
+    if not candidates:
+        raise FileNotFoundError(
+            f"claimit_mcp wheel not found at {pattern}. "
+            "CI must run 'uv build --wheel' in packages/shared/mcp/ "
+            "before this script."
+        )
+    return candidates[-1]  # latest version (alphabetic sort works for semver)
+
+
 def find_existing_agent(client, display_name: str):
     """Find a deployed AgentEngine by display_name. Returns AgentEngine or None.
 
@@ -163,6 +191,11 @@ def deploy_one(
         "display_name": agent_name,
         "agent_framework": AGENT_FRAMEWORK,
         "env_vars": env_vars,
+        # Workspace-local claimit_mcp packaged as wheel, uploaded to staging
+        # bucket via this SDK call, then pip-installed by Agent Engine server
+        # into the Reasoning Engine container before cloudpickle.loads() runs.
+        # Resolves ModuleNotFoundError observed when container starts up.
+        "extra_packages": [get_mcp_wheel_path()],
     }
 
     existing = find_existing_agent(client, agent_name)
