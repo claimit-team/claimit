@@ -16,6 +16,8 @@ from google.adk.sessions import InMemorySessionService
 from google.genai import types
 from pydantic import BaseModel, Field, ValidationError
 
+from src.confidence import compute_overall_min
+
 MODEL_NAME = "gemini-2.5-flash"
 APP_NAME = "claimit-ingest-extractor"
 MAX_BODY_CHARS = 16_000
@@ -24,15 +26,6 @@ EXTRACTOR_TIMEOUT_SECONDS = 30
 DEFAULT_CLAIM_WINDOW_DAYS = 15
 DEFAULT_MONITORING_CADENCE_MINUTES = 360
 FALLBACK_PRODUCT_ID_CONFIDENCE = 0.2
-MATERIAL_CONFIDENCE_KEYS = (
-    "platform",
-    "price",
-    "category",
-    "product_name",
-    "price_paid",
-    "purchase_date",
-    "order_id",
-)
 
 PlatformValue = Literal[
     "best_buy",
@@ -130,7 +123,7 @@ class ExtractedPurchaseFields(BaseModel):
     room_type: str | None = None
     bed_type: str | None = None
     rate_type: str | None = None
-    price_paid: float = Field(gt=0)
+    price_paid: float = Field(ge=0)
     member_price_at_purchase: float | None = Field(default=None, ge=0)
     non_member_price_at_purchase: float | None = Field(default=None, ge=0)
     purchase_date: datetime
@@ -256,19 +249,16 @@ async def _run_extractor_agent(email: EmailForExtraction) -> str | None:
     return final_text
 
 
-def _recompute_overall_min(payload: dict[str, float | None]) -> None:
-    material_values = [
-        payload[key] for key in MATERIAL_CONFIDENCE_KEYS if payload.get(key) is not None
-    ]
-    if material_values:
-        payload["overall_min"] = min(material_values)
+def _merge_confidence_aggregate(payload: dict[str, float | None]) -> None:
+    agg = compute_overall_min(payload)
+    payload["overall_min"] = agg["overall_min"]
 
 
 def _confidence_payload(confidence: ExtractedFieldConfidence) -> dict[str, float | None]:
     payload = confidence.model_dump()
     if payload["price_paid"] is None:
         payload["price_paid"] = payload["price"]
-    _recompute_overall_min(payload)
+    _merge_confidence_aggregate(payload)
 
     return payload
 
@@ -290,7 +280,7 @@ def _purchase_payload(
         product_id = f"order-{normalized_order_id}"
         fallback_used = True
         confidence["product_id"] = FALLBACK_PRODUCT_ID_CONFIDENCE
-        _recompute_overall_min(confidence)
+        _merge_confidence_aggregate(confidence)
 
     return {
         "_id": uuid4(),

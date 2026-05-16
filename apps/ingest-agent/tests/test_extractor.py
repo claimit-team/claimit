@@ -11,6 +11,7 @@ import pytest
 from claimit_mongodb_models import Purchase
 from pydantic import ValidationError
 from src import extractor
+from src.confidence import compute_overall_min
 from src.extractor import EmailForExtraction, ExtractorError, extract
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "extraction_cases.json"
@@ -86,6 +87,27 @@ def test_extract_returns_purchase_shaped_dict_for_fixtures(
     assert result["claim_type"] == "self_service"
     assert result["monitoring_cadence_minutes"] == 360
     assert result["extraction_confidence"]["price_paid"] is not None
+
+
+def test_extract_low_confidence_critical_field_pending_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _sample_extracted_payload()
+    payload["extraction_confidence"]["platform"] = 0.94
+
+    async def fake_run_agent(_email: EmailForExtraction) -> str:
+        return json.dumps(payload)
+
+    monkeypatch.setattr(extractor, "_run_extractor_agent", fake_run_agent)
+
+    result = asyncio.run(extract(_sample_email()))
+
+    assert result["status"] == "pending_confirmation"
+    assert result["extraction_confidence"]["overall_min"] == pytest.approx(0.94)
+    assert (
+        compute_overall_min(result["extraction_confidence"])["critical_field_below_threshold"]
+        == "platform"
+    )
 
 
 def test_extract_handles_missing_optional_fields(monkeypatch: pytest.MonkeyPatch) -> None:
