@@ -5,7 +5,7 @@ from google.adk import Agent
 
 monitor_agent = Agent(
     name="monitor_agent",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     instruction=(
         "You are the ClaimIt Monitor Agent. Your job is to periodically check current "
         "prices for tracked purchases using ScraperAPI, Keepa, and Amadeus. When a "

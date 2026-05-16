@@ -6,7 +6,7 @@ from google.adk import Agent
 # Sub-agents will be wired in when real logic is added.
 assistant_agent = Agent(
     name="assistant_agent",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     instruction=(
         "You are the ClaimIt Assistant. You help users track their purchases, monitor "
         "prices, and manage refund claims. You coordinate with specialized sub-agents "

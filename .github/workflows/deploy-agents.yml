@@ -1,0 +1,163 @@
+name: Deploy Agents
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - "apps/*-agent/src/agent.py"
+      - "scripts/deploy_agents.py"
+      - ".github/workflows/deploy-agents.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-agents-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PYTHON_VERSION: "3.12"
+  GCP_REGION: us-east1
+
+jobs:
+  auth-gcp:
+    name: Authenticate to GCP
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+  install-deps:
+    name: Install ADK + Vertex SDK
+    needs: auth-gcp
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/0.11.14/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Verify SDK installable
+        run: |
+          uv run --no-project \
+            --python "3.12" \
+            --with "google-cloud-aiplatform[agent_engines,adk]" \
+            --with "google-cloud-secret-manager>=2.0.0" \
+            python -c "import vertexai; from vertexai.agent_engines import AdkApp; from google.adk import Agent; from google.cloud import secretmanager; print('SDKs OK')"
+
+  deploy-adk:
+    name: Deploy 4 ADK agents
+    needs: install-deps
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/0.11.14/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Deploy agents
+        env:
+          GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          GOOGLE_CLOUD_LOCATION: ${{ vars.GCP_REGION || env.GCP_REGION }}
+          # Agent factories (claimit_mcp.get_mongodb_mcp_toolset) read MONGODB_URI
+          # at module-load time and raise if unset. Real value is injected at
+          # runtime via SecretRef in config.env_vars (see scripts/deploy_agents.py).
+          MONGODB_URI: "mongodb://placeholder-only-for-import"
+        run: |
+          uv run --no-project \
+            --python "3.12" \
+            --with "google-cloud-aiplatform[agent_engines,adk]" \
+            --with "google-cloud-secret-manager>=2.0.0" \
+            --with-editable "packages/shared/mcp" \
+            python scripts/deploy_agents.py
+
+  verify-agents:
+    name: Verify deployed agents
+    needs: deploy-adk
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/0.11.14/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Verify
+        env:
+          GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          GOOGLE_CLOUD_LOCATION: ${{ vars.GCP_REGION || env.GCP_REGION }}
+          # Same placeholder rationale as deploy-adk: agent factories read this
+          # at import time. --verify-only doesn't import agents, but mirror for
+          # consistency / safety against future code paths.
+          MONGODB_URI: "mongodb://placeholder-only-for-import"
+        run: |
+          uv run --no-project \
+            --python "3.12" \
+            --with "google-cloud-aiplatform[agent_engines,adk]" \
+            --with "google-cloud-secret-manager>=2.0.0" \
+            --with-editable "packages/shared/mcp" \
+            python scripts/deploy_agents.py --verify-only
+
+  notify-failure:
+    name: Notify Slack on failure
+    needs: [auth-gcp, install-deps, deploy-adk, verify-agents]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Slack
+        run: |
+          curl -X POST "${{ secrets.SLACK_WEBHOOK_ALERTS }}" \
+            -H 'Content-Type: application/json' \
+            -d "{\"text\": \"[CRITICAL] Deploy Agents workflow failed on ${{ github.ref_name }} @ ${{ github.sha }}. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
