@@ -144,7 +144,10 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         )
 
         draft = await generate_email_draft(
-            temp_claim, purchase, policy, search_client,
+            temp_claim,
+            purchase,
+            policy,
+            search_client,
             user_name=user_name,
             current_price=event.current_price,
         )

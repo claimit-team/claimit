@@ -281,10 +281,12 @@ async def test_post_fill_placeholder_guard() -> None:
     policy = _make_policy(Platform.HILTON, "reservations@hilton.com", "Some clause.")
     mock_search = _mock_search_client("Some clause.")
 
-    bad_template = json.dumps({
-        "subject": "Price Match — {{ORDER_ID}}",
-        "email_body": "Dear {{USER_NAME}}, this contains {{UNKNOWN}}.",
-    })
+    bad_template = json.dumps(
+        {
+            "subject": "Price Match — {{ORDER_ID}}",
+            "email_body": "Dear {{USER_NAME}}, this contains {{UNKNOWN}}.",
+        }
+    )
 
     with patch("src.draft.type_a_email._run_draft_agent", new_callable=AsyncMock) as mock_runner:
         mock_runner.return_value = bad_template

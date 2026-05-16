@@ -167,9 +167,7 @@ def _parse_draft_output(raw_output: str | None) -> _DraftOutput:
     try:
         return _DraftOutput.model_validate(payload)
     except ValidationError as exc:
-        raise DraftGenerationError(
-            "Draft generator returned invalid output schema"
-        ) from exc
+        raise DraftGenerationError("Draft generator returned invalid output schema") from exc
 
 
 def _fill_placeholders(
@@ -209,9 +207,7 @@ async def generate_email_draft(
 ) -> ClaimDraft:
     # Validate early — fail before wasting an LLM call
     if not policy.claim_email or not policy.claim_email.strip():
-        raise DraftGenerationError(
-            f"No claim email configured for platform '{purchase.platform}'"
-        )
+        raise DraftGenerationError(f"No claim email configured for platform '{purchase.platform}'")
 
     # 1. Retrieve the most relevant policy clause via search
     query = f"{purchase.platform} price match guarantee refund eligibility"
@@ -226,8 +222,7 @@ async def generate_email_draft(
 
     if results:
         policy_clause = (
-            results[0].get("policy_text_relevant_clause")
-            or policy.policy_text_relevant_clause
+            results[0].get("policy_text_relevant_clause") or policy.policy_text_relevant_clause
         )
     else:
         policy_clause = policy.policy_text_relevant_clause
@@ -238,7 +233,8 @@ async def generate_email_draft(
 
     # 3. Programmatic placeholder substitution with real values
     resolved_current_price = (
-        current_price if current_price is not None
+        current_price
+        if current_price is not None
         else round(purchase.price_paid - claim.claim_amount, 2)
     )
     kwargs = dict(
@@ -256,9 +252,7 @@ async def generate_email_draft(
     filled_subject = _fill_placeholders(draft_output.subject, **kwargs)
 
     if "{{" in filled_body or "{{" in filled_subject:
-        raise DraftGenerationError(
-            "Draft contains unreplaced placeholder tokens"
-        )
+        raise DraftGenerationError("Draft contains unreplaced placeholder tokens")
 
     return ClaimDraft(
         claim_id=claim.id,
