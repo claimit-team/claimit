@@ -29,24 +29,26 @@ _NOW = datetime(2026, 3, 15, tzinfo=UTC)
 _PURCHASE_DATE = datetime(2026, 1, 10, tzinfo=UTC)
 _WINDOW_EXPIRES = datetime(2026, 1, 25, tzinfo=UTC)
 
-_MOCK_TEMPLATE = json.dumps({
-    "title": "Best Buy Price Match Script — Order {{ORDER_ID}}",
-    "main_steps": [
-        "Hi, I'm {{USER_NAME}} and I'd like to request a price match refund.",
-        "I purchased an item on {{CHECK_IN_DATE}} (order {{ORDER_ID}}), "
-        "valid through {{CHECKOUT_DATE}}.",
-        "I originally paid {{ORIGINAL_PRICE}}, current price is {{CURRENT_PRICE}}. "
-        "I'm requesting a refund of {{REFUND_AMOUNT}}.",
-        "According to your policy: {{POLICY_CITATION}}",
-        "My order reference is {{ORDER_ID}} and I can provide proof if needed.",
-    ],
-    "escalation_steps": [
-        "I'd like to escalate this — could you transfer me to a supervisor "
-        "or provide a case number?",
-        "Could you tell me the formal submission channel? "
-        "I'll need a reference number for my records.",
-    ],
-})
+_MOCK_TEMPLATE = json.dumps(
+    {
+        "title": "Best Buy Price Match Script — Order {{ORDER_ID}}",
+        "main_steps": [
+            "Hi, I'm {{USER_NAME}} and I'd like to request a price match refund.",
+            "I purchased an item on {{CHECK_IN_DATE}} (order {{ORDER_ID}}), "
+            "valid through {{CHECKOUT_DATE}}.",
+            "I originally paid {{ORIGINAL_PRICE}}, current price is {{CURRENT_PRICE}}. "
+            "I'm requesting a refund of {{REFUND_AMOUNT}}.",
+            "According to your policy: {{POLICY_CITATION}}",
+            "My order reference is {{ORDER_ID}} and I can provide proof if needed.",
+        ],
+        "escalation_steps": [
+            "I'd like to escalate this — could you transfer me to a supervisor "
+            "or provide a case number?",
+            "Could you tell me the formal submission channel? "
+            "I'll need a reference number for my records.",
+        ],
+    }
+)
 
 
 # ─── Builders ────────────────────────────────────────────────────────────────
