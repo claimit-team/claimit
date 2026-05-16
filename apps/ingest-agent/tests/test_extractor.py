@@ -11,6 +11,7 @@ import pytest
 from claimit_mongodb_models import Purchase
 from pydantic import ValidationError
 from src import extractor
+from src.confidence import compute_overall_min
 from src.extractor import EmailForExtraction, ExtractorError, extract
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "extraction_cases.json"
@@ -88,6 +89,73 @@ def test_extract_returns_purchase_shaped_dict_for_fixtures(
     assert result["extraction_confidence"]["price_paid"] is not None
 
 
+def test_extract_high_confidence_starts_monitoring(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _sample_extracted_payload()
+    for field in (
+        "platform",
+        "price",
+        "category",
+        "product_name",
+        "price_paid",
+        "purchase_date",
+        "order_id",
+    ):
+        payload["extraction_confidence"][field] = 0.99
+
+    async def fake_run_agent(_email: EmailForExtraction) -> str:
+        return json.dumps(payload)
+
+    monkeypatch.setattr(extractor, "_run_extractor_agent", fake_run_agent)
+
+    result = asyncio.run(extract(_sample_email()))
+
+    assert result["status"] == "monitoring"
+    assert result["extraction_confidence"]["overall_min"] == pytest.approx(0.99)
+    assert (
+        compute_overall_min(result["extraction_confidence"])["critical_field_below_threshold"]
+        is None
+    )
+
+
+def test_extract_low_confidence_critical_field_triggers_pending_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _sample_extracted_payload()
+    payload["extraction_confidence"]["platform"] = 0.94
+
+    async def fake_run_agent(_email: EmailForExtraction) -> str:
+        return json.dumps(payload)
+
+    monkeypatch.setattr(extractor, "_run_extractor_agent", fake_run_agent)
+
+    result = asyncio.run(extract(_sample_email()))
+
+    assert result["status"] == "pending_confirmation"
+    assert result["extraction_confidence"]["overall_min"] == pytest.approx(0.94)
+    assert (
+        compute_overall_min(result["extraction_confidence"])["critical_field_below_threshold"]
+        == "platform"
+    )
+
+
+def test_extract_zero_price_paid_raises_validation_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """price_paid=0 must fail at ExtractedPurchaseFields validation, not later."""
+    payload = _sample_extracted_payload()
+    payload["price_paid"] = 0
+
+    async def fake_run_agent(_email: EmailForExtraction) -> str:
+        return json.dumps(payload)
+
+    monkeypatch.setattr(extractor, "_run_extractor_agent", fake_run_agent)
+
+    with pytest.raises(ValidationError, match="price_paid"):
+        asyncio.run(extract(_sample_email()))
+
+
 def test_extract_handles_missing_optional_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = _sample_extracted_payload()
     for optional_field in (
@@ -113,7 +181,8 @@ def test_extract_handles_missing_optional_fields(monkeypatch: pytest.MonkeyPatch
     assert result["variant"] is None
     assert result["member_tier_at_purchase"] is None
     assert result["member_price_at_purchase"] is None
-    assert result["status"] == "pending_confirmation"
+    # Sample payload has every critical confidence >= 0.95, so it should auto-start monitoring.
+    assert result["status"] == "monitoring"
 
 
 def test_extract_uses_product_id_fallback_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:

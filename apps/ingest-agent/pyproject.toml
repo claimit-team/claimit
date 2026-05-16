@@ -34,4 +34,3 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
-force-include = { "extractor.py" = "extractor.py" }
