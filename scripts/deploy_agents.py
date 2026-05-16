@@ -148,16 +148,18 @@ def deploy_one(
         "requirements": ADK_REQUIREMENTS,
         "display_name": agent_name,
         "agent_framework": AGENT_FRAMEWORK,
-        "env_vars": {
-            # MCP toolset (mongodb-mcp-server stdio child process) reads this
-            # env var to connect. Per Will's verify (May 15): McpToolset env=None
-            # in factory + SecretRef here = URI not baked into pickle, Agent
-            # Engine runtime fetches latest from Secret Manager at process start.
-            "MDB_MCP_CONNECTION_STRING": SecretRef(
-                secret="mongodb-uri",
-                version="latest",
-            ),
-        },
+    }
+
+    # env_vars is a top-level kwarg on create/update — not nested in config.
+    # MCP toolset (mongodb-mcp-server stdio child process) reads this env var
+    # to connect. McpToolset env=None in the factory + SecretRef here = URI
+    # not baked into pickle; Agent Engine runtime fetches latest from Secret
+    # Manager at process start.
+    env_vars = {
+        "MDB_MCP_CONNECTION_STRING": SecretRef(
+            secret="mongodb-uri",
+            version="latest",
+        ),
     }
 
     existing = find_existing_agent(client, agent_name)
@@ -176,6 +178,7 @@ def deploy_one(
             name=rn,
             agent=adk_app,
             config=config,
+            env_vars=env_vars,
         )
         action = "updated"
     else:
@@ -185,6 +188,7 @@ def deploy_one(
         remote = client.agent_engines.create(
             agent=adk_app,
             config=config,
+            env_vars=env_vars,
         )
         action = "created"
 
