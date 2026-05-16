@@ -42,7 +42,6 @@ from dataclasses import dataclass
 import vertexai
 from google.api_core import exceptions as gcp_exc
 from google.cloud import secretmanager
-from google.cloud.aiplatform_v1.types.env_var import SecretRef
 from vertexai.agent_engines import AdkApp
 
 # (agent_top_level_name, dotted_module_path)
@@ -143,21 +142,27 @@ def deploy_one(
     # but explicit AdkApp is the canonical pattern.
     adk_app = AdkApp(agent=raw_agent)
 
+    # MCP toolset (mongodb-mcp-server stdio child process) reads this env var
+    # to connect. McpToolset env=None in the factory + SecretRef here = URI
+    # not baked into pickle; Agent Engine runtime fetches latest from Secret
+    # Manager at process start.
+    #
+    # env_vars is the dict form `{env_var_name: SecretRef | str}` — verified
+    # at runtime: the list-of-SecretEnvVar form (which the type hints suggest)
+    # is rejected by the SDK serializer; the dict form is what actually works.
+    env_vars = {
+        "MDB_MCP_CONNECTION_STRING": {
+            "secret": "mongodb-uri",
+            "version": "latest",
+        },
+    }
+
     config = {
         "staging_bucket": staging_bucket,
         "requirements": ADK_REQUIREMENTS,
         "display_name": agent_name,
         "agent_framework": AGENT_FRAMEWORK,
-        "env_vars": {
-            # MCP toolset (mongodb-mcp-server stdio child process) reads this
-            # env var to connect. Per Will's verify (May 15): McpToolset env=None
-            # in factory + SecretRef here = URI not baked into pickle, Agent
-            # Engine runtime fetches latest from Secret Manager at process start.
-            "MDB_MCP_CONNECTION_STRING": SecretRef(
-                secret="mongodb-uri",
-                version="latest",
-            ),
-        },
+        "env_vars": env_vars,
     }
 
     existing = find_existing_agent(client, agent_name)
