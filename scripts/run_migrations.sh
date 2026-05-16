@@ -31,7 +31,7 @@ uv run \
   --no-project \
   --python "3.12" \
   --with "elasticsearch[async]>=8.0.0" \
-  python packages/shared/elastic/create_indices.py
+  python packages/shared/elastic/elastic/create_indices.py
 
 echo ""
 echo "=== Migrations completed ==="
