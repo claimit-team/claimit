@@ -23,6 +23,7 @@ from fastapi import FastAPI, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .draft.type_a_email import generate_email_draft
+from .draft.type_b_chat import generate_chat_script
 from .plan import PriceDroppedEvent, plan_claim
 
 _log = logging.getLogger(__name__)
@@ -80,12 +81,8 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         db = MongoDBClient()
         claim_plan = await plan_claim(event, db)
 
-        if claim_plan.draft_generator != "type_a_email":
-            _log.info(
-                "Skipping non-email draft generator %s for purchase %s",
-                claim_plan.draft_generator,
-                event.purchase_id,
-            )
+        if claim_plan.draft_generator not in ("type_a_email", "type_b_chat"):
+            _log.info("Skipping unsupported generator %s", claim_plan.draft_generator)
             return {"status": "skipped", "reason": claim_plan.draft_generator}
 
         purchase = await db.get_purchase(event.purchase_id)
@@ -143,14 +140,22 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             trace_id=event.event_id,
         )
 
-        draft = await generate_email_draft(
-            temp_claim,
-            purchase,
-            policy,
-            search_client,
-            user_name=user_name,
-            current_price=event.current_price,
-        )
+        if claim_plan.draft_generator == "type_a_email":
+            draft = await generate_email_draft(
+                temp_claim,
+                purchase,
+                policy,
+                search_client,
+                user_name=user_name,
+                current_price=event.current_price,
+            )
+        elif claim_plan.draft_generator == "type_b_chat":
+            draft = await generate_chat_script(
+                temp_claim, purchase, policy, search_client, user_name=user_name
+            )
+        else:
+            _log.info("Skipping unsupported generator %s", claim_plan.draft_generator)
+            return {"status": "skipped", "reason": claim_plan.draft_generator}
 
         # Persist claim with real draft content
         generated_version = DraftVersion(
@@ -169,7 +174,8 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         await db.upsert_claim(final_claim)
 
         _log.info(
-            "Generated type_a_email draft for claim %s (purchase %s)",
+            "Generated %s draft for claim %s (purchase %s)",
+            claim_plan.draft_generator,
             claim_id,
             event.purchase_id,
         )
