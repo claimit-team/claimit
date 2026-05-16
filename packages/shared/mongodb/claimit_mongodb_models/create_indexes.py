@@ -20,7 +20,14 @@ INDEX_DEFINITIONS: dict[str, list[dict[str, Any]]] = {
         {"keys": [("user_id", 1), ("status", 1)]},
         {"keys": [("window_expires", 1)]},
         {"keys": [("user_id", 1), ("platform", 1), ("order_id", 1)], "unique": True},
-        {"keys": [("receipt_hash", 1)], "unique": True},
+        # Partial unique: only indexes documents with a string receipt_hash so
+        # multiple null/missing hashes are allowed. If upgrading an existing DB,
+        # drop the old receipt_hash_1 index before re-running create_indexes.
+        {
+            "keys": [("receipt_hash", 1)],
+            "unique": True,
+            "partialFilterExpression": {"receipt_hash": {"$type": "string"}},
+        },
     ],
     "price_history": [
         {"keys": [("purchase_id", 1), ("checked_at", -1)]},
