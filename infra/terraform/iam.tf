@@ -39,7 +39,7 @@ resource "google_cloud_run_v2_service_iam_member" "ci_invoker" {
     "claimit-sync-worker",
   ])
   location = var.region
-  service  = each.value
+  name     = each.value
   role     = "roles/run.invoker"
   member   = "serviceAccount:claimit-ci@${var.project_id}.iam.gserviceaccount.com"
 }
