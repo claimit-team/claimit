@@ -36,10 +36,13 @@ import importlib.util
 import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 
 import vertexai
+from google.api_core import exceptions as gcp_exc
 from google.cloud import secretmanager
+from google.cloud.aiplatform_v1.types.env_var import SecretRef
 from vertexai.agent_engines import AdkApp
 
 # (agent_top_level_name, dotted_module_path)
@@ -145,6 +148,16 @@ def deploy_one(
         "requirements": ADK_REQUIREMENTS,
         "display_name": agent_name,
         "agent_framework": AGENT_FRAMEWORK,
+        "env_vars": {
+            # MCP toolset (mongodb-mcp-server stdio child process) reads this
+            # env var to connect. Per Will's verify (May 15): McpToolset env=None
+            # in factory + SecretRef here = URI not baked into pickle, Agent
+            # Engine runtime fetches latest from Secret Manager at process start.
+            "MDB_MCP_CONNECTION_STRING": SecretRef(
+                secret="mongodb-uri",
+                version="latest",
+            ),
+        },
     }
 
     existing = find_existing_agent(client, agent_name)
@@ -181,12 +194,32 @@ def deploy_one(
 
 
 def write_secret(sm_client, project: str, secret_id: str, value: str) -> None:
-    """Add a version to an existing Secret Manager secret. Fail fast if missing —
-    the secret container should be Terraform-managed (shared_secret_ids in main.tf)."""
+    """Add a version to an existing Secret Manager secret.
+
+    Retries on NotFound to absorb the race with deploy-prod.yml's
+    terraform-apply job (which creates the secret container). 6 attempts
+    x 30s = up to 3 minutes total wait.
+    """
     parent = f"projects/{project}/secrets/{secret_id}"
     payload = {"data": value.encode("utf-8")}
-    sm_client.add_secret_version(parent=parent, payload=payload)
-    print(f"  ✓ Secret Manager: {secret_id} updated")
+    last_err: Exception | None = None
+    for attempt in range(6):
+        try:
+            sm_client.add_secret_version(parent=parent, payload=payload)
+            print(f"  ✓ Secret Manager: {secret_id} updated")
+            return
+        except gcp_exc.NotFound as e:
+            last_err = e
+            if attempt < 5:
+                print(
+                    f"  ! Secret {secret_id} not found yet "
+                    f"(attempt {attempt + 1}/6), waiting 30s..."
+                )
+                time.sleep(30)
+    raise RuntimeError(
+        f"Secret {secret_id} not found after 6 attempts x 30s. "
+        f"Has deploy-prod.yml terraform-apply run yet? Last error: {last_err}"
+    )
 
 
 async def verify_one_async(client, sm_client, project: str, agent_name: str) -> bool:

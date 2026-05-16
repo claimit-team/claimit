@@ -13,6 +13,7 @@ resource "google_storage_bucket" "adk_staging" {
   force_destroy = false
 
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
 
   # ADK uploads source bundles per deploy; old versions get GC'd
   # by SDK itself, but a hard cap is a safety net.

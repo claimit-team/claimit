@@ -25,8 +25,6 @@ jobs:
   auth-gcp:
     name: Authenticate to GCP
     runs-on: ubuntu-latest
-    outputs:
-      project_id: ${{ steps.project.outputs.project_id }}
     steps:
       - name: Authenticate
         uses: google-github-actions/auth@v2
@@ -37,13 +35,6 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
-
-      - name: Confirm project
-        id: project
-        run: |
-          PROJECT=$(gcloud config get-value project)
-          echo "Active project: $PROJECT"
-          echo "project_id=$PROJECT" >> "$GITHUB_OUTPUT"
 
   install-deps:
     name: Install ADK + Vertex SDK
@@ -103,11 +94,16 @@ jobs:
         env:
           GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
           GOOGLE_CLOUD_LOCATION: ${{ vars.GCP_REGION || env.GCP_REGION }}
+          # Agent factories (claimit_mcp.get_mongodb_mcp_toolset) read MONGODB_URI
+          # at module-load time and raise if unset. Real value is injected at
+          # runtime via SecretRef in config.env_vars (see scripts/deploy_agents.py).
+          MONGODB_URI: "mongodb://placeholder-only-for-import"
         run: |
           uv run --no-project \
             --python "3.12" \
             --with "google-cloud-aiplatform[agent_engines,adk]" \
             --with "google-cloud-secret-manager>=2.0.0" \
+            --with-editable "packages/shared/mcp" \
             python scripts/deploy_agents.py
 
   verify-agents:
@@ -142,11 +138,16 @@ jobs:
         env:
           GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
           GOOGLE_CLOUD_LOCATION: ${{ vars.GCP_REGION || env.GCP_REGION }}
+          # Same placeholder rationale as deploy-adk: agent factories read this
+          # at import time. --verify-only doesn't import agents, but mirror for
+          # consistency / safety against future code paths.
+          MONGODB_URI: "mongodb://placeholder-only-for-import"
         run: |
           uv run --no-project \
             --python "3.12" \
             --with "google-cloud-aiplatform[agent_engines,adk]" \
             --with "google-cloud-secret-manager>=2.0.0" \
+            --with-editable "packages/shared/mcp" \
             python scripts/deploy_agents.py --verify-only
 
   notify-failure:
