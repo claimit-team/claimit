@@ -27,10 +27,22 @@ class OverallMinResult(TypedDict):
 
 
 def get_confidence_threshold() -> float:
+    """Read the threshold from CLAIMIT_CONFIDENCE_THRESHOLD with safe fallback.
+
+    Returns DEFAULT_CONFIDENCE_THRESHOLD if the env var is unset, empty,
+    non-numeric, or outside the inclusive 0.0-1.0 range. Silent fallback is
+    intentional so a malformed deployment config can't take down ingestion.
+    """
     raw = os.environ.get(_CONFIDENCE_THRESHOLD_ENV)
     if raw is None or raw.strip() == "":
         return DEFAULT_CONFIDENCE_THRESHOLD
-    return float(raw)
+    try:
+        threshold = float(raw.strip())
+    except (TypeError, ValueError):
+        return DEFAULT_CONFIDENCE_THRESHOLD
+    if not 0.0 <= threshold <= 1.0:
+        return DEFAULT_CONFIDENCE_THRESHOLD
+    return threshold
 
 
 def compute_overall_min(field_confidences: dict[str, float | None]) -> OverallMinResult:

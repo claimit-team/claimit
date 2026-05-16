@@ -80,6 +80,27 @@ def test_threshold_env_var_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result["critical_field_below_threshold"] is None
 
 
+@pytest.mark.parametrize("bad_value", ["", "   ", "not-a-number", "0.95x", "nan-ish"])
+def test_threshold_env_var_malformed_falls_back_to_default(
+    monkeypatch: pytest.MonkeyPatch, bad_value: str
+) -> None:
+    monkeypatch.setenv("CLAIMIT_CONFIDENCE_THRESHOLD", bad_value)
+    assert get_confidence_threshold() == pytest.approx(DEFAULT_CONFIDENCE_THRESHOLD)
+
+
+@pytest.mark.parametrize("bad_value", ["-0.1", "1.01", "2", "-1", "100"])
+def test_threshold_env_var_out_of_range_falls_back_to_default(
+    monkeypatch: pytest.MonkeyPatch, bad_value: str
+) -> None:
+    monkeypatch.setenv("CLAIMIT_CONFIDENCE_THRESHOLD", bad_value)
+    assert get_confidence_threshold() == pytest.approx(DEFAULT_CONFIDENCE_THRESHOLD)
+
+
+def test_threshold_env_var_whitespace_trimmed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CLAIMIT_CONFIDENCE_THRESHOLD", "  0.42  ")
+    assert get_confidence_threshold() == pytest.approx(0.42)
+
+
 def test_exactly_at_threshold_does_not_trigger(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CLAIMIT_CONFIDENCE_THRESHOLD", raising=False)
     threshold = DEFAULT_CONFIDENCE_THRESHOLD
