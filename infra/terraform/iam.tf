@@ -30,7 +30,7 @@ resource "google_project_iam_member" "agent_aiplatform_user" {
 # deploy-prod workflow's verify_health step can hit /health with an
 # identity token. Service names listed in full (sync-worker breaks the
 # claimit-${name}-agent suffix pattern).
-resource "google_cloud_run_service_iam_member" "ci_invoker" {
+resource "google_cloud_run_v2_service_iam_member" "ci_invoker" {
   for_each = toset([
     "claimit-ingest-agent",
     "claimit-monitor-agent",
