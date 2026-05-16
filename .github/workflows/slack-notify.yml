@@ -1,0 +1,160 @@
+name: Slack Notifications
+
+on:
+  pull_request:
+    types: [opened, synchronize, review_requested, closed]
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [opened, assigned]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Slack
+        uses: actions/github-script@v7
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+        with:
+          script: |
+            // ============================================================
+            // 👇 在这里填写你们团队的 GitHub用户名 → Slack UserID 映射
+            // Slack UserID 获取方法：在 Slack 点击头像 → Profile → 三点菜单 → Copy member ID
+            // ============================================================
+            const USER_MAP = {
+              "kimblewick":    "U0B269ALFJT",  // Raj Kavathekar
+              "Chrishhh9874":  "U0B2KLK0M53",  // Kewen Chen
+              "ErdunE":        "U0B2FBL7E5R",  // Erdun E
+              "QingyuanWan":   "U0B2FBX6D99",  // Qingyuan Wan
+            };
+
+            function slackMention(githubUser) {
+              if (!githubUser) return "（未知用户）";
+              const id = USER_MAP[githubUser];
+              return id ? `<@${id}>` : `@${githubUser}`;
+            }
+
+            const token = process.env.SLACK_BOT_TOKEN;
+            const channel = process.env.SLACK_CHANNEL_ID;
+            const event = context.eventName;
+            const payload = context.payload;
+
+            let text = null;
+
+            // ── PR Opened ────────────────────────────────────────────
+            if (event === "pull_request" && payload.action === "opened") {
+              const pr = payload.pull_request;
+              const author = slackMention(pr.user.login);
+              const reviewers = (pr.requested_reviewers || [])
+                .map(r => slackMention(r.login)).join(" ") || "(no reviewers assigned)";
+
+              text = `🆕 *New PR Opened*\n` +
+                     `Author: ${author}\n` +
+                     `Reviewers: ${reviewers}\n` +
+                     `<${pr.html_url}|${pr.title}>`;
+            }
+
+            // ── PR Updated (new commit pushed) ───────────────────────
+            else if (event === "pull_request" && payload.action === "synchronize") {
+              const pr = payload.pull_request;
+              const author = slackMention(pr.user.login);
+              const reviewers = (pr.requested_reviewers || [])
+                .map(r => slackMention(r.login)).join(" ") || "";
+
+              text = `🔄 *PR Updated with New Commit*\n` +
+                     `Author: ${author}  ${reviewers ? `Reviewers: ${reviewers}` : ""}\n` +
+                     `<${pr.html_url}|${pr.title}>`;
+            }
+
+            // ── PR Review Requested ──────────────────────────────────
+            else if (event === "pull_request" && payload.action === "review_requested") {
+              const pr = payload.pull_request;
+              const author = slackMention(pr.user.login);
+              const reviewer = slackMention(payload.requested_reviewer?.login);
+
+              text = `👀 *Review Requested*\n` +
+                     `${reviewer} please review ${author}'s PR\n` +
+                     `<${pr.html_url}|${pr.title}>`;
+            }
+
+            // ── PR Merged ────────────────────────────────────────────
+            else if (event === "pull_request" && payload.action === "closed" && payload.pull_request.merged) {
+              const pr = payload.pull_request;
+              const author = slackMention(pr.user.login);
+              const merger = slackMention(payload.sender.login);
+
+              text = `✅ *PR Merged*\n` +
+                     `${merger} merged ${author}'s PR\n` +
+                     `<${pr.html_url}|${pr.title}>`;
+            }
+
+            // ── Issue Opened ─────────────────────────────────────────
+            else if (event === "issues" && payload.action === "opened") {
+              const issue = payload.issue;
+              const author = slackMention(issue.user.login);
+              const assignees = (issue.assignees || [])
+                .map(a => slackMention(a.login)).join(" ") || "(unassigned)";
+
+              text = `🐛 *New Issue Opened*\n` +
+                     `Author: ${author}  Assigned to: ${assignees}\n` +
+                     `<${issue.html_url}|${issue.title}>`;
+            }
+
+            // ── Issue Assigned ───────────────────────────────────────
+            else if (event === "issues" && payload.action === "assigned") {
+              const issue = payload.issue;
+              const assignee = slackMention(payload.assignee?.login);
+
+              text = `📌 *Issue Assigned*\n` +
+                     `${assignee} has been assigned an issue\n` +
+                     `<${issue.html_url}|${issue.title}>`;
+            }
+
+            // ── PR Review Submitted (approve / request changes / comment) ──
+            else if (event === "pull_request_review") {
+              const review = payload.review;
+              const pr = payload.pull_request;
+              const reviewer = slackMention(review.user?.login);
+              const author = slackMention(pr.user.login);
+              const stateMap = {
+                "approved": "✅ Approved",
+                "changes_requested": "🔁 Changes Requested",
+                "commented": "💬 Commented",
+              };
+              const state = stateMap[review.state] || review.state;
+
+              text = `${state} *PR Review*\n` +
+                     `${reviewer} ${state.toLowerCase()} ${author}'s PR\n` +
+                     `<${pr.html_url}|${pr.title}>`;
+            }
+
+            // ── CI/CD Failed ─────────────────────────────────────────
+            else if (event === "workflow_run" && payload.workflow_run.conclusion === "failure") {
+              const run = payload.workflow_run;
+              const actor = slackMention(run.triggering_actor?.login);
+
+              text = `🔴 *CI/CD Failed*\n` +
+                     `Triggered by: ${actor}\n` +
+                     `Workflow: <${run.html_url}|${run.name}> failed on \`${run.head_branch}\``;
+            }
+
+            // ── 发送到 Slack ─────────────────────────────────────────
+            if (text) {
+              const resp = await fetch("https://slack.com/api/chat.postMessage", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${token}`,
+                },
+                body: JSON.stringify({ channel, text }),
+              });
+              const result = await resp.json();
+              if (!result.ok) {
+                core.setFailed(`Slack API error: ${result.error}`);
+              }
+            }
