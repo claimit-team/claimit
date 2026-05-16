@@ -351,11 +351,19 @@ def _purchase_payload(
 
 
 def _hashable_receipt_content(email: EmailForExtraction) -> str:
-    """Return text to hash for dedup, preferring body then attachments."""
-    hashable = email.body_text.strip()
-    if not hashable:
-        hashable = (email.pdf_text or "") + "".join(email.attachment_texts)
-    return hashable.strip()
+    """Return canonical text to hash for dedup across all available sources."""
+    parts: list[str] = []
+
+    body = email.body_text.strip()
+    if body:
+        parts.append(body)
+
+    pdf = (email.pdf_text or "").strip()
+    if pdf:
+        parts.append(pdf)
+
+    parts.extend(text.strip() for text in email.attachment_texts if text.strip())
+    return "\n---receipt-part---\n".join(parts)
 
 
 async def extract(

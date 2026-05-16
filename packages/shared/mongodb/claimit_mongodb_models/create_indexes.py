@@ -10,6 +10,7 @@ import os
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo.errors import OperationFailure
 
 INDEX_DEFINITIONS: dict[str, list[dict[str, Any]]] = {
     "users": [
@@ -21,8 +22,7 @@ INDEX_DEFINITIONS: dict[str, list[dict[str, Any]]] = {
         {"keys": [("window_expires", 1)]},
         {"keys": [("user_id", 1), ("platform", 1), ("order_id", 1)], "unique": True},
         # Partial unique: only indexes documents with a string receipt_hash so
-        # multiple null/missing hashes are allowed. If upgrading an existing DB,
-        # drop the old receipt_hash_1 index before re-running create_indexes.
+        # multiple null/missing hashes are allowed.
         {
             "keys": [("receipt_hash", 1)],
             "unique": True,
@@ -70,7 +70,18 @@ async def create_indexes(
             for spec in specs:
                 keys = spec["keys"]
                 kwargs = {k: v for k, v in spec.items() if k != "keys"}
-                name = await collection.create_index(keys, **kwargs)
+                try:
+                    name = await collection.create_index(keys, **kwargs)
+                except OperationFailure as exc:
+                    if (
+                        collection_name == "purchases"
+                        and keys == [("receipt_hash", 1)]
+                        and getattr(exc, "code", None) == 85
+                    ):
+                        await collection.drop_index("receipt_hash_1")
+                        name = await collection.create_index(keys, **kwargs)
+                    else:
+                        raise
                 created.append(name)
             result[collection_name] = created
         return result
