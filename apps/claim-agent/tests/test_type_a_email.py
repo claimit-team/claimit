@@ -26,7 +26,6 @@ from claimit_mongodb_models import (
     PurchaseDateBasis,
     PurchaseStatus,
 )
-
 from src.draft.models import ClaimDraft
 from src.draft.type_a_email import generate_email_draft
 
@@ -89,9 +88,7 @@ def _make_purchase(
         ingestion_source=IngestionSource.GMAIL,
         receipt_storage_url=None,
         receipt_hash=None,
-        extraction_confidence=ExtractionConfidence(
-            platform=0.95, price=0.95, overall_min=0.90
-        ),
+        extraction_confidence=ExtractionConfidence(platform=0.95, price=0.95, overall_min=0.90),
     )
 
 
@@ -237,9 +234,7 @@ async def test_hilton_suite_scenario() -> None:
         "and stay dates are met and a lower publicly available rate is verifiable "
         "at the time the claim is submitted."
     )
-    purchase = _make_purchase(
-        Platform.HILTON, price_paid=800.0, order_id="HILTON-SUITE-9999"
-    )
+    purchase = _make_purchase(Platform.HILTON, price_paid=800.0, order_id="HILTON-SUITE-9999")
     claim = _make_claim(purchase, claim_amount=150.0)
     policy = _make_policy(Platform.HILTON, "pricematch@hilton.com", clause)
     mock_search = _mock_search_client(clause)

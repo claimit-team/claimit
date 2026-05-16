@@ -146,9 +146,7 @@ async def _run_draft_agent(platform: str, policy_clause: str) -> str | None:
                 if event.is_final_response():
                     final_text = _extract_event_text(event)
     except TimeoutError as exc:
-        raise DraftGenerationError(
-            f"Draft generation timed out for session {session_id}"
-        ) from exc
+        raise DraftGenerationError(f"Draft generation timed out for session {session_id}") from exc
 
     return final_text
 
@@ -228,9 +226,7 @@ async def generate_email_draft(
     filled_subject = _fill_placeholders(draft_output.subject, **kwargs)
 
     if not policy.claim_email or not policy.claim_email.strip():
-        raise DraftGenerationError(
-            f"No claim email configured for platform '{purchase.platform}'"
-        )
+        raise DraftGenerationError(f"No claim email configured for platform '{purchase.platform}'")
 
     return ClaimDraft(
         claim_id=claim.id,
