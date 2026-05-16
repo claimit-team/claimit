@@ -26,12 +26,28 @@ resource "google_project_iam_member" "agent_aiplatform_user" {
   member  = "serviceAccount:${each.value}"
 }
 
-# CI service account needs run.invoker on each agent service so the deploy-prod
-# workflow's verify_health step can hit /health with an identity token.
-resource "google_cloud_run_service_iam_member" "ci_invoker" {
-  for_each = toset(["ingest", "monitor", "claim", "assistant"])
+# CI service account needs run.invoker on each Cloud Run service so the
+# deploy-prod workflow's verify_health step can hit /health with an
+# identity token. Service names listed in full (sync-worker breaks the
+# claimit-${name}-agent suffix pattern).
+resource "google_cloud_run_v2_service_iam_member" "ci_invoker" {
+  for_each = toset([
+    "claimit-ingest-agent",
+    "claimit-monitor-agent",
+    "claimit-claim-agent",
+    "claimit-assistant-agent",
+    "claimit-sync-worker",
+  ])
   location = var.region
-  service  = "claimit-${each.value}-agent"
+  name     = each.value
   role     = "roles/run.invoker"
   member   = "serviceAccount:claimit-ci@${var.project_id}.iam.gserviceaccount.com"
+}
+
+# CI service account needs aiplatform.user to deploy ADK agent definitions
+# via scripts/deploy_agents.py in the deploy-agents.yml workflow (ticket 1.29).
+resource "google_project_iam_member" "ci_aiplatform_user" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:claimit-ci@${var.project_id}.iam.gserviceaccount.com"
 }

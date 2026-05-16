@@ -8,29 +8,20 @@ Read-only mode is the default; agents that mutate collections (ingest, monitor,
 claim) must pass `read_only=False`.
 """
 
-import os
-
 from google.adk.tools.mcp_tool import McpToolset
 from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
 from mcp import StdioServerParameters
 
 
 def get_mongodb_mcp_toolset(read_only: bool = True) -> McpToolset:
-    """Build an ADK McpToolset that proxies to mongodb-mcp-server.
+    """MongoDB MCP toolset factory.
 
-    Args:
-        read_only: If True, starts the MCP server in read-only mode (the server
-            refuses insert/update/delete operations). Set False for ingest /
-            monitor / claim, which write to MongoDB.
-
-    Raises:
-        ValueError: when MONGODB_URI is not set. Agents must have the secret
-            mounted via Cloud Run env (see main.tf secret_env_map).
+    env=None lets the child process inherit the parent's environment.
+    On Agent Engine runtime, MDB_MCP_CONNECTION_STRING is injected via
+    SecretRef in deploy_agents.py. On Cloud Run, it comes from
+    secret_env_map in Terraform. Either way, the URI is never baked
+    into the toolset object (and therefore never into cloudpickle).
     """
-    connection_string = os.environ.get("MONGODB_URI", "")
-    if not connection_string:
-        raise ValueError("MONGODB_URI environment variable is required for MongoDB MCP")
-
     # Pin to npm's `latest` tag so npx resolves the registry on each launch
     # (without `@latest`, npx may return a cached binary). For a stricter pin,
     # swap "@latest" for a concrete version like "@0.1.2" once a known-good
@@ -44,9 +35,7 @@ def get_mongodb_mcp_toolset(read_only: bool = True) -> McpToolset:
             server_params=StdioServerParameters(
                 command="npx",
                 args=args,
-                env={
-                    "MDB_MCP_CONNECTION_STRING": connection_string,
-                },
+                env=None,
             ),
             timeout=30,
         ),

@@ -7,6 +7,7 @@ on:
       - "infra/**"
       - "apps/*-agent/**"
       - "!apps/*-agent/src/agent.py"
+      - "apps/sync-worker/**"
       - "apps/web/**"
       - ".github/workflows/deploy-prod.yml"
 
@@ -85,6 +86,8 @@ jobs:
             dockerfile: apps/Dockerfile.agent
           - agent: monitor-agent
             dockerfile: apps/monitor-agent/Dockerfile
+          - agent: sync-worker
+            dockerfile: apps/Dockerfile.agent
     steps:
       - uses: actions/checkout@v4
 
@@ -126,7 +129,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        agent: [ingest-agent, claim-agent, assistant-agent, monitor-agent]
+        agent: [ingest-agent, claim-agent, assistant-agent, monitor-agent, sync-worker]
     steps:
       - uses: actions/checkout@v4
 
