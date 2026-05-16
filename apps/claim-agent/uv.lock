@@ -353,9 +353,11 @@ name = "claimit-claim-agent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "claimit-elastic" },
     { name = "claimit-mcp" },
     { name = "claimit-mongodb-models" },
     { name = "claimit-observability" },
+    { name = "claimit-search" },
     { name = "fastapi" },
     { name = "google-adk" },
     { name = "httpx" },
@@ -375,9 +377,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "claimit-elastic", directory = "../../packages/shared/elastic" },
     { name = "claimit-mcp", directory = "../../packages/shared/mcp" },
     { name = "claimit-mongodb-models", directory = "../../packages/shared/mongodb" },
     { name = "claimit-observability", directory = "../../packages/shared/observability" },
+    { name = "claimit-search", directory = "../../packages/shared/search" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "google-adk", specifier = ">=1.0.0" },
     { name = "httpx", specifier = ">=0.27.0" },
@@ -393,6 +397,21 @@ dev = [
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.24.0" },
     { name = "ruff", specifier = ">=0.6.0" },
+]
+
+[[package]]
+name = "claimit-elastic"
+version = "0.1.0"
+source = { directory = "../../packages/shared/elastic" }
+dependencies = [
+    { name = "elasticsearch", extra = ["async"] },
+    { name = "motor" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "elasticsearch", extras = ["async"], specifier = ">=8.0.0" },
+    { name = "motor", specifier = ">=3.6.0" },
 ]
 
 [[package]]
@@ -447,6 +466,17 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-pymongo", specifier = ">=0.48b0" },
     { name = "opentelemetry-sdk", specifier = ">=1.27.0" },
 ]
+
+[[package]]
+name = "claimit-search"
+version = "0.1.0"
+source = { directory = "../../packages/shared/search" }
+dependencies = [
+    { name = "claimit-elastic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "claimit-elastic" }]
 
 [[package]]
 name = "click"
@@ -556,6 +586,41 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e0/4d/f332313098c1de1b2d2ff91cf2674415cc7cddab2ca1b01ae29774bd5fdf/docstring_parser-0.18.0.tar.gz", hash = "sha256:292510982205c12b1248696f44959db3cdd1740237a968ea1e2e7a900eeb2015", size = 29341, upload-time = "2026-04-14T04:09:19.867Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a7/5f/ed01f9a3cdffbd5a008556fc7b2a08ddb1cc6ace7effa7340604b1d16699/docstring_parser-0.18.0-py3-none-any.whl", hash = "sha256:b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b", size = 22484, upload-time = "2026-04-14T04:09:18.638Z" },
+]
+
+[[package]]
+name = "elastic-transport"
+version = "9.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
+    { name = "sniffio" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/81/3f/076b7cdc93ff4c7953a76e8e64830e6ff0352cd713d338abc601f142b75f/elastic_transport-9.4.0.tar.gz", hash = "sha256:4eff263c8011dd950451b72be567a2484b814a89c70081053d6ae6addeab52e2", size = 77819, upload-time = "2026-05-05T14:40:54.136Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/17/8d6ee5cd6218f03b195cc017e9e8e09b3df48ebc307903d09cf9f04ff0fe/elastic_transport-9.4.0-py3-none-any.whl", hash = "sha256:2dbb907ededa14e6ff5be058f8737bbba3926bd1b1a40dbc98a471285fa2cb3c", size = 65358, upload-time = "2026-05-05T14:40:52.545Z" },
+]
+
+[[package]]
+name = "elasticsearch"
+version = "9.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "elastic-transport" },
+    { name = "python-dateutil" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7d/2d/413775b172c6983c7cdbbdc3ac2be71eb00679510a536081801b387a2c8c/elasticsearch-9.4.0.tar.gz", hash = "sha256:95e38e130b1d01438b19343dfa0458e1857a7df8e2e30cbf23a72182b03f05ff", size = 907191, upload-time = "2026-05-06T11:12:51.996Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/a1/193be12421e0db8e786c1592b449f9cadef240970d391bf94b7bb07ca195/elasticsearch-9.4.0-py3-none-any.whl", hash = "sha256:e20095ba40229f4562f7cc951883c7c62a017435f94dbe0c21526f58ba411885", size = 992735, upload-time = "2026-05-06T11:12:48.267Z" },
+]
+
+[package.optional-dependencies]
+async = [
+    { name = "aiohttp" },
 ]
 
 [[package]]
