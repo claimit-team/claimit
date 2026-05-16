@@ -126,11 +126,7 @@ def get_mcp_wheel_path() -> str:
     + extra_packages is the recommended pattern for multi-agent system
     deployment where remote unpickling needs workspace-local modules.
     """
-    repo_root = os.getcwd()
-    pattern = os.path.join(
-        repo_root,
-        "packages/shared/mcp/dist/claimit_mcp-*-py3-none-any.whl",
-    )
+    pattern = "packages/shared/mcp/dist/claimit_mcp-*-py3-none-any.whl"
     candidates = sorted(glob.glob(pattern))
     if not candidates:
         raise FileNotFoundError(
@@ -191,11 +187,28 @@ def deploy_one(
         "display_name": agent_name,
         "agent_framework": AGENT_FRAMEWORK,
         "env_vars": env_vars,
-        # Workspace-local claimit_mcp packaged as wheel, uploaded to staging
-        # bucket via this SDK call, then pip-installed by Agent Engine server
-        # into the Reasoning Engine container before cloudpickle.loads() runs.
-        # Resolves ModuleNotFoundError observed when container starts up.
-        "extra_packages": [get_mcp_wheel_path()],
+        # Workspace-local claimit_mcp packaged as wheel + a shell hook that
+        # pip-installs it during Reasoning Engine container build. Server
+        # extracts extra_packages tarball, then chmod+x and runs every script
+        # listed in build_options.installation_scripts. The script runs BEFORE
+        # cloudpickle.loads(agent.pkl), so 'from claimit_mcp import ...' in
+        # apps/*-agent/src/agent.py resolves at unpickle time.
+        #
+        # Path constraints (per vertexai SDK validate_installation_scripts):
+        #   - Script path must start with literal "installation_scripts/" prefix
+        #   - Script path must appear in BOTH extra_packages and
+        #     build_options.installation_scripts
+        #   - Wheel path is outside installation_scripts/ subdir, so the
+        #     reverse check (extra_pkg under subdir but not declared) is fine.
+        "extra_packages": [
+            get_mcp_wheel_path(),
+            "installation_scripts/install_claimit_mcp.sh",
+        ],
+        "build_options": {
+            "installation_scripts": [
+                "installation_scripts/install_claimit_mcp.sh",
+            ],
+        },
     }
 
     existing = find_existing_agent(client, agent_name)
