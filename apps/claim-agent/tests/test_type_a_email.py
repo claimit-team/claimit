@@ -27,7 +27,7 @@ from claimit_mongodb_models import (
     PurchaseStatus,
 )
 from src.draft.models import ClaimDraft
-from src.draft.type_a_email import generate_email_draft
+from src.draft.type_a_email import DraftGenerationError, generate_email_draft
 
 _NOW = datetime(2026, 3, 15, tzinfo=UTC)
 _CHECK_IN = datetime(2026, 4, 10, tzinfo=UTC)
@@ -271,3 +271,87 @@ async def test_empty_search_results_uses_policy_fallback() -> None:
     assert "{{" not in draft.subject
     assert draft.policy_clause_cited == fallback_clause
     assert draft.refund_amount == 30.0
+
+
+@pytest.mark.asyncio
+async def test_post_fill_placeholder_guard() -> None:
+    """generate_email_draft raises DraftGenerationError if filled output still has {{ tokens."""
+    purchase = _make_purchase(Platform.HILTON, price_paid=300.0, order_id="HILTON-001")
+    claim = _make_claim(purchase, claim_amount=50.0)
+    policy = _make_policy(Platform.HILTON, "reservations@hilton.com", "Some clause.")
+    mock_search = _mock_search_client("Some clause.")
+
+    bad_template = json.dumps({
+        "subject": "Price Match — {{ORDER_ID}}",
+        "email_body": "Dear {{USER_NAME}}, this contains {{UNKNOWN}}.",
+    })
+
+    with patch("src.draft.type_a_email._run_draft_agent", new_callable=AsyncMock) as mock_runner:
+        mock_runner.return_value = bad_template
+        with pytest.raises(DraftGenerationError, match="unreplaced placeholder"):
+            await generate_email_draft(claim, purchase, policy, mock_search)
+
+
+@pytest.mark.asyncio
+async def test_invalid_gemini_schema() -> None:
+    """generate_email_draft raises DraftGenerationError when JSON is missing required fields."""
+    purchase = _make_purchase(Platform.HILTON, price_paid=300.0, order_id="HILTON-001")
+    claim = _make_claim(purchase, claim_amount=50.0)
+    policy = _make_policy(Platform.HILTON, "reservations@hilton.com", "Some clause.")
+    mock_search = _mock_search_client("Some clause.")
+
+    bad_output = json.dumps({"email_body": "some body"})
+
+    with patch("src.draft.type_a_email._run_draft_agent", new_callable=AsyncMock) as mock_runner:
+        mock_runner.return_value = bad_output
+        with pytest.raises(DraftGenerationError):
+            await generate_email_draft(claim, purchase, policy, mock_search)
+
+
+@pytest.mark.asyncio
+async def test_missing_claim_email_fails_early() -> None:
+    """generate_email_draft raises DraftGenerationError before calling LLM if claim_email is None."""
+    purchase = _make_purchase(Platform.HILTON, price_paid=300.0, order_id="HILTON-001")
+    claim = _make_claim(purchase, claim_amount=50.0)
+    policy = _make_policy(Platform.HILTON, None, "Some clause.")  # type: ignore[arg-type]
+    mock_search = _mock_search_client("Some clause.")
+
+    with patch("src.draft.type_a_email._run_draft_agent", new_callable=AsyncMock) as mock_runner:
+        with pytest.raises(DraftGenerationError):
+            await generate_email_draft(claim, purchase, policy, mock_search)
+        mock_runner.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_search_exception_uses_fallback() -> None:
+    """When search_policies raises an exception, falls back to policy.policy_text_relevant_clause."""
+    clause = "Fallback guarantee clause."
+    purchase = _make_purchase(Platform.HILTON, price_paid=300.0, order_id="HILTON-001")
+    claim = _make_claim(purchase, claim_amount=50.0)
+    policy = _make_policy(Platform.HILTON, "reservations@hilton.com", clause)
+
+    failing_search = AsyncMock()
+    failing_search.search_policies.side_effect = Exception("network error")
+
+    with patch("src.draft.type_a_email._run_draft_agent", new_callable=AsyncMock) as mock_runner:
+        mock_runner.return_value = _MOCK_TEMPLATE
+        draft = await generate_email_draft(claim, purchase, policy, failing_search)
+
+    assert draft.policy_clause_cited == clause
+
+
+@pytest.mark.asyncio
+async def test_currency_formatting() -> None:
+    """Prices appear in the draft as $NNN.NN formatted strings."""
+    purchase = _make_purchase(Platform.HILTON, price_paid=300.0, order_id="HILTON-FMT-001")
+    claim = _make_claim(purchase, claim_amount=50.0)
+    policy = _make_policy(Platform.HILTON, "reservations@hilton.com", "Some clause.")
+    mock_search = _mock_search_client("Some clause.")
+
+    with patch("src.draft.type_a_email._run_draft_agent", new_callable=AsyncMock) as mock_runner:
+        mock_runner.return_value = _MOCK_TEMPLATE
+        draft = await generate_email_draft(claim, purchase, policy, mock_search)
+
+    assert "$300.00" in draft.draft_content
+    assert "$250.00" in draft.draft_content
+    assert "$50.00" in draft.draft_content

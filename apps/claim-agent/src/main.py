@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import base64
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from claimit_mongodb_models import (
     Claim,
@@ -108,7 +109,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         search_client = get_search_adapter()
 
         now = datetime.now(UTC)
-        claim_id = uuid4()
+        claim_id = uuid.uuid5(uuid.NAMESPACE_URL, event.event_id)
         placeholder = "Draft pending generation."
 
         # Temporary claim object satisfying the model validator (draft_content == draft_versions[-1].content)
@@ -143,7 +144,9 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         )
 
         draft = await generate_email_draft(
-            temp_claim, purchase, policy, search_client, user_name=user_name
+            temp_claim, purchase, policy, search_client,
+            user_name=user_name,
+            current_price=event.current_price,
         )
 
         # Persist claim with real draft content

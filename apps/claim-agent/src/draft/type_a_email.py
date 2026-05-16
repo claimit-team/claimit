@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -12,12 +13,14 @@ from google.adk import Agent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 if TYPE_CHECKING:
     from search.interface import SearchClient
 
 from .models import ClaimDraft
+
+_log = logging.getLogger(__name__)
 
 MODEL_NAME = "gemini-2.5-flash"
 APP_NAME = "claimit-claim-draft"
@@ -69,6 +72,9 @@ class DraftGenerationError(RuntimeError):
 
 
 async def _maybe_await(value: Any) -> Any:
+    # InMemorySessionService.create_session is currently sync, but other
+    # session service implementations (e.g. database-backed) may be async.
+    # This helper future-proofs the call site.
     if inspect.isawaitable(value):
         return await value
     return value
@@ -158,7 +164,12 @@ def _parse_draft_output(raw_output: str | None) -> _DraftOutput:
         payload = json.loads(_strip_json_fence(raw_output))
     except json.JSONDecodeError as exc:
         raise DraftGenerationError("Draft generator returned malformed JSON") from exc
-    return _DraftOutput.model_validate(payload)
+    try:
+        return _DraftOutput.model_validate(payload)
+    except ValidationError as exc:
+        raise DraftGenerationError(
+            "Draft generator returned invalid output schema"
+        ) from exc
 
 
 def _fill_placeholders(
@@ -194,13 +205,29 @@ async def generate_email_draft(
     policy: Policy,
     search_client: SearchClient,
     user_name: str = "Valued Customer",
+    current_price: float | None = None,
 ) -> ClaimDraft:
+    # Validate early — fail before wasting an LLM call
+    if not policy.claim_email or not policy.claim_email.strip():
+        raise DraftGenerationError(
+            f"No claim email configured for platform '{purchase.platform}'"
+        )
+
     # 1. Retrieve the most relevant policy clause via search
     query = f"{purchase.platform} price match guarantee refund eligibility"
-    results = await search_client.search_policies(query=query, limit=1)
+    try:
+        results = await search_client.search_policies(query=query, limit=1)
+    except Exception:
+        _log.warning(
+            "Policy search failed for platform %s, falling back to policy document clause",
+            purchase.platform,
+        )
+        results = []
+
     if results:
-        policy_clause = results[0].get(
-            "policy_text_relevant_clause", policy.policy_text_relevant_clause
+        policy_clause = (
+            results[0].get("policy_text_relevant_clause")
+            or policy.policy_text_relevant_clause
         )
     else:
         policy_clause = policy.policy_text_relevant_clause
@@ -210,14 +237,17 @@ async def generate_email_draft(
     draft_output = _parse_draft_output(raw_output)
 
     # 3. Programmatic placeholder substitution with real values
-    current_price = round(purchase.price_paid - claim.claim_amount, 2)
+    resolved_current_price = (
+        current_price if current_price is not None
+        else round(purchase.price_paid - claim.claim_amount, 2)
+    )
     kwargs = dict(
         order_id=purchase.order_id,
         check_in_date=purchase.purchase_date.strftime("%Y-%m-%d"),
         checkout_date=purchase.window_expires.strftime("%Y-%m-%d"),
-        original_price=str(purchase.price_paid),
-        current_price=str(current_price),
-        refund_amount=str(claim.claim_amount),
+        original_price=f"${purchase.price_paid:.2f}",
+        current_price=f"${resolved_current_price:.2f}",
+        refund_amount=f"${claim.claim_amount:.2f}",
         user_name=user_name,
         policy_citation=policy_clause,
     )
@@ -225,8 +255,10 @@ async def generate_email_draft(
     filled_body = _fill_placeholders(draft_output.email_body, **kwargs)
     filled_subject = _fill_placeholders(draft_output.subject, **kwargs)
 
-    if not policy.claim_email or not policy.claim_email.strip():
-        raise DraftGenerationError(f"No claim email configured for platform '{purchase.platform}'")
+    if "{{" in filled_body or "{{" in filled_subject:
+        raise DraftGenerationError(
+            "Draft contains unreplaced placeholder tokens"
+        )
 
     return ClaimDraft(
         claim_id=claim.id,
@@ -239,6 +271,6 @@ async def generate_email_draft(
         refund_amount=claim.claim_amount,
         currency=claim.currency,
         model_used=MODEL_NAME,
-        draft_version=1,
+        draft_version=len(claim.draft_versions) + 1,
         generated_at=datetime.now(UTC),
     )
