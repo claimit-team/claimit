@@ -8,7 +8,7 @@ on:
   issues:
     types: [opened, assigned]
   workflow_run:
-    workflows: ["*"]
+    workflows: ["CI"]
     types: [completed]
 
 jobs:
@@ -34,6 +34,7 @@ jobs:
             };
 
             function slackMention(githubUser) {
+              if (!githubUser) return "（未知用户）";
               const id = USER_MAP[githubUser];
               return id ? `<@${id}>` : `@${githubUser}`;
             }
@@ -112,6 +113,24 @@ jobs:
               text = `📌 *Issue 已分配*\n` +
                      `${assignee} 被分配了一个 Issue\n` +
                      `<${issue.html_url}|${issue.title}>`;
+            }
+
+            // ── PR Review 提交（approve / request changes / comment）──
+            else if (event === "pull_request_review") {
+              const review = payload.review;
+              const pr = payload.pull_request;
+              const reviewer = slackMention(review.user?.login);
+              const author = slackMention(pr.user.login);
+              const stateMap = {
+                "approved": "✅ 已批准",
+                "changes_requested": "🔁 请求修改",
+                "commented": "💬 留下评论",
+              };
+              const state = stateMap[review.state] || review.state;
+
+              text = `${state} *PR Review*\n` +
+                     `${reviewer} 对 ${author} 的 PR ${state}\n` +
+                     `<${pr.html_url}|${pr.title}>`;
             }
 
             // ── CI/CD 失败 ───────────────────────────────────────────
