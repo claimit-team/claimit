@@ -181,4 +181,4 @@ module "sync_worker" {
   depends_on = [google_secret_manager_secret.shared]
 }
 
-# Trigger plan workflow test - Sat May 16 2026 (post sync-worker fix)
+# Trigger plan workflow test - Sat May 16 2026 (post migration path fix)
