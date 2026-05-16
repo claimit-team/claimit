@@ -14,7 +14,7 @@ from google.adk import Agent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from src.confidence import compute_overall_min
 
@@ -131,6 +131,17 @@ class ExtractedPurchaseFields(BaseModel):
     order_id: str = Field(min_length=1)
     member_tier_at_purchase: str | None = None
     extraction_confidence: ExtractedFieldConfidence
+
+    @field_validator("price_paid", mode="after")
+    @classmethod
+    def _price_paid_must_be_positive(cls, value: float) -> float:
+        # Field-level constraint is `ge=0` (not `gt=0`) so Vertex AI accepts the
+        # JSON Schema (it rejects `exclusiveMinimum`). This runtime validator
+        # closes the gap so a $0 extraction still fails fast before reaching
+        # the Mongo Purchase model.
+        if value <= 0:
+            raise ValueError("price_paid must be greater than zero")
+        return value
 
 
 def _build_extractor_agent() -> Agent:
@@ -263,6 +274,26 @@ def _confidence_payload(confidence: ExtractedFieldConfidence) -> dict[str, float
     return payload
 
 
+def _resolve_status(fallback_used: bool, confidence: dict[str, float | None]) -> str:
+    """Pick the initial purchase status based on extraction outcome.
+
+    Priority order (highest wins):
+      1. `pending_user_edit` — product_id was missing and we synthesized a fallback;
+         user must edit before monitoring can be useful.
+      2. `pending_confirmation` — a critical field (platform, price_paid, order_id,
+         purchase_date) scored strictly below the configured threshold per master
+         doc 5.1; the user must confirm before monitoring starts.
+      3. `monitoring` — all critical fields cleared the threshold; auto-start
+         monitoring.
+    """
+    if fallback_used:
+        return "pending_user_edit"
+    agg = compute_overall_min(confidence)
+    if agg["critical_field_below_threshold"] is not None:
+        return "pending_confirmation"
+    return "monitoring"
+
+
 def _purchase_payload(
     email: EmailForExtraction,
     extracted: ExtractedPurchaseFields,
@@ -281,6 +312,8 @@ def _purchase_payload(
         fallback_used = True
         confidence["product_id"] = FALLBACK_PRODUCT_ID_CONFIDENCE
         _merge_confidence_aggregate(confidence)
+
+    status = _resolve_status(fallback_used, confidence)
 
     return {
         "_id": uuid4(),
@@ -305,7 +338,7 @@ def _purchase_payload(
         "window_expires": extracted.purchase_date + timedelta(days=DEFAULT_CLAIM_WINDOW_DAYS),
         "order_id": extracted.order_id,
         "member_tier_at_purchase": extracted.member_tier_at_purchase,
-        "status": "pending_user_edit" if fallback_used else "pending_confirmation",
+        "status": status,
         "claim_type": "self_service",
         "monitoring_cadence_minutes": DEFAULT_MONITORING_CADENCE_MINUTES,
         "ingested_at": timestamp,
