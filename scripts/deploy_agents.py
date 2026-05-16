@@ -42,7 +42,6 @@ from dataclasses import dataclass
 import vertexai
 from google.api_core import exceptions as gcp_exc
 from google.cloud import secretmanager
-from vertexai._genai.types.common import SecretRef
 from vertexai.agent_engines import AdkApp
 
 # (agent_top_level_name, dotted_module_path)
@@ -151,17 +150,19 @@ def deploy_one(
     # env_vars is the dict form `{env_var_name: SecretRef | str}` — verified
     # at runtime: the list-of-SecretEnvVar form (which the type hints suggest)
     # is rejected by the SDK serializer; the dict form is what actually works.
+    env_vars = {
+        "MDB_MCP_CONNECTION_STRING": {
+            "secret": "mongodb-uri",
+            "version": "latest",
+        },
+    }
+
     config = {
         "staging_bucket": staging_bucket,
         "requirements": ADK_REQUIREMENTS,
         "display_name": agent_name,
         "agent_framework": AGENT_FRAMEWORK,
-        "env_vars": {
-            "MDB_MCP_CONNECTION_STRING": SecretRef(
-                secret="mongodb-uri",
-                version="latest",
-            ),
-        },
+        "env_vars": env_vars,
     }
 
     existing = find_existing_agent(client, agent_name)
