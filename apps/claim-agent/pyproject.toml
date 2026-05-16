@@ -15,6 +15,7 @@ dependencies = [
     "claimit-observability",
     "claimit-mcp",
     "claimit-mongodb-models",
+    "claimit-elastic",
     "claimit-search",
 ]
 
