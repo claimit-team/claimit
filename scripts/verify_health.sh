@@ -12,7 +12,7 @@ set -euo pipefail
 echo "=== Verifying Cloud Run service health ==="
 
 REGION="${GCP_REGION:-us-east1}"
-AGENTS=(ingest-agent monitor-agent claim-agent assistant-agent sync-worker)
+AGENTS=(ingest-agent monitor-agent claim-agent assistant-agent sync-worker api-gateway)
 FAILED=()
 
 for agent in "${AGENTS[@]}"; do
