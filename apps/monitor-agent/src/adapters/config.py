@@ -78,10 +78,12 @@ def get_adapter(platform: str) -> PriceSourceAdapter:
 
     # Lazy import live adapters — they'll be added in tasks 4.2-4.11
     # For now, all live platforms fall back to seeded
+    if platform == "best_buy":
+        from .best_buy import BestBuyAdapter
+
+        return BestBuyAdapter()
+
     # TODO: uncomment as live adapters are implemented
-    # if platform == "best_buy":
-    #     from .best_buy import BestBuyAdapter
-    #     return BestBuyAdapter()
     # if platform == "hilton":
     #     from .hilton import HiltonAdapter
     #     return HiltonAdapter()

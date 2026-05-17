@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from src.adapters.base import PriceSourceAdapter
+from src.adapters.best_buy import BestBuyAdapter
 from src.adapters.config import get_adapter, should_use_live
 from src.adapters.seeded import SeededAdapter
 
@@ -80,19 +81,19 @@ class TestGetAdapter:
         adapter = get_adapter("best_buy")
         assert isinstance(adapter, SeededAdapter)
 
-    def test_mixed_mode_hero_returns_seeded_until_live_wired(
+    def test_mixed_mode_best_buy_returns_live_adapter(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Until live adapters are implemented, even hero platforms get SeededAdapter."""
+        """best_buy is a hero platform — mixed mode routes it to BestBuyAdapter."""
         monkeypatch.setenv("PRICE_SOURCE_MODE", "mixed")
+        monkeypatch.setenv("SCRAPERAPI_KEY", "test-key")
         monkeypatch.delenv("PRICE_SOURCE_OVERRIDES", raising=False)
         import src.adapters.config as cfg
 
         cfg._override_cache = None
 
         adapter = get_adapter("best_buy")
-        # Currently returns SeededAdapter as fallback; will change when BestBuyAdapter is wired
-        assert isinstance(adapter, SeededAdapter)
+        assert isinstance(adapter, BestBuyAdapter)
 
 
 class TestPriceSourceAdapterInterface:
