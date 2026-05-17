@@ -56,10 +56,12 @@ AGENT_MODULES = [
 ]
 
 DEFAULT_LOCATION = "us-east1"
-# Per Cloud Shell verify on May 15 2026, this is the canonical requirements
-# string per official Vertex AI docs. SDK will fallback-add cloudpickle/pydantic
-# automatically with a non-fatal warning.
-ADK_REQUIREMENTS = ["google-cloud-aiplatform[agent_engines,adk]"]
+# cloudpickle and pydantic must be explicit — SDK does not auto-add them.
+ADK_REQUIREMENTS = [
+    "google-cloud-aiplatform[agent_engines,adk]",
+    "cloudpickle",
+    "pydantic",
+]
 AGENT_FRAMEWORK = "google-adk"
 VERIFY_PROMPT = "Say hello"
 VERIFY_USER_ID = "deploy-agents-verify-bot"
