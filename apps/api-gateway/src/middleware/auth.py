@@ -29,9 +29,7 @@ async def get_current_user(
         decoded = firebase_admin.auth.verify_id_token(credentials.credentials)
     except firebase_admin.auth.InvalidIdTokenError as err:
         raise ApiError("unauthorized", "Invalid or expired token", status_code=401) from err
-    except firebase_admin.auth.ExpiredIdTokenError as err:
-        raise ApiError("unauthorized", "Invalid or expired token", status_code=401) from err
-    except firebase_admin.exceptions.TransportError as err:
+    except firebase_admin.exceptions.UnavailableError as err:
         raise ApiError(
             "service_unavailable",
             "Auth service temporarily unavailable",
