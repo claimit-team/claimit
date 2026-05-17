@@ -113,7 +113,16 @@ def import_agent(module_path: str, agent_name: str):
         raise ImportError(f"Cannot load {file_path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return getattr(module, agent_name)
+    agent_obj = getattr(module, agent_name)
+    print(f"  [DEBUG] Agent object type: {type(agent_obj).__name__}")
+    print(f"  [DEBUG] Agent name: {agent_obj.name}")
+    print(f"  [DEBUG] Agent model: {agent_obj.model}")
+    print(
+        f"  [DEBUG] Agent tools: "
+        f"{[t.__name__ if callable(t) else str(t)[:80] for t in (agent_obj.tools or [])]}"
+    )
+    print(f"  [DEBUG] Agent sub_agents: {[a.name for a in (agent_obj.sub_agents or [])]}")
+    return agent_obj
 
 
 def get_mcp_wheel_path() -> str:
@@ -136,6 +145,16 @@ def get_mcp_wheel_path() -> str:
             "CI must run 'uv build --wheel' in packages/shared/mcp/ "
             "before this script."
         )
+    import zipfile
+
+    whl = candidates[-1]
+    print(f"  [DEBUG] Wheel path: {whl}")
+    print(f"  [DEBUG] Wheel size: {os.path.getsize(whl)} bytes")
+    try:
+        with zipfile.ZipFile(whl) as zf:
+            print(f"  [DEBUG] Wheel contents: {zf.namelist()}")
+    except Exception as ze:
+        print(f"  [DEBUG] Wheel inspect failed: {ze}")
     return candidates[-1]  # latest version (alphabetic sort works for semver)
 
 
@@ -167,6 +186,18 @@ def deploy_one(
     # Wrap in AdkApp per docs. Verified: passing raw Agent works via fallback
     # but explicit AdkApp is the canonical pattern.
     adk_app = AdkApp(agent=raw_agent)
+    print(f"  [DEBUG] AdkApp created: {type(adk_app).__name__}")
+    # Test that cloudpickle can serialize — same check SDK does
+    try:
+        import cloudpickle
+
+        pkl_bytes = cloudpickle.dumps(adk_app)
+        print(f"  [DEBUG] cloudpickle.dumps OK ({len(pkl_bytes)} bytes)")
+        # Test roundtrip
+        restored = cloudpickle.loads(pkl_bytes)
+        print(f"  [DEBUG] cloudpickle.loads OK: {type(restored).__name__}")
+    except Exception as pkl_err:
+        print(f"  [DEBUG] cloudpickle FAILED: {type(pkl_err).__name__}: {pkl_err}")
 
     # MCP toolset (mongodb-mcp-server stdio child process) reads this env var
     # to connect. McpToolset env=None in the factory + SecretRef here = URI
@@ -213,6 +244,40 @@ def deploy_one(
         },
     }
 
+    # ── Diagnostic logging ──────────────────────────────────
+    print("  [DEBUG] Config keys:", list(config.keys()))
+    print(f"  [DEBUG] requirements: {config['requirements']}")
+    print(f"  [DEBUG] agent_framework: {config.get('agent_framework')}")
+    print(f"  [DEBUG] env_vars keys: {list(config.get('env_vars', {}).keys())}")
+
+    # extra_packages: verify files exist and show sizes
+    for ep in config.get("extra_packages", []):
+        if os.path.exists(ep):
+            size = os.path.getsize(ep)
+            print(f"  [DEBUG] extra_package: {ep} (exists, {size} bytes)")
+        else:
+            print(f"  [DEBUG] extra_package: {ep} (*** MISSING ***)")
+
+    # build_options
+    bo = config.get("build_options", {})
+    print(f"  [DEBUG] build_options: {bo}")
+    for script in bo.get("installation_scripts", []):
+        if os.path.exists(script):
+            mode = oct(os.stat(script).st_mode)[-3:]
+            print(f"  [DEBUG] install_script: {script} (exists, mode={mode})")
+            with open(script) as f:
+                content = f.read()
+            print(f"  [DEBUG] install_script content ({len(content)} chars):")
+            for line in content.strip().split("\n"):
+                print(f"  [DEBUG]   | {line}")
+        else:
+            print(f"  [DEBUG] install_script: {script} (*** MISSING ***)")
+
+    # staging bucket
+    print(f"  [DEBUG] staging_bucket: {config.get('staging_bucket')}")
+    print("  [DEBUG] ── end diagnostic ──")
+    # ────────────────────────────────────────────────────────
+
     existing = find_existing_agent(client, agent_name)
 
     if dry_run:
@@ -242,6 +307,9 @@ def deploy_one(
         action = "created"
 
     rn = remote.api_resource.name
+    print(f"  [DEBUG] RE resource_name: {rn}")
+    print(f"  [DEBUG] RE state: {getattr(remote.api_resource, 'state', 'unknown')}")
+    print(f"  [DEBUG] RE display_name: {getattr(remote.api_resource, 'display_name', 'unknown')}")
     print(f"  ✓ {action}: {rn}")
     return DeployResult(agent_name, rn, action)
 
@@ -372,6 +440,38 @@ def main() -> int:
     print(f"Location:       {location}")
     print(f"Staging bucket: {staging_bucket}")
     print(f"Mode:           {mode}")
+    # Environment diagnostics
+    print(f"[DEBUG] Python: {sys.version}")
+    print(f"[DEBUG] vertexai: {vertexai.__version__}")
+    try:
+        import google.cloud.aiplatform
+
+        print(f"[DEBUG] google-cloud-aiplatform: {google.cloud.aiplatform.__version__}")
+    except Exception:
+        print("[DEBUG] google-cloud-aiplatform: (version unknown)")
+    try:
+        import google.adk
+
+        print(f"[DEBUG] google-adk: {google.adk.__version__}")
+    except Exception:
+        print("[DEBUG] google-adk: (version unknown)")
+    print(f"[DEBUG] cwd: {os.getcwd()}")
+    # CI environment
+    print(f"[DEBUG] GITHUB_SHA: {os.environ.get('GITHUB_SHA', 'local')}")
+    print(f"[DEBUG] GITHUB_REF: {os.environ.get('GITHUB_REF', 'local')}")
+    print(f"[DEBUG] GITHUB_RUN_ID: {os.environ.get('GITHUB_RUN_ID', 'local')}")
+    # GCP auth
+    print(
+        f"[DEBUG] GOOGLE_APPLICATION_CREDENTIALS set: "
+        f"{bool(os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'))}"
+    )
+    print(f"[DEBUG] ADK_STAGING_BUCKET: {os.environ.get('ADK_STAGING_BUCKET', '(default)')}")
+    # List files that will be packaged
+    print("[DEBUG] Files for extra_packages:")
+    for f in glob.glob("packages/shared/mcp/dist/*.whl"):
+        print(f"  [DEBUG]   {f} ({os.path.getsize(f)} bytes)")
+    for f in glob.glob("installation_scripts/*.sh"):
+        print(f"  [DEBUG]   {f} ({os.path.getsize(f)} bytes, mode={oct(os.stat(f).st_mode)[-3:]})")
 
     client = vertexai.Client(project=project, location=location)
     sm_client = secretmanager.SecretManagerServiceClient()
@@ -393,6 +493,66 @@ def main() -> int:
                     write_secret(sm_client, project, secret_id, result.resource_name)
             except Exception as e:
                 print(f"  ✗ FAILED: {type(e).__name__}: {e}")
+                # Auto-fetch Cloud Logging for the failed RE
+                import re as _re
+
+                match = _re.search(r"reasoningEngines/(\d+)", str(e))
+                if match:
+                    re_id = match.group(1)
+                    print(f"  [DEBUG] Fetching Cloud Logging for RE {re_id}...")
+                    try:
+                        log_result = subprocess.run(
+                            [
+                                "gcloud",
+                                "logging",
+                                "read",
+                                f"resource.labels.reasoning_engine_id={re_id}",
+                                f"--project={project}",
+                                "--limit=500",
+                                "--format=json",
+                                "--order=asc",
+                            ],
+                            capture_output=True,
+                            text=True,
+                            timeout=60,
+                        )
+                        if log_result.stdout:
+                            import json as _json
+
+                            entries = _json.loads(log_result.stdout)
+                            print(f"  [DEBUG] Cloud Logging: {len(entries)} entries")
+                            for idx, entry in enumerate(entries):
+                                tp = entry.get("textPayload", "")
+                                sev = entry.get("severity", "")
+                                ln = entry.get("logName", "").split("/")[-1]
+                                if any(
+                                    kw in tp.lower()
+                                    for kw in [
+                                        "claimit_mcp",
+                                        "error",
+                                        "failed",
+                                        "install",
+                                        "module",
+                                        "import",
+                                        "venv",
+                                        "pip",
+                                        "successfully",
+                                        "step 16",
+                                        "step 17",
+                                        "step 19",
+                                        "step 28",
+                                        "entrypoint",
+                                        "stderr",
+                                        "stdout",
+                                    ]
+                                ):
+                                    print(f"  [LOG {idx:03d}] [{sev}] [{ln}] {tp[:400]}")
+                        else:
+                            print("  [DEBUG] Cloud Logging returned no output")
+                            if log_result.stderr:
+                                print(f"  [DEBUG] stderr: {log_result.stderr[:300]}")
+                    except Exception as log_err:
+                        print(f"  [DEBUG] Could not fetch logs: {log_err}")
                 return 1
 
         print("\n=== Deploy Summary ===")
