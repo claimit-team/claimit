@@ -3,6 +3,11 @@ provider "google" {
   region  = var.region
 }
 
+provider "google-beta" {
+  project = var.project_id
+  region  = var.region
+}
+
 # ---------- Artifact Registry ----------
 resource "google_artifact_registry_repository" "claimit" {
   location      = var.region
