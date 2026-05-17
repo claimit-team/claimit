@@ -19,6 +19,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import firebase_admin
 from claimit_mongodb_models import MongoDBClient
 from claimit_observability import init_phoenix
 from fastapi import FastAPI
@@ -45,7 +46,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     init_phoenix("claimit-api-gateway")
     # Firebase Admin — uses default GCP service account in Cloud Run;
     # falls back to GOOGLE_APPLICATION_CREDENTIALS locally
-    firebase_init_app()
+    if not firebase_admin._apps:
+        firebase_init_app()
     # MongoDB
     mongo_url = os.environ["MONGODB_URI"]
     _db = MongoDBClient(mongo_url)
