@@ -210,7 +210,8 @@ module "api_gateway" {
   secret_ids     = values(local.api_gateway_secrets)
   secret_env_map = local.api_gateway_secrets
   env_vars = {
-    CORS_ALLOWED_ORIGINS = "https://claimit.vercel.app,https://*.vercel.app"
+    CORS_ALLOWED_ORIGINS      = "https://claimit.vercel.app"
+    CORS_ALLOWED_ORIGIN_REGEX = "https://.*\\.vercel\\.app"
   }
   deletion_protection = false
 

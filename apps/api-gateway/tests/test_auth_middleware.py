@@ -42,7 +42,7 @@ async def test_invalid_token_returns_401(client: AsyncClient) -> None:
             "firebase_admin.auth.verify_id_token",
             side_effect=firebase_admin.auth.InvalidIdTokenError("bad token"),
         ):
-            response = await client.post(
+            response = await client.get(
                 "/api/v1/auth/me",
                 headers={"Authorization": "Bearer fake-token"},
             )
@@ -51,7 +51,7 @@ async def test_invalid_token_returns_401(client: AsyncClient) -> None:
             "error": {"code": "unauthorized", "message": "Invalid or expired token"}
         }
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)
 
 
 @pytest.mark.asyncio
@@ -78,7 +78,7 @@ async def test_valid_token_returns_user(client: AsyncClient) -> None:
         mock_db.find_one.assert_awaited_once()
         mock_db.upsert.assert_awaited_once()
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)
 
 
 @pytest.mark.asyncio
@@ -94,4 +94,4 @@ async def test_missing_auth_header_returns_401(client: AsyncClient) -> None:
         assert response.status_code == 401
         assert response.json()["error"]["code"] == "unauthorized"
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)
