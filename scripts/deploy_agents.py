@@ -210,11 +210,18 @@ def deploy_one(
     # env_vars is the dict form `{env_var_name: SecretRef | str}` — verified
     # at runtime: the list-of-SecretEnvVar form (which the type hints suggest)
     # is rejected by the SDK serializer; the dict form is what actually works.
+    # Secret ref dict format breaks Agent Engine container startup (silent crash,
+    # no stderr). Read the actual value from Secret Manager and pass as plain string.
+    # Verified: plain string env_vars work (test5 passed), secret ref dict does not (test2 failed).
+    try:
+        sm = secretmanager.SecretManagerServiceClient()
+        secret_path = f"projects/{get_project_id()}/secrets/mongodb-uri/versions/latest"
+        mdb_uri = sm.access_secret_version(name=secret_path).payload.data.decode("utf-8")
+    except Exception as e:
+        raise RuntimeError(f"Cannot read mongodb-uri from Secret Manager: {e}") from e
+
     env_vars = {
-        "MDB_MCP_CONNECTION_STRING": {
-            "secret": "mongodb-uri",
-            "version": "latest",
-        },
+        "MDB_MCP_CONNECTION_STRING": mdb_uri,
     }
 
     config = {
@@ -236,17 +243,15 @@ def deploy_one(
         #     build_options.installation_scripts
         #   - Wheel path is outside installation_scripts/ subdir, so the
         #     reverse check (extra_pkg under subdir but not declared) is fine.
-        # extra_packages and build_options temporarily disabled for deploy validation.
-        # Will re-enable when MCP toolset is switched from stdio to SSE.
-        # "extra_packages": [
-        #     get_mcp_wheel_path(),
-        #     "installation_scripts/install_claimit_mcp.sh",
-        # ],
-        # "build_options": {
-        #     "installation_scripts": [
-        #         "installation_scripts/install_claimit_mcp.sh",
-        #     ],
-        # },
+        "extra_packages": [
+            get_mcp_wheel_path(),
+            "installation_scripts/install_claimit_mcp.sh",
+        ],
+        "build_options": {
+            "installation_scripts": [
+                "installation_scripts/install_claimit_mcp.sh",
+            ],
+        },
     }
 
     # ── Diagnostic logging ──────────────────────────────────
