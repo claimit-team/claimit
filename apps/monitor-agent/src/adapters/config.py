@@ -83,6 +83,11 @@ def get_adapter(platform: str) -> PriceSourceAdapter:
 
         return BestBuyAdapter()
 
+    if platform == "target":
+        from .target import TargetAdapter
+
+        return TargetAdapter()
+
     # TODO: uncomment as live adapters are implemented
     # if platform == "hilton":
     #     from .hilton import HiltonAdapter
