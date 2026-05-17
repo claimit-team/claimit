@@ -194,3 +194,4 @@ dist/
 # Provider cache + working dir.
 .terraform/
 .vercel
+test_results.txt

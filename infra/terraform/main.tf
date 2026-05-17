@@ -203,12 +203,16 @@ module "sync_worker" {
 module "api_gateway" {
   source = "./modules/cloud-run-agent"
 
-  project_id          = var.project_id
-  region              = var.region
-  service_name        = "claimit-api-gateway"
-  image               = var.api_gateway_image
-  secret_ids          = values(local.api_gateway_secrets)
-  secret_env_map      = local.api_gateway_secrets
+  project_id     = var.project_id
+  region         = var.region
+  service_name   = "claimit-api-gateway"
+  image          = var.api_gateway_image
+  secret_ids     = values(local.api_gateway_secrets)
+  secret_env_map = local.api_gateway_secrets
+  env_vars = {
+    CORS_ALLOWED_ORIGINS      = "https://claimitai.vercel.app,http://localhost:3000"
+    CORS_ALLOWED_ORIGIN_REGEX = "https://claimitai[a-z0-9-]*\\.vercel\\.app"
+  }
   deletion_protection = false
 
   depends_on = [google_secret_manager_secret.shared]
