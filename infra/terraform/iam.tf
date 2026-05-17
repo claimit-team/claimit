@@ -46,6 +46,28 @@ resource "google_cloud_run_v2_service_iam_member" "ci_invoker" {
   member   = "serviceAccount:claimit-ci@${var.project_id}.iam.gserviceaccount.com"
 }
 
+# api-gateway is the only browser-facing service. End users authenticate
+# via Firebase ID tokens, which the 6.1 auth middleware verifies in-app
+# using firebase-admin. Cloud Run's Layer-2 IAM cannot evaluate Firebase
+# tokens (it's designed for GCP IAM principals), so we open Layer-2 to
+# allUsers and let the application layer enforce real authentication.
+#
+# Per Cloud Run docs on end-user auth:
+# https://cloud.google.com/run/docs/authenticating/end-users
+#
+# Other services (agents, sync-worker) intentionally remain CI-only —
+# they're invoked by Pub/Sub push subscriptions and Cloud Scheduler,
+# both of which carry proper GCP service-account identity.
+resource "google_cloud_run_v2_service_iam_member" "api_gateway_public_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = "claimit-api-gateway"
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+
+  depends_on = [module.api_gateway]
+}
+
 # CI service account needs aiplatform.user to deploy ADK agent definitions
 # via scripts/deploy_agents.py in the deploy-agents.yml workflow (ticket 1.29).
 resource "google_project_iam_member" "ci_aiplatform_user" {
