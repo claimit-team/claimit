@@ -8,6 +8,7 @@ on:
       - "apps/*-agent/**"
       - "!apps/*-agent/src/agent.py"
       - "apps/sync-worker/**"
+      - "apps/api-gateway/**"
       - "apps/web/**"
       - ".github/workflows/deploy-prod.yml"
 
@@ -88,6 +89,8 @@ jobs:
             dockerfile: apps/monitor-agent/Dockerfile
           - agent: sync-worker
             dockerfile: apps/Dockerfile.agent
+          - agent: api-gateway
+            dockerfile: apps/Dockerfile.agent
     steps:
       - uses: actions/checkout@v4
 
@@ -129,7 +132,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        agent: [ingest-agent, claim-agent, assistant-agent, monitor-agent, sync-worker]
+        agent: [ingest-agent, claim-agent, assistant-agent, monitor-agent, sync-worker, api-gateway]
     steps:
       - uses: actions/checkout@v4
 
