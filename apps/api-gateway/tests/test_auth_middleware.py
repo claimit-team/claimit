@@ -2,47 +2,41 @@
 
 from __future__ import annotations
 
+import uuid
 from unittest.mock import AsyncMock, patch
 
 import firebase_admin.auth
 import pytest
-from claimit_mongodb_models import User
+from claimit_mongodb_models import MongoDBClient
 from httpx import AsyncClient
-from src.main import app, get_db
+from src.deps import derive_user_id, get_db
+from src.main import app
 
-# Minimal User document that satisfies all required fields.
-_USER_FIXTURE: dict = {
-    "_id": "00000000-0000-0000-0000-000000000001",
-    "updated_at": None,
-    "email": "test@example.com",
-    "name": "Test User",
-    "default_location": {"city": "San Francisco", "state": "CA", "lat": 37.7749, "lon": -122.4194},
-    "loyalty_memberships": [],
-    "gmail_integration": {
-        "connected": False,
-        "connected_at": None,
-        "scopes_granted": [],
-        "refresh_token_ref": None,
-        "watch_history_id": None,
-        "watch_expires_at": None,
-        "last_processed_message_id": None,
-    },
-    "send_preference": {
-        "default_mode": "approval",
-        "auto_send_delay_seconds": 0,
-        "changed_at": None,
-    },
-    "ingestion_skiplist": [],
-    "notification_prefs": {"web_push": False, "email": True},
-    "subscription": {"tier": "free", "trial_ends": None, "renewed_at": None},
-    "created_at": "2024-01-01T00:00:00Z",
-}
+
+def test_derive_user_id_deterministic() -> None:
+    uid1 = derive_user_id("firebase-uid-abc")
+    uid2 = derive_user_id("firebase-uid-abc")
+    assert uid1 == uid2
+
+
+def test_derive_user_id_is_uuid() -> None:
+    result = derive_user_id("firebase-uid-abc")
+    assert isinstance(result, uuid.UUID)
+    assert result.version == 5
+
+
+def test_derive_user_id_differs_per_uid() -> None:
+    assert derive_user_id("uid-a") != derive_user_id("uid-b")
 
 
 @pytest.mark.asyncio
 async def test_invalid_token_returns_401(client: AsyncClient) -> None:
-    mock_db = AsyncMock()
-    app.dependency_overrides[get_db] = lambda: mock_db
+    mock_db = AsyncMock(spec=MongoDBClient)
+
+    async def _override_db() -> MongoDBClient:
+        return mock_db
+
+    app.dependency_overrides[get_db] = _override_db
     try:
         with patch(
             "firebase_admin.auth.verify_id_token",
@@ -62,10 +56,14 @@ async def test_invalid_token_returns_401(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_valid_token_returns_user(client: AsyncClient) -> None:
-    user = User.model_validate(_USER_FIXTURE)
-    mock_db = AsyncMock()
-    mock_db.find_one.return_value = user
-    app.dependency_overrides[get_db] = lambda: mock_db
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.find_one = AsyncMock(return_value=None)
+    mock_db.upsert = AsyncMock(return_value=str(uuid.uuid4()))
+
+    async def _override_db() -> MongoDBClient:
+        return mock_db
+
+    app.dependency_overrides[get_db] = _override_db
     try:
         with patch(
             "firebase_admin.auth.verify_id_token",
@@ -77,5 +75,23 @@ async def test_valid_token_returns_user(client: AsyncClient) -> None:
             )
         assert response.status_code == 200
         assert response.json()["user"]["email"] == "test@example.com"
+        mock_db.find_one.assert_awaited_once()
+        mock_db.upsert.assert_awaited_once()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_missing_auth_header_returns_401(client: AsyncClient) -> None:
+    mock_db = AsyncMock(spec=MongoDBClient)
+
+    async def _override_db() -> MongoDBClient:
+        return mock_db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        response = await client.get("/api/v1/auth/me")
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "unauthorized"
     finally:
         app.dependency_overrides.clear()

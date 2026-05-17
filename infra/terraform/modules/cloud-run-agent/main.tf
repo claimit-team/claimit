@@ -59,6 +59,14 @@ resource "google_cloud_run_v2_service" "agent" {
         }
       }
 
+      dynamic "env" {
+        for_each = var.env_vars
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+
       resources {
         limits = {
           cpu    = var.cpu_limit

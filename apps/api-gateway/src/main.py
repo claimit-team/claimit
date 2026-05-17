@@ -22,37 +22,34 @@ from contextlib import asynccontextmanager
 import firebase_admin
 from claimit_mongodb_models import MongoDBClient
 from claimit_observability import init_phoenix
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from firebase_admin import initialize_app as firebase_init_app
 
+from . import deps
 from .middleware.errors import ApiError, api_error_handler, unhandled_error_handler
 from .routes import router
 
 _log = logging.getLogger(__name__)
 
-_db: MongoDBClient | None = None
-
-
-async def get_db() -> MongoDBClient:
-    if _db is None:
-        raise RuntimeError("MongoDB not initialized")
-    return _db
-
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    global _db
     init_phoenix("claimit-api-gateway")
     # Firebase Admin — uses default GCP service account in Cloud Run;
-    # falls back to GOOGLE_APPLICATION_CREDENTIALS locally
-    if not firebase_admin._apps:
+    # falls back to GOOGLE_APPLICATION_CREDENTIALS locally.
+    try:
+        firebase_admin.get_app()
+    except ValueError:
         firebase_init_app()
     # MongoDB
     mongo_url = os.environ["MONGODB_URI"]
-    _db = MongoDBClient(mongo_url)
+    deps._db = MongoDBClient(mongo_url)
     yield
-    await _db.close()
+    if deps._db is not None:
+        await deps._db.close()
 
 
 app = FastAPI(
@@ -77,6 +74,22 @@ app.add_middleware(
 
 app.add_exception_handler(ApiError, api_error_handler)
 app.add_exception_handler(Exception, unhandled_error_handler)
+
+
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    return JSONResponse(
+        {
+            "error": {
+                "code": "validation_error",
+                "message": "Request validation failed",
+                "details": exc.errors(),
+            }
+        },
+        status_code=422,
+    )
+
+
+app.add_exception_handler(RequestValidationError, validation_error_handler)
 
 app.include_router(router)
 

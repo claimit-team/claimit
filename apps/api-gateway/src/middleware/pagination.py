@@ -31,4 +31,7 @@ def apply_cursor_to_query(query: dict, cursor: str | None) -> dict:
         uid = UUID(doc_id)
     except ValueError as err:
         raise ApiError("invalid_cursor", "Cursor contains invalid ID", status_code=400) from err
+    # NOTE: sort_key is stored in cursor for future compound-sort support
+    # but not yet applied in the filter. All current endpoints sort by _id
+    # ascending. Compound cursor support tracked in ticket TBD.
     return {**query, "_id": {"$gt": uid}}
