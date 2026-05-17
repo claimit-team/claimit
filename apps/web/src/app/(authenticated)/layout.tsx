@@ -1,14 +1,14 @@
 "use client";
 
-import { Bell, ChevronDown, Menu, ShieldCheck } from "lucide-react";
+import { Bell, ChevronDown, Loader2, Menu, ShieldCheck } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { type ReactNode, useEffect, useState } from "react";
 import { FloatingAssistant } from "@/components/layout/floating-assistant";
 import { SidebarContent } from "@/components/layout/sidebar";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
-import { mockPlan, mockUser } from "@/components/settings/settings-mock";
+import { mockPlan } from "@/components/settings/settings-mock";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -22,8 +22,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { signOutUser } from "@/lib/auth-actions";
 import { cn } from "@/lib/utils";
-import { useUIStore } from "@/store";
+import { useAuthStore, useUIStore } from "@/store";
 
 type ThemeChoice = "light" | "dark" | "system";
 
@@ -38,6 +39,18 @@ const PLAN_LABEL: Record<typeof mockPlan, string> = {
   pro: "Pro plan",
   family: "Family plan",
 };
+
+function getInitials(name: string | null | undefined) {
+  const initials = name
+    ?.trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+
+  return initials || "?";
+}
 
 function ThemeChips() {
   const { theme, setTheme } = useTheme();
@@ -75,10 +88,19 @@ function ThemeChips() {
 }
 
 export default function AuthenticatedLayout({ children }: { children: ReactNode }) {
+  const router = useRouter();
   const pathname = usePathname();
+  const user = useAuthStore((s) => s.user);
+  const isLoading = useAuthStore((s) => s.isLoading);
   const isAssistant = pathname.startsWith("/assistant");
   const isClaimDetail = /^\/claims\/[^/]+$/.test(pathname);
   const setClaimEmbeddedAssistantExpanded = useUIStore((s) => s.setClaimEmbeddedAssistantExpanded);
+
+  useEffect(() => {
+    if (!isLoading && !user) {
+      router.push("/login");
+    }
+  }, [user, isLoading, router]);
 
   useEffect(() => {
     if (!isClaimDetail) {
@@ -87,6 +109,22 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
   }, [isClaimDetail, setClaimEmbeddedAssistantExpanded]);
 
   const floatingAssistantVariant = isClaimDetail ? ("pill" as const) : ("default" as const);
+  const displayName = user?.name ?? user?.email ?? "User";
+  const email = user?.email ?? "";
+  const initials = getInitials(user?.name);
+
+  const handleSignOut = async () => {
+    await signOutUser();
+    router.push("/login");
+  };
+
+  if (isLoading || !user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-neutral-0 text-neutral-600">
+        <Loader2 className="size-6 animate-spin" aria-label="Loading session" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-neutral-0">
@@ -149,11 +187,11 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
               >
                 <Avatar className="w-8 h-8">
                   <AvatarFallback className="bg-brand-primary-100 text-brand-primary-700 text-sm">
-                    {mockUser.initials}
+                    {initials}
                   </AvatarFallback>
                 </Avatar>
                 <span className="hidden sm:inline text-sm font-medium text-neutral-700">
-                  {mockUser.displayName}
+                  {displayName}
                 </span>
                 <ChevronDown className="w-4 h-4 text-neutral-500" aria-hidden="true" />
               </DropdownMenuTrigger>
@@ -162,10 +200,8 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
                 <DropdownMenuGroup>
                   <DropdownMenuLabel className="px-2 py-2">
                     <div className="flex flex-col">
-                      <span className="text-sm font-medium text-neutral-900">
-                        {mockUser.displayName}
-                      </span>
-                      <span className="text-xs text-neutral-500">{mockUser.email}</span>
+                      <span className="text-sm font-medium text-neutral-900">{displayName}</span>
+                      <span className="text-xs text-neutral-500">{email}</span>
                     </div>
                   </DropdownMenuLabel>
                 </DropdownMenuGroup>
@@ -200,7 +236,9 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
                 <DropdownMenuSeparator />
 
                 {/* Sign out */}
-                <DropdownMenuItem className="text-semantic-danger">Sign out</DropdownMenuItem>
+                <DropdownMenuItem className="text-semantic-danger" onClick={handleSignOut}>
+                  Sign out
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

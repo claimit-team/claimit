@@ -2,11 +2,14 @@
 
 import { Loader2, ShieldCheck } from "lucide-react";
 import Link from "next/link";
-import { type FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
+import { type FormEvent, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { signInWithGoogle } from "@/lib/auth-actions";
+import { useAuthStore } from "@/store";
 
 // Brand asset exception per design-system.md §2.5: the Google logo uses the
 // official multicolor SVG and intentionally does NOT inherit currentColor.
@@ -35,16 +38,26 @@ function GoogleMark({ className }: { className?: string }) {
 }
 
 export function LoginView() {
+  const router = useRouter();
+  const user = useAuthStore((s) => s.user);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleGoogleSignIn = () => {
+  useEffect(() => {
+    if (user) {
+      router.replace("/dashboard");
+    }
+  }, [user, router]);
+
+  const handleGoogleSignIn = async () => {
     setIsLoading(true);
-    setTimeout(() => {
+    try {
+      await signInWithGoogle();
+      router.push("/dashboard");
+    } catch (err) {
+      toast.error("Sign-in failed", { description: (err as Error).message });
+    } finally {
       setIsLoading(false);
-      toast.success("Google sign-in mock action", {
-        description: "This is a demo. No actual authentication is performed.",
-      });
-    }, 1500);
+    }
   };
 
   const handleEmailSubmit = (e: FormEvent<HTMLFormElement>) => {
