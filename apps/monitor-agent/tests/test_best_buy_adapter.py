@@ -108,3 +108,29 @@ async def test_caches_response() -> None:
 
         # Second call should hit cache, not requests.get
         assert mock_get.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_error_message_does_not_leak_api_key() -> None:
+    """ScraperAPI request failures must not expose the API key in error message."""
+    adapter = BestBuyAdapter()
+    with patch("src.adapters.best_buy.requests.get") as mock_get:
+        from requests.exceptions import HTTPError
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        http_error = HTTPError(
+            "500 Server Error: url=https://api.scraperapi.com/?api_key=SECRET_KEY_LEAK"
+        )
+        http_error.response = mock_response
+        mock_response.raise_for_status.side_effect = http_error
+        mock_get.return_value = mock_response
+
+        with pytest.raises(PriceFetchError) as exc_info:
+            await adapter.fetch_current_price(
+                platform="best_buy",
+                product_id="6505727",
+                product_url="https://www.bestbuy.com/site/foo/6505727.p",
+            )
+        assert "SECRET_KEY_LEAK" not in str(exc_info.value)
+        assert "api_key" not in str(exc_info.value)
