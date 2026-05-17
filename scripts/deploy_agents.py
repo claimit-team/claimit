@@ -198,6 +198,9 @@ def deploy_one(
         print(f"  [DEBUG] cloudpickle.loads OK: {type(restored).__name__}")
     except Exception as pkl_err:
         print(f"  [DEBUG] cloudpickle FAILED: {type(pkl_err).__name__}: {pkl_err}")
+        raise RuntimeError(
+            f"Serialization smoke test failed for {agent_name}; aborting deploy."
+        ) from pkl_err
 
     # MCP toolset (mongodb-mcp-server stdio child process) reads this env var
     # to connect. McpToolset env=None in the factory + SecretRef here = URI
@@ -267,8 +270,10 @@ def deploy_one(
             print(f"  [DEBUG] install_script: {script} (exists, mode={mode})")
             with open(script) as f:
                 content = f.read()
-            print(f"  [DEBUG] install_script content ({len(content)} chars):")
-            for line in content.strip().split("\n"):
+            print(f"  [DEBUG] install_script length: {len(content)} chars")
+            preview_lines = content.strip().split("\n")[:5]
+            print("  [DEBUG] install_script preview (first 5 lines):")
+            for line in preview_lines:
                 print(f"  [DEBUG]   | {line}")
         else:
             print(f"  [DEBUG] install_script: {script} (*** MISSING ***)")
