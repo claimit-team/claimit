@@ -19,8 +19,8 @@ def decode_cursor(cursor: str) -> tuple[str, str | None]:
         padding = (4 - len(cursor) % 4) % 4
         data = json.loads(base64.urlsafe_b64decode(cursor + "=" * padding))
         return data["id"], data.get("sort_key")
-    except Exception:
-        raise ApiError("invalid_cursor", "Cursor is malformed", status_code=400)
+    except Exception as err:
+        raise ApiError("invalid_cursor", "Cursor is malformed", status_code=400) from err
 
 
 def apply_cursor_to_query(query: dict, cursor: str | None) -> dict:
@@ -29,6 +29,6 @@ def apply_cursor_to_query(query: dict, cursor: str | None) -> dict:
     doc_id, _ = decode_cursor(cursor)
     try:
         uid = UUID(doc_id)
-    except ValueError:
-        raise ApiError("invalid_cursor", "Cursor contains invalid ID", status_code=400)
+    except ValueError as err:
+        raise ApiError("invalid_cursor", "Cursor contains invalid ID", status_code=400) from err
     return {**query, "_id": {"$gt": uid}}

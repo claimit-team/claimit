@@ -25,7 +25,7 @@ async def get_current_user(
     try:
         decoded = firebase_admin.auth.verify_id_token(credentials.credentials)
     except (firebase_admin.auth.InvalidIdTokenError, firebase_admin.auth.ExpiredIdTokenError):
-        raise ApiError("unauthorized", "Invalid or expired token", status_code=401)
+        raise ApiError("unauthorized", "Invalid or expired token", status_code=401) from None
 
     email: str | None = decoded.get("email")
     if not email:
