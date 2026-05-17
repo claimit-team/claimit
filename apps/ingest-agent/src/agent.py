@@ -1,6 +1,5 @@
-"""Stub Google ADK agent for the ingest service. Real tools wired in later tickets."""
+"""Stub Google ADK agent for the ingest service. MCP toolset disabled for deploy validation."""
 
-from claimit_mcp import get_mongodb_mcp_toolset
 from google.adk import Agent
 
 ingest_agent = Agent(
@@ -12,5 +11,5 @@ ingest_agent = Agent(
         "platform, date), and store them in MongoDB. Respond with 'Hello from Ingest' "
         "for now."
     ),
-    tools=[get_mongodb_mcp_toolset(read_only=False)],  # writes purchases
+    tools=[],
 )
