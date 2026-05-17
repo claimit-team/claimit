@@ -14,6 +14,19 @@ resource "google_project_service" "firebase" {
   disable_on_destroy = false
 }
 
+resource "google_project_service" "apikeys" {
+  project            = var.project_id
+  service            = "apikeys.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_firebase_project" "default" {
+  provider = google-beta
+  project  = var.project_id
+
+  depends_on = [google_project_service.firebase]
+}
+
 resource "google_identity_platform_config" "default" {
   project = var.project_id
 
@@ -61,7 +74,10 @@ resource "google_firebase_web_app" "claimit_web" {
   project      = var.project_id
   display_name = "ClaimIt Web"
 
-  depends_on = [google_project_service.firebase]
+  depends_on = [
+    google_project_service.firebase,
+    google_firebase_project.default,
+  ]
 }
 
 data "google_firebase_web_app_config" "claimit_web" {
@@ -93,5 +109,8 @@ resource "google_apikeys_key" "firebase_web" {
     }
   }
 
-  depends_on = [google_project_service.firebase]
+  depends_on = [
+    google_project_service.firebase,
+    google_project_service.apikeys,
+  ]
 }
