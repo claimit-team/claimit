@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
 import pytest_asyncio
 from claimit_mongodb_models import User
 from fastapi import Depends
 from httpx import ASGITransport, AsyncClient
-
 from src.main import app
 from src.middleware.auth import get_current_user
 

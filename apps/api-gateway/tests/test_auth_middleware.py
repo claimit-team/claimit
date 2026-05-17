@@ -8,7 +8,6 @@ import firebase_admin.auth
 import pytest
 from claimit_mongodb_models import User
 from httpx import AsyncClient
-
 from src.main import app, get_db
 
 # Minimal User document that satisfies all required fields.
