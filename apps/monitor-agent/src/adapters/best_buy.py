@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import re
 import time
 from datetime import UTC, datetime
 from typing import ClassVar
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -105,7 +107,13 @@ class BestBuyAdapter(PriceSourceAdapter):
         if not product_url:
             raise PriceFetchError(platform, product_id, "Best Buy adapter requires product_url")
 
-        html = self._fetch_page(product_url)
+        host = (urlparse(product_url).hostname or "").lower()
+        if not (host == "www.bestbuy.com" or host.endswith(".bestbuy.com")):
+            raise PriceFetchError(
+                platform, product_id, "Best Buy adapter requires a bestbuy.com URL"
+            )
+
+        html = await asyncio.to_thread(self._fetch_page, product_url)
 
         price_non_member = self._parse_price(html)
         price_member = self._parse_member_price(html)

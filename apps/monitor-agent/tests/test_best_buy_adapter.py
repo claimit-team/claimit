@@ -83,6 +83,17 @@ async def test_raises_when_no_url() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rejects_non_bestbuy_url() -> None:
+    adapter = BestBuyAdapter()
+    with pytest.raises(PriceFetchError, match=r"bestbuy\.com URL"):
+        await adapter.fetch_current_price(
+            platform="best_buy",
+            product_id="6505727",
+            product_url="https://www.amazon.com/dp/B09XS7JWHH",
+        )
+
+
+@pytest.mark.asyncio
 async def test_caches_response() -> None:
     adapter = BestBuyAdapter()
     with patch("src.adapters.best_buy.requests.get") as mock_get:
