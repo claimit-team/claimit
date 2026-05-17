@@ -34,7 +34,7 @@ resource "google_identity_platform_config" "default" {
     "localhost",
     "${var.project_id}.firebaseapp.com",
     "${var.project_id}.web.app",
-    "claimit.vercel.app",
+    "claimitai.vercel.app",
   ]
 
   sign_in {
@@ -103,7 +103,7 @@ resource "google_apikeys_key" "firebase_web" {
         "http://localhost/*",
         "http://localhost:3000/*",
         "https://${var.project_id}.firebaseapp.com/*",
-        "https://claimit.vercel.app/*",
+        "https://claimitai.vercel.app/*",
         "https://*.vercel.app/*",
       ]
     }
