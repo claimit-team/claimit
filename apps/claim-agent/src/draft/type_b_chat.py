@@ -1,28 +1,27 @@
 from __future__ import annotations
 
-import asyncio
-import inspect
 import json
+import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
-from uuid import uuid4
+from typing import TYPE_CHECKING
 
 from claimit_mongodb_models import Claim, Policy, Purchase
 from google.adk import Agent
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
-from google.genai import types
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from search.interface import SearchClient
 
+from ._shared import (
+    MODEL_NAME,
+    DraftGenerationError,
+    _fill_placeholders,
+    _run_draft_agent,
+    _strip_json_fence,
+)
 from .models import ClaimDraft
-from .type_a_email import DraftGenerationError
 
-MODEL_NAME = "gemini-2.5-flash"
-APP_NAME = "claimit-claim-draft"
-DRAFT_TIMEOUT_SECONDS = 30
+_log = logging.getLogger(__name__)
 
 CHAT_SCRIPT_SYSTEM_PROMPT = """
 You generate customer-service chat scripts for price match refund claims in JSON format.
@@ -71,60 +70,6 @@ class _ChatScriptOutput(BaseModel):
     escalation_steps: list[str]
 
 
-async def _maybe_await(value: Any) -> Any:
-    if inspect.isawaitable(value):
-        return await value
-    return value
-
-
-def _extract_event_text(event: Any) -> str | None:
-    content = getattr(event, "content", None)
-    parts = getattr(content, "parts", None) or []
-    text_parts = [part.text for part in parts if getattr(part, "text", None)]
-    if not text_parts:
-        return None
-    return "\n".join(text_parts)
-
-
-def _strip_json_fence(raw: str) -> str:
-    s = raw.strip()
-    if not s.startswith("```"):
-        return s
-    lines = s.splitlines()
-    if lines and lines[0].startswith("```"):
-        lines = lines[1:]
-    if lines and lines[-1].strip() == "```":
-        lines = lines[:-1]
-    return "\n".join(lines).strip()
-
-
-def _fill_placeholders(
-    text: str,
-    *,
-    order_id: str,
-    check_in_date: str,
-    checkout_date: str,
-    original_price: str,
-    current_price: str,
-    refund_amount: str,
-    user_name: str,
-    policy_citation: str,
-) -> str:
-    replacements = {
-        "{{ORDER_ID}}": order_id,
-        "{{CHECK_IN_DATE}}": check_in_date,
-        "{{CHECKOUT_DATE}}": checkout_date,
-        "{{ORIGINAL_PRICE}}": original_price,
-        "{{CURRENT_PRICE}}": current_price,
-        "{{REFUND_AMOUNT}}": refund_amount,
-        "{{USER_NAME}}": user_name,
-        "{{POLICY_CITATION}}": policy_citation,
-    }
-    for token, value in replacements.items():
-        text = text.replace(token, value)
-    return text
-
-
 def _build_chat_script_agent() -> Agent:
     return Agent(
         name="chat_script_generator",
@@ -135,52 +80,6 @@ def _build_chat_script_agent() -> Agent:
     )
 
 
-def _build_user_message(platform: str, policy_clause: str) -> str:
-    return json.dumps(
-        {"platform": platform, "policy_clause": policy_clause},
-        ensure_ascii=False,
-    )
-
-
-async def _run_draft_agent(platform: str, policy_clause: str) -> str | None:
-    session_service = InMemorySessionService()
-    session_id = f"draft-{uuid4()}"
-    user_id = "claim-draft-generator"
-
-    await _maybe_await(
-        session_service.create_session(
-            app_name=APP_NAME,
-            user_id=user_id,
-            session_id=session_id,
-        )
-    )
-
-    runner = Runner(
-        app_name=APP_NAME,
-        agent=_build_chat_script_agent(),
-        session_service=session_service,
-    )
-    message = types.Content(
-        role="user",
-        parts=[types.Part.from_text(text=_build_user_message(platform, policy_clause))],
-    )
-
-    final_text: str | None = None
-    try:
-        async with asyncio.timeout(DRAFT_TIMEOUT_SECONDS):
-            async for event in runner.run_async(
-                user_id=user_id,
-                session_id=session_id,
-                new_message=message,
-            ):
-                if event.is_final_response():
-                    final_text = _extract_event_text(event)
-    except TimeoutError as exc:
-        raise DraftGenerationError(f"Draft generation timed out for session {session_id}") from exc
-
-    return final_text
-
-
 def _parse_chat_script_output(raw_output: str | None) -> _ChatScriptOutput:
     if not raw_output or not raw_output.strip():
         raise DraftGenerationError("Draft generator returned empty output")
@@ -188,7 +87,14 @@ def _parse_chat_script_output(raw_output: str | None) -> _ChatScriptOutput:
         payload = json.loads(_strip_json_fence(raw_output))
     except json.JSONDecodeError as exc:
         raise DraftGenerationError("Draft generator returned malformed JSON") from exc
-    return _ChatScriptOutput.model_validate(payload)
+    result = _ChatScriptOutput.model_validate(payload)
+    if len(result.main_steps) != 5:
+        raise DraftGenerationError(f"Expected 5 main steps, got {len(result.main_steps)}")
+    if len(result.escalation_steps) != 2:
+        raise DraftGenerationError(
+            f"Expected 2 escalation steps, got {len(result.escalation_steps)}"
+        )
+    return result
 
 
 def _format_chat_script(output: _ChatScriptOutput) -> str:
@@ -210,9 +116,14 @@ async def generate_chat_script(
     policy: Policy,
     search_client: SearchClient,
     user_name: str = "Valued Customer",
+    current_price: float | None = None,
 ) -> ClaimDraft:
     query = f"{purchase.platform} price match guarantee refund eligibility"
-    results = await search_client.search_policies(query=query, limit=1)
+    try:
+        results = await search_client.search_policies(query=query, limit=1)
+    except Exception:
+        _log.warning("Policy search failed, using fallback clause", exc_info=True)
+        results = []
     if results:
         policy_clause = results[0].get(
             "policy_text_relevant_clause", policy.policy_text_relevant_clause
@@ -220,17 +131,23 @@ async def generate_chat_script(
     else:
         policy_clause = policy.policy_text_relevant_clause
 
-    raw_output = await _run_draft_agent(str(purchase.platform), policy_clause)
+    raw_output = await _run_draft_agent(
+        str(purchase.platform), policy_clause, _build_chat_script_agent
+    )
     draft_output = _parse_chat_script_output(raw_output)
 
-    current_price = round(purchase.price_paid - claim.claim_amount, 2)
+    resolved_current_price = (
+        current_price
+        if current_price is not None
+        else round(purchase.price_paid - claim.claim_amount, 2)
+    )
     kwargs = dict(
         order_id=purchase.order_id,
         check_in_date=purchase.purchase_date.strftime("%Y-%m-%d"),
         checkout_date=purchase.window_expires.strftime("%Y-%m-%d"),
-        original_price=str(purchase.price_paid),
-        current_price=str(current_price),
-        refund_amount=str(claim.claim_amount),
+        original_price=f"${purchase.price_paid:.2f}",
+        current_price=f"${resolved_current_price:.2f}",
+        refund_amount=f"${claim.claim_amount:.2f}",
         user_name=user_name,
         policy_citation=policy_clause,
     )
@@ -245,6 +162,12 @@ async def generate_chat_script(
             ],
         }
     )
+    if any(
+        "{{" in s
+        for s in [filled_steps.title, *filled_steps.main_steps, *filled_steps.escalation_steps]
+    ):
+        raise DraftGenerationError("Draft contains unreplaced placeholder tokens")
+
     draft_content = _format_chat_script(filled_steps)
 
     return ClaimDraft(
@@ -258,6 +181,6 @@ async def generate_chat_script(
         refund_amount=claim.claim_amount,
         currency=claim.currency,
         model_used=MODEL_NAME,
-        draft_version=1,
+        draft_version=len(claim.draft_versions) + 1,
         generated_at=datetime.now(UTC),
     )

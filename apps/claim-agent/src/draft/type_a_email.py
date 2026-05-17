@@ -1,30 +1,27 @@
 from __future__ import annotations
 
-import asyncio
-import inspect
 import json
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
-from uuid import uuid4
+from typing import TYPE_CHECKING
 
 from claimit_mongodb_models import Claim, Policy, Purchase
 from google.adk import Agent
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
-from google.genai import types
 from pydantic import BaseModel, ValidationError
 
 if TYPE_CHECKING:
     from search.interface import SearchClient
 
+from ._shared import (
+    MODEL_NAME,
+    DraftGenerationError,
+    _fill_placeholders,
+    _run_draft_agent,
+    _strip_json_fence,
+)
 from .models import ClaimDraft
 
 _log = logging.getLogger(__name__)
-
-MODEL_NAME = "gemini-2.5-flash"
-APP_NAME = "claimit-claim-draft"
-DRAFT_TIMEOUT_SECONDS = 30
 
 DRAFT_SYSTEM_PROMPT = """
 You generate professional price match refund claim emails in JSON format.
@@ -67,40 +64,6 @@ class _DraftOutput(BaseModel):
     email_body: str
 
 
-class DraftGenerationError(RuntimeError):
-    pass
-
-
-async def _maybe_await(value: Any) -> Any:
-    # InMemorySessionService.create_session is currently sync, but other
-    # session service implementations (e.g. database-backed) may be async.
-    # This helper future-proofs the call site.
-    if inspect.isawaitable(value):
-        return await value
-    return value
-
-
-def _extract_event_text(event: Any) -> str | None:
-    content = getattr(event, "content", None)
-    parts = getattr(content, "parts", None) or []
-    text_parts = [part.text for part in parts if getattr(part, "text", None)]
-    if not text_parts:
-        return None
-    return "\n".join(text_parts)
-
-
-def _strip_json_fence(raw: str) -> str:
-    s = raw.strip()
-    if not s.startswith("```"):
-        return s
-    lines = s.splitlines()
-    if lines and lines[0].startswith("```"):
-        lines = lines[1:]
-    if lines and lines[-1].strip() == "```":
-        lines = lines[:-1]
-    return "\n".join(lines).strip()
-
-
 def _build_draft_agent() -> Agent:
     return Agent(
         name="email_draft_generator",
@@ -109,52 +72,6 @@ def _build_draft_agent() -> Agent:
         output_schema=_DraftOutput,
         tools=[],
     )
-
-
-def _build_user_message(platform: str, policy_clause: str) -> str:
-    return json.dumps(
-        {"platform": platform, "policy_clause": policy_clause},
-        ensure_ascii=False,
-    )
-
-
-async def _run_draft_agent(platform: str, policy_clause: str) -> str | None:
-    session_service = InMemorySessionService()
-    session_id = f"draft-{uuid4()}"
-    user_id = "claim-draft-generator"
-
-    await _maybe_await(
-        session_service.create_session(
-            app_name=APP_NAME,
-            user_id=user_id,
-            session_id=session_id,
-        )
-    )
-
-    runner = Runner(
-        app_name=APP_NAME,
-        agent=_build_draft_agent(),
-        session_service=session_service,
-    )
-    message = types.Content(
-        role="user",
-        parts=[types.Part.from_text(text=_build_user_message(platform, policy_clause))],
-    )
-
-    final_text: str | None = None
-    try:
-        async with asyncio.timeout(DRAFT_TIMEOUT_SECONDS):
-            async for event in runner.run_async(
-                user_id=user_id,
-                session_id=session_id,
-                new_message=message,
-            ):
-                if event.is_final_response():
-                    final_text = _extract_event_text(event)
-    except TimeoutError as exc:
-        raise DraftGenerationError(f"Draft generation timed out for session {session_id}") from exc
-
-    return final_text
 
 
 def _parse_draft_output(raw_output: str | None) -> _DraftOutput:
@@ -168,33 +85,6 @@ def _parse_draft_output(raw_output: str | None) -> _DraftOutput:
         return _DraftOutput.model_validate(payload)
     except ValidationError as exc:
         raise DraftGenerationError("Draft generator returned invalid output schema") from exc
-
-
-def _fill_placeholders(
-    text: str,
-    *,
-    order_id: str,
-    check_in_date: str,
-    checkout_date: str,
-    original_price: str,
-    current_price: str,
-    refund_amount: str,
-    user_name: str,
-    policy_citation: str,
-) -> str:
-    replacements = {
-        "{{ORDER_ID}}": order_id,
-        "{{CHECK_IN_DATE}}": check_in_date,
-        "{{CHECKOUT_DATE}}": checkout_date,
-        "{{ORIGINAL_PRICE}}": original_price,
-        "{{CURRENT_PRICE}}": current_price,
-        "{{REFUND_AMOUNT}}": refund_amount,
-        "{{USER_NAME}}": user_name,
-        "{{POLICY_CITATION}}": policy_citation,
-    }
-    for token, value in replacements.items():
-        text = text.replace(token, value)
-    return text
 
 
 async def generate_email_draft(
@@ -214,10 +104,7 @@ async def generate_email_draft(
     try:
         results = await search_client.search_policies(query=query, limit=1)
     except Exception:
-        _log.warning(
-            "Policy search failed for platform %s, falling back to policy document clause",
-            purchase.platform,
-        )
+        _log.warning("Policy search failed, using fallback clause", exc_info=True)
         results = []
 
     if results:
@@ -228,7 +115,7 @@ async def generate_email_draft(
         policy_clause = policy.policy_text_relevant_clause
 
     # 2. Generate email template via Gemini — placeholders only, no real data
-    raw_output = await _run_draft_agent(str(purchase.platform), policy_clause)
+    raw_output = await _run_draft_agent(str(purchase.platform), policy_clause, _build_draft_agent)
     draft_output = _parse_draft_output(raw_output)
 
     # 3. Programmatic placeholder substitution with real values

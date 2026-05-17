@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import base64
 import logging
-import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from claimit_mongodb_models import (
     Claim,
@@ -73,6 +72,9 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
     Always returns 200 to ack the message — errors are logged, never retried
     via a 5xx, to prevent Pub/Sub infinite-retry loops.
     """
+    # TODO(post-hackathon): add Pub/Sub push authentication (OIDC token verification)
+    event = None
+    claim_plan = None
     try:
         body = _PubSubPushBody.model_validate(await request.json())
         raw_data = base64.b64decode(body.message.data).decode("utf-8")
@@ -80,10 +82,6 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
 
         db = MongoDBClient()
         claim_plan = await plan_claim(event, db)
-
-        if claim_plan.draft_generator not in ("type_a_email", "type_b_chat"):
-            _log.info("Skipping unsupported generator %s", claim_plan.draft_generator)
-            return {"status": "skipped", "reason": claim_plan.draft_generator}
 
         purchase = await db.get_purchase(event.purchase_id)
         if purchase is None:
@@ -98,7 +96,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         user_name = "Valued Customer"
         user = await db.get_user(event.user_id)
         if user is not None:
-            user_name = user.name
+            user_name = (user.name or "").strip() or "Valued Customer"
 
         # Lazy import: claimit-search may not be installed in all environments
         from search import get_search_adapter
@@ -106,7 +104,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         search_client = get_search_adapter()
 
         now = datetime.now(UTC)
-        claim_id = uuid.uuid5(uuid.NAMESPACE_URL, event.event_id)
+        claim_id = uuid5(NAMESPACE_URL, f"claim:{event.event_id}")
         placeholder = "Draft pending generation."
 
         # Temporary claim object satisfying the model validator (draft_content == draft_versions[-1].content)
@@ -151,7 +149,12 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             )
         elif claim_plan.draft_generator == "type_b_chat":
             draft = await generate_chat_script(
-                temp_claim, purchase, policy, search_client, user_name=user_name
+                temp_claim,
+                purchase,
+                policy,
+                search_client,
+                user_name=user_name,
+                current_price=event.current_price,
             )
         else:
             _log.info("Skipping unsupported generator %s", claim_plan.draft_generator)
@@ -182,5 +185,12 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         return {"status": "ok", "claim_id": str(claim_id)}
 
     except Exception:
-        _log.exception("Failed to process price.dropped event")
+        _log.exception(
+            "Failed to process price.dropped event",
+            extra={
+                "event_id": getattr(event, "event_id", "unknown"),
+                "purchase_id": getattr(event, "purchase_id", "unknown"),
+                "draft_generator": getattr(claim_plan, "draft_generator", "unknown"),
+            },
+        )
         return {"status": "error"}

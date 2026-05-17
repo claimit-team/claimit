@@ -22,6 +22,7 @@ from claimit_mongodb_models import (
     PurchaseDateBasis,
     PurchaseStatus,
 )
+from src.draft._shared import DraftGenerationError
 from src.draft.models import ClaimDraft
 from src.draft.type_b_chat import generate_chat_script
 
@@ -181,15 +182,16 @@ def _assert_clean_draft(draft: ClaimDraft, claim: Claim) -> None:
 
 @pytest.mark.asyncio
 async def test_best_buy_scenario() -> None:
-    clause = (
+    search_clause = (
         "Best Buy Price Match Guarantee: If you find a lower price on an identical "
         "available product at a local retail competitor or qualifying online retailer, "
         "we will match that price."
     )
+    fallback_clause = "Best Buy Fallback: Standard return policy applies."
     purchase = _make_purchase(Platform.BEST_BUY, price_paid=329.99, order_id="BB-2024-789123")
     claim = _make_claim(purchase, claim_amount=50.0)
-    policy = _make_policy(Platform.BEST_BUY, clause)
-    mock_search = _mock_search_client(clause)
+    policy = _make_policy(Platform.BEST_BUY, fallback_clause)
+    mock_search = _mock_search_client(search_clause)
 
     with patch("src.draft.type_b_chat._run_draft_agent", new_callable=AsyncMock) as mock_runner:
         mock_runner.return_value = _MOCK_TEMPLATE
@@ -201,18 +203,21 @@ async def test_best_buy_scenario() -> None:
     assert "BB-2024-789123" in draft.draft_content
     assert "BB-2024-789123" in draft.subject
     assert draft.platform == "best_buy"
+    assert draft.policy_clause_cited == search_clause
+    mock_search.search_policies.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_target_scenario() -> None:
-    clause = (
+    search_clause = (
         "Target Price Match Policy: We will match the price if you find a current lower "
         "price at Target.com or select online competitors within 14 days of purchase."
     )
+    fallback_clause = "Target Fallback: General refund policy applies."
     purchase = _make_purchase(Platform.TARGET, price_paid=199.99, order_id="TGT-2024-456789")
     claim = _make_claim(purchase, claim_amount=30.0)
-    policy = _make_policy(Platform.TARGET, clause)
-    mock_search = _mock_search_client(clause)
+    policy = _make_policy(Platform.TARGET, fallback_clause)
+    mock_search = _mock_search_client(search_clause)
 
     with patch("src.draft.type_b_chat._run_draft_agent", new_callable=AsyncMock) as mock_runner:
         mock_runner.return_value = _MOCK_TEMPLATE
@@ -224,18 +229,21 @@ async def test_target_scenario() -> None:
     assert "TGT-2024-456789" in draft.draft_content
     assert draft.platform == "target"
     assert draft.refund_amount == 30.0
+    assert draft.policy_clause_cited == search_clause
+    mock_search.search_policies.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_best_buy_high_value_scenario() -> None:
-    clause = (
+    search_clause = (
         "Best Rate Guarantee: Applies to identical models when a verifiably lower "
         "publicly available price is found within the eligible claim window."
     )
+    fallback_clause = "Best Buy High-Value Fallback: Items over $500 subject to manager review."
     purchase = _make_purchase(Platform.BEST_BUY, price_paid=1299.99, order_id="BB-2024-HIGH-001")
     claim = _make_claim(purchase, claim_amount=200.0)
-    policy = _make_policy(Platform.BEST_BUY, clause)
-    mock_search = _mock_search_client(clause)
+    policy = _make_policy(Platform.BEST_BUY, fallback_clause)
+    mock_search = _mock_search_client(search_clause)
 
     with patch("src.draft.type_b_chat._run_draft_agent", new_callable=AsyncMock) as mock_runner:
         mock_runner.return_value = _MOCK_TEMPLATE
@@ -246,6 +254,8 @@ async def test_best_buy_high_value_scenario() -> None:
     _assert_clean_draft(draft, claim)
     assert draft.refund_amount == 200.0
     assert "BB-2024-HIGH-001" in draft.draft_content
+    assert draft.policy_clause_cited == search_clause
+    mock_search.search_policies.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -269,3 +279,63 @@ async def test_empty_search_results_uses_policy_fallback() -> None:
     assert "{{" not in draft.subject
     assert draft.policy_clause_cited == fallback_clause
     assert draft.refund_amount == 30.0
+
+
+@pytest.mark.asyncio
+async def test_wrong_main_step_count_raises() -> None:
+    """Parser should raise if Gemini returns wrong number of main steps."""
+    bad_template = json.dumps(
+        {
+            "title": "Script — Order {{ORDER_ID}}",
+            "main_steps": [
+                "Step 1 text.",
+                "Step 2 text.",
+                "Step 3 text.",
+                "Step 4 text.",
+                # missing step 5 — only 4 steps
+            ],
+            "escalation_steps": [
+                "Escalation step 1.",
+                "Escalation step 2.",
+            ],
+        }
+    )
+    purchase = _make_purchase(Platform.BEST_BUY, price_paid=100.0, order_id="BB-ERR-001")
+    claim = _make_claim(purchase, claim_amount=10.0)
+    policy = _make_policy(Platform.BEST_BUY, "Some clause.")
+    mock_search = _mock_search_client("Some clause.")
+
+    with patch("src.draft.type_b_chat._run_draft_agent", new_callable=AsyncMock) as mock_runner:
+        mock_runner.return_value = bad_template
+        with pytest.raises(DraftGenerationError, match="Expected 5 main steps, got 4"):
+            await generate_chat_script(claim, purchase, policy, mock_search)
+
+
+@pytest.mark.asyncio
+async def test_wrong_escalation_step_count_raises() -> None:
+    """Parser should raise if Gemini returns wrong number of escalation steps."""
+    bad_template = json.dumps(
+        {
+            "title": "Script — Order {{ORDER_ID}}",
+            "main_steps": [
+                "Step 1 text.",
+                "Step 2 text.",
+                "Step 3 text.",
+                "Step 4 text.",
+                "Step 5 text.",
+            ],
+            "escalation_steps": [
+                "Only one escalation step.",
+                # missing step 2 — only 1 step
+            ],
+        }
+    )
+    purchase = _make_purchase(Platform.BEST_BUY, price_paid=100.0, order_id="BB-ERR-002")
+    claim = _make_claim(purchase, claim_amount=10.0)
+    policy = _make_policy(Platform.BEST_BUY, "Some clause.")
+    mock_search = _mock_search_client("Some clause.")
+
+    with patch("src.draft.type_b_chat._run_draft_agent", new_callable=AsyncMock) as mock_runner:
+        mock_runner.return_value = bad_template
+        with pytest.raises(DraftGenerationError, match="Expected 2 escalation steps, got 1"):
+            await generate_chat_script(claim, purchase, policy, mock_search)
