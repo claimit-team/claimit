@@ -236,15 +236,17 @@ def deploy_one(
         #     build_options.installation_scripts
         #   - Wheel path is outside installation_scripts/ subdir, so the
         #     reverse check (extra_pkg under subdir but not declared) is fine.
-        "extra_packages": [
-            get_mcp_wheel_path(),
-            "installation_scripts/install_claimit_mcp.sh",
-        ],
-        "build_options": {
-            "installation_scripts": [
-                "installation_scripts/install_claimit_mcp.sh",
-            ],
-        },
+        # extra_packages and build_options temporarily disabled for deploy validation.
+        # Will re-enable when MCP toolset is switched from stdio to SSE.
+        # "extra_packages": [
+        #     get_mcp_wheel_path(),
+        #     "installation_scripts/install_claimit_mcp.sh",
+        # ],
+        # "build_options": {
+        #     "installation_scripts": [
+        #         "installation_scripts/install_claimit_mcp.sh",
+        #     ],
+        # },
     }
 
     # ── Diagnostic logging ──────────────────────────────────
