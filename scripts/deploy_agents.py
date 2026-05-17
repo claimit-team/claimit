@@ -58,7 +58,7 @@ AGENT_MODULES = [
 DEFAULT_LOCATION = "us-east1"
 # cloudpickle and pydantic must be explicit — SDK does not auto-add them.
 ADK_REQUIREMENTS = [
-    "google-cloud-aiplatform[agent_engines,adk]",
+    "google-cloud-aiplatform[agent_engines,adk]==1.115.0",
     "cloudpickle",
     "pydantic",
 ]
