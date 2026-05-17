@@ -54,10 +54,10 @@ class TargetAdapter(PriceSourceAdapter):
         return cls._api_key
 
     def _fetch_page(self, url: str) -> str:
-        now = time.time()
+        # Cache check uses current time (read-only)
         if url in self._cache:
             cached_at, html = self._cache[url]
-            if now - cached_at < CACHE_TTL_SECONDS:
+            if time.time() - cached_at < CACHE_TTL_SECONDS:
                 return html
 
         params = {
@@ -71,10 +71,17 @@ class TargetAdapter(PriceSourceAdapter):
             response = requests.get(SCRAPERAPI_ENDPOINT, params=params, timeout=60)
             response.raise_for_status()
         except requests.RequestException as e:
-            raise PriceFetchError("target", url, f"ScraperAPI request failed: {e}") from e
+            # Avoid leaking ScraperAPI key from prepared URL in str(e)
+            status = (
+                str(e.response.status_code)
+                if getattr(e, "response", None) is not None
+                else type(e).__name__
+            )
+            raise PriceFetchError("target", url, f"ScraperAPI request failed: {status}") from e
 
         html = response.text
-        self._cache[url] = (now, html)
+        # Use post-fetch timestamp to reflect when content was actually retrieved
+        self._cache[url] = (time.time(), html)
         return html
 
     def _parse_current_price(self, html: str) -> float | None:
