@@ -33,7 +33,9 @@ def _parse_overrides() -> dict[str, str]:
         pair = pair.strip()
         if "=" in pair:
             platform, mode = pair.split("=", 1)
-            overrides[platform.strip()] = mode.strip()
+            normalized_mode = mode.strip().lower()
+            if normalized_mode in {"live", "seeded"}:
+                overrides[platform.strip().lower()] = normalized_mode
 
     _override_cache = overrides
     return overrides
@@ -41,7 +43,10 @@ def _parse_overrides() -> dict[str, str]:
 
 def get_mode() -> str:
     """Return the global price source mode."""
-    return os.environ.get("PRICE_SOURCE_MODE", "mixed")
+    mode = os.environ.get("PRICE_SOURCE_MODE", "mixed").strip().lower()
+    if mode not in {"live", "seeded", "mixed"}:
+        raise ValueError(f"Invalid PRICE_SOURCE_MODE: {mode!r}")
+    return mode
 
 
 def should_use_live(platform: str) -> bool:

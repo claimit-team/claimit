@@ -68,9 +68,10 @@ class SeededAdapter(PriceSourceAdapter):
         if match is None:
             raise PriceFetchError(platform, product_id, "No seeded data available")
 
+        resolved_product_id = str(match.get("product_id", product_id))
         return PriceSnapshot(
             platform=platform,
-            product_id=product_id,
+            product_id=resolved_product_id,
             price_member=match.get("price_member"),
             price_non_member=match.get("price_non_member"),
             member_tier_required=match.get("member_tier_required"),
