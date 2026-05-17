@@ -1,5 +1,6 @@
-"""Stub Google ADK agent for the claim service. MCP toolset disabled for deploy validation."""
+"""Stub Google ADK agent for the claim service. Real tools wired in later tickets."""
 
+from claimit_mcp import get_mongodb_mcp_toolset
 from google.adk import Agent
 
 claim_agent = Agent(
@@ -11,5 +12,5 @@ claim_agent = Agent(
         "retailer's specific policy language and format. Respond with 'Hello from "
         "Claim' for now."
     ),
-    tools=[],
+    tools=[get_mongodb_mcp_toolset(read_only=False)],
 )

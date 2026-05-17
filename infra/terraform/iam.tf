@@ -11,10 +11,11 @@
 
 locals {
   agent_service_accounts = {
-    ingest    = module.ingest_agent.service_account_email
-    monitor   = module.monitor_agent.service_account_email
-    claim     = module.claim_agent.service_account_email
-    assistant = module.assistant_agent.service_account_email
+    ingest      = module.ingest_agent.service_account_email
+    monitor     = module.monitor_agent.service_account_email
+    claim       = module.claim_agent.service_account_email
+    assistant   = module.assistant_agent.service_account_email
+    api_gateway = module.api_gateway.service_account_email
   }
 }
 
@@ -37,6 +38,7 @@ resource "google_cloud_run_v2_service_iam_member" "ci_invoker" {
     "claimit-claim-agent",
     "claimit-assistant-agent",
     "claimit-sync-worker",
+    "claimit-api-gateway",
   ])
   location = var.region
   name     = each.value

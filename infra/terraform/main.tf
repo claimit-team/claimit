@@ -3,6 +3,11 @@ provider "google" {
   region  = var.region
 }
 
+provider "google-beta" {
+  project = var.project_id
+  region  = var.region
+}
+
 # ---------- Artifact Registry ----------
 resource "google_artifact_registry_repository" "claimit" {
   location      = var.region
@@ -104,6 +109,20 @@ locals {
     ELASTIC_URL     = "elastic-url"
     ELASTIC_API_KEY = "elastic-api-key"
   }
+  # api-gateway: BFF layer. Reads MongoDB + Elastic directly, calls all 4
+  # ADK agents via Agent Engine SDK, handles Gmail OAuth flow, traces to Phoenix.
+  api_gateway_secrets = {
+    MONGODB_URI                = "mongodb-uri"
+    ELASTIC_URL                = "elastic-url"
+    ELASTIC_API_KEY            = "elastic-api-key"
+    PHOENIX_API_KEY            = "phoenix-api-key"
+    GMAIL_OAUTH_CLIENT_ID      = "gmail-oauth-client-id"
+    GMAIL_OAUTH_CLIENT_SECRET  = "gmail-oauth-client-secret"
+    CLAIMIT_INGEST_AGENT_ID    = "claimit-ingest-agent-id"
+    CLAIMIT_MONITOR_AGENT_ID   = "claimit-monitor-agent-id"
+    CLAIMIT_CLAIM_AGENT_ID     = "claimit-claim-agent-id"
+    CLAIMIT_ASSISTANT_AGENT_ID = "claimit-assistant-agent-id"
+  }
 }
 
 module "ingest_agent" {
@@ -176,6 +195,20 @@ module "sync_worker" {
   min_instances       = 1
   secret_ids          = values(local.sync_worker_secrets)
   secret_env_map      = local.sync_worker_secrets
+  deletion_protection = false
+
+  depends_on = [google_secret_manager_secret.shared]
+}
+
+module "api_gateway" {
+  source = "./modules/cloud-run-agent"
+
+  project_id          = var.project_id
+  region              = var.region
+  service_name        = "claimit-api-gateway"
+  image               = var.api_gateway_image
+  secret_ids          = values(local.api_gateway_secrets)
+  secret_env_map      = local.api_gateway_secrets
   deletion_protection = false
 
   depends_on = [google_secret_manager_secret.shared]
