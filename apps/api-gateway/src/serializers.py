@@ -6,7 +6,7 @@ sensitive fields. Used by routes that return User payloads.
 
 from __future__ import annotations
 
-from claimit_mongodb_models import User
+from claimit_mongodb_models import NotificationEvent, User
 
 
 def serialize_user(user: User) -> dict[str, object]:
@@ -23,3 +23,12 @@ def serialize_user(user: User) -> dict[str, object]:
         by_alias=True,
         exclude={"gmail_integration": {"refresh_token_ref"}},
     )
+
+
+def serialize_notification(notification: NotificationEvent) -> dict[str, object]:
+    """JSON-serialize a NotificationEvent for response.
+
+    No fields are stripped today; the helper exists for symmetry with
+    serialize_user and to centralize any future exclusion rules.
+    """
+    return notification.model_dump(mode="json", by_alias=True)
