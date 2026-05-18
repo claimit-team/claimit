@@ -34,6 +34,7 @@ class BestBuyAdapter(PriceSourceAdapter):
 
     @classmethod
     def _get_api_key(cls) -> str:
+        """Load ScraperAPI key from env var (override) or GCP Secret Manager."""
         if cls._api_key is None:
             # Allow env var override for local testing
             env_key = os.environ.get("SCRAPERAPI_KEY")
@@ -47,6 +48,13 @@ class BestBuyAdapter(PriceSourceAdapter):
         return cls._api_key
 
     def _fetch_page(self, url: str) -> str:
+        """Fetch a Best Buy product page through ScraperAPI.
+
+        Returns cached HTML if within CACHE_TTL_SECONDS, otherwise calls
+        ScraperAPI with premium=true + country_code=us (required for the
+        protected bestbuy.com domain). Raises PriceFetchError on HTTP failures
+        without leaking the API key.
+        """
         # Cache check uses current time (read-only)
         if url in self._cache:
             cached_at, html = self._cache[url]
@@ -110,6 +118,16 @@ class BestBuyAdapter(PriceSourceAdapter):
         product_url: str | None = None,
         member_tier: str | None = None,
     ) -> PriceSnapshot:
+        """Fetch current Best Buy price for the given product URL.
+
+        Validates that the URL is on bestbuy.com to prevent SSRF and accidental
+        credit burn on non-BestBuy domains. Runs the synchronous _fetch_page in
+        a worker thread to avoid blocking the event loop.
+
+        Raises:
+            PriceFetchError: if product_url missing, host invalid, request fails,
+                or both price selectors return None.
+        """
         if not product_url:
             raise PriceFetchError(platform, product_id, "Best Buy adapter requires product_url")
 

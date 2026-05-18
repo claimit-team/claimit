@@ -31,6 +31,7 @@ def reset_state(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 async def test_parses_current_price() -> None:
+    """Extracts customer + member prices from Apollo JSON embedded in the HTML."""
     adapter = BestBuyAdapter()
     with patch("src.adapters.best_buy.requests.get") as mock_get:
         mock_response = MagicMock()
@@ -56,6 +57,7 @@ async def test_parses_current_price() -> None:
 
 @pytest.mark.asyncio
 async def test_raises_when_no_price_found() -> None:
+    """Raises PriceFetchError when neither customerPrice JSON nor DOM selector matches."""
     adapter = BestBuyAdapter()
     with patch("src.adapters.best_buy.requests.get") as mock_get:
         mock_response = MagicMock()
@@ -73,6 +75,7 @@ async def test_raises_when_no_price_found() -> None:
 
 @pytest.mark.asyncio
 async def test_raises_when_no_url() -> None:
+    """Raises PriceFetchError when product_url is None."""
     adapter = BestBuyAdapter()
     with pytest.raises(PriceFetchError, match="requires product_url"):
         await adapter.fetch_current_price(
@@ -84,6 +87,7 @@ async def test_raises_when_no_url() -> None:
 
 @pytest.mark.asyncio
 async def test_rejects_non_bestbuy_url() -> None:
+    """Host-validation guard rejects URLs whose host isn't on bestbuy.com."""
     adapter = BestBuyAdapter()
     with pytest.raises(PriceFetchError, match=r"bestbuy\.com URL"):
         await adapter.fetch_current_price(
@@ -95,6 +99,7 @@ async def test_rejects_non_bestbuy_url() -> None:
 
 @pytest.mark.asyncio
 async def test_caches_response() -> None:
+    """Second fetch of the same URL within CACHE_TTL_SECONDS hits the cache."""
     adapter = BestBuyAdapter()
     with patch("src.adapters.best_buy.requests.get") as mock_get:
         mock_response = MagicMock()
