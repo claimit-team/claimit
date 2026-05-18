@@ -76,7 +76,7 @@ async def create_indexes(
                     if (
                         collection_name == "purchases"
                         and keys == [("receipt_hash", 1)]
-                        and getattr(exc, "code", None) == 85
+                        and getattr(exc, "code", None) in (85, 86)
                     ):
                         await collection.drop_index("receipt_hash_1")
                         name = await collection.create_index(keys, **kwargs)

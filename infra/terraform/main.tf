@@ -157,6 +157,10 @@ module "ingest_agent" {
   image          = var.ingest_agent_image
   secret_ids     = values(local.ingest_secrets)
   secret_env_map = local.ingest_secrets
+  env_vars = {
+    FRONTEND_BASE_URL = "https://claimitai.vercel.app"
+    GCP_PROJECT_ID    = var.project_id
+  }
   # Hackathon scope; flip to true once services handle real data.
   deletion_protection = false
 

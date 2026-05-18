@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from src.confidence import compute_overall_min
 from src.dedup import DuplicateReceiptError, check_duplicate, hash_receipt
+from src.notifier import maybe_send_confirmation_email
 
 MODEL_NAME = "gemini-2.5-flash"
 APP_NAME = "claimit-ingest-extractor"
@@ -370,8 +371,16 @@ async def extract(
     email: EmailForExtraction | dict[str, Any],
     *,
     purchases_collection: Any | None = None,
+    user_email: str | None = None,
+    gmail_refresh_token_ref: str | None = None,
+    gmail_connected_email: str | None = None,
 ) -> dict[str, Any]:
-    """Extract and validate a Purchase-shaped dictionary from an order email."""
+    """Extract and validate a Purchase-shaped dictionary from an order email.
+
+    When extraction yields ``pending_confirmation`` and ``user_email`` is set,
+    sends a confirmation email with a deep link to ``/confirm/{purchase_id}``.
+    Email failures are logged and do not fail extraction.
+    """
 
     validated_email = EmailForExtraction.model_validate(email)
     if validated_email.receipt_hash is None:
@@ -389,4 +398,11 @@ async def extract(
     raw_output = await _run_extractor_agent(validated_email)
     extracted = _parse_extraction_output(raw_output)
     purchase = Purchase.model_validate(_purchase_payload(validated_email, extracted))
-    return purchase.model_dump(by_alias=True, mode="json")
+    result = purchase.model_dump(by_alias=True, mode="json")
+    await maybe_send_confirmation_email(
+        result,
+        user_email=user_email,
+        gmail_refresh_token_ref=gmail_refresh_token_ref,
+        gmail_connected_email=gmail_connected_email,
+    )
+    return result

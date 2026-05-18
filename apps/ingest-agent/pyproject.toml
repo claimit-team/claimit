@@ -15,6 +15,9 @@ dependencies = [
     "claimit-observability",
     "claimit-mcp",
     "claimit-mongodb-models",
+    "google-cloud-secret-manager>=2.20.0",
+    "google-auth>=2.29.0",
+    "sendgrid>=6.11.0",
 ]
 
 [tool.uv.sources]
@@ -25,8 +28,14 @@ claimit-mongodb-models = { path = "../../packages/shared/mongodb" }
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
     "ruff>=0.6.0",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]
 
 [build-system]
 requires = ["hatchling"]
