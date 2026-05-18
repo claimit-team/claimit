@@ -15,12 +15,14 @@ dependencies = [
     "claimit-observability",
     "claimit-mcp",
     "claimit-mongodb-models",
+    "claimit-pubsub",
 ]
 
 [tool.uv.sources]
 claimit-observability = { path = "../../packages/shared/observability" }
 claimit-mcp = { path = "../../packages/shared/mcp" }
 claimit-mongodb-models = { path = "../../packages/shared/mongodb" }
+claimit-pubsub = { path = "../../packages/shared/pubsub" }
 
 [dependency-groups]
 dev = [
