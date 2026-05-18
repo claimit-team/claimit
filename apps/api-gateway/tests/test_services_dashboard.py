@@ -175,25 +175,23 @@ async def test_pipeline_month_filter_uses_utc_start_of_month() -> None:
     assert "$gte" in resolved_at_filter
     assert "$lt" in resolved_at_filter
 
-    now = datetime.now(UTC)
-
     lower = resolved_at_filter["$gte"]
-    assert lower.year == now.year
-    assert lower.month == now.month
+    # Lower bound is some month's first day at UTC midnight. We don't assert
+    # WHICH month (that would race with `datetime.now(UTC)` at UTC month
+    # rollover); we assert structural properties + that the upper bound is
+    # exactly one calendar month later via the helper.
     assert lower.day == 1
     assert lower.hour == 0
+    assert lower.minute == 0
+    assert lower.second == 0
+    assert lower.microsecond == 0
     assert lower.tzinfo == UTC
 
     upper = resolved_at_filter["$lt"]
-    assert upper.day == 1
-    assert upper.hour == 0
-    assert upper.tzinfo == UTC
-    if now.month == 12:
-        assert upper.year == now.year + 1
-        assert upper.month == 1
-    else:
-        assert upper.year == now.year
-        assert upper.month == now.month + 1
+    # Upper bound must equal lower + 1 calendar month. The helper itself is
+    # verified by test_start_of_next_month_utc_december_rollover and
+    # test_start_of_next_month_utc_normal_month below.
+    assert upper == dashboard._start_of_next_month_utc(lower)
 
 
 @pytest.mark.asyncio
