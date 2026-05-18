@@ -2,7 +2,8 @@
 
 import { AlertCircle, CheckCircle2, Mail, Upload } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { mockGmail } from "@/components/settings/settings-mock";
@@ -19,7 +20,15 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { connectGmail, GmailApiError } from "@/lib/api/gmail";
 import { cn } from "@/lib/utils";
+
+const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
+  state_expired: "Your Gmail connection request expired. Please try again.",
+  state_invalid: "Gmail connection security check failed. Please try again.",
+  code_exchange_failed: "Google could not complete the Gmail connection. Please try again.",
+  internal_error: "Something went wrong connecting Gmail. Please try again.",
+};
 
 /** Only scopes we surface in mock UI — intentionally excludes gmail.modify. */
 const scopeDescriptions: Partial<Record<(typeof mockGmail.scopes)[number], string>> = {
@@ -47,12 +56,38 @@ export function GmailSettingsContent() {
     return () => clearTimeout(timer);
   }, []);
 
+  // OAuth callback toast: /api/v1/gmail/callback 302s back here with
+  // ?status=connected or ?status=error&reason=<x>. Surface it once per mount
+  // (StrictMode double-renders the effect; the ref-guard keeps the toast singular).
+  const searchParams = useSearchParams();
+  const callbackHandledRef = useRef(false);
+  useEffect(() => {
+    if (callbackHandledRef.current) return;
+    const status = searchParams.get("status");
+    if (status === "connected") {
+      callbackHandledRef.current = true;
+      toast.success("Gmail connected successfully.");
+      setGmailConnected(true);
+    } else if (status === "error") {
+      callbackHandledRef.current = true;
+      const reason = searchParams.get("reason") ?? "internal_error";
+      toast.error(CALLBACK_ERROR_MESSAGES[reason] ?? CALLBACK_ERROR_MESSAGES.internal_error);
+    }
+  }, [searchParams]);
+
   const handleConnect = async () => {
     setIsConnecting(true);
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    setIsConnecting(false);
-    toast.success("Connecting to Google in this mock flow.");
-    setGmailConnected(true);
+    try {
+      const { authorization_url } = await connectGmail("/settings/gmail");
+      window.location.href = authorization_url;
+    } catch (err) {
+      setIsConnecting(false);
+      const message =
+        err instanceof GmailApiError
+          ? err.message
+          : "Could not start Gmail connection. Please try again.";
+      toast.error(message);
+    }
   };
 
   const handleDisconnect = async () => {
