@@ -11,32 +11,39 @@ Why polling and not MongoDB Change Streams or Pub/Sub?
   "live" notifications. Easy to swap out later if either alternative
   becomes attractive.
 
-last_seen ordering:
-- The generator tracks the latest `created_at` ISO string it has emitted.
-  Each tick queries for `created_at > last_seen` and updates the
-  watermark from the newest doc returned. This avoids re-emitting
-  notifications across polling intervals without needing a server-side
-  cursor.
-- On first tick we seed last_seen with `datetime.now(UTC).isoformat()`
-  so we don't replay the user's history. The route layer can decide
-  later to support backfill via query param if the product wants it.
+Compound watermark (created_at, _id):
+- Tracking only `created_at` is unsafe at the 50-doc batch boundary: if
+  two notifications share the same created_at and one straddles the
+  batch limit, the next tick's `$gt: last_seen_iso` filter would drop
+  the rest of that timestamp's docs forever. Same bug family as the
+  cursor pagination tie-break in services/notifications.py — applied the
+  same $or compound predicate fix here.
+- First poll has no _id watermark yet (last_seen_id is None), so we use
+  a plain `created_at $gt now()` filter; subsequent polls use the
+  compound `[created_at $gt last_iso, OR (created_at == last_iso AND
+  _id $gt last_id)]` predicate.
+- Sort is `created_at` ASC, `_id` ASC so the watermark advance is
+  consistent with the read order.
 
 Safety cap:
 - Each tick fetches at most 50 docs. If a user has a backlog of > 50
   events accumulated between polls, the watermark advances by one batch
-  and the rest are picked up on the next tick. Prevents pathological
-  bursts from blowing up a single SSE frame.
+  and the rest are picked up on the next tick.
 
-Error handling:
-- A DB error during a poll is emitted as an `error` SSE event (not a
-  notification frame) and the generator continues. Yielding rather than
-  raising avoids tearing down the stream on a transient blip and lets
-  the client decide how to react.
+Error handling — two layers:
+- A DB error during the poll itself emits an `error` SSE frame and the
+  generator continues on the next poll cycle. Transient connection
+  blips do not tear down the stream.
+- A failure inside the per-doc validate/serialize/yield path (Pydantic
+  ValidationError from a schema-drift document, etc.) is caught
+  per-doc, logged, and the watermark is best-effort advanced past the
+  poison doc so we don't replay it forever. The connection stays open.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -62,33 +69,57 @@ async def event_stream_generator(
     layer hands these to sse_starlette.EventSourceResponse, which emits
     them as `event:` / `data:` lines on the wire.
 
-    Loop: poll notification_events for created_at > last_seen,
-    emit any new ones (oldest first), sleep POLL_INTERVAL_SECONDS,
-    repeat. Disconnects propagate via asyncio.CancelledError raised by
+    Loop: poll notification_events newer than the (created_at, _id)
+    watermark, emit each new doc (oldest first), sleep, repeat.
+    Disconnects propagate via asyncio.CancelledError raised by
     sse_starlette when the client closes the underlying response.
     """
     last_seen_iso: str = datetime.now(UTC).isoformat()
+    last_seen_id: UUID | None = None
 
     while True:
         try:
-            new_docs = await _fetch_new_notifications(db, user_id, last_seen_iso)
+            new_docs = await _fetch_new_notifications(db, user_id, last_seen_iso, last_seen_id)
         except Exception:
             logger.exception("event_stream poll failed for user_id=%s", user_id)
             yield {
                 "event": "error",
                 "data": json.dumps({"message": "Stream temporarily unavailable"}),
             }
-        else:
-            for doc in new_docs:
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+            continue
+
+        for raw in new_docs:
+            try:
+                event = NotificationEvent.model_validate(raw)
+                payload = event.model_dump(mode="json", by_alias=True)
                 yield {
                     "event": "notification",
-                    "data": json.dumps(
-                        NotificationEvent.model_validate(doc).model_dump(mode="json", by_alias=True)
-                    ),
+                    "data": json.dumps(payload),
                 }
-                created_at = doc.get("created_at")
-                if isinstance(created_at, str) and created_at > last_seen_iso:
-                    last_seen_iso = created_at
+                last_seen_iso = event.created_at
+                last_seen_id = event.id
+            except Exception:
+                logger.exception(
+                    "event_stream serialize/yield failed user_id=%s doc_id=%s",
+                    user_id,
+                    raw.get("_id"),
+                )
+                # Best-effort watermark advance so a poison doc doesn't
+                # get replayed on every poll. Use the raw fields rather
+                # than the (failed) Pydantic instance.
+                raw_created_at = raw.get("created_at")
+                if isinstance(raw_created_at, str):
+                    last_seen_iso = raw_created_at
+                raw_id = raw.get("_id")
+                if isinstance(raw_id, UUID):
+                    last_seen_id = raw_id
+                elif isinstance(raw_id, str):
+                    # _id wasn't UUID-shaped; leave watermark alone. The
+                    # compound predicate still skips the poison doc on the
+                    # next poll once a later created_at lands.
+                    with contextlib.suppress(ValueError):
+                        last_seen_id = UUID(raw_id)
 
         await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
@@ -97,20 +128,32 @@ async def _fetch_new_notifications(
     db: MongoDBClient,
     user_id: UUID,
     last_seen_iso: str,
+    last_seen_id: UUID | None,
 ) -> list[dict[str, Any]]:
-    """Return up to MAX_DOCS_PER_TICK notifications newer than last_seen.
+    """Return up to MAX_DOCS_PER_TICK notifications newer than the
+    (last_seen_iso, last_seen_id) watermark.
 
-    Sort is `created_at` ASC + `_id` ASC so a tick that hits the safety
-    cap leaves the generator with a deterministic watermark (the most
-    recent doc emitted), ready to pick up from on the next tick.
+    First poll has no _id watermark (last_seen_id is None); use a plain
+    `created_at $gt last_seen_iso` filter. Subsequent polls use the
+    compound `$or` predicate so docs sharing the boundary timestamp are
+    not silently dropped.
     """
+    if last_seen_id is None:
+        match: dict[str, Any] = {
+            "user_id": user_id,
+            "created_at": {"$gt": last_seen_iso},
+        }
+    else:
+        match = {
+            "user_id": user_id,
+            "$or": [
+                {"created_at": {"$gt": last_seen_iso}},
+                {"created_at": last_seen_iso, "_id": {"$gt": last_seen_id}},
+            ],
+        }
+
     pipeline = [
-        {
-            "$match": {
-                "user_id": user_id,
-                "created_at": {"$gt": last_seen_iso},
-            }
-        },
+        {"$match": match},
         {"$sort": {"created_at": 1, "_id": 1}},
         {"$limit": MAX_DOCS_PER_TICK},
     ]

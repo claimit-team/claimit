@@ -119,8 +119,13 @@ class _FrozenInstant:
 
 @pytest.mark.asyncio
 async def test_generator_advances_last_seen_after_emit() -> None:
-    """After yielding a doc with created_at=T, next poll's $gt filter must use T."""
-    doc = make_notification_event(created_at="2026-05-18T10:00:01+00:00")
+    """After yielding a doc, second poll uses the compound (created_at, _id)
+    $or predicate so docs sharing the boundary timestamp are not dropped."""
+    doc_id = "40000000-0000-0000-0000-000000000001"
+    doc = make_notification_event(
+        notification_id=doc_id,
+        created_at="2026-05-18T10:00:01+00:00",
+    )
     db = _mock_db([[doc], []])
 
     sleep_calls = 0
@@ -143,7 +148,16 @@ async def test_generator_advances_last_seen_after_emit() -> None:
 
     second_call_pipeline = db.aggregate.await_args_list[1].args[1]
     match_stage = second_call_pipeline[0]["$match"]
-    assert match_stage["created_at"] == {"$gt": "2026-05-18T10:00:01+00:00"}
+    assert match_stage["$or"] == [
+        {"created_at": {"$gt": "2026-05-18T10:00:01+00:00"}},
+        {
+            "created_at": "2026-05-18T10:00:01+00:00",
+            "_id": {"$gt": UUID(doc_id)},
+        },
+    ]
+    # bare $gt: must not exist at the top level once the compound predicate
+    # is in play — otherwise both filters would be ANDed together.
+    assert "created_at" not in match_stage
 
 
 @pytest.mark.asyncio
@@ -235,3 +249,102 @@ async def test_generator_uses_notification_events_collection() -> None:
 
     collection = db.aggregate.await_args_list[0].args[0]
     assert collection == "notification_events"
+
+
+@pytest.mark.asyncio
+async def test_generator_compound_watermark_breaks_ties_on_created_at() -> None:
+    """Two docs with IDENTICAL created_at, sorted by _id ASC. Second tick's
+    $match must use the compound predicate with the second doc's _id so
+    docs sharing the boundary timestamp aren't silently dropped."""
+    same_ts = "2026-05-18T10:00:01+00:00"
+    id_a = "40000000-0000-0000-0000-0000000000aa"
+    id_b = "40000000-0000-0000-0000-0000000000bb"
+    doc_a = make_notification_event(notification_id=id_a, created_at=same_ts)
+    doc_b = make_notification_event(notification_id=id_b, created_at=same_ts)
+    db = _mock_db([[doc_a, doc_b], []])
+
+    sleep_calls = 0
+
+    async def fake_sleep(_seconds: float) -> None:
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls >= 2:
+            raise asyncio.CancelledError
+
+    _FrozenDatetime.value = "2026-05-18T00:00:00+00:00"  # seed < same_ts
+    with (
+        patch.object(event_stream_module.asyncio, "sleep", new=fake_sleep),
+        patch.object(event_stream_module, "datetime", _FrozenDatetime),
+    ):
+        gen = event_stream_generator(db, USER_ID)
+        first = await gen.__anext__()
+        second = await gen.__anext__()
+        with pytest.raises(asyncio.CancelledError):
+            await gen.__anext__()
+
+    payload_a = json.loads(first["data"])
+    payload_b = json.loads(second["data"])
+    assert payload_a["_id"] == id_a
+    assert payload_b["_id"] == id_b
+
+    second_pipeline = db.aggregate.await_args_list[1].args[1]
+    match_stage = second_pipeline[0]["$match"]
+    assert match_stage["$or"] == [
+        {"created_at": {"$gt": same_ts}},
+        {"created_at": same_ts, "_id": {"$gt": UUID(id_b)}},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_generator_skips_bad_doc_in_else_path() -> None:
+    """A doc that fails Pydantic validation in the per-doc try-except is
+    logged + skipped; the generator does not crash and watermark advances
+    past the poison doc so it is not re-fetched forever."""
+    good_id = "40000000-0000-0000-0000-0000000000aa"
+    bad_id = "40000000-0000-0000-0000-0000000000bb"
+    good_doc = make_notification_event(
+        notification_id=good_id,
+        created_at="2026-05-18T10:00:00+00:00",
+    )
+    bad_doc = make_notification_event(
+        notification_id=bad_id,
+        created_at="2026-05-18T10:00:01+00:00",
+        event_type="not_a_real_event_type",
+    )
+    db = _mock_db([[good_doc, bad_doc], []])
+
+    sleep_calls = 0
+
+    async def fake_sleep(_seconds: float) -> None:
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls >= 2:
+            raise asyncio.CancelledError
+
+    _FrozenDatetime.value = "2026-05-18T00:00:00+00:00"
+    with (
+        patch.object(event_stream_module.asyncio, "sleep", new=fake_sleep),
+        patch.object(event_stream_module, "datetime", _FrozenDatetime),
+        patch.object(event_stream_module.logger, "exception") as log_exception,
+    ):
+        gen = event_stream_generator(db, USER_ID)
+        emitted = await gen.__anext__()  # only the good doc yields
+        with pytest.raises(asyncio.CancelledError):
+            await gen.__anext__()  # second poll empty -> sleep raises
+
+    payload = json.loads(emitted["data"])
+    assert payload["_id"] == good_id
+    log_exception.assert_called_once()
+
+    second_pipeline = db.aggregate.await_args_list[1].args[1]
+    match_stage = second_pipeline[0]["$match"]
+    # Watermark advanced past the BAD doc (later created_at + its _id),
+    # not just the good one. Otherwise the bad doc would be re-fetched
+    # on every subsequent poll and re-fail validation forever.
+    assert match_stage["$or"] == [
+        {"created_at": {"$gt": "2026-05-18T10:00:01+00:00"}},
+        {
+            "created_at": "2026-05-18T10:00:01+00:00",
+            "_id": {"$gt": UUID(bad_id)},
+        },
+    ]
