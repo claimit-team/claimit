@@ -2,10 +2,16 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .base import BaseDocument
-from .enums import LoyaltyTier, Platform, SendMode, SubscriptionTier
+from .enums import (
+    LoyaltyTier,
+    NotificationEventType,
+    Platform,
+    SendMode,
+    SubscriptionTier,
+)
 
 
 class DefaultLocation(BaseModel):
@@ -48,6 +54,7 @@ class IngestionSkiplistEntry(BaseModel):
 class NotificationPrefs(BaseModel):
     web_push: bool
     email: bool
+    muted_event_types: list[NotificationEventType] = Field(default_factory=list)
 
 
 class Subscription(BaseModel):

@@ -1,3 +1,4 @@
+import type { NotificationEventType } from "./NotificationEvent";
 import type {
   ISODateString,
   LoyaltyTier,
@@ -46,6 +47,7 @@ export interface IngestionSkiplistEntry {
 export interface NotificationPrefs {
   web_push: boolean;
   email: boolean;
+  muted_event_types: NotificationEventType[];
 }
 
 export interface Subscription {

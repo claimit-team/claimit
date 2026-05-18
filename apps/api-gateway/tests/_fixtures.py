@@ -39,7 +39,7 @@ USER_FIXTURE: dict[str, object] = {
         "changed_at": None,
     },
     "ingestion_skiplist": [],
-    "notification_prefs": {"web_push": True, "email": True},
+    "notification_prefs": {"web_push": True, "email": True, "muted_event_types": []},
     "subscription": {"tier": "free", "trial_ends": None, "renewed_at": None},
     "created_at": "2024-01-01T00:00:00Z",
 }
