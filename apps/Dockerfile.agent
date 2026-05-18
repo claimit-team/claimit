@@ -41,6 +41,7 @@ COPY apps/${APP_NAME}/pyproject.toml apps/${APP_NAME}/uv.lock ./
 COPY packages/shared/observability /build/packages/shared/observability
 COPY packages/shared/mcp /build/packages/shared/mcp
 COPY packages/shared/mongodb /build/packages/shared/mongodb
+COPY packages/shared/pubsub /build/packages/shared/pubsub
 COPY packages/shared/elastic /build/packages/shared/elastic
 COPY packages/shared/search /build/packages/shared/search
 
