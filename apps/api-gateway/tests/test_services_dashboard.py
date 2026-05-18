@@ -165,22 +165,35 @@ async def test_pipeline_recent_resolved_limit_and_sort() -> None:
 
 @pytest.mark.asyncio
 async def test_pipeline_month_filter_uses_utc_start_of_month() -> None:
-    """Locked design decision: month = UTC calendar month."""
+    """Locked design decision: month = UTC calendar month (start inclusive, end exclusive)."""
     db = _mock_db()
     await dashboard.get_summary(db, _USER_ID)
     pipeline = db.aggregate.call_args.args[1]
     month_match = pipeline[1]["$facet"]["savings_month"][0]["$match"]
     resolved_at_filter = month_match["resolved_at"]
-    # The filter sets a "$gte" boundary; verify it's the 1st of this UTC month
-    # at 00:00:00, not e.g. (now - 30 days).
+
     assert "$gte" in resolved_at_filter
-    boundary = resolved_at_filter["$gte"]
+    assert "$lt" in resolved_at_filter
+
     now = datetime.now(UTC)
-    assert boundary.year == now.year
-    assert boundary.month == now.month
-    assert boundary.day == 1
-    assert boundary.hour == 0
-    assert boundary.tzinfo == UTC
+
+    lower = resolved_at_filter["$gte"]
+    assert lower.year == now.year
+    assert lower.month == now.month
+    assert lower.day == 1
+    assert lower.hour == 0
+    assert lower.tzinfo == UTC
+
+    upper = resolved_at_filter["$lt"]
+    assert upper.day == 1
+    assert upper.hour == 0
+    assert upper.tzinfo == UTC
+    if now.month == 12:
+        assert upper.year == now.year + 1
+        assert upper.month == 1
+    else:
+        assert upper.year == now.year
+        assert upper.month == now.month + 1
 
 
 @pytest.mark.asyncio
@@ -213,3 +226,43 @@ def test_make_claim_validates_against_pydantic() -> None:
 
 def test_make_purchase_validates_against_pydantic() -> None:
     Purchase.model_validate(make_purchase())
+
+
+# ---------------------------------------------------------------------------
+# Helper-level unit tests for _start_of_next_month_utc — pure function with a
+# December rollover edge case that should never depend on `datetime.now()` to
+# verify. These guard the upper-bound contract enforced by the savings_month
+# pipeline (start inclusive, end exclusive).
+# ---------------------------------------------------------------------------
+
+
+def test_start_of_next_month_utc_december_rollover() -> None:
+    """December -> January of next year, with year incremented."""
+    from src.services.dashboard import _start_of_next_month_utc
+
+    dec_2026 = datetime(2026, 12, 1, 0, 0, 0, tzinfo=UTC)
+    assert _start_of_next_month_utc(dec_2026) == datetime(
+        2027,
+        1,
+        1,
+        0,
+        0,
+        0,
+        tzinfo=UTC,
+    )
+
+
+def test_start_of_next_month_utc_normal_month() -> None:
+    """Non-December months just increment the month component."""
+    from src.services.dashboard import _start_of_next_month_utc
+
+    may_2026 = datetime(2026, 5, 1, 0, 0, 0, tzinfo=UTC)
+    assert _start_of_next_month_utc(may_2026) == datetime(
+        2026,
+        6,
+        1,
+        0,
+        0,
+        0,
+        tzinfo=UTC,
+    )

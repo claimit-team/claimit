@@ -35,6 +35,20 @@ def _start_of_current_month_utc() -> datetime:
     return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
+def _start_of_next_month_utc(start_of_month: datetime) -> datetime:
+    """First moment of the calendar month after `start_of_month`.
+
+    Pure function so tests can verify the December -> January year rollover
+    independently of `datetime.now()`.
+    """
+    if start_of_month.month == 12:
+        return start_of_month.replace(
+            year=start_of_month.year + 1,
+            month=1,
+        )
+    return start_of_month.replace(month=start_of_month.month + 1)
+
+
 def _first_total(facet_result: list[dict[str, Any]]) -> float:
     """Extract sum from a $group facet output; default 0.0 if empty."""
     if not facet_result:
@@ -54,6 +68,7 @@ def _build_claims_pipeline(
     start_of_month: datetime,
 ) -> list[dict[str, Any]]:
     """Construct the $facet pipeline that produces all 4 claims-side metrics."""
+    start_of_next_month = _start_of_next_month_utc(start_of_month)
     return [
         {"$match": {"user_id": user_id}},
         {
@@ -62,7 +77,10 @@ def _build_claims_pipeline(
                     {
                         "$match": {
                             "outcome": {"$in": _SAVINGS_OUTCOMES},
-                            "resolved_at": {"$gte": start_of_month},
+                            "resolved_at": {
+                                "$gte": start_of_month,
+                                "$lt": start_of_next_month,
+                            },
                         }
                     },
                     {"$group": {"_id": None, "total": {"$sum": "$claim_amount"}}},
