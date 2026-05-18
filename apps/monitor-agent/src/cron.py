@@ -29,6 +29,13 @@ tracer = get_tracer(__name__)
 _SCAN_LIMIT = 1000
 
 
+def _as_utc_aware(value: datetime) -> datetime:
+    """Treat naive MongoDB datetimes as UTC and convert aware values to UTC."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 async def run_cron(db: MongoDBClient) -> dict[str, int]:
     """Run one cadence sweep. Returns counter summary; always finishes successfully."""
     now = datetime.now(UTC)
@@ -39,6 +46,9 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
     with span_with_attributes(tracer, "cron.run", {"purchases.scanned": len(purchases)}):
         for purchase in purchases:
             scanned += 1
+            purchase.window_expires = _as_utc_aware(purchase.window_expires)
+            if purchase.last_checked_at is not None:
+                purchase.last_checked_at = _as_utc_aware(purchase.last_checked_at)
 
             if purchase.window_expires <= now:
                 skipped_expired += 1
