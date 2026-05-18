@@ -92,6 +92,25 @@ def test_missing_project_raises(monkeypatch: pytest.MonkeyPatch) -> None:
         asyncio.run(publisher.publish_event(TOPIC_PURCHASE_INGESTED, event))
 
 
+def test_publish_event_passes_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, float | None] = {"timeout": None}
+
+    class _StubFuture:
+        def result(self, timeout: float | None = None) -> str:
+            captured["timeout"] = timeout
+            return "msg-1"
+
+    client = MagicMock()
+    client.topic_path.side_effect = lambda project, topic: f"projects/{project}/topics/{topic}"
+    client.publish.return_value = _StubFuture()
+    monkeypatch.setattr(publisher, "_get_publisher", lambda: client)
+
+    event = PurchaseIngestedEvent(**_VALID_PAYLOAD)
+    asyncio.run(publisher.publish_event(TOPIC_PURCHASE_INGESTED, event))
+
+    assert captured["timeout"] == publisher.PUBLISH_TIMEOUT_SECONDS
+
+
 def test_module_exports_match_init() -> None:
     # Confirm public surface is exactly what __init__ promises.
     assert events.PurchaseIngestedEvent is PurchaseIngestedEvent

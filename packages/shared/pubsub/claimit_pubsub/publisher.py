@@ -26,6 +26,8 @@ if TYPE_CHECKING:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
+PUBLISH_TIMEOUT_SECONDS = 30.0
+
 _client: PublisherClient | None = None
 _client_lock = threading.Lock()
 _project_id: str | None = None
@@ -78,7 +80,10 @@ async def publish_event(topic: str, event: EventEnvelope) -> str:
 
     loop = asyncio.get_running_loop()
     future = _get_publisher().publish(topic_path, data, **attributes)
-    message_id = await loop.run_in_executor(None, future.result)
+    message_id = await loop.run_in_executor(
+        None,
+        lambda: future.result(timeout=PUBLISH_TIMEOUT_SECONDS),
+    )
     logger.info(
         "Published %s event_id=%s topic=%s message_id=%s",
         type(event).__name__,
