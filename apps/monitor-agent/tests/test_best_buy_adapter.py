@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from src.adapters.base import PriceFetchError
@@ -23,10 +23,14 @@ NO_PRICE_HTML = """
 
 @pytest.fixture(autouse=True)
 def reset_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Reset class-level cache and API key between tests."""
+    """Reset class-level cache and API key between tests; mock screenshot service."""
     monkeypatch.setenv("SCRAPERAPI_KEY", "test-key")
     BestBuyAdapter._cache = {}
     BestBuyAdapter._api_key = None
+    monkeypatch.setattr(
+        "src.adapters.best_buy.capture_screenshot",
+        AsyncMock(return_value="https://fake-signed-url.com/evidence.png"),
+    )
 
 
 @pytest.mark.asyncio
