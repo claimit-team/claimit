@@ -27,6 +27,7 @@ from pydantic import TypeAdapter, ValidationError
 from .base import BaseDocument
 from .claim import Claim
 from .conversation import Conversation
+from .notification_event import NotificationEvent
 from .policy import Policy
 from .price_history import PriceHistory
 from .purchase import Purchase
@@ -47,6 +48,7 @@ COLLECTION_MODELS: dict[str, type[BaseDocument]] = {
     "users": User,
     "price_history": PriceHistory,
     "conversations": Conversation,
+    "notification_events": NotificationEvent,
 }
 
 
@@ -288,6 +290,9 @@ class MongoDBClient:
 
     async def upsert_conversation(self, conv: Conversation) -> str:
         return await self.upsert("conversations", conv.id, conv)
+
+    async def upsert_notification_event(self, doc: NotificationEvent) -> str:
+        return await self.upsert("notification_events", doc.id, doc)
 
 
 def _coerce_uuid(value: str | UUID) -> UUID:
