@@ -230,6 +230,26 @@ class MongoDBClient:
         """Count documents matching `filter`."""
         return await self._db[collection].count_documents(filter)
 
+    async def aggregate(
+        self,
+        collection: str,
+        pipeline: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Run an aggregation pipeline against `collection`.
+
+        Returns raw documents because aggregation pipelines can $project
+        arbitrary shapes that don't match domain Pydantic models. Callers
+        interpret the result shape.
+
+        Example:
+            result = await db.aggregate("claims", [
+                {"$match": {"user_id": uid}},
+                {"$group": {"_id": "$outcome", "total": {"$sum": "$claim_amount"}}},
+            ])
+        """
+        cursor = self._db[collection].aggregate(pipeline)
+        return [doc async for doc in cursor]
+
     async def delete(self, collection: str, id: str | UUID) -> bool:
         """Delete by `_id`. Returns True if exactly one document was deleted."""
         result = await self._db[collection].delete_one({"_id": _coerce_uuid(id)})
