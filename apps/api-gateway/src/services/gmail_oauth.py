@@ -3,9 +3,11 @@
 Wraps `google_auth_oauthlib.flow.Flow` with three thin helpers used by the
 /gmail/connect and /gmail/callback route handlers:
 - build_flow: constructs a Flow from in-memory client_config (no client_secret.json file)
-- build_authorization_url: forces offline + consent prompt so we get a refresh_token
-- exchange_code_for_tokens: redeems the authorization code and extracts the
-  user's actual Gmail address from the OIDC id_token's `email` claim
+- build_authorization_url: forces offline + consent prompt so we get a refresh_token;
+  takes a caller-supplied PKCE code_verifier so the route layer (not this module)
+  owns generation and persistence
+- exchange_code_for_tokens: redeems the authorization code (with PKCE verifier)
+  and extracts the user's actual Gmail address from the OIDC id_token's `email` claim
 
 Scope notes:
 - gmail.readonly / send / modify cover the ingestion + claim-send + archive
@@ -53,14 +55,20 @@ def build_flow(client_id: str, client_secret: str, redirect_uri: str) -> Flow:
     return flow
 
 
-def build_authorization_url(flow: Flow, state: str) -> str:
+def build_authorization_url(flow: Flow, state: str, code_verifier: str) -> str:
     """Build the Google OAuth consent URL.
 
     `access_type="offline"` plus `prompt="consent"` forces Google to issue a
     refresh_token even if the user previously consented to the same scopes.
     Without `prompt="consent"`, Google omits the refresh_token on re-consent
     and we'd have nothing to persist in Secret Manager.
+
+    `code_verifier` is assigned to the Flow before calling `authorization_url`
+    so google-auth-oauthlib uses our caller-supplied verifier (rather than its
+    auto-generated one, which we'd then have no way to recover for /callback)
+    when deriving the S256 code_challenge.
     """
+    flow.code_verifier = code_verifier
     authorization_url, _ = flow.authorization_url(
         access_type="offline",
         prompt="consent",
@@ -70,7 +78,9 @@ def build_authorization_url(flow: Flow, state: str) -> str:
     return authorization_url
 
 
-def exchange_code_for_tokens(flow: Flow, code: str, client_id: str) -> dict[str, Any]:
+def exchange_code_for_tokens(
+    flow: Flow, code: str, client_id: str, code_verifier: str
+) -> dict[str, Any]:
     """Redeem the auth code and return a normalized token dict.
 
     Returns: {refresh_token, access_token, expires_at: datetime, scopes: list[str],
@@ -78,7 +88,13 @@ def exchange_code_for_tokens(flow: Flow, code: str, client_id: str) -> dict[str,
 
     Raises OAuthExchangeError if token fetch fails, id_token is absent, or
     id_token verification fails.
+
+    `code_verifier` must be the same value passed to build_authorization_url
+    on the /connect side. The library reads `flow.code_verifier` and includes
+    it in the token request body; without it, Google rejects the exchange
+    with `invalid_grant: Missing code verifier`.
     """
+    flow.code_verifier = code_verifier
     try:
         flow.fetch_token(code=code)
     except Exception as err:

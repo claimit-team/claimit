@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
@@ -99,13 +100,21 @@ async def gmail_connect(
     client_secret = os.environ["GMAIL_OAUTH_CLIENT_SECRET"]
     redirect_uri = os.environ["GMAIL_OAUTH_REDIRECT_URI"]
 
+    # PKCE: 32 bytes -> 43-char url-safe verifier, the RFC 7636 §4.1 minimum.
+    # We carry it inside the state JWT so /callback can pass it back to the
+    # token exchange (api-gateway is stateless across requests).
+    code_verifier = secrets.token_urlsafe(32)
+
     state = state_jwt.sign_state(
         user_id=str(user.id),
         return_to=return_to,
+        code_verifier=code_verifier,
         key=state_key,
     )
     flow = gmail_oauth.build_flow(client_id, client_secret, redirect_uri)
-    authorization_url = gmail_oauth.build_authorization_url(flow, state=state)
+    authorization_url = gmail_oauth.build_authorization_url(
+        flow, state=state, code_verifier=code_verifier
+    )
     return {"authorization_url": authorization_url}
 
 
@@ -137,8 +146,11 @@ async def gmail_callback(
 
     user_id_str: str = payload["user_id"]
     return_to: str = payload["return_to"]
+    code_verifier: str = payload["code_verifier"]
 
     # 2. Exchange code for tokens (refresh_token + access_token + id_token email).
+    # The code_verifier from the state JWT must match the code_challenge sent
+    # to Google in /connect, otherwise Google returns invalid_grant.
     client_id = os.environ["GMAIL_OAUTH_CLIENT_ID"]
     client_secret = os.environ["GMAIL_OAUTH_CLIENT_SECRET"]
     redirect_uri = os.environ["GMAIL_OAUTH_REDIRECT_URI"]
@@ -146,7 +158,9 @@ async def gmail_callback(
 
     try:
         flow = gmail_oauth.build_flow(client_id, client_secret, redirect_uri)
-        tokens = gmail_oauth.exchange_code_for_tokens(flow, code, client_id)
+        tokens = gmail_oauth.exchange_code_for_tokens(
+            flow, code, client_id, code_verifier=code_verifier
+        )
     except gmail_oauth.OAuthExchangeError as err:
         _log.warning("Gmail code exchange failed for user_id=%s: %s", user_id_str, err)
         return _redirect_error(return_to, "code_exchange_failed")
