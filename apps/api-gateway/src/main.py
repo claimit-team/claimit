@@ -27,10 +27,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from firebase_admin import initialize_app as firebase_init_app
+from google.cloud import secretmanager
 
 from . import deps
 from .middleware.errors import ApiError, api_error_handler, unhandled_error_handler
 from .routes import router
+from .services.token_cache import AccessTokenCache
 
 _log = logging.getLogger(__name__)
 
@@ -47,6 +49,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # MongoDB
     mongo_url = os.environ["MONGODB_URI"]
     deps._db = MongoDBClient(mongo_url)
+    # Ticket 4.14 singletons: Secret Manager gRPC client, HS256 state-JWT key
+    # (raw value from Secret Manager payload mounted as env var), and per-process
+    # access-token cache for Gmail. None of these need teardown.
+    deps._secret_manager_client = secretmanager.SecretManagerServiceClient()
+    deps._state_jwt_key = os.environ["STATE_JWT_SECRET"]
+    deps._token_cache = AccessTokenCache()
     yield
     if deps._db is not None:
         await deps._db.close()
