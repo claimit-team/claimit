@@ -2,7 +2,7 @@
 
 import { AlertCircle, CheckCircle2, Mail, Upload } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -44,6 +44,7 @@ const gmailDemoMeta = {
 } as const;
 
 export function GmailSettingsContent() {
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
@@ -59,21 +60,25 @@ export function GmailSettingsContent() {
   // OAuth callback toast: /api/v1/gmail/callback 302s back here with
   // ?status=connected or ?status=error&reason=<x>. Surface it once per mount
   // (StrictMode double-renders the effect; the ref-guard keeps the toast singular).
-  const searchParams = useSearchParams();
+  // We read window.location.search directly instead of useSearchParams() to
+  // avoid the App Router static-prerender Suspense bailout.
   const callbackHandledRef = useRef(false);
   useEffect(() => {
     if (callbackHandledRef.current) return;
-    const status = searchParams.get("status");
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("status");
     if (status === "connected") {
       callbackHandledRef.current = true;
       toast.success("Gmail connected successfully.");
       setGmailConnected(true);
+      router.replace("/settings/gmail");
     } else if (status === "error") {
       callbackHandledRef.current = true;
-      const reason = searchParams.get("reason") ?? "internal_error";
+      const reason = params.get("reason") ?? "internal_error";
       toast.error(CALLBACK_ERROR_MESSAGES[reason] ?? CALLBACK_ERROR_MESSAGES.internal_error);
+      router.replace("/settings/gmail");
     }
-  }, [searchParams]);
+  }, [router]);
 
   const handleConnect = async () => {
     setIsConnecting(true);
