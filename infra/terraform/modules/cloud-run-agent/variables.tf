@@ -76,3 +76,9 @@ variable "deletion_protection" {
   description = "Whether the Cloud Run service is protected from accidental deletion."
   default     = true
 }
+
+variable "env_vars" {
+  type        = map(string)
+  description = "Plain (non-secret) environment variables to inject into the container."
+  default     = {}
+}
