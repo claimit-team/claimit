@@ -22,7 +22,11 @@ def test_build_authorization_url_includes_state_scopes_and_offline_access() -> N
         client_secret="test-client-secret",
         redirect_uri="https://example.com/callback",
     )
-    url = build_authorization_url(flow, state="my-state-token")
+    url = build_authorization_url(
+        flow,
+        state="my-state-token",
+        code_verifier="test-pkce-verifier-43chars-aaaaaaaaaaaaaaaaaaa",
+    )
     parsed = urlparse(url)
     qs = parse_qs(parsed.query)
 
@@ -34,6 +38,26 @@ def test_build_authorization_url_includes_state_scopes_and_offline_access() -> N
     scope_str = qs["scope"][0]
     for scope in GMAIL_SCOPES:
         assert scope in scope_str
+    # PKCE: verifier we passed in was applied to the Flow, and Google sees
+    # the matching S256 challenge.
+    assert flow.code_verifier == "test-pkce-verifier-43chars-aaaaaaaaaaaaaaaaaaa"
+    assert qs["code_challenge_method"] == ["S256"]
+    assert "code_challenge" in qs
+
+
+def test_build_authorization_url_uses_caller_supplied_verifier() -> None:
+    """Two distinct verifiers must produce two distinct challenges (no library override)."""
+    flow_a = build_flow("cid", "cs", "https://example.com/cb")
+    flow_b = build_flow("cid", "cs", "https://example.com/cb")
+    url_a = build_authorization_url(
+        flow_a, state="s", code_verifier="verifier-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    )
+    url_b = build_authorization_url(
+        flow_b, state="s", code_verifier="verifier-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    )
+    challenge_a = parse_qs(urlparse(url_a).query)["code_challenge"][0]
+    challenge_b = parse_qs(urlparse(url_b).query)["code_challenge"][0]
+    assert challenge_a != challenge_b
 
 
 def test_exchange_code_for_tokens_returns_normalized_dict() -> None:
@@ -59,9 +83,17 @@ def test_exchange_code_for_tokens_returns_normalized_dict() -> None:
         patch.object(type(flow), "credentials", new_callable=PropertyMock) as mock_credentials,
     ):
         mock_credentials.return_value = fake_creds
-        result = exchange_code_for_tokens(flow, code="auth-code", client_id="cid")
+        result = exchange_code_for_tokens(
+            flow,
+            code="auth-code",
+            client_id="cid",
+            code_verifier="test-pkce-verifier-43chars-aaaaaaaaaaaaaaaaaaa",
+        )
         mock_fetch.assert_called_once_with(code="auth-code")
 
+    # Verifier must be assigned on the Flow before fetch_token so the library
+    # includes it in the token-exchange POST body.
+    assert flow.code_verifier == "test-pkce-verifier-43chars-aaaaaaaaaaaaaaaaaaa"
     assert result["refresh_token"] == "fake-refresh-token"
     assert result["access_token"] == "fake-access-token"
     assert result["connected_email"] == "user@gmail.com"
@@ -88,4 +120,9 @@ def test_exchange_code_for_tokens_missing_email_raises() -> None:
     ):
         mock_credentials.return_value = fake_creds
         with pytest.raises(OAuthExchangeError, match="email"):
-            exchange_code_for_tokens(flow, code="c", client_id="cid")
+            exchange_code_for_tokens(
+                flow,
+                code="c",
+                client_id="cid",
+                code_verifier="test-pkce-verifier-43chars-aaaaaaaaaaaaaaaaaaa",
+            )

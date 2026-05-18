@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qs, urlparse
 
+import jwt
 import pytest
 from claimit_mongodb_models import MongoDBClient, User
 from httpx import AsyncClient
@@ -55,6 +56,14 @@ async def test_connect_happy_path(client: AsyncClient) -> None:
         assert qs["access_type"] == ["offline"]
         assert qs["prompt"] == ["consent"]
         assert qs["state"][0]  # non-empty signed JWT
+        # PKCE: authorization URL must carry the S256 challenge, and the
+        # verifier behind it must be present in the state JWT so /callback
+        # can recover it.
+        assert qs["code_challenge_method"] == ["S256"]
+        assert qs["code_challenge"][0]
+        state_payload = jwt.decode(qs["state"][0], _STATE_KEY, algorithms=["HS256"])
+        assert state_payload["code_verifier"]
+        assert len(state_payload["code_verifier"]) >= 43
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_state_jwt_key, None)

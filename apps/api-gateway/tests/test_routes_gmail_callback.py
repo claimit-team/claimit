@@ -19,6 +19,7 @@ from ._fixtures import USER_FIXTURE
 
 _STATE_KEY = "test-state-jwt-key-for-callback-tests"
 _USER_ID = "00000000-0000-0000-0000-000000000001"  # matches USER_FIXTURE["_id"]
+_TEST_VERIFIER = "test-pkce-verifier-43chars-aaaaaaaaaaaaaaaaaaa"
 
 _FAKE_ENV = {
     "GMAIL_OAUTH_CLIENT_ID": "test-client-id",
@@ -44,7 +45,7 @@ def _clear_overrides() -> None:
 
 
 def _valid_state(return_to: str = "/settings/gmail") -> str:
-    return state_jwt.sign_state(_USER_ID, return_to, _STATE_KEY, ttl_seconds=600)
+    return state_jwt.sign_state(_USER_ID, return_to, _TEST_VERIFIER, _STATE_KEY, ttl_seconds=600)
 
 
 def _fake_exchange_result() -> dict[str, object]:
@@ -74,7 +75,7 @@ async def test_callback_happy_path_redirects_to_frontend_connected(client: Async
             patch(
                 "src.routes.gmail.gmail_oauth.exchange_code_for_tokens",
                 return_value=_fake_exchange_result(),
-            ),
+            ) as mock_exchange,
             patch(
                 "src.routes.gmail.secret_manager.store_refresh_token",
                 return_value="projects/test-project/secrets/gmail-refresh-token-x/versions/1",
@@ -89,6 +90,11 @@ async def test_callback_happy_path_redirects_to_frontend_connected(client: Async
             "https://app.example.com/settings/gmail?status=connected"
         )
         mock_db.upsert.assert_awaited_once()
+        # Verifier from the state JWT must be threaded into the exchange so
+        # Google's PKCE check passes. This is the regression that this fix
+        # addresses.
+        exchange_kwargs = mock_exchange.call_args.kwargs
+        assert exchange_kwargs["code_verifier"] == _TEST_VERIFIER
     finally:
         _clear_overrides()
 
@@ -99,7 +105,13 @@ async def test_callback_expired_state_redirects_with_error(client: AsyncClient) 
     _override_deps(mock_db)
     try:
         with patch.dict("os.environ", _FAKE_ENV):
-            expired = state_jwt.sign_state(_USER_ID, "/settings/gmail", _STATE_KEY, ttl_seconds=-1)
+            expired = state_jwt.sign_state(
+                _USER_ID,
+                "/settings/gmail",
+                _TEST_VERIFIER,
+                _STATE_KEY,
+                ttl_seconds=-1,
+            )
             response = await client.get(
                 f"/api/v1/gmail/callback?code=c&state={expired}",
                 follow_redirects=False,
@@ -124,6 +136,7 @@ async def test_callback_invalid_signature_redirects_with_error(client: AsyncClie
             forged = state_jwt.sign_state(
                 _USER_ID,
                 "/settings/gmail",
+                _TEST_VERIFIER,
                 "different-key-that-is-also-32-plus-bytes-long-for-pyjwt",
             )
             response = await client.get(
