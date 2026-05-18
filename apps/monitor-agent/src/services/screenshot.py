@@ -87,9 +87,9 @@ async def capture(
                 len(raw_png),
             )
             return None
-        watermarked = _add_timestamp_watermark(raw_png, captured_at)
+        watermarked = await asyncio.to_thread(_add_timestamp_watermark, raw_png, captured_at)
         blob_path = _build_blob_path(platform, product_id, captured_at)
-        return _upload_and_sign(watermarked, blob_path)
+        return await asyncio.to_thread(_upload_and_sign, watermarked, blob_path)
     except Exception:
         logger.exception(
             "Screenshot capture failed for %s/%s url=%s",
@@ -156,7 +156,7 @@ def _add_timestamp_watermark(png_bytes: bytes, captured_at: datetime) -> bytes:
 
 def _build_blob_path(platform: str, product_id: str, captured_at: datetime) -> str:
     """Return GCS blob path: evidence/{platform}/{product_id}/{ISO timestamp}.png"""
-    ts = captured_at.strftime("%Y-%m-%dT%H-%M-%SZ")
+    ts = captured_at.strftime("%Y-%m-%dT%H-%M-%S-%fZ")
     return f"evidence/{platform}/{product_id}/{ts}.png"
 
 

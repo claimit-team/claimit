@@ -11,7 +11,7 @@
 resource "google_storage_bucket" "evidence" {
   name          = "${var.project_id}-evidence"
   location      = var.region
-  force_destroy = true # hackathon: allow easy teardown via terraform destroy
+  force_destroy = false
 
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
