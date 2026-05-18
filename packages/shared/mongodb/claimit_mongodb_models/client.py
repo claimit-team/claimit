@@ -62,7 +62,14 @@ class MongoDBClient:
         connection_uri = uri if uri is not None else os.environ.get("MONGODB_URI")
         if not connection_uri:
             raise ValueError("MongoDB URI not provided and MONGODB_URI env var is not set.")
-        self._client: AsyncIOMotorClient = AsyncIOMotorClient(connection_uri)
+        # uuidRepresentation="standard" -> BSON Binary subtype 4 (RFC 4122).
+        # Required for pymongo 4.x to round-trip native uuid.UUID; the default
+        # UNSPECIFIED rejects UUID writes/queries. "standard" is cross-language
+        # interoperable and the project's chosen representation.
+        self._client: AsyncIOMotorClient = AsyncIOMotorClient(
+            connection_uri,
+            uuidRepresentation="standard",
+        )
         self._db: AsyncIOMotorDatabase = self._client[database]
 
     async def close(self) -> None:
