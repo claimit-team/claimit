@@ -17,6 +17,7 @@ from google.genai import types
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from src.confidence import compute_overall_min
+from src.dedup import DuplicateReceiptError, check_duplicate, hash_receipt
 
 MODEL_NAME = "gemini-2.5-flash"
 APP_NAME = "claimit-ingest-extractor"
@@ -349,10 +350,42 @@ def _purchase_payload(
     }
 
 
-async def extract(email: EmailForExtraction | dict[str, Any]) -> dict[str, Any]:
+def _hashable_receipt_content(email: EmailForExtraction) -> str:
+    """Return canonical text to hash for dedup across all available sources."""
+    parts: list[str] = []
+
+    body = email.body_text.strip()
+    if body:
+        parts.append(body)
+
+    pdf = (email.pdf_text or "").strip()
+    if pdf:
+        parts.append(pdf)
+
+    parts.extend(text.strip() for text in email.attachment_texts if text.strip())
+    return "\n---receipt-part---\n".join(parts)
+
+
+async def extract(
+    email: EmailForExtraction | dict[str, Any],
+    *,
+    purchases_collection: Any | None = None,
+) -> dict[str, Any]:
     """Extract and validate a Purchase-shaped dictionary from an order email."""
 
     validated_email = EmailForExtraction.model_validate(email)
+    if validated_email.receipt_hash is None:
+        hashable = _hashable_receipt_content(validated_email)
+        if hashable:
+            validated_email.receipt_hash = hash_receipt(hashable)
+
+    if (
+        purchases_collection is not None
+        and validated_email.receipt_hash is not None
+        and await check_duplicate(validated_email.receipt_hash, purchases_collection)
+    ):
+        raise DuplicateReceiptError(validated_email.receipt_hash)
+
     raw_output = await _run_extractor_agent(validated_email)
     extracted = _parse_extraction_output(raw_output)
     purchase = Purchase.model_validate(_purchase_payload(validated_email, extracted))
