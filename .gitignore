@@ -193,3 +193,5 @@ dist/
 *.tfstate.*
 # Provider cache + working dir.
 .terraform/
+.vercel
+test_results.txt

@@ -11,10 +11,11 @@
 
 locals {
   agent_service_accounts = {
-    ingest    = module.ingest_agent.service_account_email
-    monitor   = module.monitor_agent.service_account_email
-    claim     = module.claim_agent.service_account_email
-    assistant = module.assistant_agent.service_account_email
+    ingest      = module.ingest_agent.service_account_email
+    monitor     = module.monitor_agent.service_account_email
+    claim       = module.claim_agent.service_account_email
+    assistant   = module.assistant_agent.service_account_email
+    api_gateway = module.api_gateway.service_account_email
   }
 }
 
@@ -37,11 +38,34 @@ resource "google_cloud_run_v2_service_iam_member" "ci_invoker" {
     "claimit-claim-agent",
     "claimit-assistant-agent",
     "claimit-sync-worker",
+    "claimit-api-gateway",
   ])
   location = var.region
   name     = each.value
   role     = "roles/run.invoker"
   member   = "serviceAccount:claimit-ci@${var.project_id}.iam.gserviceaccount.com"
+}
+
+# api-gateway is the only browser-facing service. End users authenticate
+# via Firebase ID tokens, which the 6.1 auth middleware verifies in-app
+# using firebase-admin. Cloud Run's Layer-2 IAM cannot evaluate Firebase
+# tokens (it's designed for GCP IAM principals), so we open Layer-2 to
+# allUsers and let the application layer enforce real authentication.
+#
+# Per Cloud Run docs on end-user auth:
+# https://cloud.google.com/run/docs/authenticating/end-users
+#
+# Other services (agents, sync-worker) intentionally remain CI-only —
+# they're invoked by Pub/Sub push subscriptions and Cloud Scheduler,
+# both of which carry proper GCP service-account identity.
+resource "google_cloud_run_v2_service_iam_member" "api_gateway_public_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = "claimit-api-gateway"
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+
+  depends_on = [module.api_gateway]
 }
 
 # CI service account needs aiplatform.user to deploy ADK agent definitions
@@ -50,4 +74,22 @@ resource "google_project_iam_member" "ci_aiplatform_user" {
   project = var.project_id
   role    = "roles/aiplatform.user"
   member  = "serviceAccount:claimit-ci@${var.project_id}.iam.gserviceaccount.com"
+}
+
+# NOTE: Cannot use IAM Condition to scope this grant to gmail-refresh-token-*
+# prefix. secretmanager.secrets.create evaluates resource.name against the
+# parent project (projects/<id>), not the future secret name, so a
+# resource.name.startsWith(".../gmail-refresh-token-") condition would deny
+# all create operations.
+#
+# Application code (services/secret_manager.py) controls secret naming and only
+# creates secrets matching the gmail-refresh-token-{user_id} pattern.
+#
+# TODO: Production hardening — split into two grants:
+#   - roles/secretmanager.secretCreator unconditional (for create on parent)
+#   - roles/secretmanager.admin conditional on gmail-refresh-token-* (for everything else)
+resource "google_project_iam_member" "api_gateway_secretmanager_admin" {
+  project = var.project_id
+  role    = "roles/secretmanager.admin"
+  member  = "serviceAccount:claimit-api-gateway@${var.project_id}.iam.gserviceaccount.com"
 }

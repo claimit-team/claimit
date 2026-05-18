@@ -13,5 +13,5 @@ assistant_agent = Agent(
         "for ingestion, monitoring, and claim generation. Respond with 'Hello from "
         "Assistant' for now."
     ),
-    tools=[get_mongodb_mcp_toolset(read_only=True)],  # read-only: conversational queries
+    tools=[get_mongodb_mcp_toolset(read_only=True)],
 )

@@ -12,5 +12,5 @@ claim_agent = Agent(
         "retailer's specific policy language and format. Respond with 'Hello from "
         "Claim' for now."
     ),
-    tools=[get_mongodb_mcp_toolset(read_only=False)],  # writes claims
+    tools=[get_mongodb_mcp_toolset(read_only=False)],
 )

@@ -24,6 +24,7 @@ class LoyaltyMembership(BaseModel):
 class GmailIntegration(BaseModel):
     connected: bool
     connected_at: datetime | None
+    connected_email: str | None = None
     scopes_granted: list[str]
     refresh_token_ref: str | None
     watch_history_id: str | None

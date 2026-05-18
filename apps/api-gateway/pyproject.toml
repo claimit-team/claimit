@@ -1,0 +1,48 @@
+[project]
+name = "claimit-api-gateway"
+version = "0.1.0"
+description = "ClaimIt API gateway — BFF layer hosting all REST endpoints"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "motor>=3.6.0",
+    "pydantic>=2.9.0",
+    "httpx>=0.27.0",
+    "firebase-admin>=6.5.0",
+    "google-cloud-aiplatform[agent_engines]>=1.71.0",
+    "google-auth-oauthlib>=1.2.0",
+    "google-cloud-secret-manager>=2.20.0",
+    "PyJWT[crypto]>=2.8.0",
+    "sse-starlette>=2.1.0",
+    "python-dotenv>=1.0.0",
+    "claimit-observability",
+    "claimit-mongodb-models",
+    "claimit-elastic",
+    "claimit-search",
+]
+
+[tool.uv.sources]
+claimit-observability = { path = "../../packages/shared/observability" }
+claimit-mongodb-models = { path = "../../packages/shared/mongodb" }
+claimit-elastic = { path = "../../packages/shared/elastic" }
+claimit-search = { path = "../../packages/shared/search" }
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]

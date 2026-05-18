@@ -13,7 +13,7 @@ set -uo pipefail
 
 REGION="${GCP_REGION:-us-east1}"
 FRONTEND_URL="${FRONTEND_URL:-https://claimitai.vercel.app}"
-AGENTS=(ingest-agent monitor-agent claim-agent assistant-agent sync-worker)
+AGENTS=(ingest-agent monitor-agent claim-agent assistant-agent sync-worker api-gateway)
 
 echo "=== Keepalive ping $(date -u +'%Y-%m-%d %H:%M:%S UTC') ==="
 

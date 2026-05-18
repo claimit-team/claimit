@@ -12,5 +12,5 @@ monitor_agent = Agent(
         "price drops below the user's purchase price, trigger a claim. Respond with "
         "'Hello from Monitor' for now."
     ),
-    tools=[get_mongodb_mcp_toolset(read_only=False)],  # writes price_history
+    tools=[get_mongodb_mcp_toolset(read_only=False)],
 )

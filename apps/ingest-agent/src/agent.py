@@ -12,5 +12,5 @@ ingest_agent = Agent(
         "platform, date), and store them in MongoDB. Respond with 'Hello from Ingest' "
         "for now."
     ),
-    tools=[get_mongodb_mcp_toolset(read_only=False)],  # writes purchases
+    tools=[get_mongodb_mcp_toolset(read_only=False)],
 )
