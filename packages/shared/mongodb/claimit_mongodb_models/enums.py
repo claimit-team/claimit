@@ -139,3 +139,22 @@ class MessageRole(StrEnum):
 class ConversationStatus(StrEnum):
     ACTIVE = "active"
     ARCHIVED = "archived"
+
+
+class NotificationEventType(StrEnum):
+    PRICE_DROPPED = "price_dropped"
+    CLAIM_DRAFTED = "claim_drafted"
+    CLAIM_QUEUED_AUTO = "claim_queued_auto"
+    CLAIM_SUBMITTED = "claim_submitted"
+    CLAIM_DENIED = "claim_denied"
+    CLAIM_RESOLVED_SUCCESS = "claim_resolved_success"
+    LOW_CONFIDENCE_EXTRACT = "low_confidence_extract"
+    FIRST_TIME_DASHBOARD = "first_time_dashboard"
+    USER_RETURNED_AFTER_LONG_ABSENCE = "user_returned_after_long_absence"
+    CONSECUTIVE_REJECTIONS = "consecutive_rejections"
+
+
+class NotificationEntityType(StrEnum):
+    PURCHASE = "purchase"
+    CLAIM = "claim"
+    CONVERSATION = "conversation"

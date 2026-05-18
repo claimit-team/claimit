@@ -1,5 +1,10 @@
 export type { Claim, DraftVersion } from "./Claim";
 export type { Conversation, ConversationMessage, ToolCall } from "./Conversation";
+export type {
+  NotificationEntityType,
+  NotificationEvent,
+  NotificationEventType,
+} from "./NotificationEvent";
 export type { Policy } from "./Policy";
 export type { PriceHistory } from "./PriceHistory";
 export type { ExtractionConfidence, Purchase } from "./Purchase";
