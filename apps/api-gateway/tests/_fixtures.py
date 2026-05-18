@@ -43,3 +43,108 @@ USER_FIXTURE: dict[str, object] = {
     "subscription": {"tier": "free", "trial_ends": None, "renewed_at": None},
     "created_at": "2024-01-01T00:00:00Z",
 }
+
+
+# ---------------------------------------------------------------------------
+# Claim + Purchase fixture builders for dashboard tests (6.6 PR A onward).
+# Use the builder pattern instead of static dicts so each test can vary one
+# field without copying the whole document.
+# Defaults are valid for `Claim.model_validate` / `Purchase.model_validate`
+# (StrEnum values are snake_case — see enums.py).
+# ---------------------------------------------------------------------------
+
+
+def make_claim(
+    *,
+    claim_id: str = "20000000-0000-0000-0000-000000000001",
+    user_id: str = "00000000-0000-0000-0000-000000000001",
+    purchase_id: str = "30000000-0000-0000-0000-000000000001",
+    platform: str = "best_buy",
+    claim_amount: float = 50.0,
+    outcome: str = "approved",
+    resolved_at: str | None = "2026-05-15T12:00:00Z",
+    submitted_at: str | None = "2026-05-10T12:00:00Z",
+    **overrides: object,
+) -> dict[str, object]:
+    """Build a Claim document dict; override any field via kwargs."""
+    base: dict[str, object] = {
+        "_id": claim_id,
+        "updated_at": None,
+        "purchase_id": purchase_id,
+        "user_id": user_id,
+        "platform": platform,
+        "claim_amount": claim_amount,
+        "currency": "USD",
+        "claim_type": "email",
+        "draft_content": "Test draft body.",
+        "draft_versions": [
+            {
+                "version": 1,
+                "content": "Test draft body.",
+                "generated_by": "agent",
+                "at": "2026-05-09T12:00:00Z",
+            }
+        ],
+        "redraft_count": 0,
+        "policy_clause_cited": "Section 3.2 of Best Buy price match policy.",
+        "evidence_screenshot_url": None,
+        "send_override": None,
+        "submitted_at": submitted_at,
+        "submitted_via": "gmail_send",
+        "outcome": outcome,
+        "outcome_note": None,
+        "denial_reason_extracted": None,
+        "resolved_at": resolved_at,
+        "trace_id": None,
+    }
+    base.update(overrides)
+    return base
+
+
+def make_purchase(
+    *,
+    purchase_id: str = "30000000-0000-0000-0000-000000000001",
+    user_id: str = "00000000-0000-0000-0000-000000000001",
+    platform: str = "best_buy",
+    status: str = "monitoring",
+    **overrides: object,
+) -> dict[str, object]:
+    """Build a Purchase document dict; override any field via kwargs."""
+    base: dict[str, object] = {
+        "_id": purchase_id,
+        "updated_at": None,
+        "user_id": user_id,
+        "platform": platform,
+        "category": "retail",
+        "product_name": "Test Product",
+        "product_id": "TEST-SKU-1",
+        "product_url": "https://example.com/product",
+        "variant": None,
+        "fare_class": None,
+        "room_type": None,
+        "bed_type": None,
+        "rate_type": None,
+        "price_paid": 100.0,
+        "member_price_at_purchase": None,
+        "non_member_price_at_purchase": None,
+        "currency": "USD",
+        "purchase_date": "2026-05-01T12:00:00Z",
+        "purchase_date_basis": "order_date",
+        "window_expires": "2026-05-16T12:00:00Z",
+        "order_id": "BBY-987654",
+        "member_tier_at_purchase": None,
+        "status": status,
+        "claim_type": "email",
+        "monitoring_cadence_minutes": 360,
+        "ingested_at": "2026-05-01T12:30:00Z",
+        "ingestion_source": "gmail",
+        "receipt_storage_url": "gs://test/receipt.pdf",
+        "receipt_hash": "abc123",
+        "extraction_confidence": {
+            "platform": 0.99,
+            "price": 0.97,
+            "overall_min": 0.97,
+        },
+    }
+    base.update(overrides)
+    return base
