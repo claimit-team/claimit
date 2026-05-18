@@ -38,6 +38,15 @@ def test_build_authorization_url_includes_state_scopes_and_offline_access() -> N
     scope_str = qs["scope"][0]
     for scope in GMAIL_SCOPES:
         assert scope in scope_str
+    # Regression guard (PR #99): email scope must be the full URI form, not
+    # the short-form `email` alias. Google returns the full URI in the token
+    # response and google-auth-oauthlib does an exact-string comparison;
+    # mixing forms raises "Scope has changed".
+    assert "https://www.googleapis.com/auth/userinfo.email" in scope_str
+    # Regression guard (PR #99): incremental-authorization must stay off so
+    # Google does not silently append previously-granted scopes (e.g.
+    # userinfo.profile from Firebase login) that we never requested.
+    assert "include_granted_scopes" not in qs
     # PKCE: verifier we passed in was applied to the Flow, and Google sees
     # the matching S256 challenge.
     assert flow.code_verifier == "test-pkce-verifier-43chars-aaaaaaaaaaaaaaaaaaa"

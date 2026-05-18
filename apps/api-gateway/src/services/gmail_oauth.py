@@ -12,9 +12,12 @@ Wraps `google_auth_oauthlib.flow.Flow` with three thin helpers used by the
 Scope notes:
 - gmail.readonly / send / modify cover the ingestion + claim-send + archive
   workflows in WS4.
-- openid + email are needed for the id_token claim that gives us the
-  authenticated Gmail address (otherwise we'd have to assume it equals the
-  Firebase auth email, which is not always true).
+- openid + userinfo.email are needed for the id_token claim that gives us
+  the authenticated Gmail address (otherwise we'd have to assume it equals
+  the Firebase auth email, which is not always true). We use the full URI
+  form of userinfo.email (not the short alias `email`) because Google's
+  token response always returns the full URI; the library compares request
+  vs response as exact strings and would otherwise raise "Scope has changed".
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ GMAIL_SCOPES: list[str] = [
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/gmail.modify",
     "openid",
-    "email",
+    "https://www.googleapis.com/auth/userinfo.email",
 ]
 
 
@@ -67,12 +70,18 @@ def build_authorization_url(flow: Flow, state: str, code_verifier: str) -> str:
     so google-auth-oauthlib uses our caller-supplied verifier (rather than its
     auto-generated one, which we'd then have no way to recover for /callback)
     when deriving the S256 code_challenge.
+
+    `include_granted_scopes` is intentionally omitted: with it set, Google
+    appends previously-granted scopes (e.g. `userinfo.profile` from the
+    user's Firebase sign-in) to the token response, and google-auth-oauthlib
+    then raises "Scope has changed" because the returned set no longer
+    matches our request. We grant all required scopes in this single flow,
+    so incremental authorization buys us nothing.
     """
     flow.code_verifier = code_verifier
     authorization_url, _ = flow.authorization_url(
         access_type="offline",
         prompt="consent",
-        include_granted_scopes="true",
         state=state,
     )
     return authorization_url
