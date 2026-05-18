@@ -2,10 +2,11 @@
 
 from fastapi import APIRouter
 
-from . import auth, gmail
+from . import auth, dashboard, gmail
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth.router)
+router.include_router(dashboard.router)
 router.include_router(gmail.router)
 
 __all__ = ["router"]

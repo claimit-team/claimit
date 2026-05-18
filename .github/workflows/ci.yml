@@ -65,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        agent: [ingest-agent, monitor-agent, claim-agent, assistant-agent]
+        agent: [api-gateway, ingest-agent, monitor-agent, claim-agent, assistant-agent]
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
@@ -105,6 +105,22 @@ jobs:
             echo "No tests directory or test files yet — skipping."
           fi
 
+  test-python-api-gateway:
+    name: Test Python (pytest) (api-gateway)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.11.14"
+          enable-cache: true
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - working-directory: apps/api-gateway
+        run: uv sync --dev
+      - working-directory: apps/api-gateway
+        run: uv run pytest tests/ -v
+
   pre-commit-check:
     name: Pre-commit (all hooks)
     runs-on: ubuntu-latest
@@ -141,6 +157,7 @@ jobs:
       - test-typescript
       - lint-python
       - test-python
+      - test-python-api-gateway
       - pre-commit-check
     if: always()
     steps:
