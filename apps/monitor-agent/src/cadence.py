@@ -18,7 +18,7 @@ CADENCE_SHORT_MIN = 15  # < 24 h remaining
 def compute_target_cadence_minutes(window_expires: datetime, now: datetime) -> int:
     """Pick the cadence bucket for a purchase given how much window is left."""
     remaining = window_expires - now
-    if remaining <= timedelta(hours=24):
+    if remaining < timedelta(hours=24):
         return CADENCE_SHORT_MIN
     if remaining <= timedelta(days=7):
         return CADENCE_MID_MIN

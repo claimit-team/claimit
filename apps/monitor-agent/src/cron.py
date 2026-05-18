@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from claimit_mongodb_models import (
     MongoDBClient,
@@ -157,8 +158,6 @@ async def _persist_price_history(
     except ValueError:
         logger.info("cron.price_history_skip source=%s purchase_id=%s", snap.source, purchase.id)
         return
-
-    from uuid import uuid4
 
     record = PriceHistory(
         _id=uuid4(),
