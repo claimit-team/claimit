@@ -60,6 +60,7 @@ async def get_current_user(
             gmail_integration={
                 "connected": False,
                 "connected_at": None,
+                "connected_email": None,
                 "scopes_granted": [],
                 "refresh_token_ref": None,
                 "watch_history_id": None,

@@ -3,13 +3,14 @@
 import { CheckCircle2, Loader2, Mail } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { OnboardingLogo } from "@/components/onboarding/onboarding-logo";
 import { StepIndicator } from "@/components/onboarding/step-indicator";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CALLBACK_ERROR_MESSAGES, connectGmail, GmailApiError } from "@/lib/api/gmail";
 
 const reassurancePoints = [
   "ClaimIt requests read-only Gmail access scoped to what we need to surface order-related messages from supported merchants.",
@@ -20,17 +21,46 @@ const reassurancePoints = [
 
 export default function OnboardingGmailPage() {
   const router = useRouter();
+  const callbackHandledRef = useRef(false);
   const [isConnecting, setIsConnecting] = useState(false);
+
+  // /api/v1/gmail/callback 302s back here with ?status=connected|error after the
+  // OAuth round trip. On success, surface a toast and advance to the next step;
+  // on error, show the user-friendly reason. ref-guard avoids double-firing
+  // under React StrictMode. We read window.location.search directly instead of
+  // useSearchParams() to avoid the App Router static-prerender Suspense bailout.
+  useEffect(() => {
+    if (callbackHandledRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("status");
+    if (status === "connected") {
+      callbackHandledRef.current = true;
+      toast.success("Gmail connected successfully.", { id: "gmail-connect" });
+      router.replace("/onboarding/preferences");
+    } else if (status === "error") {
+      callbackHandledRef.current = true;
+      const reason = params.get("reason") ?? "internal_error";
+      toast.error(CALLBACK_ERROR_MESSAGES[reason] ?? CALLBACK_ERROR_MESSAGES.internal_error, {
+        id: "gmail-connect",
+      });
+      router.replace("/onboarding/gmail");
+    }
+  }, [router]);
 
   async function handleContinueGoogle() {
     setIsConnecting(true);
     toast.loading("Connecting…", { id: "gmail-connect" });
-
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-
-    toast.success("Connected (mock). Wire OAuth in Identity Platform.", { id: "gmail-connect" });
-    setIsConnecting(false);
-    router.push("/onboarding/preferences");
+    try {
+      const { authorization_url } = await connectGmail("/onboarding/gmail");
+      window.location.href = authorization_url;
+    } catch (err) {
+      setIsConnecting(false);
+      const message =
+        err instanceof GmailApiError
+          ? err.message
+          : "Could not start Gmail connection. Please try again.";
+      toast.error(message, { id: "gmail-connect" });
+    }
   }
 
   function handleSkip() {

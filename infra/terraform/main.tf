@@ -55,6 +55,28 @@ resource "google_secret_manager_secret" "shared" {
   }
 }
 
+# Gmail OAuth state JWT signing key (ticket 4.14). Generated in-Terraform via
+# random_password and stored as a Secret Manager secret; api-gateway reads it
+# at boot via STATE_JWT_SECRET env var (mounted from secret payload) to sign
+# the OAuth `state` parameter (CSRF protection for /api/v1/gmail/callback).
+resource "random_password" "gmail_oauth_state_jwt_key" {
+  length  = 64
+  special = false
+}
+
+resource "google_secret_manager_secret" "gmail_oauth_state_jwt_key" {
+  secret_id = "gmail-oauth-state-jwt-key"
+
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "gmail_oauth_state_jwt_key" {
+  secret      = google_secret_manager_secret.gmail_oauth_state_jwt_key.id
+  secret_data = random_password.gmail_oauth_state_jwt_key.result
+}
+
 # ---------- Cloud Run services ----------
 # Per-agent secret access. Each map is ENV_VAR_NAME => secret-manager-secret-id;
 # the module both grants secretAccessor and mounts the env var from Secret Manager.
@@ -118,6 +140,7 @@ locals {
     PHOENIX_API_KEY            = "phoenix-api-key"
     GMAIL_OAUTH_CLIENT_ID      = "gmail-oauth-client-id"
     GMAIL_OAUTH_CLIENT_SECRET  = "gmail-oauth-client-secret"
+    STATE_JWT_SECRET           = "gmail-oauth-state-jwt-key"
     CLAIMIT_INGEST_AGENT_ID    = "claimit-ingest-agent-id"
     CLAIMIT_MONITOR_AGENT_ID   = "claimit-monitor-agent-id"
     CLAIMIT_CLAIM_AGENT_ID     = "claimit-claim-agent-id"
@@ -212,10 +235,17 @@ module "api_gateway" {
   env_vars = {
     CORS_ALLOWED_ORIGINS      = "https://claimitai.vercel.app,http://localhost:3000"
     CORS_ALLOWED_ORIGIN_REGEX = "https://claimitai[a-z0-9-]*\\.vercel\\.app"
+    GMAIL_OAUTH_REDIRECT_URI  = "https://claimit-api-gateway-i4zxjn67hq-ue.a.run.app/api/v1/gmail/callback"
+    FRONTEND_BASE_URL         = "https://claimitai.vercel.app"
+    GCP_PROJECT_ID            = var.project_id
   }
   deletion_protection = false
 
-  depends_on = [google_secret_manager_secret.shared]
+  depends_on = [
+    google_secret_manager_secret.shared,
+    google_secret_manager_secret.gmail_oauth_state_jwt_key,
+    google_secret_manager_secret_version.gmail_oauth_state_jwt_key,
+  ]
 }
 
 # Trigger plan workflow test - Sat May 16 2026 (post migration path fix)

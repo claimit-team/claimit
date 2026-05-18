@@ -42,8 +42,12 @@ async def test_gmail_status_disconnected(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_gmail_status_connected(client: AsyncClient) -> None:
+    # When connected, /status surfaces the connected Gmail address from the
+    # User.gmail_integration.connected_email field (set by /callback after the
+    # 4.14 OAuth flow), not user.email (which is the Firebase login email).
     fixture = copy.deepcopy(USER_FIXTURE)
     fixture["gmail_integration"]["connected"] = True  # type: ignore[index]
+    fixture["gmail_integration"]["connected_email"] = "gmail-account@gmail.com"  # type: ignore[index]
     fixture["gmail_integration"]["scopes_granted"] = [  # type: ignore[index]
         "https://www.googleapis.com/auth/gmail.readonly",
         "https://www.googleapis.com/auth/gmail.send",
@@ -68,7 +72,10 @@ async def test_gmail_status_connected(client: AsyncClient) -> None:
         assert response.status_code == 200
         payload = response.json()
         assert payload["connected"] is True
-        assert payload["email"] == "test@example.com"
-        assert len(payload["scopes"]) == 2
+        assert payload["email"] == "gmail-account@gmail.com"
+        assert set(payload["scopes"]) == {
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.send",
+        }
     finally:
         app.dependency_overrides.pop(get_db, None)

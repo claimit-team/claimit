@@ -75,3 +75,21 @@ resource "google_project_iam_member" "ci_aiplatform_user" {
   role    = "roles/aiplatform.user"
   member  = "serviceAccount:claimit-ci@${var.project_id}.iam.gserviceaccount.com"
 }
+
+# NOTE: Cannot use IAM Condition to scope this grant to gmail-refresh-token-*
+# prefix. secretmanager.secrets.create evaluates resource.name against the
+# parent project (projects/<id>), not the future secret name, so a
+# resource.name.startsWith(".../gmail-refresh-token-") condition would deny
+# all create operations.
+#
+# Application code (services/secret_manager.py) controls secret naming and only
+# creates secrets matching the gmail-refresh-token-{user_id} pattern.
+#
+# TODO: Production hardening — split into two grants:
+#   - roles/secretmanager.secretCreator unconditional (for create on parent)
+#   - roles/secretmanager.admin conditional on gmail-refresh-token-* (for everything else)
+resource "google_project_iam_member" "api_gateway_secretmanager_admin" {
+  project = var.project_id
+  role    = "roles/secretmanager.admin"
+  member  = "serviceAccount:claimit-api-gateway@${var.project_id}.iam.gserviceaccount.com"
+}
