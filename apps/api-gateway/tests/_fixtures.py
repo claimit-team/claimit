@@ -101,6 +101,44 @@ def make_claim(
     return base
 
 
+def make_notification_event(
+    *,
+    notification_id: str = "40000000-0000-0000-0000-000000000001",
+    user_id: str = "00000000-0000-0000-0000-000000000001",
+    event_type: str = "price_dropped",
+    entity_type: str | None = "claim",
+    entity_id: str | None = "20000000-0000-0000-0000-000000000001",
+    data: dict[str, object] | None = None,
+    acknowledged: bool = False,
+    acknowledged_at: str | None = None,
+    surfaced_at: str | None = None,
+    created_at: str = "2026-05-18T10:00:00+00:00",
+    **overrides: object,
+) -> dict[str, object]:
+    """Build a NotificationEvent document dict; override any field via kwargs."""
+    base: dict[str, object] = {
+        "_id": notification_id,
+        "updated_at": None,
+        "user_id": user_id,
+        "event_type": event_type,
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "data": data
+        if data is not None
+        else {
+            "platform": "best_buy",
+            "refund_amount": 50.0,
+            "currency": "USD",
+        },
+        "acknowledged": acknowledged,
+        "acknowledged_at": acknowledged_at,
+        "surfaced_at": surfaced_at,
+        "created_at": created_at,
+    }
+    base.update(overrides)
+    return base
+
+
 def make_purchase(
     *,
     purchase_id: str = "30000000-0000-0000-0000-000000000001",
