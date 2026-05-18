@@ -76,20 +76,20 @@ resource "google_project_iam_member" "ci_aiplatform_user" {
   member  = "serviceAccount:claimit-ci@${var.project_id}.iam.gserviceaccount.com"
 }
 
-# api-gateway needs CREATE + ADD_VERSION for per-user secrets named
-# gmail-refresh-token-{user_id} on first Gmail OAuth connection and on
-# subsequent re-connections. Scoped via an IAM Condition to only those
-# secrets — does NOT cover other api_gateway_secrets (mongodb-uri, etc.),
-# which continue to receive per-secret secretAccessor through the
-# cloud-run-agent module's existing binding.
+# NOTE: Cannot use IAM Condition to scope this grant to gmail-refresh-token-*
+# prefix. secretmanager.secrets.create evaluates resource.name against the
+# parent project (projects/<id>), not the future secret name, so a
+# resource.name.startsWith(".../gmail-refresh-token-") condition would deny
+# all create operations.
+#
+# Application code (services/secret_manager.py) controls secret naming and only
+# creates secrets matching the gmail-refresh-token-{user_id} pattern.
+#
+# TODO: Production hardening — split into two grants:
+#   - roles/secretmanager.secretCreator unconditional (for create on parent)
+#   - roles/secretmanager.admin conditional on gmail-refresh-token-* (for everything else)
 resource "google_project_iam_member" "api_gateway_secretmanager_admin" {
   project = var.project_id
   role    = "roles/secretmanager.admin"
   member  = "serviceAccount:claimit-api-gateway@${var.project_id}.iam.gserviceaccount.com"
-
-  condition {
-    title       = "gmail_refresh_token_secrets_only"
-    description = "Limit Secret Manager admin to per-user Gmail refresh-token secrets"
-    expression  = "resource.name.startsWith(\"projects/${var.project_id}/secrets/gmail-refresh-token-\")"
-  }
 }

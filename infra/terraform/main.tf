@@ -237,6 +237,7 @@ module "api_gateway" {
     CORS_ALLOWED_ORIGIN_REGEX = "https://claimitai[a-z0-9-]*\\.vercel\\.app"
     GMAIL_OAUTH_REDIRECT_URI  = "https://claimit-api-gateway-i4zxjn67hq-ue.a.run.app/api/v1/gmail/callback"
     FRONTEND_BASE_URL         = "https://claimitai.vercel.app"
+    GCP_PROJECT_ID            = var.project_id
   }
   deletion_protection = false
 
