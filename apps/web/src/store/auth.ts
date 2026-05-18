@@ -1,14 +1,11 @@
 /**
- * Auth store — current user state.
- * Wired up properly in ticket 5.2 (Auth scaffold with Google Identity Platform).
+ * Auth store — current MongoDB User state.
+ * Synced from GET /api/v1/auth/me on Firebase sign-in by AuthInit.
  */
+import type { User as SharedUser } from "@claimit/mongodb-types";
 import { create } from "zustand";
 
-type User = {
-  id: string;
-  email: string;
-  name: string | null;
-} | null;
+type User = SharedUser | null;
 
 type AuthState = {
   user: User;
@@ -23,5 +20,5 @@ export const useAuthStore = create<AuthState>((set) => ({
   isLoading: true,
   setUser: (user) => set({ user, isLoading: false }),
   setLoading: (isLoading) => set({ isLoading }),
-  signOut: () => set({ user: null }),
+  signOut: () => set({ user: null, isLoading: false }),
 }));
