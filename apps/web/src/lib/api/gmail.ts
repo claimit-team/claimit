@@ -10,6 +10,17 @@ import { auth } from "@/lib/firebase";
 
 export type ConnectGmailResponse = { authorization_url: string };
 
+/**
+ * User-facing labels for /api/v1/gmail/callback ?status=error&reason=<x> redirects.
+ * Shared by the settings and onboarding pages that handle the post-OAuth toast.
+ */
+export const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
+  state_expired: "Your Gmail connection request expired. Please try again.",
+  state_invalid: "Gmail connection security check failed. Please try again.",
+  code_exchange_failed: "Google could not complete the Gmail connection. Please try again.",
+  internal_error: "Something went wrong connecting Gmail. Please try again.",
+};
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 export class GmailApiError extends Error {

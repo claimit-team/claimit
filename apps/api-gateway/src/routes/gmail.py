@@ -152,18 +152,21 @@ async def gmail_callback(
         return _redirect_error(return_to, "code_exchange_failed")
 
     try:
-        # 3. Persist refresh_token in Secret Manager.
-        secret_ref = secret_manager.store_refresh_token(
-            sm_client, project_id, user_id_str, tokens["refresh_token"]
-        )
-
-        # 4. Update the User document with the new gmail_integration state.
+        # 3. Load the User document FIRST — if the user was deleted between
+        # /connect and /callback, bailing out here avoids creating an orphaned
+        # refresh-token secret in Secret Manager.
         uid = uuid.UUID(user_id_str)
         user = await db.find_one("users", {"_id": uid}, User)
         if user is None:
             _log.error("Gmail callback: user %s not found in MongoDB", user_id_str)
             return _redirect_error(return_to, "internal_error")
 
+        # 4. Persist refresh_token in Secret Manager.
+        secret_ref = secret_manager.store_refresh_token(
+            sm_client, project_id, user_id_str, tokens["refresh_token"]
+        )
+
+        # 5. Update the User document with the new gmail_integration state.
         now = datetime.now(UTC)
         user.gmail_integration.connected = True
         user.gmail_integration.connected_at = now
@@ -172,7 +175,7 @@ async def gmail_callback(
         user.gmail_integration.refresh_token_ref = secret_ref
         await db.upsert("users", user.id, user)
 
-        # 5. Cache the access token so the next API call doesn't need to refresh.
+        # 6. Cache the access token so the next API call doesn't need to refresh.
         token_cache.set(
             user_id_str,
             tokens["access_token"],
@@ -182,6 +185,6 @@ async def gmail_callback(
         _log.exception("Gmail callback post-exchange failure for user_id=%s: %s", user_id_str, err)
         return _redirect_error(return_to, "internal_error")
 
-    # 6. Send the user back to the frontend page they started on.
+    # 7. Send the user back to the frontend page they started on.
     base = os.environ["FRONTEND_BASE_URL"]
     return RedirectResponse(url=f"{base}{return_to}?status=connected", status_code=302)

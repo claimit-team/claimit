@@ -76,15 +76,20 @@ resource "google_project_iam_member" "ci_aiplatform_user" {
   member  = "serviceAccount:claimit-ci@${var.project_id}.iam.gserviceaccount.com"
 }
 
-# api-gateway needs to CREATE per-user secrets (gmail-refresh-token-{user_id})
-# on first Gmail OAuth connection plus ADD_VERSION on re-connections. Project-
-# level admin is intentionally broad for the hackathon; production should
-# scope this via IAM Conditions on the gmail-refresh-token-* name pattern.
-# Per-secret secretAccessor for the existing api_gateway_secrets (including
-# the new gmail-oauth-state-jwt-key) is already granted by the cloud-run-agent
-# module; this admin role subsumes that for those secrets too.
+# api-gateway needs CREATE + ADD_VERSION for per-user secrets named
+# gmail-refresh-token-{user_id} on first Gmail OAuth connection and on
+# subsequent re-connections. Scoped via an IAM Condition to only those
+# secrets — does NOT cover other api_gateway_secrets (mongodb-uri, etc.),
+# which continue to receive per-secret secretAccessor through the
+# cloud-run-agent module's existing binding.
 resource "google_project_iam_member" "api_gateway_secretmanager_admin" {
   project = var.project_id
   role    = "roles/secretmanager.admin"
   member  = "serviceAccount:claimit-api-gateway@${var.project_id}.iam.gserviceaccount.com"
+
+  condition {
+    title       = "gmail_refresh_token_secrets_only"
+    description = "Limit Secret Manager admin to per-user Gmail refresh-token secrets"
+    expression  = "resource.name.startsWith(\"projects/${var.project_id}/secrets/gmail-refresh-token-\")"
+  }
 }

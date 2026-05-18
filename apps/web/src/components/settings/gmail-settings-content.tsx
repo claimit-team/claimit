@@ -20,15 +20,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { connectGmail, GmailApiError } from "@/lib/api/gmail";
+import { CALLBACK_ERROR_MESSAGES, connectGmail, GmailApiError } from "@/lib/api/gmail";
 import { cn } from "@/lib/utils";
-
-const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
-  state_expired: "Your Gmail connection request expired. Please try again.",
-  state_invalid: "Gmail connection security check failed. Please try again.",
-  code_exchange_failed: "Google could not complete the Gmail connection. Please try again.",
-  internal_error: "Something went wrong connecting Gmail. Please try again.",
-};
 
 /** Only scopes we surface in mock UI — intentionally excludes gmail.modify. */
 const scopeDescriptions: Partial<Record<(typeof mockGmail.scopes)[number], string>> = {

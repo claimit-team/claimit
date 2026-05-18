@@ -73,6 +73,9 @@ async def test_gmail_status_connected(client: AsyncClient) -> None:
         payload = response.json()
         assert payload["connected"] is True
         assert payload["email"] == "gmail-account@gmail.com"
-        assert len(payload["scopes"]) == 2
+        assert set(payload["scopes"]) == {
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.send",
+        }
     finally:
         app.dependency_overrides.pop(get_db, None)

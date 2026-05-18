@@ -10,14 +10,7 @@ import { OnboardingLogo } from "@/components/onboarding/onboarding-logo";
 import { StepIndicator } from "@/components/onboarding/step-indicator";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { connectGmail, GmailApiError } from "@/lib/api/gmail";
-
-const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
-  state_expired: "Your Gmail connection request expired. Please try again.",
-  state_invalid: "Gmail connection security check failed. Please try again.",
-  code_exchange_failed: "Google could not complete the Gmail connection. Please try again.",
-  internal_error: "Something went wrong connecting Gmail. Please try again.",
-};
+import { CALLBACK_ERROR_MESSAGES, connectGmail, GmailApiError } from "@/lib/api/gmail";
 
 const reassurancePoints = [
   "ClaimIt requests read-only Gmail access scoped to what we need to surface order-related messages from supported merchants.",
@@ -43,7 +36,7 @@ export default function OnboardingGmailPage() {
     if (status === "connected") {
       callbackHandledRef.current = true;
       toast.success("Gmail connected successfully.", { id: "gmail-connect" });
-      router.push("/onboarding/preferences");
+      router.replace("/onboarding/preferences");
     } else if (status === "error") {
       callbackHandledRef.current = true;
       const reason = params.get("reason") ?? "internal_error";

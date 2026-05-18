@@ -243,6 +243,7 @@ module "api_gateway" {
   depends_on = [
     google_secret_manager_secret.shared,
     google_secret_manager_secret.gmail_oauth_state_jwt_key,
+    google_secret_manager_secret_version.gmail_oauth_state_jwt_key,
   ]
 }
 

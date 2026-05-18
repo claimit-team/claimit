@@ -15,6 +15,8 @@ managed here.
 
 from __future__ import annotations
 
+import contextlib
+
 from google.api_core import exceptions as google_exceptions
 from google.cloud import secretmanager
 
@@ -45,11 +47,15 @@ def store_refresh_token(
     try:
         version = client.add_secret_version(parent=secret_name, payload=payload)
     except google_exceptions.NotFound:
-        client.create_secret(
-            parent=parent,
-            secret_id=secret_id,
-            secret={"replication": {"automatic": {}}},
-        )
+        # Concurrent first-connect race: another request may create the secret
+        # in the gap between our NotFound and create_secret. Suppress the
+        # AlreadyExists and proceed to add_secret_version on the now-existing secret.
+        with contextlib.suppress(google_exceptions.AlreadyExists):
+            client.create_secret(
+                parent=parent,
+                secret_id=secret_id,
+                secret={"replication": {"automatic": {}}},
+            )
         version = client.add_secret_version(parent=secret_name, payload=payload)
 
     return version.name

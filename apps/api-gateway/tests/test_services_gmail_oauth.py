@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -48,15 +48,17 @@ def test_exchange_code_for_tokens_returns_normalized_dict() -> None:
     fake_creds.expiry = fake_expiry.replace(tzinfo=None)
     fake_creds.scopes = GMAIL_SCOPES
 
+    # patch.object scopes the Flow.credentials property mock to this test;
+    # assigning to type(flow).credentials directly would leak across tests.
     with (
         patch.object(flow, "fetch_token") as mock_fetch,
         patch(
             "src.services.gmail_oauth.google_id_token.verify_oauth2_token",
             return_value={"email": "user@gmail.com", "aud": "cid"},
         ),
+        patch.object(type(flow), "credentials", new_callable=PropertyMock) as mock_credentials,
     ):
-        # The flow.credentials attribute is read after fetch_token succeeds.
-        type(flow).credentials = property(lambda self: fake_creds)  # type: ignore[assignment]
+        mock_credentials.return_value = fake_creds
         result = exchange_code_for_tokens(flow, code="auth-code", client_id="cid")
         mock_fetch.assert_called_once_with(code="auth-code")
 
@@ -82,7 +84,8 @@ def test_exchange_code_for_tokens_missing_email_raises() -> None:
             "src.services.gmail_oauth.google_id_token.verify_oauth2_token",
             return_value={"aud": "cid"},  # no email claim
         ),
+        patch.object(type(flow), "credentials", new_callable=PropertyMock) as mock_credentials,
     ):
-        type(flow).credentials = property(lambda self: fake_creds)  # type: ignore[assignment]
+        mock_credentials.return_value = fake_creds
         with pytest.raises(OAuthExchangeError, match="email"):
             exchange_code_for_tokens(flow, code="c", client_id="cid")
