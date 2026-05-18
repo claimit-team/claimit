@@ -11,6 +11,11 @@ import { auth } from "@/lib/firebase";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
+// 10s balances Cloud Run cold-start tolerance (3-5s in practice) against UX
+// (users perceive >5s as broken). On hung connections without this timeout
+// the auth resolution would stall indefinitely with no recovery path.
+const AUTH_ME_TIMEOUT_MS = 10000;
+
 export class AuthApiError extends Error {
   constructor(
     public readonly code: string,
@@ -32,9 +37,26 @@ export async function getMe(): Promise<User> {
 
   const token = await currentUser.getIdToken();
 
-  const response = await fetch(`${API_BASE_URL}/api/v1/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), AUTH_ME_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/v1/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new AuthApiError(
+        "request_timeout",
+        "Timed out loading your profile. Please try again.",
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     let code = "request_failed";
