@@ -29,6 +29,7 @@ locals {
     "anthropic-api-key",
     "keepa-api-key",
     "scraperapi-key",
+    "sendgrid-api-key",
     "elastic-url",
     "elastic-api-key",
     # amadeus-client-id and amadeus-client-secret removed — self-service portal
@@ -94,6 +95,7 @@ locals {
     SCRAPERAPI_KEY            = "scraperapi-key"
     GMAIL_OAUTH_CLIENT_ID     = "gmail-oauth-client-id"
     GMAIL_OAUTH_CLIENT_SECRET = "gmail-oauth-client-secret"
+    SENDGRID_API_KEY          = "sendgrid-api-key"
   }
   # monitor: polls current prices via Keepa (Amazon), Amadeus (travel),
   # ScraperAPI (retail fallback); writes price-history records.

@@ -1,7 +1,7 @@
-# Frontend: Wire purchase confirmation page to real API (WS3 / depends on 3.5 backend)
+# Frontend: Wire purchase confirmation page to real API (WS3 / depends on 3.6 backend)
 
 **Workstream:** WS5 Frontend
-**Depends on:** WS3 Ticket 3.5 (ingest confirmation email + api-gateway confirm/dismiss routes)
+**Depends on:** WS3 Ticket 3.6 (ingest confirmation email + api-gateway confirm/dismiss routes)
 **Effort:** ~0.5d
 
 ## Summary
@@ -66,7 +66,7 @@ Dismisses a pending confirmation.
 }
 ```
 
-- `not_an_order`: backend sets `status=dismissed` and appends `User.ingestion_skiplist` (when `receipt_hash` present).
+- `not_an_order`: backend sets `status=dismissed` and best-effort appends `User.ingestion_skiplist` when `receipt_hash` is present. `skiplist_written` may be `false` even on successful dismissal (e.g., write failure, duplicate entry already present, or missing `receipt_hash`); clients must handle both values.
 - `duplicate`: backend sets `status=dismissed` only (`skiplist_written: false`).
 
 ## UI changes

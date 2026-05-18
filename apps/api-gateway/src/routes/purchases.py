@@ -1,4 +1,4 @@
-"""Purchase confirmation and dismissal endpoints (ticket 3.5)."""
+"""Purchase confirmation and dismissal endpoints (ticket 3.6)."""
 
 from __future__ import annotations
 

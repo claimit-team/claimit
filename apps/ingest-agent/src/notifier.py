@@ -1,4 +1,4 @@
-"""Low-confidence confirmation email notifications (ticket 3.5).
+"""Low-confidence confirmation email notifications (ticket 3.6).
 
 Sends a review email when extraction yields ``pending_confirmation``. Primary
 path is Gmail Send using the user's OAuth refresh token (Secret Manager ref on
@@ -8,7 +8,9 @@ or ``SENDGRID_API_KEY`` is the only configured sender.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import html
 import logging
 import os
 from email.mime.multipart import MIMEMultipart
@@ -58,16 +60,18 @@ def build_confirmation_email_html(
     confirm_url: str,
 ) -> str:
     """Minimal HTML body with purchase summary and CTA."""
-    platform_label = _format_platform_label(platform)
+    platform_label = html.escape(_format_platform_label(platform))
+    safe_product_name = html.escape(product_name)
+    safe_confirm_url = html.escape(confirm_url, quote=True)
     price_display = f"${price_paid:,.2f}"
     return f"""\
 <!DOCTYPE html>
 <html>
 <body style="font-family: system-ui, sans-serif; color: #171717; line-height: 1.5;">
   <p>We found a possible purchase in your inbox, but we're not fully confident in the extracted details.</p>
-  <p><strong>{product_name}</strong><br/>
+  <p><strong>{safe_product_name}</strong><br/>
   {platform_label} · {price_display}</p>
-  <p><a href="{confirm_url}" style="display:inline-block;padding:12px 20px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;">Review and confirm</a></p>
+  <p><a href="{safe_confirm_url}" style="display:inline-block;padding:12px 20px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;">Review and confirm</a></p>
   <p style="color:#737373;font-size:14px;">If this isn't an order, you can dismiss it from the review page.</p>
 </body>
 </html>
@@ -221,11 +225,12 @@ async def send_confirmation_email(
     gmail_errors: list[str] = []
     if gmail_refresh_token_ref:
         try:
-            refresh_token = _read_refresh_token(
+            refresh_token = await asyncio.to_thread(
+                _read_refresh_token,
                 gmail_refresh_token_ref,
                 client=secret_manager_client,
             )
-            access_token = get_gmail_access_token(refresh_token)
+            access_token = await asyncio.to_thread(get_gmail_access_token, refresh_token)
             from_email = gmail_connected_email or user_email
             await _send_via_gmail(
                 access_token=access_token,
@@ -236,9 +241,8 @@ async def send_confirmation_email(
                 http_client=http_client,
             )
             _log.info(
-                "Sent confirmation email via Gmail for purchase_id=%s to=%s",
+                "Sent confirmation email via Gmail for purchase_id=%s",
                 purchase_id,
-                user_email,
             )
             return "gmail"
         except Exception as err:
@@ -257,9 +261,8 @@ async def send_confirmation_email(
             http_client=http_client,
         )
         _log.info(
-            "Sent confirmation email via SendGrid for purchase_id=%s to=%s",
+            "Sent confirmation email via SendGrid for purchase_id=%s",
             purchase_id,
-            user_email,
         )
         return "sendgrid"
     except Exception as sendgrid_err:
