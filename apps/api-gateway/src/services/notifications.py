@@ -11,8 +11,10 @@ Design notes:
   `limit` and emit next_cursor from the last visible doc.
 - Cursor encoding format matches middleware/pagination.py's existing helpers
   (base64-json {id, sort_key}). sort_key holds the doc's created_at ISO
-  string; apply step is inline ({"created_at": {"$lt": sort_key}}) because
-  the existing apply_cursor_to_query targets _id-ASC pagination which
+  string; apply step uses a compound $or predicate so pagination is correct
+  when multiple notifications share the same created_at:
+  {$or: [{created_at: {$lt: sort_key}}, {created_at: sort_key, _id: {$lt: id}}]}.
+  The existing apply_cursor_to_query targets _id-ASC pagination which
   doesn't fit notifications.
 - Sort order: created_at DESC, _id DESC. Hits the existing
   user_id_1_created_at_-1 index (and the 3-field
@@ -63,14 +65,25 @@ async def list_notifications(
     if acknowledged is not None:
         list_match["acknowledged"] = acknowledged
     if cursor is not None:
-        _, sort_key = decode_cursor(cursor)
+        cursor_id, sort_key = decode_cursor(cursor)
         if sort_key is None:
             raise ApiError(
                 "invalid_cursor",
                 "Cursor is missing the sort key",
                 status_code=400,
             )
-        list_match["created_at"] = {"$lt": sort_key}
+        try:
+            cursor_uuid = UUID(cursor_id)
+        except ValueError as err:
+            raise ApiError(
+                "invalid_cursor",
+                "Cursor contains invalid ID",
+                status_code=400,
+            ) from err
+        list_match["$or"] = [
+            {"created_at": {"$lt": sort_key}},
+            {"created_at": sort_key, "_id": {"$lt": cursor_uuid}},
+        ]
 
     pipeline: list[dict[str, Any]] = [
         {"$match": {"user_id": user_id}},

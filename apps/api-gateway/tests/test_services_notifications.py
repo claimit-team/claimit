@@ -120,12 +120,10 @@ async def test_list_pipeline_includes_acknowledged_false_filter() -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_pipeline_applies_cursor_as_lt_on_created_at() -> None:
+async def test_list_pipeline_applies_compound_cursor_predicate() -> None:
     db = _mock_db_with_aggregate()
-    cursor = encode_cursor(
-        doc_id=str(_NOTIF_ID_A),
-        sort_key="2026-05-18T09:30:00+00:00",
-    )
+    sort_key = "2026-05-18T09:30:00+00:00"
+    cursor = encode_cursor(doc_id=str(_NOTIF_ID_A), sort_key=sort_key)
     await svc.list_notifications(
         db=db,
         user_id=_USER_ID,
@@ -135,7 +133,12 @@ async def test_list_pipeline_applies_cursor_as_lt_on_created_at() -> None:
         cursor=cursor,
     )
     inner = db.aggregate.call_args.args[1][1]["$facet"]["list"][0]["$match"]
-    assert inner == {"created_at": {"$lt": "2026-05-18T09:30:00+00:00"}}
+    assert inner == {
+        "$or": [
+            {"created_at": {"$lt": sort_key}},
+            {"created_at": sort_key, "_id": {"$lt": _NOTIF_ID_A}},
+        ]
+    }
 
 
 @pytest.mark.asyncio
@@ -236,6 +239,25 @@ async def test_list_decode_cursor_failure_raises_400() -> None:
 async def test_list_cursor_missing_sort_key_raises_400() -> None:
     db = _mock_db_with_aggregate()
     cursor = encode_cursor(doc_id=str(_NOTIF_ID_A), sort_key=None)
+    with pytest.raises(ApiError) as exc_info:
+        await svc.list_notifications(
+            db=db,
+            user_id=_USER_ID,
+            event_type=None,
+            acknowledged=None,
+            limit=20,
+            cursor=cursor,
+        )
+    assert exc_info.value.code == "invalid_cursor"
+    assert exc_info.value.status_code == 400
+    db.aggregate.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_cursor_with_invalid_id_returns_400_invalid_cursor() -> None:
+    """Cursor with malformed UUID in id field → ApiError(invalid_cursor, 400)."""
+    db = _mock_db_with_aggregate()
+    cursor = encode_cursor(doc_id="not-a-uuid", sort_key="2026-05-18T10:00:00+00:00")
     with pytest.raises(ApiError) as exc_info:
         await svc.list_notifications(
             db=db,

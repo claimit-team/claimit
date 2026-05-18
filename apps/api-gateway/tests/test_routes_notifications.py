@@ -7,6 +7,7 @@ dependency_overrides[get_db], firebase_admin.auth.verify_id_token patched.
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
 from claimit_mongodb_models import MongoDBClient, NotificationEvent, User
@@ -479,6 +480,14 @@ async def test_list_notifications_cursor_roundtrip_filters_next_page(
         assert response.status_code == 200
         pipeline = db.aggregate.call_args.args[1]
         inner_match = pipeline[1]["$facet"]["list"][0]["$match"]
-        assert inner_match == {"created_at": {"$lt": "2026-05-18T11:00:00+00:00"}}
+        assert inner_match == {
+            "$or": [
+                {"created_at": {"$lt": "2026-05-18T11:00:00+00:00"}},
+                {
+                    "created_at": "2026-05-18T11:00:00+00:00",
+                    "_id": {"$lt": UUID(_NOTIF_ID_A)},
+                },
+            ]
+        }
     finally:
         app.dependency_overrides.pop(get_db, None)
