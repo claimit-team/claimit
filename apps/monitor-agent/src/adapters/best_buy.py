@@ -151,10 +151,10 @@ class BestBuyAdapter(PriceSourceAdapter):
         member_tier_required = "MyBestBuy Plus" if price_member else None
 
         screenshot_url = await capture_screenshot(
-            url=product_url,
+            html=html,
             platform="best_buy",
             product_id=product_id,
-            wait_selector='[data-testid="price-block-customer-price"]',
+            url=product_url,
         )
 
         return PriceSnapshot(

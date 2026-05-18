@@ -137,10 +137,10 @@ class TargetAdapter(PriceSourceAdapter):
             )
 
         screenshot_url = await capture_screenshot(
-            url=product_url,
+            html=html,
             platform="target",
             product_id=product_id,
-            wait_selector='[data-test="product-price"]',
+            url=product_url,
         )
 
         # Target Circle (member) pricing is not reliably extractable from standard

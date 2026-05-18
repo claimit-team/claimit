@@ -1,18 +1,19 @@
-"""Screenshot service - captures price-drop evidence and uploads to GCS.
+"""Screenshot service - renders adapter-fetched HTML and uploads to GCS.
 
 For each captured screenshot:
-1. ScraperAPI fetches a PNG of the rendered page (screenshot=true + premium=true)
+1. Playwright headless Chromium loads the HTML via set_content()
 2. Pillow overlays a timestamp watermark in the bottom-left corner
 3. PNG is uploaded to gs://{EVIDENCE_BUCKET}/evidence/{platform}/{product_id}/{ts}.png
 4. A v4 signed URL valid for 30 days is returned
 
 Failures are logged and the function returns None - never raises.
 
-Why ScraperAPI instead of direct headless Chromium: Best Buy, Target, and most
-travel sites detect headless Chromium fingerprints and either reset connections
-(ERR_HTTP2_PROTOCOL_ERROR) or block the price-hydration XHRs that we need to
-see. ScraperAPI's premium proxy pool handles the anti-bot bypass for us; we
-just receive PNG bytes back.
+Why local Playwright on already-fetched HTML, not direct navigation: Best Buy,
+Target, and most travel sites detect headless Chromium fingerprints and block
+direct navigation. But the adapters already get HTML via ScraperAPI; rendering
+that HTML locally with set_content() never triggers anti-bot because no network
+request is made to the protected origin during render. Cost stays at one
+ScraperAPI HTML fetch per price check - the screenshot itself is free.
 """
 
 from __future__ import annotations
@@ -24,66 +25,46 @@ from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from typing import Any
 
-import requests
 from google.auth import default as get_default_credentials
 from google.auth.transport.requests import Request as AuthRequest
-from google.cloud import secretmanager, storage
+from google.cloud import storage
 from PIL import Image, ImageDraw
+from playwright.async_api import async_playwright
 
 logger = logging.getLogger(__name__)
 
-SCRAPERAPI_ENDPOINT = "https://api.scraperapi.com/"
 _EVIDENCE_BUCKET = os.environ.get("EVIDENCE_BUCKET", "claimit-evidence-dev")
-_PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "claimit-beta")
 _SIGNED_URL_EXPIRY_DAYS = 30
-_SCRAPERAPI_TIMEOUT_S = 120
+_VIEWPORT_WIDTH = 1280
+_VIEWPORT_HEIGHT = 800
+_RENDER_SETTLE_MS = 1000
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-
-_api_key_cache: str | None = None
-
-
-def _get_api_key() -> str:
-    """Load ScraperAPI key from env var (override) or GCP Secret Manager.
-
-    Mirrors the per-adapter cache pattern but at module level.
-    """
-    global _api_key_cache
-    if _api_key_cache is None:
-        env_key = os.environ.get("SCRAPERAPI_KEY")
-        if env_key:
-            _api_key_cache = env_key
-        else:
-            client = secretmanager.SecretManagerServiceClient()
-            secret_path = f"projects/{_PROJECT_ID}/secrets/scraperapi-key/versions/latest"
-            response = client.access_secret_version(name=secret_path)
-            _api_key_cache = response.payload.data.decode("utf-8")
-    return _api_key_cache
 
 
 async def capture(
-    url: str,
+    html: str,
     platform: str,
     product_id: str,
-    wait_selector: str | None = None,
+    url: str | None = None,
 ) -> str | None:
-    """Capture a screenshot of a product page and upload to GCS as evidence.
+    """Render adapter-fetched HTML and upload as price evidence.
 
     Args:
-        url: The product page URL to screenshot.
-        platform: Platform identifier (e.g. "best_buy") for the storage path.
-        product_id: SKU/ID for the storage path.
-        wait_selector: Accepted for backward compatibility; not used by the
-            ScraperAPI screenshot endpoint, which has its own render-wait logic.
+        html: HTML string already retrieved by the adapter (e.g. via ScraperAPI).
+            The renderer never navigates to a live origin - it uses set_content().
+        platform: Platform identifier (e.g. "best_buy") for the GCS path.
+        product_id: SKU/ID for the GCS path.
+        url: Original product URL, used only for log context. Never fetched.
 
     Returns:
         Signed GCS URL valid for 30 days, or None on any failure.
     """
     try:
         captured_at = datetime.now(UTC)
-        raw_png = await _take_screenshot(url, wait_selector)
+        raw_png = await _take_screenshot(html)
         if not raw_png.startswith(PNG_MAGIC):
             logger.warning(
-                "ScraperAPI returned non-PNG content (%d bytes); discarding",
+                "Renderer produced non-PNG output (%d bytes); discarding",
                 len(raw_png),
             )
             return None
@@ -100,31 +81,24 @@ async def capture(
         return None
 
 
-async def _take_screenshot(url: str, wait_selector: str | None = None) -> bytes:
-    """Fetch a PNG of the rendered page via ScraperAPI's screenshot endpoint.
+async def _take_screenshot(html: str) -> bytes:
+    """Render HTML in headless Chromium and return viewport PNG bytes.
 
-    wait_selector is preserved on the signature but ignored; ScraperAPI does
-    not accept a CSS-selector readiness signal. It uses internal render-wait
-    timing controlled server-side.
+    Uses set_content() rather than goto() so the page loads without making
+    any network request to the protected origin - anti-bot defenses are
+    never triggered.
     """
-    params = {
-        "api_key": _get_api_key(),
-        "url": url,
-        "screenshot": "true",
-        "render": "true",
-        "premium": "true",
-        "country_code": "us",
-    }
-    response = await asyncio.to_thread(
-        requests.get,
-        SCRAPERAPI_ENDPOINT,
-        params=params,
-        timeout=_SCRAPERAPI_TIMEOUT_S,
-    )
-    if response.status_code != 200:
-        # Avoid leaking api_key in error messages
-        raise RuntimeError(f"ScraperAPI screenshot failed: HTTP {response.status_code}")
-    return response.content
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            page = await browser.new_page(
+                viewport={"width": _VIEWPORT_WIDTH, "height": _VIEWPORT_HEIGHT}
+            )
+            await page.set_content(html, wait_until="domcontentloaded")
+            await page.wait_for_timeout(_RENDER_SETTLE_MS)
+            return await page.screenshot(type="png", full_page=False)
+        finally:
+            await browser.close()
 
 
 def _add_timestamp_watermark(png_bytes: bytes, captured_at: datetime) -> bytes:
