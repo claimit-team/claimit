@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 from ..deps import get_db
 from ..middleware.auth import get_current_user
 from ..middleware.errors import ApiError
+from ..serializers import serialize_user
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -47,16 +48,6 @@ class UpdateNotificationsRequest(BaseModel):
     web_push: bool
     email: bool
     muted_event_types: list[NotificationEventType]
-
-
-def _serialize_user(user: User) -> dict[str, object]:
-    """Mirror /auth/me's stripping rules so frontends can swap Zustand state."""
-    payload = user.model_dump(
-        mode="json",
-        by_alias=True,
-        exclude={"gmail_integration": {"refresh_token_ref"}},
-    )
-    return {"user": payload}
 
 
 @router.put("/send-preference")
@@ -82,7 +73,7 @@ async def update_send_preference(
         raise ApiError("user_not_found", "User document was removed", status_code=404)
 
     user.send_preference = new_prefs
-    return _serialize_user(user)
+    return {"user": serialize_user(user)}
 
 
 @router.put("/notifications")
@@ -108,4 +99,4 @@ async def update_notifications(
         raise ApiError("user_not_found", "User document was removed", status_code=404)
 
     user.notification_prefs = new_prefs
-    return _serialize_user(user)
+    return {"user": serialize_user(user)}

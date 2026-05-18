@@ -217,6 +217,34 @@ async def test_send_preference_rejects_missing_default_mode(client: AsyncClient)
         app.dependency_overrides.pop(get_db, None)
 
 
+@pytest.mark.asyncio
+async def test_update_send_preference_returns_404_when_user_missing(
+    client: AsyncClient,
+) -> None:
+    """If partial_update reports no match (user deleted between auth + write),
+    the route raises ApiError(user_not_found, 404). Both settings endpoints
+    use the same code path so one test covers both."""
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=lambda *_args, **_kwargs: User.model_validate(USER_FIXTURE))
+    db.partial_update = AsyncMock(return_value=False)
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.put(
+                "/api/v1/settings/send-preference",
+                headers={"Authorization": "Bearer valid-token"},
+                json={"default_mode": "auto", "auto_send_delay_seconds": 600},
+            )
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "user_not_found"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
 # ---------------------------------------------------------------------------
 # PUT /settings/notifications
 # ---------------------------------------------------------------------------
