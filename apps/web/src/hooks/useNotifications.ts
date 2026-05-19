@@ -196,6 +196,13 @@ export function useNotifications({
         cursor: nextCursor,
       });
       if (myGeneration !== generationRef.current) return;
+      // Clear any stale error from a prior failed loadMore. Placement is
+      // intentional: AFTER the generation check (a stale response must
+      // not clobber a fresher generation's legitimate error) and BEFORE
+      // the data writes (the Alert clears, then the new rows render).
+      // The initial-fetch effect does the equivalent by setting
+      // error=null up-front; this mirrors that for retry-after-failure.
+      setError(null);
       // Append; unread_count is the user-wide total so it can shift if the
       // background changed it (e.g. a new event arrived). Trust the server.
       setNotifications((prev) => [...prev, ...page.notifications]);
