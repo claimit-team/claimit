@@ -17,6 +17,15 @@
  *   unread across the whole dataset (not scoped by current filter), so
  *   it is safe to wire directly into the "Unread" tab badge AND the
  *   header bell.
+ *
+ * Cross-hook synchronization:
+ * - The unread count is owned by useNotificationsStore (Zustand) so the
+ *   header bell (useUnreadCount) and any other consumer see optimistic
+ *   ack/ackAll updates on the next render frame, not after the next
+ *   60s poll. This hook publishes server-authoritative writes from
+ *   first-page / loadMore responses and optimistic deltas from ack /
+ *   ackAll. The list itself stays page-local (it's only ever rendered
+ *   on /notifications).
  */
 
 "use client";
@@ -30,7 +39,7 @@ import {
   listNotifications,
   NotificationsApiError,
 } from "@/lib/api/notifications";
-import { useAuthStore } from "@/store";
+import { useAuthStore, useNotificationsStore } from "@/store";
 
 export type NotificationsFilter = {
   acknowledged?: boolean;
@@ -64,8 +73,14 @@ export function useNotifications({
   const userId = useAuthStore((state) => state.user?._id ?? null);
   const isAuthLoading = useAuthStore((state) => state.isLoading);
 
+  // Cross-hook unread count lives in the store. Selector-based reads
+  // give stable action refs, so they're safe useCallback deps below.
+  const unreadCount = useNotificationsStore((s) => s.unreadCount);
+  const setUnreadCount = useNotificationsStore((s) => s.setUnreadCount);
+  const decrementUnread = useNotificationsStore((s) => s.decrementUnread);
+  const clearUnread = useNotificationsStore((s) => s.clearUnread);
+
   const [notifications, setNotifications] = useState<NotificationEvent[]>([]);
-  const [unreadCount, setUnreadCount] = useState<number>(0);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
@@ -101,7 +116,7 @@ export function useNotifications({
     }
     if (!userId) {
       setNotifications([]);
-      setUnreadCount(0);
+      clearUnread();
       setNextCursor(null);
       setError(new NotificationsApiError("unauthenticated", "User must be signed in."));
       setIsLoading(false);
@@ -147,7 +162,16 @@ export function useNotifications({
     return () => {
       mounted = false;
     };
-  }, [userId, isAuthLoading, acknowledgedFilter, eventTypeFilter, pageSize, reloadTick]);
+  }, [
+    userId,
+    isAuthLoading,
+    acknowledgedFilter,
+    eventTypeFilter,
+    pageSize,
+    reloadTick,
+    setUnreadCount,
+    clearUnread,
+  ]);
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || isLoadingMore) return;
@@ -190,69 +214,67 @@ export function useNotifications({
         setIsLoadingMore(false);
       }
     }
-  }, [nextCursor, isLoadingMore, acknowledgedFilter, eventTypeFilter, pageSize]);
+  }, [nextCursor, isLoadingMore, acknowledgedFilter, eventTypeFilter, pageSize, setUnreadCount]);
 
-  // The optimistic helpers below capture state via the latest closure
-  // values stored in refs. setState callback form is fine for the flip
-  // itself, but TS can't narrow a snapshot variable mutated inside the
-  // setState callback — explicit refs are clearer and let us roll back
-  // synchronously on failure.
+  // List snapshot for optimistic-flip rollback. The unread count is no
+  // longer mirrored locally — captured synchronously via
+  // useNotificationsStore.getState() at the call site so a Zustand
+  // update from the bell's poll between effect renders is included.
   const notificationsRef = useRef(notifications);
-  const unreadCountRef = useRef(unreadCount);
   useEffect(() => {
     notificationsRef.current = notifications;
   }, [notifications]);
-  useEffect(() => {
-    unreadCountRef.current = unreadCount;
-  }, [unreadCount]);
 
-  const ack = useCallback(async (notificationId: string) => {
-    const prevList = notificationsRef.current;
-    const prevUnread = unreadCountRef.current;
+  const ack = useCallback(
+    async (notificationId: string) => {
+      const prevList = notificationsRef.current;
+      const prevUnread = useNotificationsStore.getState().unreadCount;
 
-    const idx = prevList.findIndex((n) => n._id === notificationId);
-    if (idx === -1) return;
-    const target = prevList[idx];
-    if (target.acknowledged) {
-      // Already acked locally — fire-and-forget the server call so a
-      // re-click is still a no-op (the server short-circuits too).
-      try {
-        await ackOneApi(notificationId);
-      } catch {
-        // Swallow: nothing to roll back.
+      const idx = prevList.findIndex((n) => n._id === notificationId);
+      if (idx === -1) return;
+      const target = prevList[idx];
+      if (target.acknowledged) {
+        // Already acked locally — fire-and-forget the server call so a
+        // re-click is still a no-op (the server short-circuits too).
+        try {
+          await ackOneApi(notificationId);
+        } catch {
+          // Swallow: nothing to roll back.
+        }
+        return;
       }
-      return;
-    }
 
-    const optimistic: NotificationEvent = {
-      ...target,
-      acknowledged: true,
-      acknowledged_at: target.acknowledged_at ?? new Date().toISOString(),
-    };
-    const nextList = [...prevList];
-    nextList[idx] = optimistic;
-    setNotifications(nextList);
-    setUnreadCount(prevUnread > 0 ? prevUnread - 1 : prevUnread);
+      const optimistic: NotificationEvent = {
+        ...target,
+        acknowledged: true,
+        acknowledged_at: target.acknowledged_at ?? new Date().toISOString(),
+      };
+      const nextList = [...prevList];
+      nextList[idx] = optimistic;
+      setNotifications(nextList);
+      decrementUnread();
 
-    try {
-      const updated = await ackOneApi(notificationId);
-      setNotifications((curr) => {
-        const i = curr.findIndex((n) => n._id === notificationId);
-        if (i === -1) return curr;
-        const next = [...curr];
-        next[i] = updated;
-        return next;
-      });
-    } catch (err) {
-      setNotifications(prevList);
-      setUnreadCount(prevUnread);
-      throw err;
-    }
-  }, []);
+      try {
+        const updated = await ackOneApi(notificationId);
+        setNotifications((curr) => {
+          const i = curr.findIndex((n) => n._id === notificationId);
+          if (i === -1) return curr;
+          const next = [...curr];
+          next[i] = updated;
+          return next;
+        });
+      } catch (err) {
+        setNotifications(prevList);
+        setUnreadCount(prevUnread);
+        throw err;
+      }
+    },
+    [decrementUnread, setUnreadCount],
+  );
 
   const ackAll = useCallback(async () => {
     const prevList = notificationsRef.current;
-    const prevUnread = unreadCountRef.current;
+    const prevUnread = useNotificationsStore.getState().unreadCount;
     const hasUnread = prevList.some((n) => !n.acknowledged);
     if (!hasUnread && prevUnread === 0) {
       return 0;
@@ -263,7 +285,7 @@ export function useNotifications({
       n.acknowledged ? n : { ...n, acknowledged: true, acknowledged_at: now },
     );
     setNotifications(nextList);
-    setUnreadCount(0);
+    clearUnread();
 
     try {
       return await ackAllApi();
@@ -272,7 +294,7 @@ export function useNotifications({
       setUnreadCount(prevUnread);
       throw err;
     }
-  }, []);
+  }, [clearUnread, setUnreadCount]);
 
   return {
     notifications,

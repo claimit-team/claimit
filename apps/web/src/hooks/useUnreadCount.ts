@@ -11,6 +11,12 @@
  * - Skipped entirely while the document is hidden — avoids burning
  *   tokens for background tabs that no one is looking at.
  *
+ * State lives in the shared useNotificationsStore so an optimistic
+ * ack/ackAll on the /notifications page is visible on the header bell
+ * on the next render frame (no 60s lag). The hook still owns the
+ * polling lifecycle; it just publishes results to the store instead
+ * of local React state.
+ *
  * The hook does not own a list, never paginates, and never errors loudly:
  * a failed poll keeps the previous count and silently retries on the
  * next tick. Header bells must never crash the app shell.
@@ -18,10 +24,10 @@
 
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import { listNotifications } from "@/lib/api/notifications";
-import { useAuthStore } from "@/store";
+import { useAuthStore, useNotificationsStore } from "@/store";
 
 const POLL_INTERVAL_MS = 60_000;
 
@@ -34,9 +40,14 @@ export function useUnreadCount(): UseUnreadCountResult {
   const userId = useAuthStore((state) => state.user?._id ?? null);
   const isAuthLoading = useAuthStore((state) => state.isLoading);
 
-  const [unreadCount, setUnreadCount] = useState<number>(0);
+  const unreadCount = useNotificationsStore((s) => s.unreadCount);
+  const setUnreadCount = useNotificationsStore((s) => s.setUnreadCount);
+  const resetOnSignOut = useNotificationsStore((s) => s.resetOnSignOut);
+
   // Tracks the latest in-flight request so a stale response can never
-  // overwrite a newer one.
+  // overwrite a newer one. Bumped on every fetchOnce and on auth flips
+  // so an in-flight poll captured under the previous user can never
+  // re-write a count after sign-out.
   const requestSeqRef = useRef(0);
 
   const fetchOnce = useCallback(async () => {
@@ -50,7 +61,7 @@ export function useUnreadCount(): UseUnreadCountResult {
     } catch {
       // Header badge: silent failure preserves the previous count.
     }
-  }, []);
+  }, [setUnreadCount]);
 
   useEffect(() => {
     if (isAuthLoading || !userId) {
@@ -59,7 +70,7 @@ export function useUnreadCount(): UseUnreadCountResult {
       // can resolve afterward and re-write a stale unread count over
       // the cleared 0.
       requestSeqRef.current += 1;
-      setUnreadCount(0);
+      resetOnSignOut();
       return;
     }
 
@@ -77,7 +88,7 @@ export function useUnreadCount(): UseUnreadCountResult {
       window.clearInterval(intervalId);
       window.removeEventListener("focus", onFocus);
     };
-  }, [userId, isAuthLoading, fetchOnce]);
+  }, [userId, isAuthLoading, fetchOnce, resetOnSignOut]);
 
   const refetch = useCallback(() => {
     void fetchOnce();
