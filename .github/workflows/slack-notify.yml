@@ -8,7 +8,7 @@ on:
   issues:
     types: [opened, assigned]
   workflow_run:
-    workflows: ["CI", "Deploy Prod"]
+    workflows: ["CI", "Deploy Prod", "Deploy Agents", "Terraform Plan"]
     types: [completed]
 
 jobs:
