@@ -53,11 +53,13 @@ function shortScope(scope: string): string {
 
 function formatConnectedAt(iso: string | null): string {
   if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
+  // `new Date(malformed)` doesn't throw — it produces an Invalid Date whose
+  // .toLocaleString() returns the literal string "Invalid Date", which would
+  // leak into the connected card. Guard with isNaN(getTime()) and fall back
+  // to the em-dash placeholder, matching the no-timestamp branch.
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString();
 }
 
 export function GmailSettingsContent() {

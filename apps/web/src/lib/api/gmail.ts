@@ -24,6 +24,12 @@ export const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
+// Same 10s budget as /auth/me — Cloud Run cold-start tolerance vs UX
+// (users perceive >5s as broken). Without this, a hung TCP connection
+// would freeze the connect/disconnect button indefinitely with no
+// recovery path.
+const GMAIL_TIMEOUT_MS = 10000;
+
 export class GmailApiError extends Error {
   constructor(
     public readonly code: string,
@@ -47,9 +53,23 @@ export async function connectGmail(returnTo: string): Promise<ConnectGmailRespon
   const url = new URL(`${API_BASE_URL}/api/v1/gmail/connect`);
   url.searchParams.set("return_to", returnTo);
 
-  const response = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), GMAIL_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new GmailApiError("request_timeout", "Timed out reaching Gmail. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     // Backend uses the {error: {code, message}} envelope from middleware/errors.py.
@@ -79,10 +99,24 @@ export async function disconnectGmail(): Promise<User> {
 
   const token = await user.getIdToken();
 
-  const response = await fetch(`${API_BASE_URL}/api/v1/gmail/disconnect`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), GMAIL_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/v1/gmail/disconnect`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new GmailApiError("request_timeout", "Timed out reaching Gmail. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     let code = "request_failed";
