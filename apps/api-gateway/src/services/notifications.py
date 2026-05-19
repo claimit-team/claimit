@@ -135,6 +135,30 @@ async def list_notifications(
     }
 
 
+async def ack_all_notifications(
+    db: MongoDBClient,
+    user_id: UUID,
+) -> int:
+    """Mark every unread notification for `user_id` as acknowledged.
+
+    Idempotent — returns 0 when there is nothing to ack. The number returned
+    is the count of documents whose `acknowledged` field actually flipped to
+    True (rows already True are skipped by Mongo's $set semantics, surfaced
+    as `modified_count`).
+
+    All flipped documents share a single `acknowledged_at` ISO timestamp
+    (the moment of the bulk write). This matches `ack_notification`'s
+    string-typed `acknowledged_at` and avoids an N-write loop.
+    """
+    now_iso = datetime.now(UTC).isoformat()
+    return await db.update_many(
+        "notification_events",
+        {"user_id": user_id, "acknowledged": False},
+        {"acknowledged": True, "acknowledged_at": now_iso},
+        model=NotificationEvent,
+    )
+
+
 async def ack_notification(
     db: MongoDBClient,
     user_id: UUID,

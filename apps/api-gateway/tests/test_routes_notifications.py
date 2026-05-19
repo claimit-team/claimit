@@ -1,4 +1,5 @@
-"""Tests for GET /api/v1/notifications and POST /api/v1/notifications/:id/ack.
+"""Tests for GET /api/v1/notifications, POST /api/v1/notifications/:id/ack,
+and POST /api/v1/notifications/ack-all.
 
 Pattern mirrors test_routes_settings.py: AsyncMock(spec=MongoDBClient),
 dependency_overrides[get_db], firebase_admin.auth.verify_id_token patched.
@@ -453,6 +454,170 @@ async def test_ack_notification_invalid_uuid_in_path_returns_422(
             )
         assert response.status_code == 422
         db.partial_update.assert_not_called()
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+# ---------------------------------------------------------------------------
+# POST /notifications/ack-all
+# ---------------------------------------------------------------------------
+
+
+def _mock_db_for_ack_all(*, modified_count: int) -> AsyncMock:
+    """DB mock for ack-all: find_one returns User for auth middleware, then
+    update_many returns the modified_count from the bulk $set."""
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=lambda *_args, **_kwargs: User.model_validate(USER_FIXTURE))
+    db.update_many = AsyncMock(return_value=modified_count)
+    return db
+
+
+@pytest.mark.asyncio
+async def test_ack_all_returns_200_with_count(client: AsyncClient) -> None:
+    """Happy path: 5 unread notifications flipped → response is
+    `{"acknowledged_count": 5}` with HTTP 200."""
+    db = _mock_db_for_ack_all(modified_count=5)
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                "/api/v1/notifications/ack-all",
+                headers={"Authorization": "Bearer valid-token"},
+            )
+        assert response.status_code == 200
+        assert response.json() == {"acknowledged_count": 5}
+        db.update_many.assert_awaited_once()
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
+async def test_ack_all_idempotent_returns_zero(client: AsyncClient) -> None:
+    """Second call from the same client (or any user with no unread) returns
+    `acknowledged_count: 0` without raising."""
+    db = _mock_db_for_ack_all(modified_count=0)
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                "/api/v1/notifications/ack-all",
+                headers={"Authorization": "Bearer valid-token"},
+            )
+        assert response.status_code == 200
+        assert response.json() == {"acknowledged_count": 0}
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
+async def test_ack_all_filter_scopes_to_user_and_unread(client: AsyncClient) -> None:
+    """The bulk filter is `{user_id, acknowledged: False}` — never bare —
+    so a user can never ack another user's notifications, and acked rows
+    are never re-flipped."""
+    db = _mock_db_for_ack_all(modified_count=2)
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            await client.post(
+                "/api/v1/notifications/ack-all",
+                headers={"Authorization": "Bearer valid-token"},
+            )
+        # Service calls update_many positionally: (collection, filter, updates).
+        call = db.update_many.await_args
+        assert call.args[0] == "notification_events"
+        assert call.args[1] == {
+            "user_id": UUID(USER_FIXTURE["_id"]),
+            "acknowledged": False,
+        }
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
+async def test_ack_all_sets_acknowledged_true_and_iso_timestamp(
+    client: AsyncClient,
+) -> None:
+    """The $set payload flips `acknowledged` to True and writes a non-empty
+    ISO-8601 string into `acknowledged_at` (matches the schema field's
+    `str | None` type)."""
+    db = _mock_db_for_ack_all(modified_count=1)
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            await client.post(
+                "/api/v1/notifications/ack-all",
+                headers={"Authorization": "Bearer valid-token"},
+            )
+        call = db.update_many.await_args
+        updates = call.args[2]
+        assert updates["acknowledged"] is True
+        assert isinstance(updates["acknowledged_at"], str) and updates["acknowledged_at"]
+        # Round-trips through datetime.fromisoformat — the service uses
+        # datetime.now(UTC).isoformat().
+        from datetime import datetime as _dt
+
+        _dt.fromisoformat(updates["acknowledged_at"])
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
+async def test_ack_all_requires_bearer(client: AsyncClient) -> None:
+    """No Authorization header → 401 before the service is reached."""
+    mock_db = AsyncMock(spec=MongoDBClient)
+
+    async def _override_db() -> MongoDBClient:
+        return mock_db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        response = await client.post("/api/v1/notifications/ack-all")
+        assert response.status_code == 401
+        mock_db.update_many.assert_not_called()
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
+async def test_ack_all_route_takes_precedence_over_uuid_path(
+    client: AsyncClient,
+) -> None:
+    """Route ordering is load-bearing: `/ack-all` is declared before
+    `/{notification_id}/ack`. A POST to `/ack-all` must invoke the
+    bulk handler (update_many), NOT 422 from UUID parsing or hit the
+    single-id ack path."""
+    db = _mock_db_for_ack_all(modified_count=1)
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                "/api/v1/notifications/ack-all",
+                headers={"Authorization": "Bearer valid-token"},
+            )
+        assert response.status_code == 200
+        db.update_many.assert_awaited_once()
+        # partial_update is the single-id ack code path; ack-all must not touch it.
+        assert "partial_update" not in {c[0] for c in db.method_calls}
     finally:
         app.dependency_overrides.pop(get_db, None)
 

@@ -48,6 +48,27 @@ async def list_notifications(
     )
 
 
+@router.post("/ack-all")
+async def ack_all_notifications(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[MongoDBClient, Depends(get_db)],
+) -> dict[str, int]:
+    """Mark every unread notification for the authenticated user as acked.
+
+    Declared before `/{notification_id}/ack` so FastAPI does not interpret
+    "ack-all" as a UUID path param and 422 the request.
+
+    Response shape: `{ "acknowledged_count": int }` — the number of docs
+    whose `acknowledged` field flipped from False to True. Idempotent: a
+    second call from the same client returns 0.
+    """
+    count = await notifications_service.ack_all_notifications(
+        db=db,
+        user_id=user.id,
+    )
+    return {"acknowledged_count": count}
+
+
 @router.post("/{notification_id}/ack")
 async def ack_notification(
     notification_id: Annotated[UUID, Path()],
