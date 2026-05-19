@@ -15,7 +15,10 @@ from claimit_mongodb_models import (
     DraftGeneratedBy,
     DraftVersion,
     MongoDBClient,
+    NotificationEntityType,
+    NotificationEventType,
     Platform,
+    write_notification_event,
 )
 from claimit_observability import init_phoenix
 from fastapi import FastAPI, Request
@@ -175,6 +178,28 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             }
         )
         await db.upsert_claim(final_claim)
+        notif_id = await write_notification_event(
+            db=db,
+            user_id=event.user_id,
+            event_type=NotificationEventType.CLAIM_DRAFTED,
+            entity_type=NotificationEntityType.CLAIM,
+            entity_id=str(claim_id),
+            data={
+                "claim_id": str(claim_id),
+                "claim_type": claim_plan.claim_type.value,
+                "refund_amount": event.price_drop_amount,
+                "send_mode": final_claim.send_override.value
+                if final_claim.send_override
+                else "approval",
+                "platform": event.platform_id,
+            },
+        )
+        if notif_id is None:
+            _log.warning("Failed to write claim_drafted notification for claim %s", claim_id)
+        # TODO(task-3.20): write_notification_event claim_queued_auto here
+        # TODO(task-3.20): write_notification_event claim_submitted here
+        # TODO(task-3.20): write_notification_event claim_denied here
+        # TODO(task-3.20): write_notification_event claim_resolved_success here
 
         _log.info(
             "Generated %s draft for claim %s (purchase %s)",

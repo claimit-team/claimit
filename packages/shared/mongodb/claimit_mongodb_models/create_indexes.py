@@ -1,6 +1,6 @@
 """Idempotent MongoDB index creation for ClaimIt.
 
-Creates indexes for 6 collections per master doc §7.3. Safe to run multiple
+Creates indexes for 7 collections per master doc §7.3. Safe to run multiple
 times — MongoDB's createIndex is a no-op when the requested spec matches an
 existing index, and raises OperationFailure only when options conflict.
 """
@@ -46,6 +46,11 @@ INDEX_DEFINITIONS: dict[str, list[dict[str, Any]]] = {
         {"keys": [("user_id", 1), ("status", 1), ("last_message_at", -1)]},
         {"keys": [("claim_id", 1)]},
     ],
+    "notification_events": [
+        {"keys": [("user_id", 1), ("created_at", -1)]},
+        {"keys": [("user_id", 1), ("acknowledged", 1), ("created_at", -1)]},
+        {"keys": [("entity_id", 1)], "sparse": True},
+    ],
 }
 
 
@@ -76,7 +81,7 @@ async def create_indexes(
                     if (
                         collection_name == "purchases"
                         and keys == [("receipt_hash", 1)]
-                        and getattr(exc, "code", None) == 85
+                        and getattr(exc, "code", None) in (85, 86)
                     ):
                         await collection.drop_index("receipt_hash_1")
                         name = await collection.create_index(keys, **kwargs)

@@ -1,19 +1,27 @@
 "use client";
 
-import { ChevronRight, Clock, FileText, ShoppingBag } from "lucide-react";
+import { ChevronRight, FileText, ShoppingBag } from "lucide-react";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
+/**
+ * Hero shown to users who are actively monitoring purchases or have
+ * claims in progress, but no resolved/reclaimed totals yet.
+ *
+ * The "windows ending soon" tile from the previous mock-driven version
+ * was removed because GET /api/v1/dashboard/summary does not yet expose
+ * a derived deadline-bucket count. Reintroduce a third tile once the
+ * backend grows that field, or move to the per-purchase page where the
+ * underlying timestamps already live.
+ */
 export function HeroActiveUser({
   claimsInProgress,
   purchasesMonitored,
-  windowsEndingSoon,
 }: {
   claimsInProgress: number;
   purchasesMonitored: number;
-  windowsEndingSoon: number;
 }) {
   return (
     <Card className="border-neutral-200">
@@ -28,7 +36,7 @@ export function HeroActiveUser({
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="bg-neutral-50 rounded-lg p-4 border border-neutral-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-brand-primary-100 flex items-center justify-center">
@@ -53,20 +61,6 @@ export function HeroActiveUser({
                   {purchasesMonitored}
                 </div>
                 <div className="text-sm text-neutral-600">Purchases monitored</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-semantic-warning-bg rounded-lg p-4 border border-semantic-warning/20">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-semantic-warning/20 flex items-center justify-center">
-                <Clock className="w-5 h-5 text-semantic-warning" aria-hidden="true" />
-              </div>
-              <div>
-                <div className="text-2xl font-semibold text-neutral-900 tabular-nums">
-                  {windowsEndingSoon}
-                </div>
-                <div className="text-sm text-neutral-600">Windows ending soon</div>
               </div>
             </div>
           </div>

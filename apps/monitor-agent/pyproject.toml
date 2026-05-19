@@ -14,14 +14,18 @@ dependencies = [
     "google-adk>=1.0.0",
     "claimit-observability",
     "claimit-mcp",
+    "claimit-mongodb-models",
     "requests>=2.31.0",
     "beautifulsoup4>=4.12.0",
     "google-cloud-secret-manager>=2.20.0",
+    "google-cloud-storage>=2.18.0",
+    "Pillow>=10.0.0",
 ]
 
 [tool.uv.sources]
 claimit-observability = { path = "../../packages/shared/observability" }
 claimit-mcp = { path = "../../packages/shared/mcp" }
+claimit-mongodb-models = { path = "../../packages/shared/mongodb" }
 
 [dependency-groups]
 dev = [

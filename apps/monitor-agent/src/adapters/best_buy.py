@@ -15,6 +15,7 @@ import requests
 from bs4 import BeautifulSoup
 from google.cloud import secretmanager
 
+from ..services.screenshot import capture as capture_screenshot
 from .base import PriceFetchError, PriceSnapshot, PriceSourceAdapter
 
 SCRAPERAPI_ENDPOINT = "https://api.scraperapi.com/"
@@ -149,6 +150,13 @@ class BestBuyAdapter(PriceSourceAdapter):
 
         member_tier_required = "MyBestBuy Plus" if price_member else None
 
+        screenshot_url = await capture_screenshot(
+            html=html,
+            platform="best_buy",
+            product_id=product_id,
+            url=product_url,
+        )
+
         return PriceSnapshot(
             platform=platform,
             product_id=product_id,
@@ -158,6 +166,6 @@ class BestBuyAdapter(PriceSourceAdapter):
             currency="USD",
             checked_at=datetime.now(UTC),
             source="scraperapi",
-            evidence_screenshot_url=None,
+            evidence_screenshot_url=screenshot_url,
             raw_response_hash=hashlib.sha256(html.encode("utf-8")).hexdigest()[:16],
         )

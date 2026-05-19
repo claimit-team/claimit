@@ -1,9 +1,9 @@
 "use client";
 
+import type { NotificationEventType } from "@claimit/mongodb-types";
 import {
   AlertTriangle,
   CheckCircle2,
-  Clock,
   FileEdit,
   Info,
   LayoutDashboard,
@@ -14,22 +14,22 @@ import {
   XCircle,
 } from "lucide-react";
 import type { ComponentType } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { SettingsApiError, updateNotifications } from "@/lib/api/settings";
+import { useAuthStore } from "@/store";
 
-type EventType = {
-  key: string;
+type EventTypeRow = {
+  key: NotificationEventType;
   label: string;
   description: string;
-  enabled: boolean;
   icon: ComponentType<{ className?: string }>;
 };
 
@@ -38,62 +38,55 @@ type Channel = {
   status: string;
 };
 
-const initialEventTypes: EventType[] = [
+// The 7 event types we surface in the notifications UI. Keys must match
+// values in the backend NotificationEventType enum
+// (claimit_mongodb_models/enums.py); a `muted_event_types` payload with
+// any other key would be rejected as 422 by /settings/notifications.
+//
+// `update_needed_reminders` is intentionally absent — there's no matching
+// enum value yet (see plan audit; the backend would 422 it).
+const EVENT_TYPE_DEFS: EventTypeRow[] = [
   {
     key: "price_dropped",
     label: "Price drop detected",
     description: "When ClaimIt detects an eligible price drop.",
-    enabled: true,
     icon: TrendingDown,
   },
   {
     key: "claim_drafted",
     label: "Claim drafted",
     description: "When claim material is ready for review.",
-    enabled: true,
     icon: FileEdit,
   },
   {
     key: "claim_queued_auto",
     label: "Auto-send queued",
     description: "When an eligible email claim enters the 5-minute send queue.",
-    enabled: true,
     icon: Send,
   },
   {
     key: "claim_denied",
     label: "Claim denied",
     description: "When you record or import a denied outcome.",
-    enabled: true,
     icon: XCircle,
   },
   {
     key: "claim_resolved_success",
     label: "Claim resolved",
     description: "When you mark a claim approved or resolved.",
-    enabled: true,
     icon: CheckCircle2,
   },
   {
     key: "low_confidence_extract",
     label: "Low confidence extraction",
     description: "When ClaimIt needs you to confirm extracted purchase details.",
-    enabled: true,
     icon: AlertTriangle,
   },
   {
     key: "first_time_dashboard",
     label: "First-time dashboard",
     description: "When your dashboard is ready after onboarding.",
-    enabled: true,
     icon: LayoutDashboard,
-  },
-  {
-    key: "update_needed_reminders",
-    label: "Update needed reminders",
-    description: "When a submitted claim needs you to report the outcome.",
-    enabled: true,
-    icon: Clock,
   },
 ];
 
@@ -103,49 +96,75 @@ const channels: Channel[] = [
 ];
 
 export default function NotificationsPage() {
-  const [isLoading, setIsLoading] = useState(true);
-  const [hasError] = useState(false);
-  const [eventTypes, setEventTypes] = useState<EventType[]>(initialEventTypes);
-  const [savedEventTypes, setSavedEventTypes] = useState<EventType[]>(initialEventTypes);
+  const user = useAuthStore((s) => s.user);
+  const isAuthLoading = useAuthStore((s) => s.isLoading);
+  const setUser = useAuthStore((s) => s.setUser);
+
+  // Keys whose toggle is currently OFF in the edit buffer. Stored as a Set
+  // (keys-only) rather than mirroring the full row defs because every row
+  // is enabled-by-default; muted_event_types is the only stateful bit.
+  const [mutedKeys, setMutedKeys] = useState<Set<NotificationEventType>>(new Set());
+  // Last successful server state — what Reset reverts to.
+  const [savedMutedKeys, setSavedMutedKeys] = useState<Set<NotificationEventType>>(new Set());
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 800);
-    return () => clearTimeout(timer);
-  }, []);
+    if (user) {
+      const initial = new Set(user.notification_prefs.muted_event_types);
+      setMutedKeys(initial);
+      setSavedMutedKeys(initial);
+    }
+  }, [user]);
 
-  const handleToggle = (key: string) => {
-    setEventTypes((prev) =>
-      prev.map((event) => (event.key === key ? { ...event, enabled: !event.enabled } : event)),
-    );
+  const handleToggle = (key: NotificationEventType) => {
+    setMutedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
 
   const handleSave = async () => {
+    if (!user) return;
     setIsSaving(true);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    setSavedEventTypes([...eventTypes]);
-    setIsSaving(false);
-    toast.success("Notification settings saved in this mock flow.");
+    try {
+      // PUT /settings/notifications fully replaces notification_prefs, so
+      // we always re-send web_push and email at their current values. The
+      // UI doesn't expose those toggles yet (the "Channels" card shows
+      // them as Coming Soon) — preserving them keeps the backend honest.
+      const updated = await updateNotifications({
+        web_push: user.notification_prefs.web_push,
+        email: user.notification_prefs.email,
+        muted_event_types: Array.from(mutedKeys),
+      });
+      setUser(updated);
+      const persisted = new Set(updated.notification_prefs.muted_event_types);
+      setMutedKeys(persisted);
+      setSavedMutedKeys(persisted);
+      toast.success("Notification settings saved.");
+    } catch (err) {
+      const message =
+        err instanceof SettingsApiError
+          ? err.message
+          : "Could not save notification settings. Please try again.";
+      toast.error(message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleReset = () => {
-    setEventTypes([...savedEventTypes]);
+    setMutedKeys(new Set(savedMutedKeys));
     toast.info("Settings reset to last saved state.");
   };
 
-  const hasChanges = JSON.stringify(eventTypes) !== JSON.stringify(savedEventTypes);
-
-  if (hasError) {
-    return (
-      <div className="space-y-6">
-        <Alert variant="destructive">
-          <AlertTriangle className="size-4" aria-hidden="true" />
-          <AlertTitle>Error</AlertTitle>
-          <AlertDescription>Notification settings could not be loaded.</AlertDescription>
-        </Alert>
-      </div>
-    );
-  }
+  const isLoading = isAuthLoading || !user;
+  const hasChanges = useMemo(() => {
+    if (mutedKeys.size !== savedMutedKeys.size) return true;
+    for (const k of mutedKeys) if (!savedMutedKeys.has(k)) return true;
+    return false;
+  }, [mutedKeys, savedMutedKeys]);
 
   return (
     <div className="space-y-6">
@@ -164,7 +183,7 @@ export default function NotificationsPage() {
         <CardContent className="pt-4">
           {isLoading ? (
             <div className="space-y-4">
-              {Array.from({ length: 8 }).map((_, i) => (
+              {Array.from({ length: EVENT_TYPE_DEFS.length }).map((_, i) => (
                 <div key={`sk-${String(i)}`}>
                   <div className="flex items-center justify-between py-3">
                     <div className="flex flex-1 items-start gap-3">
@@ -176,14 +195,15 @@ export default function NotificationsPage() {
                     </div>
                     <Skeleton className="h-5 w-8" />
                   </div>
-                  {i < 7 ? <Separator className="bg-neutral-200" /> : null}
+                  {i < EVENT_TYPE_DEFS.length - 1 ? <Separator className="bg-neutral-200" /> : null}
                 </div>
               ))}
             </div>
           ) : (
             <div className="space-y-0">
-              {eventTypes.map((event, index) => {
+              {EVENT_TYPE_DEFS.map((event, index) => {
                 const Icon = event.icon;
+                const enabled = !mutedKeys.has(event.key);
                 return (
                   <div key={event.key}>
                     <div className="flex items-center justify-between py-3">
@@ -204,12 +224,12 @@ export default function NotificationsPage() {
                       </div>
                       <Switch
                         id={event.key}
-                        checked={event.enabled}
+                        checked={enabled}
                         onCheckedChange={() => handleToggle(event.key)}
                         className="ml-4 shrink-0 data-checked:bg-brand-primary-500"
                       />
                     </div>
-                    {index < eventTypes.length - 1 ? (
+                    {index < EVENT_TYPE_DEFS.length - 1 ? (
                       <Separator className="bg-neutral-200" />
                     ) : null}
                   </div>
@@ -232,7 +252,7 @@ export default function NotificationsPage() {
         <CardContent className="pt-2">
           <p className="text-sm text-neutral-700">
             Some notifications can open the Assistant panel with context and quick actions. Muting
-            an event type prevents that proactive surface in this mock UI.
+            an event type prevents that proactive surface.
           </p>
         </CardContent>
       </Card>
