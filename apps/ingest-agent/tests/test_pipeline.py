@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any
 from unittest.mock import AsyncMock
@@ -71,13 +70,13 @@ def _stub_collection(find_one_result: Any = None) -> AsyncMock:
     return collection
 
 
-def test_publishes_event_when_monitoring(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_publishes_event_when_monitoring(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_extractor(monkeypatch, _sample_extracted_payload(overall_min=0.95))
     collection = _stub_collection()
     publish_mock = AsyncMock(return_value="msg-1")
     monkeypatch.setattr(pipeline, "publish_event", publish_mock)
 
-    result = asyncio.run(pipeline.ingest_email(_sample_email(), purchases_collection=collection))
+    result = await pipeline.ingest_email(_sample_email(), purchases_collection=collection)
 
     assert result["status"] == "monitoring"
     collection.insert_one.assert_awaited_once_with(result)
@@ -94,7 +93,7 @@ def test_publishes_event_when_monitoring(monkeypatch: pytest.MonkeyPatch) -> Non
     assert event.overall_confidence == result["extraction_confidence"]["overall_min"]
 
 
-def test_publishes_event_when_pending_confirmation(
+async def test_publishes_event_when_pending_confirmation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     payload = _sample_extracted_payload(overall_min=0.5)
@@ -104,7 +103,7 @@ def test_publishes_event_when_pending_confirmation(
     publish_mock = AsyncMock(return_value="msg-1")
     monkeypatch.setattr(pipeline, "publish_event", publish_mock)
 
-    result = asyncio.run(pipeline.ingest_email(_sample_email(), purchases_collection=collection))
+    result = await pipeline.ingest_email(_sample_email(), purchases_collection=collection)
 
     assert result["status"] == "pending_confirmation"
     publish_mock.assert_awaited_once()
@@ -112,7 +111,7 @@ def test_publishes_event_when_pending_confirmation(
     assert event.status == "pending_confirmation"
 
 
-def test_does_not_publish_for_pending_user_edit(
+async def test_does_not_publish_for_pending_user_edit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     payload = _sample_extracted_payload(overall_min=0.95)
@@ -122,14 +121,14 @@ def test_does_not_publish_for_pending_user_edit(
     publish_mock = AsyncMock(return_value="msg-1")
     monkeypatch.setattr(pipeline, "publish_event", publish_mock)
 
-    result = asyncio.run(pipeline.ingest_email(_sample_email(), purchases_collection=collection))
+    result = await pipeline.ingest_email(_sample_email(), purchases_collection=collection)
 
     assert result["status"] == "pending_user_edit"
     collection.insert_one.assert_awaited_once()
     publish_mock.assert_not_awaited()
 
 
-def test_duplicate_receipt_skips_insert_and_publish(
+async def test_duplicate_receipt_skips_insert_and_publish(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_extractor(monkeypatch, _sample_extracted_payload())
@@ -138,13 +137,13 @@ def test_duplicate_receipt_skips_insert_and_publish(
     monkeypatch.setattr(pipeline, "publish_event", publish_mock)
 
     with pytest.raises(DuplicateReceiptError):
-        asyncio.run(pipeline.ingest_email(_sample_email(), purchases_collection=collection))
+        await pipeline.ingest_email(_sample_email(), purchases_collection=collection)
 
     collection.insert_one.assert_not_awaited()
     publish_mock.assert_not_awaited()
 
 
-def test_event_payload_validates_against_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_event_payload_validates_against_schema(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_extractor(monkeypatch, _sample_extracted_payload())
     collection = _stub_collection()
     captured: list[PurchaseIngestedEvent] = []
@@ -155,9 +154,38 @@ def test_event_payload_validates_against_schema(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(pipeline, "publish_event", capture)
 
-    asyncio.run(pipeline.ingest_email(_sample_email(), purchases_collection=collection))
+    await pipeline.ingest_email(_sample_email(), purchases_collection=collection)
 
     assert len(captured) == 1
     # Round-trip the event JSON to guarantee schema conformance.
     decoded = PurchaseIngestedEvent.model_validate_json(captured[0].model_dump_json())
     assert decoded == captured[0]
+
+
+async def test_threads_notifier_params_to_extract(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_extractor(monkeypatch, _sample_extracted_payload())
+    collection = _stub_collection()
+    publish_mock = AsyncMock(return_value="msg-1")
+    monkeypatch.setattr(pipeline, "publish_event", publish_mock)
+
+    captured: dict[str, Any] = {}
+
+    real_extract = extractor.extract
+
+    async def spy_extract(email: Any, **kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return await real_extract(email, **kwargs)
+
+    monkeypatch.setattr(pipeline, "extract", spy_extract)
+
+    await pipeline.ingest_email(
+        _sample_email(),
+        purchases_collection=collection,
+        user_email="user@example.com",
+        gmail_refresh_token_ref="secret://refresh",
+        gmail_connected_email="gmail@example.com",
+    )
+
+    assert captured["user_email"] == "user@example.com"
+    assert captured["gmail_refresh_token_ref"] == "secret://refresh"
+    assert captured["gmail_connected_email"] == "gmail@example.com"

@@ -23,13 +23,22 @@ async def ingest_email(
     email: EmailForExtraction | dict[str, Any],
     *,
     purchases_collection: Any,
+    user_email: str | None = None,
+    gmail_refresh_token_ref: str | None = None,
+    gmail_connected_email: str | None = None,
 ) -> dict[str, Any]:
     """Extract, persist, and publish a single order email.
 
     Raises `DuplicateReceiptError` from `extract()` when a matching
     `receipt_hash` already exists — no insert, no publish.
     """
-    purchase = await extract(email, purchases_collection=purchases_collection)
+    purchase = await extract(
+        email,
+        purchases_collection=purchases_collection,
+        user_email=user_email,
+        gmail_refresh_token_ref=gmail_refresh_token_ref,
+        gmail_connected_email=gmail_connected_email,
+    )
     await purchases_collection.insert_one(purchase)
 
     status = purchase["status"]
