@@ -170,6 +170,80 @@ async def test_second_signin_returns_existing_user(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_new_user_created_with_onboarded_false(client: AsyncClient) -> None:
+    """First-time Firebase signup → upserted User has onboarded=False.
+
+    The Pydantic model defaults onboarded=True so legacy MongoDB documents
+    without the field validate as already-onboarded; the new-user branch
+    in _user_from_decoded_token has to override that default explicitly so
+    fresh signups get routed through /onboarding by the frontend gate.
+    """
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.find_one = AsyncMock(return_value=None)
+    mock_db.upsert = AsyncMock(return_value=str(uuid.uuid4()))
+
+    async def _override_db() -> MongoDBClient:
+        return mock_db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        with patch(
+            "firebase_admin.auth.verify_id_token",
+            return_value={"uid": "new-uid", "email": "newcomer@example.com"},
+        ):
+            response = await client.get(
+                "/api/v1/auth/me",
+                headers={"Authorization": "Bearer valid-token"},
+            )
+        assert response.status_code == 200
+        assert response.json()["user"]["onboarded"] is False
+
+        mock_db.upsert.assert_awaited_once()
+        upserted_user = mock_db.upsert.await_args.args[2]
+        assert isinstance(upserted_user, User)
+        assert upserted_user.onboarded is False
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def test_legacy_user_doc_without_onboarded_validates_as_true() -> None:
+    """Existing MongoDB documents predate the onboarded field. Pydantic
+    default=True backfills missing values at read time so claimitbeta and
+    other beta accounts skip onboarding without a one-time migration."""
+    legacy_doc: dict[str, object] = {
+        "_id": "00000000-0000-0000-0000-000000000099",
+        "updated_at": None,
+        "email": "legacy@example.com",
+        "name": "Legacy User",
+        "default_location": {"city": "", "state": "", "lat": 0.0, "lon": 0.0},
+        "loyalty_memberships": [],
+        "gmail_integration": {
+            "connected": False,
+            "connected_at": None,
+            "connected_email": None,
+            "scopes_granted": [],
+            "refresh_token_ref": None,
+            "watch_history_id": None,
+            "watch_expires_at": None,
+            "last_processed_message_id": None,
+        },
+        "send_preference": {
+            "default_mode": "approval",
+            "auto_send_delay_seconds": 300,
+            "changed_at": None,
+        },
+        "ingestion_skiplist": [],
+        "notification_prefs": {"web_push": True, "email": True, "muted_event_types": []},
+        "subscription": {"tier": "free", "trial_ends": None, "renewed_at": None},
+        "created_at": "2024-01-01T00:00:00Z",
+    }
+    assert "onboarded" not in legacy_doc
+
+    user = User.model_validate(legacy_doc)
+    assert user.onboarded is True
+
+
+@pytest.mark.asyncio
 async def test_missing_auth_header_returns_401(client: AsyncClient) -> None:
     mock_db = AsyncMock(spec=MongoDBClient)
 

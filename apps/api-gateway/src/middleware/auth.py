@@ -101,6 +101,7 @@ async def _user_from_decoded_token(decoded: dict, db: MongoDBClient) -> User:
                 "trial_ends": None,
                 "renewed_at": None,
             },
+            onboarded=False,
             created_at=now,
         )
         await db.upsert("users", user.id, user)
