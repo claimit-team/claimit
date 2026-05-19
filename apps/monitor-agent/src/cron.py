@@ -68,13 +68,20 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
                     purchase.monitoring_cadence_minutes,
                     target_cadence,
                 )
-                await db.partial_update(
-                    "purchases",
-                    purchase.id,
-                    {"monitoring_cadence_minutes": target_cadence},
-                    Purchase,
-                )
-                purchase.monitoring_cadence_minutes = target_cadence
+                try:
+                    await db.partial_update(
+                        "purchases",
+                        purchase.id,
+                        {"monitoring_cadence_minutes": target_cadence},
+                        Purchase,
+                    )
+                    purchase.monitoring_cadence_minutes = target_cadence
+                except Exception:
+                    errors += 1
+                    logger.exception("cron.cadence_update_error purchase_id=%s", purchase.id)
+                    # Leave in-memory cadence at the stored value so is_due uses
+                    # the value the DB still has; next tick will retry the drift.
+                    continue
 
             days_remaining = (purchase.window_expires - now).total_seconds() / 86400
 
@@ -124,9 +131,15 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
             finally:
                 # Always bump last_checked_at — even on adapter error — to avoid
                 # hot-looping a permanently broken adapter on every 15-min tick.
-                await db.partial_update(
-                    "purchases", purchase.id, {"last_checked_at": now}, Purchase
-                )
+                # A failure here must not abort the sweep; the next tick will
+                # observe last_checked_at unchanged and naturally retry.
+                try:
+                    await db.partial_update(
+                        "purchases", purchase.id, {"last_checked_at": now}, Purchase
+                    )
+                except Exception:
+                    errors += 1
+                    logger.exception("cron.last_checked_update_error purchase_id=%s", purchase.id)
 
     summary = {
         "scanned": scanned,

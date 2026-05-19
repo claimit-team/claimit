@@ -237,6 +237,45 @@ class TestRunCron(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(cadence_updates), 1)
         self.assertEqual(cadence_updates[0]["monitoring_cadence_minutes"], 60)
 
+    async def test_partial_update_failure_does_not_abort_sweep(self) -> None:
+        """A flaky DB write on one purchase must not skip the remaining ones."""
+        now = datetime.now(UTC)
+        purchase_a = _make_purchase(
+            last_checked_at=None,
+            window_expires=now + timedelta(days=3),
+        )
+        purchase_b = _make_purchase(
+            last_checked_at=None,
+            window_expires=now + timedelta(days=3),
+        )
+        db = _FakeDB([purchase_a, purchase_b])
+        adapter = _StubAdapter()
+
+        # First partial_update call (the cadence-drift write for A, since both
+        # purchases start at cadence=60 and the target is 60, this site is not
+        # hit. The first write that runs is the last_checked_at update in
+        # finally for A). Make that one raise.
+        real_partial_update = db.partial_update
+        call_state = {"raised": False}
+
+        async def flaky_partial_update(*args, **kwargs):  # type: ignore[no-untyped-def]
+            if not call_state["raised"]:
+                call_state["raised"] = True
+                raise RuntimeError("simulated mongo blip")
+            return await real_partial_update(*args, **kwargs)
+
+        db.partial_update = flaky_partial_update  # type: ignore[method-assign]
+
+        with patch.object(cron_module, "get_adapter", return_value=adapter):
+            summary = await run_cron(db)  # type: ignore[arg-type]
+
+        # Both purchases were scanned; A's write failed (errors=1) but B's
+        # fetch + write still ran.
+        self.assertEqual(summary["scanned"], 2)
+        self.assertEqual(summary["fetched"], 2)
+        self.assertEqual(summary["errors"], 1)
+        self.assertEqual(adapter.calls, 2)
+
     async def test_seeded_source_does_not_persist_price_history(self) -> None:
         now = datetime.now(UTC)
         purchase = _make_purchase(
