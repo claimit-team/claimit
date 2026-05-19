@@ -22,6 +22,7 @@ than crashing the Floating Panel render.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -68,11 +69,16 @@ def _safe_get(data: dict[str, Any], key: str, default: Any = "unknown") -> Any:
 
 def _format_currency(amount: Any) -> str:
     """Format a number as a USD-formatted string ("$1,234.56"). Returns
-    "$?.??" if the value can't be coerced to a float — never raises."""
+    "$?.??" if the value can't be coerced to a finite float — guards both
+    type errors and NaN/inf (which `f"{value:,.2f}"` would render as "nan"
+    or "inf", leaking misleading text into the user-facing message)."""
     try:
-        return f"${float(amount):,.2f}"
+        value = float(amount)
     except (TypeError, ValueError):
         return "$?.??"
+    if not math.isfinite(value):
+        return "$?.??"
+    return f"${value:,.2f}"
 
 
 def _safe_list(data: dict[str, Any], key: str) -> list[str]:
@@ -317,4 +323,9 @@ def generate_proactive_output(event_type: str, data: dict[str, Any]) -> Proactiv
     template = PROACTIVE_TEMPLATES.get(event_type)
     if template is None:
         return None
-    return template(data)
+    # Notifications come from multiple producers; a misbehaving caller may
+    # pass None or a non-dict (e.g. a list, a stray model dump). Coerce to
+    # an empty dict so the template's `_safe_get` fallbacks take over rather
+    # than letting `.get()` raise AttributeError on the wrong type.
+    safe_data = data if isinstance(data, dict) else {}
+    return template(safe_data)
