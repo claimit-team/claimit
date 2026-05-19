@@ -68,6 +68,7 @@ def screenshot_mocks():
 
     patches = [
         patch("src.services.screenshot._take_screenshot", take_screenshot),
+        patch("src.services.screenshot._EVIDENCE_BUCKET", "test-bucket"),
         patch("src.services.screenshot.storage.Client", client_cls),
         patch("src.services.screenshot.Image", image),
         patch("src.services.screenshot.ImageDraw", image_draw),

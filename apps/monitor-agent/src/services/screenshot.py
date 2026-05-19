@@ -33,7 +33,7 @@ from playwright.async_api import async_playwright
 
 logger = logging.getLogger(__name__)
 
-_EVIDENCE_BUCKET = os.environ.get("EVIDENCE_BUCKET", "claimit-evidence-dev")
+_EVIDENCE_BUCKET: str | None = os.environ.get("EVIDENCE_BUCKET")
 _SIGNED_URL_EXPIRY_DAYS = 30
 _VIEWPORT_WIDTH = 1280
 _VIEWPORT_HEIGHT = 800
@@ -85,19 +85,29 @@ async def _take_screenshot(html: str) -> bytes:
     """Render HTML in headless Chromium and return viewport PNG bytes.
 
     Uses set_content() rather than goto() so the page loads without making
-    any network request to the protected origin - anti-bot defenses are
-    never triggered.
+    any network request to the protected origin. JS is disabled and all
+    outbound routes are aborted as belt-and-suspenders against the HTML
+    pulling in tracking pixels, third-party scripts, or image CDN calls
+    during render - anti-bot defenses are never triggered.
     """
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(
+            viewport={"width": _VIEWPORT_WIDTH, "height": _VIEWPORT_HEIGHT},
+            java_script_enabled=False,
+        )
         try:
-            page = await browser.new_page(
-                viewport={"width": _VIEWPORT_WIDTH, "height": _VIEWPORT_HEIGHT}
-            )
+            page = await context.new_page()
+
+            async def _block_requests(route) -> None:
+                await route.abort()
+
+            await page.route("**/*", _block_requests)
             await page.set_content(html, wait_until="domcontentloaded")
             await page.wait_for_timeout(_RENDER_SETTLE_MS)
             return await page.screenshot(type="png", full_page=False)
         finally:
+            await context.close()
             await browser.close()
 
 
@@ -136,6 +146,8 @@ def _build_blob_path(platform: str, product_id: str, captured_at: datetime) -> s
 
 def _upload_and_sign(png_bytes: bytes, blob_path: str) -> str:
     """Upload bytes to GCS and return a v4 signed URL valid for 30 days."""
+    if not _EVIDENCE_BUCKET:
+        raise RuntimeError("EVIDENCE_BUCKET environment variable is not configured")
     client = storage.Client()
     bucket = client.bucket(_EVIDENCE_BUCKET)
     blob = bucket.blob(blob_path)
