@@ -8,7 +8,7 @@ type StepIndicatorProps = {
   totalSteps?: number;
 };
 
-export function StepIndicator({ currentStep, totalSteps = 4 }: StepIndicatorProps) {
+export function StepIndicator({ currentStep, totalSteps = 3 }: StepIndicatorProps) {
   const progressPercent = Math.round((currentStep / totalSteps) * 100);
 
   return (
