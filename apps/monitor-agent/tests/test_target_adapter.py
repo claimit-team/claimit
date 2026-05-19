@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from src.adapters.base import PriceFetchError
@@ -29,9 +29,14 @@ RENDER_INCOMPLETE_HTML = """
 
 @pytest.fixture(autouse=True)
 def reset_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reset class-level state; mock screenshot service."""
     monkeypatch.setenv("SCRAPERAPI_KEY", "test-key")
     TargetAdapter._cache = {}
     TargetAdapter._api_key = None
+    monkeypatch.setattr(
+        "src.adapters.target.capture_screenshot",
+        AsyncMock(return_value="https://fake-signed-url.com/evidence.png"),
+    )
 
 
 @pytest.mark.asyncio
