@@ -8,6 +8,7 @@ from uuid import UUID
 
 import pytest
 from claimit_mongodb_models import MongoDBClient, NotificationEvent
+from pydantic import ValidationError
 
 
 def _client_with_modified_count(modified_count: int) -> tuple[MongoDBClient, MagicMock]:
@@ -68,9 +69,12 @@ async def test_update_many_validates_against_model_when_supplied() -> None:
     model annotation. Invalid values raise before the DB call."""
     client, collection_mock = _client_with_modified_count(modified_count=0)
 
-    # `acknowledged` must be bool; passing an int trips Pydantic strict-bool
-    # via TypeAdapter and raises ValidationError before update_many is called.
-    with pytest.raises(Exception):  # noqa: B017 — pydantic ValidationError
+    # `acknowledged` must be bool; passing a non-bool string trips
+    # Pydantic strict-bool via TypeAdapter and raises ValidationError
+    # before update_many is called. Asserting on ValidationError directly
+    # (rather than the bare Exception) verifies the contract — any other
+    # exception type would indicate a regression in the validation path.
+    with pytest.raises(ValidationError):
         await client.update_many(
             "notification_events",
             {"user_id": UUID("00000000-0000-0000-0000-000000000001")},

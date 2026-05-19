@@ -72,6 +72,13 @@ export function useNotifications({
   const [error, setError] = useState<NotificationsApiError | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
 
+  // Bumped on every first-page-load (filter change, auth flip, manual
+  // refetch). loadMore captures the value at call time and aborts its
+  // state mutations if the generation has drifted by the time its
+  // response arrives — protects the list from stale results contaminating
+  // the new filter.
+  const generationRef = useRef(0);
+
   const refetch = useCallback(() => {
     setReloadTick((tick) => tick + 1);
   }, []);
@@ -83,6 +90,11 @@ export function useNotifications({
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reloadTick is an intentional refetch trigger; not read inside the effect body
   useEffect(() => {
+    // Bump first so any in-flight loadMore (started under the previous
+    // generation) is invalidated regardless of which branch we take
+    // below — including the auth-loading and unauthenticated branches.
+    generationRef.current += 1;
+
     if (isAuthLoading) {
       setIsLoading(true);
       return;
@@ -139,6 +151,14 @@ export function useNotifications({
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || isLoadingMore) return;
+    // Snapshot the generation at request start. If the user changes a
+    // filter (or signs out, or refetches) before the response lands,
+    // the effect above will bump generationRef.current and we drop
+    // every state mutation below — protects the list from stale results
+    // landing on top of the new filter's data. setIsLoadingMore is
+    // harmless to flip in the finally regardless because the new fetch
+    // owns isLoading and the Load more button visibility.
+    const myGeneration = generationRef.current;
     setIsLoadingMore(true);
     try {
       const page = await listNotifications({
@@ -147,12 +167,14 @@ export function useNotifications({
         limit: pageSize,
         cursor: nextCursor,
       });
+      if (myGeneration !== generationRef.current) return;
       // Append; unread_count is the user-wide total so it can shift if the
       // background changed it (e.g. a new event arrived). Trust the server.
       setNotifications((prev) => [...prev, ...page.notifications]);
       setUnreadCount(page.unread_count);
       setNextCursor(page.next_cursor);
     } catch (err) {
+      if (myGeneration !== generationRef.current) return;
       if (err instanceof NotificationsApiError) {
         setError(err);
       } else {
@@ -164,7 +186,9 @@ export function useNotifications({
         );
       }
     } finally {
-      setIsLoadingMore(false);
+      if (myGeneration === generationRef.current) {
+        setIsLoadingMore(false);
+      }
     }
   }, [nextCursor, isLoadingMore, acknowledgedFilter, eventTypeFilter, pageSize]);
 

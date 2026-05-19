@@ -54,6 +54,11 @@ export function useUnreadCount(): UseUnreadCountResult {
 
   useEffect(() => {
     if (isAuthLoading || !userId) {
+      // Invalidate any in-flight poll captured under the previous user
+      // — without this bump, a fetchOnce started just before sign-out
+      // can resolve afterward and re-write a stale unread count over
+      // the cleared 0.
+      requestSeqRef.current += 1;
       setUnreadCount(0);
       return;
     }
