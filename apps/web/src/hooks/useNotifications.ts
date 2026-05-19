@@ -177,11 +177,15 @@ export function useNotifications({
     if (!nextCursor || isLoadingMore) return;
     // Snapshot the generation at request start. If the user changes a
     // filter (or signs out, or refetches) before the response lands,
-    // the effect above will bump generationRef.current and we drop
-    // every state mutation below — protects the list from stale results
-    // landing on top of the new filter's data. setIsLoadingMore is
-    // harmless to flip in the finally regardless because the new fetch
-    // owns isLoading and the Load more button visibility.
+    // the effect above bumps generationRef.current and we drop the DATA
+    // writes below (notifications / unreadCount / nextCursor / error) —
+    // applying them on top of the new filter's data would corrupt the
+    // list. The UI loading flag (setIsLoadingMore) is intentionally NOT
+    // gated by generation: this request is done either way and the
+    // "Load more" button must release. There's no risk of clobbering a
+    // newer in-flight loadMore on the new generation because the
+    // filter-change effect resets the cursor to null, and loadMore
+    // early-returns on a null cursor.
     const myGeneration = generationRef.current;
     setIsLoadingMore(true);
     try {
@@ -210,9 +214,7 @@ export function useNotifications({
         );
       }
     } finally {
-      if (myGeneration === generationRef.current) {
-        setIsLoadingMore(false);
-      }
+      setIsLoadingMore(false);
     }
   }, [nextCursor, isLoadingMore, acknowledgedFilter, eventTypeFilter, pageSize, setUnreadCount]);
 
