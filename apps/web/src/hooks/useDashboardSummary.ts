@@ -77,7 +77,15 @@ export function useDashboardSummary(): UseDashboardSummaryResult {
             ),
           );
         }
-        setSummary(null);
+        // Stale-while-error: deliberately keep the previously-fetched
+        // summary so transient backend hiccups don't collapse the
+        // dashboard layout. The page derives userState from summary,
+        // and falling back to null would force the layout into the
+        // "new user" empty state, hiding NeedsAttention /
+        // MonitoredPurchases / RecentActivity for users who already
+        // have data. Initial-load failures keep summary at its
+        // initial null, which gracefully renders the new-user empty
+        // state — same behavior as before.
       })
       .finally(() => {
         if (!mounted) return;

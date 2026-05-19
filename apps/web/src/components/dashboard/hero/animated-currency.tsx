@@ -9,6 +9,11 @@
  * dollar ranges we render in the dashboard hero (single dollars to mid-
  * thousands).
  *
+ * Display uses Intl.NumberFormat USD with 2 fraction digits so cents
+ * from backend amounts (e.g. claim outcomes resolved at $342.50) are
+ * preserved — the spring interpolates smoothly through cents during
+ * the count-up, which is the correct visual.
+ *
  * `tabular-nums` is applied at the call site (matches existing hero
  * components) so sibling labels stay locked.
  */
@@ -19,19 +24,21 @@ import { useEffect } from "react";
 export type AnimatedCurrencyProps = {
   value: number;
   className?: string;
-  /** Currency symbol prefix; defaults to "$". Pass "" for unprefixed numbers. */
-  prefix?: string;
 };
 
-export function AnimatedCurrency({ value, className, prefix = "$" }: AnimatedCurrencyProps) {
+const CURRENCY_FORMATTER = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+export function AnimatedCurrency({ value, className }: AnimatedCurrencyProps) {
   const motionValue = useMotionValue(0);
   // ~800ms settle for typical dashboard amounts; quick visual confirmation
   // without stealing focus from page content. Tuned empirically.
   const spring = useSpring(motionValue, { stiffness: 120, damping: 22, mass: 1 });
-  const formatted = useTransform(
-    spring,
-    (latest) => `${prefix}${Math.round(latest).toLocaleString()}`,
-  );
+  const formatted = useTransform(spring, (latest) => CURRENCY_FORMATTER.format(latest));
 
   useEffect(() => {
     motionValue.set(value);
