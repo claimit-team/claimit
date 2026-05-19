@@ -12,6 +12,7 @@ dependencies = [
     "firebase-admin>=6.5.0",
     "google-cloud-aiplatform[agent_engines]>=1.71.0",
     "google-auth-oauthlib>=1.2.0",
+    "google-cloud-pubsub>=2.21.0",
     "google-cloud-secret-manager>=2.20.0",
     "PyJWT[crypto]>=2.8.0",
     "sse-starlette>=2.1.0",
