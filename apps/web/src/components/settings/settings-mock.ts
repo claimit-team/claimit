@@ -1,28 +1,8 @@
 /**
- * Coherent demo state for settings routes (replaced by Identity Platform in 5.2).
+ * Demo state for settings routes that don't yet have a real backend.
+ *
+ * As of Ticket 5.17 the account / Gmail / preferences / notifications
+ * pages all read from useAuthStore + the live API. Billing remains
+ * mock-only here until subscription work lands.
  */
-export const mockUser: {
-  displayName: string;
-  email: string;
-  initials: string;
-} = {
-  displayName: "Erdun",
-  email: "erdun@claimit.app",
-  initials: "E",
-};
-
-export const mockGmail: {
-  connected: boolean;
-  connectedEmail: string;
-  scopes: readonly ["gmail.readonly", "gmail.send"];
-} = {
-  connected: true,
-  connectedEmail: "erdun@gmail.com",
-  scopes: ["gmail.readonly", "gmail.send"],
-};
-
-export const mockPreferences: { defaultSendMode: "approval" | "auto" } = {
-  defaultSendMode: "approval",
-};
-
 export const mockPlan: "free" | "pro" | "family" = "pro";

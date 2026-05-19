@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { mockGmail } from "@/components/settings/settings-mock";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -20,41 +19,65 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CALLBACK_ERROR_MESSAGES, connectGmail, GmailApiError } from "@/lib/api/gmail";
+import { AuthApiError, getMe } from "@/lib/api/auth";
+import {
+  CALLBACK_ERROR_MESSAGES,
+  connectGmail,
+  disconnectGmail,
+  GmailApiError,
+} from "@/lib/api/gmail";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/store";
 
-/** Only scopes we surface in mock UI — intentionally excludes gmail.modify. */
-const scopeDescriptions: Partial<Record<(typeof mockGmail.scopes)[number], string>> = {
+/**
+ * App-defined OAuth scopes — these are what we request, not what's been
+ * granted to a particular user. The "What access is used for" card always
+ * shows this static list (it documents the app's needs); the per-user
+ * connected card surfaces gmail_integration.scopes_granted instead.
+ *
+ * Display labels are bare scope names ("gmail.readonly", "gmail.send")
+ * rather than full URIs — the granted scopes from Google come back as
+ * full https://www.googleapis.com/auth/* strings, so we strip that prefix
+ * for both lists below for visual symmetry.
+ */
+const OAUTH_SCOPE_DESCRIPTIONS: Record<string, string> = {
   "gmail.readonly": "Read order confirmations and claim-related messages for workflow context.",
   "gmail.send": "Send approved eligible email claims from your Gmail account.",
 };
+const APP_OAUTH_SCOPES: readonly string[] = ["gmail.readonly", "gmail.send"];
 
-const gmailDemoMeta = {
-  connectedOnLabel: "Mock connected timestamp",
-  lastCheckedLabel: "Mock relative time",
-  watchStatus: "Active",
-  nextRenewalLabel: "Mock renewal window",
-} as const;
+/** Strip the Google API URI prefix so granted scopes display the same way as our app-defined list. */
+function shortScope(scope: string): string {
+  return scope.replace(/^https:\/\/www\.googleapis\.com\/auth\//, "");
+}
+
+function formatConnectedAt(iso: string | null): string {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
 
 export function GmailSettingsContent() {
   const router = useRouter();
-  const [isLoading, setIsLoading] = useState(true);
+  const user = useAuthStore((s) => s.user);
+  const isAuthLoading = useAuthStore((s) => s.isLoading);
+  const setUser = useAuthStore((s) => s.setUser);
+
   const [isConnecting, setIsConnecting] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
-  const [mockError] = useState<string | null>(null);
-  const [gmailConnected, setGmailConnected] = useState(mockGmail.connected);
   const [showDisconnectDialog, setShowDisconnectDialog] = useState(false);
 
-  useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 1000);
-    return () => clearTimeout(timer);
-  }, []);
-
   // OAuth callback toast: /api/v1/gmail/callback 302s back here with
-  // ?status=connected or ?status=error&reason=<x>. Surface it once per mount
-  // (StrictMode double-renders the effect; the ref-guard keeps the toast singular).
-  // We read window.location.search directly instead of useSearchParams() to
-  // avoid the App Router static-prerender Suspense bailout.
+  // ?status=connected or ?status=error&reason=<x>. On success we re-fetch
+  // /auth/me so useAuthStore.user reflects the new connected_email +
+  // scopes_granted set by the backend during the callback.
+  // (StrictMode double-renders the effect; the ref-guard keeps the toast
+  // and the network call singular.) We read window.location.search directly
+  // instead of useSearchParams() to avoid the App Router static-prerender
+  // Suspense bailout.
   const callbackHandledRef = useRef(false);
   useEffect(() => {
     if (callbackHandledRef.current) return;
@@ -63,7 +86,15 @@ export function GmailSettingsContent() {
     if (status === "connected") {
       callbackHandledRef.current = true;
       toast.success("Gmail connected successfully.");
-      setGmailConnected(true);
+      // Refresh the user so the connected card shows real connected_email +
+      // scopes_granted values. Failures are non-fatal — the next /auth/me
+      // refetch (e.g. AuthInit on next sign-in) will catch up.
+      void getMe()
+        .then(setUser)
+        .catch((err) => {
+          if (err instanceof AuthApiError && err.code === "unauthenticated") return;
+          console.error("Failed to refresh user after Gmail callback:", err);
+        });
       router.replace("/settings/gmail");
     } else if (status === "error") {
       callbackHandledRef.current = true;
@@ -71,7 +102,7 @@ export function GmailSettingsContent() {
       toast.error(CALLBACK_ERROR_MESSAGES[reason] ?? CALLBACK_ERROR_MESSAGES.internal_error);
       router.replace("/settings/gmail");
     }
-  }, [router]);
+  }, [router, setUser]);
 
   const handleConnect = async () => {
     setIsConnecting(true);
@@ -90,22 +121,27 @@ export function GmailSettingsContent() {
 
   const handleDisconnect = async () => {
     setIsDisconnecting(true);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setIsDisconnecting(false);
-    setShowDisconnectDialog(false);
-    toast.success("Gmail disconnected in this mock flow.");
-    setGmailConnected(false);
+    try {
+      const updated = await disconnectGmail();
+      setUser(updated);
+      setShowDisconnectDialog(false);
+      toast.success("Gmail disconnected.");
+    } catch (err) {
+      const message =
+        err instanceof GmailApiError
+          ? err.message
+          : "Could not disconnect Gmail. Please try again.";
+      toast.error(message);
+    } finally {
+      setIsDisconnecting(false);
+    }
   };
 
-  if (mockError) {
-    return (
-      <Alert variant="destructive">
-        <AlertCircle className="size-4" aria-hidden="true" />
-        <AlertTitle>Error</AlertTitle>
-        <AlertDescription>Gmail status could not be loaded.</AlertDescription>
-      </Alert>
-    );
-  }
+  const isLoading = isAuthLoading || !user;
+  const integration = user?.gmail_integration;
+  const gmailConnected = integration?.connected ?? false;
+  const connectedEmail = integration?.connected_email ?? "";
+  const grantedScopes = integration?.scopes_granted ?? [];
 
   return (
     <div className="space-y-6">
@@ -115,6 +151,14 @@ export function GmailSettingsContent() {
           Manage Gmail access for order confirmation ingestion and eligible email claim sending.
         </p>
       </div>
+
+      {!isLoading && !user ? (
+        <Alert variant="destructive">
+          <AlertCircle className="size-4" aria-hidden="true" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>Gmail status could not be loaded.</AlertDescription>
+        </Alert>
+      ) : null}
 
       {isLoading ? (
         <Card className="border-neutral-200 bg-neutral-0">
@@ -145,21 +189,23 @@ export function GmailSettingsContent() {
                     Connected
                   </Badge>
                 </div>
-                <CardDescription className="mt-1">{mockGmail.connectedEmail}</CardDescription>
+                <CardDescription className="mt-1">
+                  {connectedEmail || "Gmail account connected"}
+                </CardDescription>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="text-sm text-neutral-700">
-              Connected on {gmailDemoMeta.connectedOnLabel}
+              Connected on {formatConnectedAt(integration?.connected_at ?? null)}
             </div>
 
             <div>
               <div className="mb-2 text-sm font-medium text-neutral-900">Scopes granted</div>
               <div className="flex flex-wrap gap-2">
-                {mockGmail.scopes.map((scope) => (
+                {grantedScopes.map((scope) => (
                   <Badge key={scope} variant="secondary" className="font-mono text-xs">
-                    {scope}
+                    {shortScope(scope)}
                   </Badge>
                 ))}
               </div>
@@ -215,13 +261,15 @@ export function GmailSettingsContent() {
             </div>
           ) : (
             <div className="divide-y divide-neutral-200">
-              {mockGmail.scopes.map((scope) => (
+              {APP_OAUTH_SCOPES.map((scope) => (
                 <div key={scope} className="py-3 first:pt-0 last:pb-0">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
                     <code className="shrink-0 rounded bg-neutral-100 px-2 py-1 font-mono text-xs text-neutral-900">
                       {scope}
                     </code>
-                    <span className="text-sm text-neutral-700">{scopeDescriptions[scope]}</span>
+                    <span className="text-sm text-neutral-700">
+                      {OAUTH_SCOPE_DESCRIPTIONS[scope]}
+                    </span>
                   </div>
                 </div>
               ))}
@@ -229,46 +277,6 @@ export function GmailSettingsContent() {
           )}
         </CardContent>
       </Card>
-
-      {gmailConnected ? (
-        <Card className="border-neutral-200 bg-neutral-0">
-          <CardHeader>
-            <CardTitle className="text-base text-neutral-900">Sync status</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-4 w-40" />
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="h-4 w-36" />
-              </div>
-            ) : (
-              <dl className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <dt className="text-neutral-700">Last checked</dt>
-                  <dd className="font-medium text-neutral-900">{gmailDemoMeta.lastCheckedLabel}</dd>
-                </div>
-                <div>
-                  <dt className="text-neutral-700">Watch status</dt>
-                  <dd className="font-medium text-neutral-900">
-                    <span className="inline-flex items-center gap-1">
-                      <span
-                        className="size-2 rounded-full bg-semantic-success"
-                        aria-hidden="true"
-                      />
-                      {gmailDemoMeta.watchStatus}
-                    </span>
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-neutral-700">Next renewal</dt>
-                  <dd className="font-medium text-neutral-900">{gmailDemoMeta.nextRenewalLabel}</dd>
-                </div>
-              </dl>
-            )}
-          </CardContent>
-        </Card>
-      ) : null}
 
       <Card className="border-neutral-200 bg-neutral-50">
         <CardHeader>
@@ -312,7 +320,7 @@ export function GmailSettingsContent() {
         </Card>
       ) : null}
 
-      {!gmailConnected && !isLoading ? (
+      {!isLoading && !gmailConnected ? (
         <p className="text-sm text-neutral-700 italic">Gmail is not connected.</p>
       ) : null}
 
