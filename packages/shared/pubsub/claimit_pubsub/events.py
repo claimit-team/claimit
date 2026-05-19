@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 TOPIC_PURCHASE_INGESTED = "purchase.ingested"
 
@@ -22,8 +22,8 @@ def _new_event_id() -> str:
     return str(uuid4())
 
 
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+def _now_utc() -> datetime:
+    return datetime.now(UTC)
 
 
 class EventEnvelope(BaseModel):
@@ -33,12 +33,13 @@ class EventEnvelope(BaseModel):
 
     schema_version: Literal[1] = 1
     event_id: str = Field(default_factory=_new_event_id)
-    emitted_at: str = Field(default_factory=_now_iso)
+    emitted_at: AwareDatetime = Field(default_factory=_now_utc)
 
 
 class PurchaseIngestedEvent(EventEnvelope):
     """Published by the ingest-agent after a purchase is persisted."""
 
+    event_type: Literal["purchase.ingested"] = "purchase.ingested"
     user_id: str
     purchase_id: str
     platform: str

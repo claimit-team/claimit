@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from claimit_pubsub import PurchaseIngestedEvent
+from claimit_pubsub.events import TOPIC_PURCHASE_INGESTED
 from src import extractor, pipeline
 from src.dedup import DuplicateReceiptError
 from src.extractor import EmailForExtraction
@@ -82,7 +83,7 @@ def test_publishes_event_when_monitoring(monkeypatch: pytest.MonkeyPatch) -> Non
     collection.insert_one.assert_awaited_once_with(result)
     publish_mock.assert_awaited_once()
     topic, event = publish_mock.await_args.args
-    assert topic == "purchase.ingested"
+    assert topic == TOPIC_PURCHASE_INGESTED
     assert isinstance(event, PurchaseIngestedEvent)
     assert event.status == "monitoring"
     assert event.user_id == str(result["user_id"])

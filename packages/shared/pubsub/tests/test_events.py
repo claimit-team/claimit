@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
@@ -31,8 +32,11 @@ def test_topic_constant() -> None:
 def test_envelope_defaults_are_populated() -> None:
     event = PurchaseIngestedEvent(**_VALID_PAYLOAD)
     assert event.schema_version == 1
+    assert event.event_type == "purchase.ingested"
     UUID(event.event_id)  # raises if not a UUID
-    assert event.emitted_at.endswith("+00:00")
+    assert isinstance(event.emitted_at, datetime)
+    assert event.emitted_at.tzinfo is not None
+    assert event.emitted_at.utcoffset() == UTC.utcoffset(None)
 
 
 def test_envelope_round_trip_through_json() -> None:
@@ -49,6 +53,7 @@ def test_payload_matches_schema_keys() -> None:
         "schema_version",
         "event_id",
         "emitted_at",
+        "event_type",
         *_VALID_PAYLOAD,
     }
 
