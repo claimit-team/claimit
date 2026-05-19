@@ -20,7 +20,11 @@ from google.cloud import pubsub_v1
 
 logger = logging.getLogger(__name__)
 
-_PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "claimit-beta")
+# Mandatory in production. Read at import (so a misconfigured deploy fails
+# loudly at startup if the var is missing) but the actual raise happens at
+# first publish — same pattern as screenshot.py's EVIDENCE_BUCKET. Tests that
+# don't touch publish() don't need this set.
+_PROJECT_ID: str | None = os.environ.get("GOOGLE_CLOUD_PROJECT")
 _PUBLISH_TIMEOUT_SECONDS = 10.0
 
 
@@ -35,6 +39,8 @@ class PubSubPublisher:
         responsible for catching exceptions if the publish must not fail the
         request — by default an unawaitable Future error or timeout propagates.
         """
+        if not _PROJECT_ID:
+            raise RuntimeError("GOOGLE_CLOUD_PROJECT environment variable is not configured")
         topic_path = self.client.topic_path(_PROJECT_ID, topic_name)
         message_bytes = json.dumps(data).encode("utf-8")
         future = self.client.publish(topic_path, message_bytes)

@@ -200,14 +200,35 @@ async def approve_claim(
     try:
         await publisher.publish(CLAIM_APPROVED_TOPIC, event_payload)
     except Exception:
-        # Persist already succeeded; the publish failure means claim-agent
-        # won't get woken up. Log loudly so on-call can replay manually.
+        # Persist already moved the claim to PENDING but the broker didn't
+        # accept the wake-up message. If we leave it at PENDING, a client
+        # retry hits the state gate (claim_not_approvable) — the user gets
+        # stuck. Roll the outcome back to DRAFT_PENDING and clear the
+        # submission stamp so retry is well-defined.
         logger.exception(
-            "Failed to publish claim.approved for claim %s; manual replay required", updated.id
+            "Failed to publish claim.approved for claim %s; rolling back outcome", updated.id
         )
+        try:
+            await db.partial_update(
+                "claims",
+                updated.id,
+                {
+                    "outcome": ClaimOutcome.DRAFT_PENDING.value,
+                    "submitted_at": None,
+                },
+                model=Claim,
+            )
+        except Exception:
+            # Rollback itself failed — claim is now stranded in PENDING with
+            # no downstream notification. Operator intervention required;
+            # log so on-call can find it.
+            logger.exception(
+                "Rollback failed after publish failure for claim %s; manual fix required",
+                updated.id,
+            )
         raise ApiError(
             "publish_failed",
-            "Claim approved but downstream notification failed; please retry.",
+            "Claim approval failed; please retry.",
             status_code=502,
         ) from None
 
@@ -234,8 +255,14 @@ async def cancel_claim(
     claim = await _load_owned_claim(db, claim_id, user_id)
 
     now = datetime.now(UTC)
+    # The 5-min cancel window is the auto-send hold buffer — claim-agent
+    # delays auto-mode sends by auto_send_delay_seconds before actually
+    # dispatching. Approval-mode claims have no such buffer; once they're
+    # PENDING they're considered queued for human-initiated send, so cancel
+    # after submission isn't safe.
     within_auto_window = (
         claim.outcome == ClaimOutcome.PENDING
+        and claim.send_override == SendMode.AUTO
         and claim.submitted_at is not None
         and _to_utc(claim.submitted_at) is not None
         and (now - _to_utc(claim.submitted_at)) < _AUTO_SEND_CANCEL_WINDOW

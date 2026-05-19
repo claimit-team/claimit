@@ -230,6 +230,40 @@ async def test_approve_claim_with_edited_draft_appends_version(client: AsyncClie
 
 
 @pytest.mark.asyncio
+async def test_approve_rollback_outcome_on_publish_failure(client: AsyncClient) -> None:
+    """If publish fails after the DB write, outcome must be rolled back to
+    DRAFT_PENDING so a client retry can re-enter the approve path."""
+    claim = Claim.model_validate(_claim_doc(outcome="draft_pending", submitted_at=None))
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
+    db.upsert_claim = AsyncMock(return_value=_CLAIM_ID)
+    db.partial_update = AsyncMock(return_value=True)
+
+    publisher = AsyncMock(spec=PubSubPublisher)
+    publisher.publish = AsyncMock(side_effect=RuntimeError("broker unreachable"))
+
+    _override_db(db)
+    _override_publisher(publisher)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/approve",
+                json={},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 502
+        assert response.json()["error"]["code"] == "publish_failed"
+        # Rollback partial_update was called with outcome=DRAFT_PENDING
+        db.partial_update.assert_awaited_once()
+        coll, _id, updates = db.partial_update.await_args.args[:3]
+        assert coll == "claims"
+        assert updates["outcome"] == "draft_pending"
+        assert updates["submitted_at"] is None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
 async def test_approve_claim_rejects_non_draft_pending_state(client: AsyncClient) -> None:
     claim = Claim.model_validate(_claim_doc(outcome="pending"))
     db = AsyncMock(spec=MongoDBClient)
@@ -279,6 +313,86 @@ async def test_cancel_claim_success_when_draft_pending(client: AsyncClient) -> N
         assert updates["outcome"] == "user_cancelled"
         assert updates["outcome_note"] == "Changed my mind"
         assert updates["resolved_at"] is not None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_cancel_pending_claim_rejected_when_not_auto_send(client: AsyncClient) -> None:
+    """A claim in PENDING with send_override != AUTO is past the cancel
+    window even if submitted_at is recent — approval-mode sends are not
+    held in a buffer, so they can't be retroactively cancelled."""
+    from datetime import UTC, datetime
+
+    now_iso = datetime.now(UTC).isoformat()
+    claim = Claim.model_validate(
+        _claim_doc(outcome="pending", submitted_at=now_iso, send_override=None)
+    )
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
+
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/cancel",
+                json={},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "claim_not_cancellable"
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_cancel_pending_auto_within_window_succeeds(client: AsyncClient) -> None:
+    """PENDING + send_override=AUTO + submitted within 5min → cancellable."""
+    from datetime import UTC, datetime
+
+    now_iso = datetime.now(UTC).isoformat()
+    claim = Claim.model_validate(
+        _claim_doc(outcome="pending", submitted_at=now_iso, send_override="auto")
+    )
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
+    db.partial_update = AsyncMock(return_value=True)
+
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/cancel",
+                json={},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 200
+        assert response.json() == {"success": True}
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_approve_with_no_body_uses_defaults(client: AsyncClient) -> None:
+    """POST /approve with no JSON body should succeed (all fields optional)."""
+    claim = Claim.model_validate(_claim_doc(outcome="draft_pending", submitted_at=None))
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
+    db.upsert_claim = AsyncMock(return_value=_CLAIM_ID)
+
+    publisher = AsyncMock(spec=PubSubPublisher)
+    publisher.publish = AsyncMock(return_value="msg-id")
+
+    _override_db(db)
+    _override_publisher(publisher)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            # No json= kwarg → no request body at all.
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/approve",
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 200
     finally:
         _clear_overrides()
 

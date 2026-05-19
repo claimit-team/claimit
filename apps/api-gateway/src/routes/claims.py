@@ -12,7 +12,7 @@ from uuid import UUID
 
 from claimit_mongodb_models import MongoDBClient, User
 from claimit_mongodb_models.enums import ClaimOutcome, Platform, SendMode
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Body, Depends, Path, Query
 from pydantic import BaseModel, Field
 
 from ..deps import get_db, get_pubsub_publisher
@@ -75,10 +75,10 @@ async def get_claim_detail(
 @router.post("/{claim_id}/approve")
 async def approve_claim(
     claim_id: Annotated[UUID, Path()],
-    body: ApproveClaimRequest,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[MongoDBClient, Depends(get_db)],
     publisher: Annotated[PubSubPublisher, Depends(get_pubsub_publisher)],
+    body: ApproveClaimRequest = Body(default_factory=ApproveClaimRequest),
 ) -> dict[str, object]:
     """Approve a draft claim — transitions outcome to PENDING and publishes
     claim.approved for the claim-agent to actually submit.
@@ -96,9 +96,9 @@ async def approve_claim(
 @router.post("/{claim_id}/cancel")
 async def cancel_claim(
     claim_id: Annotated[UUID, Path()],
-    body: CancelClaimRequest,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[MongoDBClient, Depends(get_db)],
+    body: CancelClaimRequest = Body(default_factory=CancelClaimRequest),
 ) -> dict[str, object]:
     """Cancel a claim. Allowed only before submission OR within the 5-min
     auto-send window. 409 on later states.
