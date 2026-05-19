@@ -1,6 +1,11 @@
 # ClaimIt
 
 [![CI](https://github.com/claimit-team/claimit/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/claimit-team/claimit/actions/workflows/ci.yml)
+[![Deploy Agents](https://github.com/claimit-team/claimit/actions/workflows/deploy-agents.yml/badge.svg)](https://github.com/claimit-team/claimit/actions/workflows/deploy-agents.yml)
+[![Deploy Prod](https://github.com/claimit-team/claimit/actions/workflows/deploy-prod.yml/badge.svg)](https://github.com/claimit-team/claimit/actions/workflows/deploy-prod.yml)
+[![Keepalive](https://github.com/claimit-team/claimit/actions/workflows/keepalive.yml/badge.svg)](https://github.com/claimit-team/claimit/actions/workflows/keepalive.yml)
+[![Slack Notifications](https://github.com/claimit-team/claimit/actions/workflows/slack-notify.yml/badge.svg)](https://github.com/claimit-team/claimit/actions/workflows/slack-notify.yml)
+[![Terraform Plan](https://github.com/claimit-team/claimit/actions/workflows/terraform-plan.yml/badge.svg)](https://github.com/claimit-team/claimit/actions/workflows/terraform-plan.yml)
 
 AI agent that monitors post-purchase prices and auto-generates refund claims across multiple platforms.
 

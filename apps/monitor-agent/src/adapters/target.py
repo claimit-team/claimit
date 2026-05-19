@@ -23,6 +23,7 @@ import requests
 from bs4 import BeautifulSoup
 from google.cloud import secretmanager
 
+from ..services.screenshot import capture as capture_screenshot
 from .base import PriceFetchError, PriceSnapshot, PriceSourceAdapter
 
 SCRAPERAPI_ENDPOINT = "https://api.scraperapi.com/"
@@ -135,6 +136,13 @@ class TargetAdapter(PriceSourceAdapter):
                 platform, product_id, "Could not parse current price from Target page"
             )
 
+        screenshot_url = await capture_screenshot(
+            html=html,
+            platform="target",
+            product_id=product_id,
+            url=product_url,
+        )
+
         # Target Circle (member) pricing is not reliably extractable from standard
         # product pages — only appears on Circle Week promo items. TODO: add support
         # when we have a stable Circle-promoted test product.
@@ -147,6 +155,6 @@ class TargetAdapter(PriceSourceAdapter):
             currency="USD",
             checked_at=datetime.now(UTC),
             source="scraperapi",
-            evidence_screenshot_url=None,
+            evidence_screenshot_url=screenshot_url,
             raw_response_hash=hashlib.sha256(html.encode("utf-8")).hexdigest()[:16],
         )

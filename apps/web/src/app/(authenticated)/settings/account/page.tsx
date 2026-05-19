@@ -1,80 +1,115 @@
 "use client";
 
 import { AlertCircle } from "lucide-react";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import {
   AccountProfileCard,
-  DangerZoneCard,
   SessionActionsCard,
   SignInProviderCard,
 } from "@/components/settings/account";
-import { mockUser } from "@/components/settings/settings-mock";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { AuthApiError, patchUserMe } from "@/lib/api/auth";
+import { signOutUser } from "@/lib/auth-actions";
+import { useAuthStore } from "@/store";
 
-const initialMockData = {
-  user: {
-    name: mockUser.displayName,
-    email: mockUser.email,
-    initials: mockUser.initials,
-    provider: "Google",
-  },
-  isLoading: false,
-  isSaving: false,
-  mockError: null as string | null,
-};
+function deriveInitials(name: string): string {
+  // First letter of the first two whitespace-separated words. Covers the
+  // common "First Last" case and degrades cleanly for one-word display
+  // names (just the first letter). Empty string falls back to "?".
+  const trimmed = name.trim();
+  if (!trimmed) return "?";
+  const parts = trimmed.split(/\s+/).slice(0, 2);
+  return parts
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("")
+    .slice(0, 2);
+}
 
 export default function AccountSettingsPage() {
-  const [state, setState] = useState(initialMockData);
-  const [name, setName] = useState(state.user.name);
+  const router = useRouter();
+  const user = useAuthStore((s) => s.user);
+  const isAuthLoading = useAuthStore((s) => s.isLoading);
+  const setUser = useAuthStore((s) => s.setUser);
 
-  const handleSave = () => {
-    setState((prev) => ({ ...prev, isSaving: true }));
+  const [name, setName] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-    setTimeout(() => {
-      setState((prev) => ({
-        ...prev,
-        isSaving: false,
-        user: { ...prev.user, name },
-      }));
-      toast.success("Account changes saved in this mock flow.");
-    }, 800);
+  // Sync the local edit buffer when the underlying user changes (initial
+  // load, post-save replacement, or onAuthStateChanged switching accounts).
+  useEffect(() => {
+    if (user) setName(user.name);
+  }, [user]);
+
+  const handleSave = async () => {
+    if (!user) return;
+    if (name.trim() === user.name) {
+      // Nothing changed — skip the network round-trip entirely.
+      toast.info("No changes to save.");
+      return;
+    }
+    setIsSaving(true);
+    setErrorMessage(null);
+    try {
+      const updated = await patchUserMe({ name: name.trim() });
+      setUser(updated);
+      toast.success("Account changes saved.");
+    } catch (err) {
+      const message =
+        err instanceof AuthApiError
+          ? err.message
+          : "Could not save your changes. Please try again.";
+      setErrorMessage(message);
+      toast.error(message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleSignOut = () => {
-    toast.success("Signed out in this mock flow.");
+  const handleSignOut = async () => {
+    try {
+      await signOutUser();
+      router.push("/login");
+    } catch (err) {
+      // Mirrors the authenticated layout's sidebar sign-out: surface the
+      // error rather than silently failing, then let onAuthStateChanged
+      // do its thing if the SDK eventually clears anyway.
+      const message = err instanceof Error ? err.message : "Sign out failed.";
+      toast.error(message);
+    }
   };
 
-  const handleDeleteAccount = () => {
-    toast.success("Delete account confirmed in this mock flow.");
-  };
+  const isLoading = isAuthLoading || !user;
 
   return (
     <div className="space-y-6">
-      {state.mockError ? (
+      {errorMessage ? (
         <Alert variant="destructive">
           <AlertCircle className="size-4" aria-hidden="true" />
           <AlertTitle>Error</AlertTitle>
-          <AlertDescription>{state.mockError}</AlertDescription>
+          <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
       ) : null}
 
       <AccountProfileCard
         name={name}
-        email={state.user.email}
-        initials={state.user.initials}
-        isLoading={state.isLoading}
-        isSaving={state.isSaving}
+        email={user?.email ?? ""}
+        initials={user ? deriveInitials(user.name) : "?"}
+        isLoading={isLoading}
+        isSaving={isSaving}
         onNameChange={setName}
-        onSave={handleSave}
+        onSave={() => void handleSave()}
       />
 
-      <SignInProviderCard provider={state.user.provider} email={state.user.email} />
-
-      <SessionActionsCard onSignOut={handleSignOut} />
-
-      <DangerZoneCard onDeleteAccount={handleDeleteAccount} />
+      {user ? (
+        <>
+          <SignInProviderCard provider="Google" email={user.email} />
+          <SessionActionsCard onSignOut={() => void handleSignOut()} />
+        </>
+      ) : null}
     </div>
   );
 }

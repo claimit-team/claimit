@@ -1,4 +1,17 @@
-"""Firebase ID-token auth dependency."""
+"""Firebase ID-token auth dependencies.
+
+Two parallel paths share the same Firebase verification + User upsert logic:
+
+- get_current_user: Bearer-header auth via HTTPBearer. Used by all JSON
+  endpoints.
+- get_current_user_from_query_token: Query-param token auth. Used only by
+  the SSE endpoint (browser EventSource API can't set custom headers, so
+  ?token=<firebase_id_token> is the standard workaround).
+
+Both paths verify the same Firebase ID token type via the same
+firebase_admin.auth.verify_id_token() call; the only difference is where
+the token is read from on the request.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +22,7 @@ from typing import Annotated
 import firebase_admin.auth
 import firebase_admin.exceptions
 from claimit_mongodb_models import MongoDBClient, SendMode, SubscriptionTier, User
-from fastapi import Depends
+from fastapi import Depends, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ..deps import derive_user_id, get_db
@@ -18,15 +31,15 @@ from .errors import ApiError
 _bearer = HTTPBearer(auto_error=False)
 
 
-async def get_current_user(
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
-    db: Annotated[MongoDBClient, Depends(get_db)],
-) -> User:
-    if credentials is None:
-        raise ApiError("unauthorized", "Missing or invalid Authorization header", status_code=401)
+def _verify_firebase_token(token: str) -> dict:
+    """Verify a Firebase ID token and return the decoded claims dict.
 
+    Maps the three firebase_admin exception types to ApiError exactly as
+    the original Bearer flow did. Shared by both auth dependencies so
+    behavior stays identical regardless of where the token came from.
+    """
     try:
-        decoded = firebase_admin.auth.verify_id_token(credentials.credentials)
+        return firebase_admin.auth.verify_id_token(token)
     except firebase_admin.auth.InvalidIdTokenError as err:
         raise ApiError("unauthorized", "Invalid or expired token", status_code=401) from err
     except firebase_admin.exceptions.UnavailableError as err:
@@ -38,6 +51,15 @@ async def get_current_user(
     except firebase_admin.exceptions.FirebaseError as err:
         raise ApiError("unauthorized", "Token verification failed", status_code=401) from err
 
+
+async def _user_from_decoded_token(decoded: dict, db: MongoDBClient) -> User:
+    """Find-or-create the User document for the verified Firebase claims.
+
+    Shared between Bearer and Query-param dependencies. Identical body to
+    the original Bearer-only get_current_user implementation: validates
+    uid + email claims, derives the deterministic UUIDv5 _id, then loads
+    or upserts.
+    """
     decoded_uid: str | None = decoded.get("uid")
     if not decoded_uid:
         raise ApiError("unauthorized", "Token missing uid claim", status_code=401) from None
@@ -84,3 +106,34 @@ async def get_current_user(
         await db.upsert("users", user.id, user)
 
     return user
+
+
+async def get_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    db: Annotated[MongoDBClient, Depends(get_db)],
+) -> User:
+    """Bearer-token auth dependency for normal JSON endpoints."""
+    if credentials is None:
+        raise ApiError("unauthorized", "Missing or invalid Authorization header", status_code=401)
+    decoded = _verify_firebase_token(credentials.credentials)
+    return await _user_from_decoded_token(decoded, db)
+
+
+async def get_current_user_from_query_token(
+    db: Annotated[MongoDBClient, Depends(get_db)],
+    token: Annotated[str | None, Query()] = None,
+) -> User:
+    """Query-param token auth for SSE endpoints.
+
+    EventSource API can't set custom request headers, so SSE consumers
+    pass the Firebase ID token via ?token=<jwt>. Verification path is
+    identical to Bearer auth.
+    """
+    if not token:
+        raise ApiError(
+            "unauthorized",
+            "Missing or invalid token query parameter",
+            status_code=401,
+        )
+    decoded = _verify_firebase_token(token)
+    return await _user_from_decoded_token(decoded, db)

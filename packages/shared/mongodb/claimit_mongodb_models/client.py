@@ -27,6 +27,7 @@ from pydantic import TypeAdapter, ValidationError
 from .base import BaseDocument
 from .claim import Claim
 from .conversation import Conversation
+from .notification_event import NotificationEvent
 from .policy import Policy
 from .price_history import PriceHistory
 from .purchase import Purchase
@@ -47,6 +48,7 @@ COLLECTION_MODELS: dict[str, type[BaseDocument]] = {
     "users": User,
     "price_history": PriceHistory,
     "conversations": Conversation,
+    "notification_events": NotificationEvent,
 }
 
 
@@ -228,6 +230,26 @@ class MongoDBClient:
         """Count documents matching `filter`."""
         return await self._db[collection].count_documents(filter)
 
+    async def aggregate(
+        self,
+        collection: str,
+        pipeline: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Run an aggregation pipeline against `collection`.
+
+        Returns raw documents because aggregation pipelines can $project
+        arbitrary shapes that don't match domain Pydantic models. Callers
+        interpret the result shape.
+
+        Example:
+            result = await db.aggregate("claims", [
+                {"$match": {"user_id": uid}},
+                {"$group": {"_id": "$outcome", "total": {"$sum": "$claim_amount"}}},
+            ])
+        """
+        cursor = self._db[collection].aggregate(pipeline)
+        return [doc async for doc in cursor]
+
     async def delete(self, collection: str, id: str | UUID) -> bool:
         """Delete by `_id`. Returns True if exactly one document was deleted."""
         result = await self._db[collection].delete_one({"_id": _coerce_uuid(id)})
@@ -288,6 +310,9 @@ class MongoDBClient:
 
     async def upsert_conversation(self, conv: Conversation) -> str:
         return await self.upsert("conversations", conv.id, conv)
+
+    async def upsert_notification_event(self, doc: NotificationEvent) -> str:
+        return await self.upsert("notification_events", doc.id, doc)
 
 
 def _coerce_uuid(value: str | UUID) -> UUID:

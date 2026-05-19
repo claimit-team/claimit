@@ -21,6 +21,8 @@ from .enums import (
     IngestionSource,
     LoyaltyTier,
     MessageRole,
+    NotificationEntityType,
+    NotificationEventType,
     Platform,
     PriceSource,
     PurchaseDateBasis,
@@ -29,6 +31,8 @@ from .enums import (
     SubmittedVia,
     SubscriptionTier,
 )
+from .notification_event import NotificationEvent
+from .notification_helpers import write_notification_event
 from .policy import Policy
 from .price_history import PriceHistory
 from .purchase import ExtractionConfidence, Purchase
@@ -66,6 +70,9 @@ __all__ = [
     "LoyaltyTier",
     "MessageRole",
     "MongoDBClient",
+    "NotificationEntityType",
+    "NotificationEvent",
+    "NotificationEventType",
     "NotificationPrefs",
     "Platform",
     "Policy",
@@ -82,4 +89,5 @@ __all__ = [
     "ToolCall",
     "User",
     "create_indexes",
+    "write_notification_event",
 ]
