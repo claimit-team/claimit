@@ -15,6 +15,13 @@ from __future__ import annotations
 
 from typing import Any
 
+# Upper bounds on result-set size. The model can ask for any limit it wants
+# but we silently clamp to keep prompt context tractable. Negative or zero
+# limits are rejected loudly — that's always a coding bug in the agent prompt,
+# never a legitimate query.
+MAX_POLICY_LIMIT = 20
+MAX_PURCHASE_LIMIT = 50
+
 
 async def search_policies(query: str, limit: int = 5) -> list[dict[str, Any]]:
     """Search platform price-protection policies by keyword.
@@ -33,6 +40,10 @@ async def search_policies(query: str, limit: int = 5) -> list[dict[str, Any]]:
     Returns:
         A list of matching policy documents (each is a dict of policy fields).
     """
+    if limit < 1:
+        raise ValueError("limit must be >= 1")
+    limit = min(limit, MAX_POLICY_LIMIT)
+
     from search import get_search_adapter
 
     adapter = get_search_adapter()
@@ -60,6 +71,10 @@ async def search_user_purchases(user_id: str, query: str, limit: int = 10) -> li
     Returns:
         A list of matching purchase documents.
     """
+    if limit < 1:
+        raise ValueError("limit must be >= 1")
+    limit = min(limit, MAX_PURCHASE_LIMIT)
+
     from search import get_search_adapter
 
     adapter = get_search_adapter()

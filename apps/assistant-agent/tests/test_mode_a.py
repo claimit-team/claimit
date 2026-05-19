@@ -33,11 +33,16 @@ def test_create_mode_a_agent_returns_fresh_instance_each_call() -> None:
     assert a is not b
 
 
-def test_create_mode_a_agent_wires_three_tool_slots() -> None:
-    """1 MongoDB MCP toolset + 2 FunctionTool wrappers around search tools."""
+def test_create_mode_a_agent_wires_two_tool_slots() -> None:
+    """Deploy-path agent: 1 MongoDB MCP toolset + 1 FunctionTool (search_policies).
+
+    Does NOT include search_user_purchases — that would expose user_id to the
+    model. handle_message() wires a closure-scoped replacement for that tool
+    on the local-invocation path.
+    """
     agent = create_mode_a_agent()
     assert agent.tools is not None
-    assert len(agent.tools) == 3
+    assert len(agent.tools) == 2
 
 
 # ---------------------------------------------------------------------------

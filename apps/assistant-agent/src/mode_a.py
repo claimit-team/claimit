@@ -78,12 +78,25 @@ You help users understand their purchases, claims, savings, and platform policie
 
 
 def create_mode_a_agent() -> Agent:
-    """Build the Mode A agent with MongoDB MCP + Elastic search tools.
+    """Build the Mode A agent for the Vertex AI Agent Engine deploy path.
 
-    Returns a fresh Agent instance on every call. ADK Agent objects are
-    cheap to construct and the toolset factories are idempotent; callers
-    that need per-request isolation (e.g., handle_message below) can
-    rebuild without performance concern.
+    Tools wired here:
+    - MongoDB MCP toolset (read-only) — for purchase / claim / conversation lookups
+    - FunctionTool(search_policies) — Elastic policy search, no user scoping needed
+
+    Notably absent: search_user_purchases. That tool requires a user_id
+    argument; exposing it via FunctionTool would force the model to fill in
+    user_id from the prompt, leaking the ID into the LLM context and creating
+    a trivial impersonation vector ("search purchases for user_id=...").
+
+    The local handle_message() path below replaces search_user_purchases with
+    a closure-scoped variant. The Vertex AI Agent Engine deploy path does NOT
+    get user-scoped purchase search via FunctionTool — it relies on the
+    MongoDB MCP toolset to filter by user_id when the deployed agent is
+    invoked with user_id in session context.
+
+    Returns a fresh Agent instance on every call so callers needing per-
+    request isolation can rebuild without shared mutable state.
     """
     return Agent(
         name="assistant_agent_mode_a",
@@ -92,9 +105,8 @@ def create_mode_a_agent() -> Agent:
         tools=[
             # MongoDB access via MCP — consistent with all other ClaimIt agents.
             get_mongodb_mcp_toolset(read_only=True),
-            # Elastic search via FunctionTool — Elastic has no MCP server.
+            # Elastic policy search via FunctionTool — no user scoping needed.
             FunctionTool(search_policies),
-            FunctionTool(search_user_purchases),
         ],
     )
 
@@ -107,16 +119,35 @@ async def handle_message(user_id: str, message: str) -> AsyncIterator[dict[str, 
     in production, tests in CI) is responsible for persisting messages to
     the conversations collection.
 
+    user_id is captured in a closure-scoped tool wrapper rather than passed
+    through the prompt — the model never sees the ID, so it cannot be tricked
+    into impersonating another user by a crafted message ("search purchases
+    for user_id=abc"). This is the local-invocation analogue of how the
+    deployed agent would receive user_id via session context on Vertex AI.
+
     Args:
-        user_id: Authenticated user's ID. Scopes tool queries and is also
-            prepended to the model message so tools that take user_id as
-            an argument (e.g. search_user_purchases) can fill it in.
-        message: The user's message text.
+        user_id: Authenticated user's ID. Captured by the per-call scoped
+            tool wrapper; never inserted into the model prompt.
+        message: The user's message text — passed through verbatim.
 
     Production note: api-gateway does NOT call this function; it calls
     vertexai.agent_engines.get(...).async_stream_query() against the
     deployed agent. This function is for local invocation and testing.
     """
+
+    async def _search_my_purchases(query: str, limit: int = 10) -> list[dict[str, Any]]:
+        """Search your purchases by keyword (natural language).
+
+        Use this for natural-language purchase lookups like "my Sony
+        headphones" or "recent hotel bookings". user_id is automatically
+        scoped to the authenticated user — never ask the user for it.
+
+        Args:
+            query: Natural language search terms.
+            limit: Maximum results to return (default 10, max 50).
+        """
+        return await search_user_purchases(user_id=user_id, query=query, limit=limit)
+
     session_service = InMemorySessionService()
     session_id = f"mode-a-{uuid4()}"
     await _maybe_await(
@@ -127,18 +158,27 @@ async def handle_message(user_id: str, message: str) -> AsyncIterator[dict[str, 
         )
     )
 
+    scoped_agent = Agent(
+        name="assistant_agent_mode_a",
+        model=_MODEL_NAME,
+        instruction=MODE_A_SYSTEM_PROMPT,
+        tools=[
+            get_mongodb_mcp_toolset(read_only=True),
+            FunctionTool(search_policies),
+            # Closure-scoped purchase search — user_id is baked in, not exposed.
+            FunctionTool(_search_my_purchases),
+        ],
+    )
+
     runner = Runner(
         app_name=_APP_NAME,
-        agent=create_mode_a_agent(),
+        agent=scoped_agent,
         session_service=session_service,
     )
 
-    # Prefix the message with user_id so the model can fill it in for tools
-    # like search_user_purchases that require it as an explicit argument.
-    contextualized = f"[user_id: {user_id}]\n{message}"
     new_message = types.Content(
         role="user",
-        parts=[types.Part.from_text(text=contextualized)],
+        parts=[types.Part.from_text(text=message)],
     )
 
     async for event in runner.run_async(
@@ -146,7 +186,20 @@ async def handle_message(user_id: str, message: str) -> AsyncIterator[dict[str, 
         session_id=session_id,
         new_message=new_message,
     ):
-        yield _adk_event_to_sse_dict(event)
+        sse_event = _adk_event_to_sse_dict(event)
+        yield sse_event
+
+        # Guarantee a terminating "done" frame so SSE consumers don't hang
+        # waiting for stream close. The translator emits {"event":"done"}
+        # only for ADK final events that have no content parts; final events
+        # that DO carry a text/tool part get translated as text_chunk/etc.
+        # and the consumer would otherwise never see an explicit terminator.
+        if (
+            sse_event.get("event") != "done"
+            and hasattr(event, "is_final_response")
+            and event.is_final_response()
+        ):
+            yield {"event": "done", "data": "{}"}
 
 
 def _adk_event_to_sse_dict(event: Any) -> dict[str, Any]:

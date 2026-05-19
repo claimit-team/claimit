@@ -89,3 +89,63 @@ async def test_search_user_purchases_closes_adapter() -> None:
     with patch("search.get_search_adapter", return_value=adapter):
         await search_user_purchases(user_id="u", query="q")
     adapter.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_search_user_purchases_closes_adapter_on_exception() -> None:
+    """Symmetry with the policies cleanup test — adapter must close even when
+    the search call raises, so we don't leak Elastic connections."""
+    adapter = _make_adapter_mock([])
+    adapter.search_purchases = AsyncMock(side_effect=RuntimeError("boom"))
+    with (
+        patch("search.get_search_adapter", return_value=adapter),
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        await search_user_purchases(user_id="u1", query="test")
+    adapter.close.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Limit validation + clamp (Fix 3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_policies_rejects_zero_limit() -> None:
+    with pytest.raises(ValueError, match="limit must be >= 1"):
+        await search_policies(query="x", limit=0)
+
+
+@pytest.mark.asyncio
+async def test_search_policies_rejects_negative_limit() -> None:
+    with pytest.raises(ValueError, match="limit must be >= 1"):
+        await search_policies(query="x", limit=-5)
+
+
+@pytest.mark.asyncio
+async def test_search_policies_clamps_excessive_limit() -> None:
+    """Caller-supplied limits over MAX_POLICY_LIMIT are silently capped."""
+    from src.tools.search_tools import MAX_POLICY_LIMIT
+
+    adapter = _make_adapter_mock([])
+    with patch("search.get_search_adapter", return_value=adapter):
+        await search_policies(query="x", limit=9999)
+    adapter.search_policies.assert_awaited_once_with(query="x", limit=MAX_POLICY_LIMIT)
+
+
+@pytest.mark.asyncio
+async def test_search_user_purchases_rejects_zero_limit() -> None:
+    with pytest.raises(ValueError, match="limit must be >= 1"):
+        await search_user_purchases(user_id="u", query="x", limit=0)
+
+
+@pytest.mark.asyncio
+async def test_search_user_purchases_clamps_excessive_limit() -> None:
+    from src.tools.search_tools import MAX_PURCHASE_LIMIT
+
+    adapter = _make_adapter_mock([])
+    with patch("search.get_search_adapter", return_value=adapter):
+        await search_user_purchases(user_id="u", query="x", limit=9999)
+    adapter.search_purchases.assert_awaited_once_with(
+        user_id="u", query="x", limit=MAX_PURCHASE_LIMIT
+    )
