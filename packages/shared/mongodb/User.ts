@@ -69,5 +69,6 @@ export interface User {
   ingestion_skiplist: IngestionSkiplistEntry[];
   notification_prefs: NotificationPrefs;
   subscription: Subscription;
+  onboarded: boolean;
   created_at: ISODateString;
 }

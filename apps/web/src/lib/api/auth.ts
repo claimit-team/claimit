@@ -33,6 +33,7 @@ export type PatchUserMeRequest = {
   default_location?: DefaultLocation;
   loyalty_memberships?: LoyaltyMembership[];
   ingestion_skiplist?: IngestionSkiplistEntry[];
+  onboarded?: boolean;
 };
 
 export class AuthApiError extends Error {

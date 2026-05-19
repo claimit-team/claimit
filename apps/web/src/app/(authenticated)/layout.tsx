@@ -99,8 +99,13 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
   const { unreadCount } = useUnreadCount();
 
   useEffect(() => {
-    if (!isLoading && !user) {
+    if (isLoading) return;
+    if (!user) {
       router.push("/login");
+      return;
+    }
+    if (!user.onboarded) {
+      router.replace("/onboarding");
     }
   }, [user, isLoading, router]);
 
@@ -120,7 +125,7 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
     router.push("/login");
   };
 
-  if (isLoading || !user) {
+  if (isLoading || !user || !user.onboarded) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-neutral-0 text-neutral-600">
         <Loader2 className="size-6 animate-spin" aria-label="Loading session" />

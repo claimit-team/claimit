@@ -41,6 +41,18 @@
           ],
           "title": "Connected At"
         },
+        "connected_email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Connected Email"
+        },
         "scopes_granted": {
           "items": {
             "type": "string"
@@ -164,6 +176,22 @@
       "title": "LoyaltyTier",
       "type": "string"
     },
+    "NotificationEventType": {
+      "enum": [
+        "price_dropped",
+        "claim_drafted",
+        "claim_queued_auto",
+        "claim_submitted",
+        "claim_denied",
+        "claim_resolved_success",
+        "low_confidence_extract",
+        "first_time_dashboard",
+        "user_returned_after_long_absence",
+        "consecutive_rejections"
+      ],
+      "title": "NotificationEventType",
+      "type": "string"
+    },
     "NotificationPrefs": {
       "properties": {
         "web_push": {
@@ -173,6 +201,13 @@
         "email": {
           "title": "Email",
           "type": "boolean"
+        },
+        "muted_event_types": {
+          "items": {
+            "$ref": "#/$defs/NotificationEventType"
+          },
+          "title": "Muted Event Types",
+          "type": "array"
         }
       },
       "required": ["web_push", "email"],
@@ -321,6 +356,11 @@
     },
     "subscription": {
       "$ref": "#/$defs/Subscription"
+    },
+    "onboarded": {
+      "default": true,
+      "title": "Onboarded",
+      "type": "boolean"
     },
     "created_at": {
       "format": "date-time",

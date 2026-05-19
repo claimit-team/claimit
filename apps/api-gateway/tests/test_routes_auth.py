@@ -271,6 +271,65 @@ async def test_patch_me_requires_bearer(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_patch_me_can_set_onboarded_true(client: AsyncClient) -> None:
+    """PATCH {onboarded: true} flips the User.onboarded flag and the response
+    envelope reflects the post-update state. Used by the onboarding flow's
+    final step (Step 3 preferences page) to mark setup complete before
+    redirecting to /dashboard."""
+    fixture = copy.deepcopy(USER_FIXTURE)
+    fixture["onboarded"] = False
+    db = _patch_db(User.model_validate(fixture))
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.patch(
+                "/api/v1/auth/me",
+                headers={"Authorization": "Bearer valid-token"},
+                json={"onboarded": True},
+            )
+        assert response.status_code == 200
+        assert response.json()["user"]["onboarded"] is True
+
+        db.partial_update.assert_called_once()
+        updates = db.partial_update.call_args.args[2]
+        assert updates == {"onboarded": True}
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
+async def test_patch_me_can_set_onboarded_false(client: AsyncClient) -> None:
+    """Symmetric to set-true — false is also a valid value. Not used by the
+    UI today but allows admin-reset / future flows to push the user back
+    through onboarding without backdoor MongoDB writes."""
+    db = _patch_db()  # default fixture has onboarded missing → Pydantic default True
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.patch(
+                "/api/v1/auth/me",
+                headers={"Authorization": "Bearer valid-token"},
+                json={"onboarded": False},
+            )
+        assert response.status_code == 200
+        assert response.json()["user"]["onboarded"] is False
+
+        db.partial_update.assert_called_once()
+        updates = db.partial_update.call_args.args[2]
+        assert updates == {"onboarded": False}
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
 async def test_patch_me_returns_404_when_user_missing(client: AsyncClient) -> None:
     """If partial_update reports no document matched (user deleted between
     auth + write), the route raises ApiError(user_not_found, 404)."""
