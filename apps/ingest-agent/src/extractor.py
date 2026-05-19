@@ -380,6 +380,10 @@ async def extract(
     When extraction yields ``pending_confirmation`` and ``user_email`` is set,
     sends a confirmation email with a deep link to ``/confirm/{purchase_id}``.
     Email failures are logged and do not fail extraction.
+
+    TODO(#105): ``extract()`` has no production caller yet — the HTTP entrypoint
+    that threads ``user_email`` / ``gmail_refresh_token_ref`` / ``gmail_connected_email``
+    from the authenticated user is tracked in issue #105.
     """
 
     validated_email = EmailForExtraction.model_validate(email)

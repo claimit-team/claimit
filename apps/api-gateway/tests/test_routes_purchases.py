@@ -91,7 +91,6 @@ async def test_confirm_purchase_sets_monitoring(client: AsyncClient) -> None:
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_current_user, None)
-        app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.mark.asyncio
@@ -113,7 +112,6 @@ async def test_confirm_purchase_rejects_wrong_status(client: AsyncClient) -> Non
         assert response.status_code == 409
     finally:
         app.dependency_overrides.pop(get_db, None)
-        app.dependency_overrides.pop(get_current_user, None)
         app.dependency_overrides.pop(get_current_user, None)
 
 
@@ -143,7 +141,6 @@ async def test_dismiss_duplicate_sets_dismissed(client: AsyncClient) -> None:
         mock_db.upsert.assert_not_awaited()
     finally:
         app.dependency_overrides.pop(get_db, None)
-        app.dependency_overrides.pop(get_current_user, None)
         app.dependency_overrides.pop(get_current_user, None)
 
 

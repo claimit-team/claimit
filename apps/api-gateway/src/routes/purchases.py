@@ -154,7 +154,13 @@ async def _append_ingestion_skiplist(
             purchase.id,
         )
 
-    sender = (body.sender or "").strip() or "unknown"
+    sender = (body.sender or "").strip()
+    if not sender:
+        _log.warning(
+            "Dismiss not_an_order without sender; using 'unknown' purchase_id=%s",
+            purchase.id,
+        )
+        sender = "unknown"
     now = datetime.now(UTC)
     entry = IngestionSkiplistEntry(
         sender=sender,

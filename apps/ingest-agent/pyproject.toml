@@ -17,7 +17,6 @@ dependencies = [
     "claimit-mongodb-models",
     "google-cloud-secret-manager>=2.20.0",
     "google-auth>=2.29.0",
-    "sendgrid>=6.11.0",
 ]
 
 [tool.uv.sources]

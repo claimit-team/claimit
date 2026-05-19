@@ -13,7 +13,6 @@ import base64
 import html
 import logging
 import os
-from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any
 from uuid import UUID
@@ -126,11 +125,10 @@ def _encode_gmail_raw_message(
     subject: str,
     html_body: str,
 ) -> str:
-    msg = MIMEMultipart("alternative")
+    msg = MIMEText(html_body, "html", "utf-8")
     msg["To"] = to_email
     msg["From"] = from_email
     msg["Subject"] = subject
-    msg.attach(MIMEText(html_body, "html", "utf-8"))
     return base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
 
 
