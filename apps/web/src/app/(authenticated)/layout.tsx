@@ -99,8 +99,13 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
   const { unreadCount } = useUnreadCount();
 
   useEffect(() => {
-    if (!isLoading && !user) {
+    if (isLoading) return;
+    if (!user) {
       router.push("/login");
+      return;
+    }
+    if (!user.onboarded) {
+      router.replace("/onboarding");
     }
   }, [user, isLoading, router]);
 

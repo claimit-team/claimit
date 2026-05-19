@@ -44,7 +44,7 @@ export function LoginView() {
 
   useEffect(() => {
     if (user) {
-      router.replace("/dashboard");
+      router.replace(user.onboarded ? "/dashboard" : "/onboarding");
     }
   }, [user, router]);
 
@@ -52,10 +52,11 @@ export function LoginView() {
     setIsLoading(true);
     try {
       await signInWithGoogle();
-      router.push("/dashboard");
+      // Redirect is handled by the useEffect above once AuthInit hydrates
+      // the user from getMe(); branching on user.onboarded sends new users
+      // to /onboarding and returning users to /dashboard.
     } catch (err) {
       toast.error("Sign-in failed", { description: (err as Error).message });
-    } finally {
       setIsLoading(false);
     }
   };
