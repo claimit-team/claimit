@@ -24,6 +24,7 @@ export interface LoyaltyMembership {
 export interface GmailIntegration {
   connected: boolean;
   connected_at: ISODateString | null;
+  connected_email: string | null;
   scopes_granted: string[];
   refresh_token_ref: string | null;
   watch_history_id: string | null;
