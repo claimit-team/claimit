@@ -1,32 +1,19 @@
 "use client";
 
-import { CheckCircle, Clock, Info, Send } from "lucide-react";
-import { useState } from "react";
+import type { SendMode } from "@claimit/mongodb-types";
+import { CheckCircle, Clock, Send } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { mockPreferences } from "@/components/settings/settings-mock";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SettingsApiError, updateSendPreference } from "@/lib/api/settings";
 import { cn } from "@/lib/utils";
-
-type SendMode = "approval" | "auto";
-
-type PreferenceSettings = {
-  selectedMode: SendMode;
-  autoSendDelaySeconds: number;
-  autoSendDelayLabel: string;
-};
-
-const initialSettings: PreferenceSettings = {
-  selectedMode: mockPreferences.defaultSendMode,
-  autoSendDelaySeconds: 300,
-  autoSendDelayLabel: "5 minutes",
-};
+import { useAuthStore } from "@/store";
 
 const perPlatformOverrides = [
   { platform: "Best Buy", status: "Coming soon" },
@@ -34,26 +21,74 @@ const perPlatformOverrides = [
   { platform: "Southwest", status: "Coming soon" },
 ];
 
+// Display label for the auto-send delay window. The numeric value is stored
+// on User.send_preference.auto_send_delay_seconds; this helper renders it
+// for the read-only "Cancel window" card. (Editing the delay is post-MVP.)
+function describeDelay(seconds: number): string {
+  if (seconds % 60 === 0) {
+    const minutes = seconds / 60;
+    return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  }
+  return `${seconds} seconds`;
+}
+
 export default function PreferencesPage() {
-  const [settings, setSettings] = useState<PreferenceSettings>(initialSettings);
-  const [isLoading] = useState(false);
-  const [hasError] = useState(false);
+  const user = useAuthStore((s) => s.user);
+  const isAuthLoading = useAuthStore((s) => s.isLoading);
+  const setUser = useAuthStore((s) => s.setUser);
+
+  // selectedMode is the *edit buffer*; savedMode tracks the last successful
+  // server state and is what Reset reverts to. Both seed from the user
+  // store and re-sync whenever the underlying user reference changes.
+  const [selectedMode, setSelectedMode] = useState<SendMode>("approval");
+  const [savedMode, setSavedMode] = useState<SendMode>("approval");
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      setSelectedMode(user.send_preference.default_mode);
+      setSavedMode(user.send_preference.default_mode);
+    }
+  }, [user]);
 
   const handleModeChange = (value: string) => {
-    setSettings((prev) => ({
-      ...prev,
-      selectedMode: value as SendMode,
-    }));
+    setSelectedMode(value as SendMode);
   };
 
-  const handleSave = () => {
-    toast.success("Send preferences saved in this mock flow.");
+  const handleSave = async () => {
+    if (!user) return;
+    setIsSaving(true);
+    try {
+      // PUT /settings/send-preference fully replaces the sub-document, so
+      // we always re-send the current auto_send_delay_seconds — the UI
+      // doesn't expose it for editing yet, but the backend requires it.
+      const updated = await updateSendPreference({
+        default_mode: selectedMode,
+        auto_send_delay_seconds: user.send_preference.auto_send_delay_seconds,
+      });
+      setUser(updated);
+      setSavedMode(updated.send_preference.default_mode);
+      toast.success("Send preferences saved.");
+    } catch (err) {
+      const message =
+        err instanceof SettingsApiError
+          ? err.message
+          : "Could not save preferences. Please try again.";
+      toast.error(message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleReset = () => {
-    setSettings(initialSettings);
-    toast("Preferences reset to defaults.");
+    setSelectedMode(savedMode);
+    toast("Preferences reset to last saved state.");
   };
+
+  const isLoading = isAuthLoading || !user;
+  const hasChanges = selectedMode !== savedMode;
+  const autoSendDelaySeconds = user?.send_preference.auto_send_delay_seconds ?? 300;
+  const autoSendDelayLabel = describeDelay(autoSendDelaySeconds);
 
   if (isLoading) {
     return (
@@ -75,23 +110,6 @@ export default function PreferencesPage() {
     );
   }
 
-  if (hasError) {
-    return (
-      <div className="space-y-6">
-        <div className="space-y-2">
-          <h1 className="text-2xl font-semibold text-neutral-900">Send preferences</h1>
-          <p className="text-neutral-700">
-            Choose how ClaimIt handles claim drafts and eligible email claim sending.
-          </p>
-        </div>
-        <Alert variant="destructive">
-          <Info className="size-4" aria-hidden="true" />
-          <AlertDescription>Preferences could not be loaded.</AlertDescription>
-        </Alert>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
       <div className="space-y-2">
@@ -106,16 +124,12 @@ export default function PreferencesPage() {
           <CardTitle className="text-neutral-900">Default send mode</CardTitle>
         </CardHeader>
         <CardContent>
-          <RadioGroup
-            value={settings.selectedMode}
-            onValueChange={handleModeChange}
-            className="space-y-4"
-          >
+          <RadioGroup value={selectedMode} onValueChange={handleModeChange} className="space-y-4">
             <Label
               htmlFor="approval"
               className={cn(
                 "flex cursor-pointer rounded-lg border-2 p-4 transition-all",
-                settings.selectedMode === "approval"
+                selectedMode === "approval"
                   ? "border-brand-primary-500 bg-brand-primary-50"
                   : "border-neutral-200 bg-neutral-0 hover:border-neutral-300",
               )}
@@ -132,18 +146,14 @@ export default function PreferencesPage() {
                   <CheckCircle
                     className={cn(
                       "size-5",
-                      settings.selectedMode === "approval"
-                        ? "text-brand-primary-600"
-                        : "text-neutral-500",
+                      selectedMode === "approval" ? "text-brand-primary-600" : "text-neutral-500",
                     )}
                     aria-hidden="true"
                   />
                   <span
                     className={cn(
                       "font-medium",
-                      settings.selectedMode === "approval"
-                        ? "text-brand-primary-700"
-                        : "text-neutral-900",
+                      selectedMode === "approval" ? "text-brand-primary-700" : "text-neutral-900",
                     )}
                   >
                     Approve each claim
@@ -173,7 +183,7 @@ export default function PreferencesPage() {
               htmlFor="auto"
               className={cn(
                 "flex cursor-pointer rounded-lg border-2 p-4 transition-all",
-                settings.selectedMode === "auto"
+                selectedMode === "auto"
                   ? "border-brand-primary-500 bg-brand-primary-50"
                   : "border-neutral-200 bg-neutral-0 hover:border-neutral-300",
               )}
@@ -190,18 +200,14 @@ export default function PreferencesPage() {
                   <Send
                     className={cn(
                       "size-5",
-                      settings.selectedMode === "auto"
-                        ? "text-brand-primary-600"
-                        : "text-neutral-500",
+                      selectedMode === "auto" ? "text-brand-primary-600" : "text-neutral-500",
                     )}
                     aria-hidden="true"
                   />
                   <span
                     className={cn(
                       "font-medium",
-                      settings.selectedMode === "auto"
-                        ? "text-brand-primary-700"
-                        : "text-neutral-900",
+                      selectedMode === "auto" ? "text-brand-primary-700" : "text-neutral-900",
                     )}
                   >
                     Send automatically
@@ -238,7 +244,7 @@ export default function PreferencesPage() {
         </CardContent>
       </Card>
 
-      {settings.selectedMode === "auto" ? (
+      {selectedMode === "auto" ? (
         <Card className="border-neutral-200 bg-neutral-0">
           <CardHeader>
             <CardTitle className="text-neutral-900">Cancel window</CardTitle>
@@ -248,7 +254,7 @@ export default function PreferencesPage() {
               <div className="flex items-center gap-3">
                 <Clock className="size-5 text-brand-primary-500" aria-hidden="true" />
                 <span className="text-2xl font-semibold text-neutral-900">
-                  {settings.autoSendDelayLabel}
+                  {autoSendDelayLabel}
                 </span>
               </div>
               <Badge variant="secondary" className="text-neutral-600">
@@ -297,16 +303,18 @@ export default function PreferencesPage() {
           type="button"
           variant="outline"
           onClick={handleReset}
+          disabled={!hasChanges || isSaving}
           className="border-neutral-200 text-neutral-700 hover:bg-neutral-100"
         >
           Reset
         </Button>
         <Button
           type="button"
-          onClick={handleSave}
+          onClick={() => void handleSave()}
+          disabled={!hasChanges || isSaving}
           className="bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600"
         >
-          Save changes
+          {isSaving ? "Saving…" : "Save changes"}
         </Button>
       </div>
 

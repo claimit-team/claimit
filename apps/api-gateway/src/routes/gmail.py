@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from claimit_mongodb_models import MongoDBClient, User
+from claimit_mongodb_models.user import GmailIntegration
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import RedirectResponse
 from google.cloud import secretmanager
@@ -30,6 +31,7 @@ from google.cloud import secretmanager
 from ..deps import get_db, get_secret_manager_client, get_state_jwt_key, get_token_cache
 from ..middleware.auth import get_current_user
 from ..middleware.errors import ApiError
+from ..serializers import serialize_user
 from ..services import gmail_oauth, secret_manager, state_jwt
 from ..services.token_cache import AccessTokenCache
 
@@ -202,3 +204,41 @@ async def gmail_callback(
     # 7. Send the user back to the frontend page they started on.
     base = os.environ["FRONTEND_BASE_URL"]
     return RedirectResponse(url=f"{base}{return_to}?status=connected", status_code=302)
+
+
+@router.post("/disconnect")
+async def gmail_disconnect(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[MongoDBClient, Depends(get_db)],
+) -> dict[str, object]:
+    """Clear the user's Gmail integration state. Idempotent.
+
+    Hackathon scope: this is a DB-only flip — we do NOT revoke the OAuth grant
+    at Google, do NOT delete the refresh token from Secret Manager, and do NOT
+    call gmail.users.stop() to tear down any active push subscription. Those
+    are tracked TODOs for post-MVP. Re-connect simply overwrites the same
+    fields via /gmail/callback (and re-stores the refresh token at the same
+    Secret Manager path), so leaving the secret behind doesn't leak access —
+    once we set `connected=False` the rest of the system stops looking at it.
+    """
+    cleared = GmailIntegration(
+        connected=False,
+        connected_at=None,
+        connected_email=None,
+        scopes_granted=[],
+        refresh_token_ref=None,
+        watch_history_id=None,
+        watch_expires_at=None,
+        last_processed_message_id=None,
+    )
+    matched = await db.partial_update(
+        "users",
+        user.id,
+        {"gmail_integration": cleared.model_dump(mode="json")},
+        model=User,
+    )
+    if not matched:
+        raise ApiError("user_not_found", "User document was removed", status_code=404)
+
+    user.gmail_integration = cleared
+    return {"user": serialize_user(user)}

@@ -6,6 +6,7 @@
  * auto-refreshes hourly, and using the SDK's getIdToken() respects that.
  */
 
+import type { User } from "@claimit/mongodb-types";
 import { auth } from "@/lib/firebase";
 
 export type ConnectGmailResponse = { authorization_url: string };
@@ -22,6 +23,12 @@ export const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
 };
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+
+// Same 10s budget as /auth/me — Cloud Run cold-start tolerance vs UX
+// (users perceive >5s as broken). Without this, a hung TCP connection
+// would freeze the connect/disconnect button indefinitely with no
+// recovery path.
+const GMAIL_TIMEOUT_MS = 10000;
 
 export class GmailApiError extends Error {
   constructor(
@@ -46,9 +53,23 @@ export async function connectGmail(returnTo: string): Promise<ConnectGmailRespon
   const url = new URL(`${API_BASE_URL}/api/v1/gmail/connect`);
   url.searchParams.set("return_to", returnTo);
 
-  const response = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), GMAIL_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new GmailApiError("request_timeout", "Timed out reaching Gmail. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     // Backend uses the {error: {code, message}} envelope from middleware/errors.py.
@@ -65,4 +86,51 @@ export async function connectGmail(returnTo: string): Promise<ConnectGmailRespon
   }
 
   return (await response.json()) as ConnectGmailResponse;
+}
+
+export async function disconnectGmail(): Promise<User> {
+  if (!API_BASE_URL) {
+    throw new GmailApiError("missing_api_base_url", "NEXT_PUBLIC_API_BASE_URL is not configured.");
+  }
+  const user = auth.currentUser;
+  if (!user) {
+    throw new GmailApiError("unauthenticated", "User must be signed in.");
+  }
+
+  const token = await user.getIdToken();
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), GMAIL_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/v1/gmail/disconnect`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new GmailApiError("request_timeout", "Timed out reaching Gmail. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!response.ok) {
+    let code = "request_failed";
+    let message = `Gmail disconnect failed (${response.status})`;
+    try {
+      const body = (await response.json()) as { error?: { code?: string; message?: string } };
+      code = body.error?.code ?? code;
+      message = body.error?.message ?? message;
+    } catch {
+      // Non-JSON body; keep defaults.
+    }
+    throw new GmailApiError(code, message);
+  }
+
+  const body = (await response.json()) as { user: User };
+  return body.user;
 }
