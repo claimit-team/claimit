@@ -34,6 +34,7 @@ jobs:
   pr-deploy-started:
     name: PR Deploy Started Comment
     runs-on: ubuntu-latest
+    continue-on-error: true
     permissions:
       contents: read
       pull-requests: write
@@ -271,6 +272,7 @@ jobs:
       - run-migrations
       - verify-health
     runs-on: ubuntu-latest
+    continue-on-error: true
     permissions:
       contents: read
       pull-requests: write
@@ -278,7 +280,7 @@ jobs:
       - name: Post completion comment on merged PR
         env:
           GH_TOKEN: ${{ github.token }}
-          DEPLOY_FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+          DEPLOY_FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'timed_out') }}
         run: |
           set -euo pipefail
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -291,6 +293,6 @@ jobs:
           if [ "$DEPLOY_FAILED" = "true" ]; then
             BODY="❌ Deploy Prod failed — [logs](${RUN_URL})"
           else
-            BODY="✅ Deploy Prod succeeded"
+            BODY="✅ Deploy Prod succeeded — [workflow run](${RUN_URL})"
           fi
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
