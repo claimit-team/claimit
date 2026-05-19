@@ -1,3 +1,4 @@
+import type { NotificationEventType } from "./NotificationEvent";
 import type {
   ISODateString,
   LoyaltyTier,
@@ -23,6 +24,7 @@ export interface LoyaltyMembership {
 export interface GmailIntegration {
   connected: boolean;
   connected_at: ISODateString | null;
+  connected_email: string | null;
   scopes_granted: string[];
   refresh_token_ref: string | null;
   watch_history_id: string | null;
@@ -46,6 +48,7 @@ export interface IngestionSkiplistEntry {
 export interface NotificationPrefs {
   web_push: boolean;
   email: boolean;
+  muted_event_types: NotificationEventType[];
 }
 
 export interface Subscription {

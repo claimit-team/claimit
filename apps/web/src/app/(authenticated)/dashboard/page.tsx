@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { HeroActiveUser } from "@/components/dashboard/hero/active-user";
 import { HeroNewUser } from "@/components/dashboard/hero/new-user";
 import { HeroReclaimExperienced } from "@/components/dashboard/hero/reclaim-experienced";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,9 +34,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { useDashboardSummary } from "@/hooks/useDashboardSummary";
 import { cn } from "@/lib/utils";
-import { useUIStore } from "@/store";
+import { useAuthStore, useUIStore } from "@/store";
 
 // ============================================================================
 // MOCK DATA
@@ -44,16 +47,6 @@ import { useUIStore } from "@/store";
 type UserState = "new" | "active" | "reclaim_experienced";
 
 const mockDashboardData = {
-  gmailConnected: false,
-  hero: {
-    purchasesMonitored: 12,
-    claimsInProgress: 3,
-    windowsEndingSoon: 4,
-    reclaimedThisMonth: 342,
-    lifetimeReclaimed: 1284,
-    approvedClaimsReported: 5,
-    averageReportedRefund: 68,
-  },
   needsAttention: [
     {
       type: "review_draft" as const,
@@ -809,10 +802,50 @@ function RecentActivitySection({
 // MAIN PAGE
 // ============================================================================
 
+function HeroSkeleton() {
+  return (
+    <Card className="border-neutral-200">
+      <CardContent className="p-6 lg:p-8 space-y-4">
+        <Skeleton className="h-10 w-2/3" />
+        <Skeleton className="h-4 w-1/3" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+          <Skeleton className="h-12" />
+          <Skeleton className="h-12" />
+          <Skeleton className="h-12" />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function DashboardPage() {
-  const [userState, setUserState] = useState<UserState>("reclaim_experienced");
-  const { gmailConnected, hero, needsAttention, monitoredPurchases, recentActivity } =
-    mockDashboardData;
+  // Dev override: when null, userState is auto-derived from /dashboard/summary
+  // (see Amendment 1). Persisted only in component state — not localStorage —
+  // so a hard refresh always shows the auto-derived state, mirroring what
+  // real users see.
+  const [userStateOverride, setUserStateOverride] = useState<UserState | null>(null);
+
+  const { summary, isLoading: isSummaryLoading, error: summaryError } = useDashboardSummary();
+  // gmailConnected reads from auth store (AuthInit populates user via getMe()).
+  // Previously read from mockDashboardData.gmailConnected, which masked the
+  // real backend state — accounts with gmail_integration.connected=true in
+  // Mongo were rendering as "not connected" in the dashboard header.
+  const gmailConnected = useAuthStore((s) => s.user?.gmail_integration?.connected ?? false);
+  const { needsAttention, monitoredPurchases, recentActivity } = mockDashboardData;
+
+  // Auto-derive userState from real summary data:
+  // - lifetime_savings > 0 → user has resolved claims → "reclaim_experienced"
+  // - else if any active claims or monitored purchases → "active"
+  // - else (or while loading) → "new" (empty-state hero, no mock-data hybrid)
+  const computedUserState: UserState = !summary
+    ? "new"
+    : summary.total_savings_lifetime > 0
+      ? "reclaim_experienced"
+      : summary.monitoring_purchases_count > 0 || summary.active_claims_count > 0
+        ? "active"
+        : "new";
+
+  const userState: UserState = userStateOverride ?? computedUserState;
 
   const handleUploadClick = () => {
     toast.success("Receipt added to upload queue.");
@@ -829,35 +862,57 @@ export default function DashboardPage() {
           gmailConnected={gmailConnected}
           onUploadClick={handleUploadClick}
           userState={userState}
-          onUserStateChange={setUserState}
+          onUserStateChange={setUserStateOverride}
         />
 
-        {userState === "new" && <HeroNewUser onBrowseFiles={handleBrowseFiles} />}
-        {userState === "active" && (
-          <HeroActiveUser
-            claimsInProgress={hero.claimsInProgress}
-            purchasesMonitored={hero.purchasesMonitored}
-            windowsEndingSoon={hero.windowsEndingSoon}
-          />
+        {summaryError && summaryError.code !== "unauthenticated" && (
+          <Alert variant="destructive">
+            <AlertTitle>We couldn&apos;t load your savings summary.</AlertTitle>
+            <AlertDescription>
+              {summaryError.message} Refresh to try again — the rest of the dashboard is still
+              available below.
+            </AlertDescription>
+          </Alert>
         )}
-        {userState === "reclaim_experienced" && (
-          <HeroReclaimExperienced
-            reclaimedThisMonth={hero.reclaimedThisMonth}
-            approvedClaimsReported={hero.approvedClaimsReported}
-            claimsInProgress={hero.claimsInProgress}
-            lifetimeReclaimed={hero.lifetimeReclaimed}
-            averageReportedRefund={hero.averageReportedRefund}
-          />
+
+        {isSummaryLoading && !summary ? (
+          <HeroSkeleton />
+        ) : (
+          <>
+            {userState === "new" && <HeroNewUser onBrowseFiles={handleBrowseFiles} />}
+            {userState === "active" && summary && (
+              <HeroActiveUser
+                claimsInProgress={summary.active_claims_count}
+                purchasesMonitored={summary.monitoring_purchases_count}
+              />
+            )}
+            {userState === "reclaim_experienced" && summary && (
+              <HeroReclaimExperienced
+                reclaimedThisMonth={summary.total_savings_month}
+                claimsInProgress={summary.active_claims_count}
+                lifetimeReclaimed={summary.total_savings_lifetime}
+                purchasesMonitored={summary.monitoring_purchases_count}
+              />
+            )}
+            {/* Override fallback: if dev forces "active"/"reclaim_experienced"
+                before summary loads, render skeleton rather than crashing. */}
+            {userState !== "new" && !summary && <HeroSkeleton />}
+          </>
         )}
 
         {userState !== "new" && <NeedsAttentionSection items={needsAttention} />}
 
         {userState !== "new" && <MonitoredPurchasesSection purchases={monitoredPurchases} />}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <QuickUploadSection gmailConnected={gmailConnected} />
-          {userState !== "new" && <RecentActivitySection activities={recentActivity} />}
-        </div>
+        {/* Quick Upload + Recent Activity grid is hidden in the new-user state
+            because HeroNewUser already renders an upload CTA at the top —
+            otherwise new users see two upload regions on the same page. */}
+        {userState !== "new" && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <QuickUploadSection gmailConnected={gmailConnected} />
+            <RecentActivitySection activities={recentActivity} />
+          </div>
+        )}
       </div>
     </div>
   );
