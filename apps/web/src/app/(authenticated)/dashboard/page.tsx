@@ -38,7 +38,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useDashboardSummary } from "@/hooks/useDashboardSummary";
 import { cn } from "@/lib/utils";
-import { useUIStore } from "@/store";
+import { useAuthStore, useUIStore } from "@/store";
 
 // ============================================================================
 // MOCK DATA
@@ -47,7 +47,6 @@ import { useUIStore } from "@/store";
 type UserState = "new" | "active" | "reclaim_experienced";
 
 const mockDashboardData = {
-  gmailConnected: false,
   needsAttention: [
     {
       type: "review_draft" as const,
@@ -827,7 +826,12 @@ export default function DashboardPage() {
   const [userStateOverride, setUserStateOverride] = useState<UserState | null>(null);
 
   const { summary, isLoading: isSummaryLoading, error: summaryError } = useDashboardSummary();
-  const { gmailConnected, needsAttention, monitoredPurchases, recentActivity } = mockDashboardData;
+  // gmailConnected reads from auth store (AuthInit populates user via getMe()).
+  // Previously read from mockDashboardData.gmailConnected, which masked the
+  // real backend state — accounts with gmail_integration.connected=true in
+  // Mongo were rendering as "not connected" in the dashboard header.
+  const gmailConnected = useAuthStore((s) => s.user?.gmail_integration?.connected ?? false);
+  const { needsAttention, monitoredPurchases, recentActivity } = mockDashboardData;
 
   // Auto-derive userState from real summary data:
   // - lifetime_savings > 0 → user has resolved claims → "reclaim_experienced"
@@ -900,10 +904,15 @@ export default function DashboardPage() {
 
         {userState !== "new" && <MonitoredPurchasesSection purchases={monitoredPurchases} />}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <QuickUploadSection gmailConnected={gmailConnected} />
-          {userState !== "new" && <RecentActivitySection activities={recentActivity} />}
-        </div>
+        {/* Quick Upload + Recent Activity grid is hidden in the new-user state
+            because HeroNewUser already renders an upload CTA at the top —
+            otherwise new users see two upload regions on the same page. */}
+        {userState !== "new" && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <QuickUploadSection gmailConnected={gmailConnected} />
+            <RecentActivitySection activities={recentActivity} />
+          </div>
+        )}
       </div>
     </div>
   );
