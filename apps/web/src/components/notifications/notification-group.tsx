@@ -1,14 +1,17 @@
 "use client";
 
+import type { NotificationEvent } from "@claimit/mongodb-types";
+
 import { NotificationRow } from "@/components/notifications/notification-row";
-import type { NotificationEvent } from "@/lib/mock-notifications";
 
 export function NotificationGroupSection({
   label,
   events,
+  onCardClick,
 }: {
   label: string;
   events: NotificationEvent[];
+  onCardClick?: (notification: NotificationEvent) => void;
 }) {
   if (!events.length) return null;
 
@@ -19,13 +22,7 @@ export function NotificationGroupSection({
       </h2>
       <div>
         {events.map((evt) => (
-          <NotificationRow
-            key={evt.id}
-            title={evt.title}
-            description={evt.description}
-            timeLabel={evt.timeLabel}
-            eventType={evt.eventType}
-          />
+          <NotificationRow key={evt._id} notification={evt} onCardClick={onCardClick} />
         ))}
       </div>
     </section>

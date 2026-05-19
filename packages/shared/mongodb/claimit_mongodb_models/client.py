@@ -226,6 +226,59 @@ class MongoDBClient:
         result = await self._db[collection].update_one({"_id": uid}, {"$set": set_payload})
         return result.matched_count > 0
 
+    async def update_many(
+        self,
+        collection: str,
+        filter: dict[str, Any],
+        updates: dict[str, Any],
+        model: type[T] | None = None,
+    ) -> int:
+        """Apply a `$set` partial update to every document matching `filter`.
+
+        Counterpart to `partial_update`, but for bulk operations (e.g. "ack
+        all unread notifications for this user"). `updated_at` is set
+        automatically on every modified document.
+
+        `_id` may not appear in `updates` — bulk-rewriting identities is
+        always a bug. Per-field validation is identical to `partial_update`
+        when `model` is supplied.
+
+        Returns the number of documents whose contents actually changed
+        (`modified_count`). Documents that already matched the new values
+        are not counted, which makes the helper naturally idempotent.
+        """
+        if "_id" in updates:
+            raise ValueError(
+                "`updates` may not contain '_id'; bulk identity rewrites are not allowed."
+            )
+
+        if model is not None:
+            for field_name, value in updates.items():
+                field_info = model.model_fields.get(field_name)
+                if field_info is None:
+                    raise ValueError(f"Unknown field {field_name!r} for model {model.__name__}.")
+                annotation = field_info.annotation
+                if field_info.metadata:
+                    annotation = Annotated[(annotation, *field_info.metadata)]
+                try:
+                    TypeAdapter(annotation).validate_python(value)
+                except ValidationError as exc:
+                    sanitized = [
+                        {"loc": (field_name,), "type": e.get("type"), "msg": e.get("msg")}
+                        for e in exc.errors()
+                    ]
+                    logger.error(
+                        "update_many validation failed for collection=%s field=%s: %s",
+                        collection,
+                        field_name,
+                        sanitized,
+                    )
+                    raise
+
+        set_payload = {**updates, "updated_at": datetime.now(UTC)}
+        result = await self._db[collection].update_many(filter, {"$set": set_payload})
+        return result.modified_count
+
     async def count(self, collection: str, filter: dict[str, Any]) -> int:
         """Count documents matching `filter`."""
         return await self._db[collection].count_documents(filter)
