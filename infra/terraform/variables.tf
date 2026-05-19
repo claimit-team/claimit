@@ -57,6 +57,6 @@ variable "api_gateway_image" {
 
 variable "web_frontend_url" {
   type        = string
-  description = "Base URL of the Vercel-hosted web frontend for Pub/Sub push subscriptions."
+  description = "Base URL of the Vercel-hosted web frontend. Used as Pub/Sub push target and as FRONTEND_BASE_URL for ingest-agent (confirmation email deep links) and api-gateway."
   default     = "https://claimitai.vercel.app"
 }
