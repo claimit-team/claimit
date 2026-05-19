@@ -73,4 +73,5 @@ class User(BaseDocument):
     ingestion_skiplist: list[IngestionSkiplistEntry]
     notification_prefs: NotificationPrefs
     subscription: Subscription
+    onboarded: bool = True
     created_at: datetime
