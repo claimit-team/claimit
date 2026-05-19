@@ -29,6 +29,7 @@ locals {
     "anthropic-api-key",
     "keepa-api-key",
     "scraperapi-key",
+    "sendgrid-api-key",
     "elastic-url",
     "elastic-api-key",
     # amadeus-client-id and amadeus-client-secret removed — self-service portal
@@ -94,6 +95,7 @@ locals {
     SCRAPERAPI_KEY            = "scraperapi-key"
     GMAIL_OAUTH_CLIENT_ID     = "gmail-oauth-client-id"
     GMAIL_OAUTH_CLIENT_SECRET = "gmail-oauth-client-secret"
+    SENDGRID_API_KEY          = "sendgrid-api-key"
   }
   # monitor: polls current prices via Keepa (Amazon), Amadeus (travel),
   # ScraperAPI (retail fallback); writes price-history records.
@@ -157,6 +159,10 @@ module "ingest_agent" {
   image          = var.ingest_agent_image
   secret_ids     = values(local.ingest_secrets)
   secret_env_map = local.ingest_secrets
+  env_vars = {
+    FRONTEND_BASE_URL = var.web_frontend_url
+    GCP_PROJECT_ID    = var.project_id
+  }
   # Hackathon scope; flip to true once services handle real data.
   deletion_protection = false
 
@@ -236,7 +242,7 @@ module "api_gateway" {
     CORS_ALLOWED_ORIGINS      = "https://claimitai.vercel.app,http://localhost:3000"
     CORS_ALLOWED_ORIGIN_REGEX = "https://claimitai[a-z0-9-]*\\.vercel\\.app"
     GMAIL_OAUTH_REDIRECT_URI  = "https://claimit-api-gateway-i4zxjn67hq-ue.a.run.app/api/v1/gmail/callback"
-    FRONTEND_BASE_URL         = "https://claimitai.vercel.app"
+    FRONTEND_BASE_URL         = var.web_frontend_url
     GCP_PROJECT_ID            = var.project_id
   }
   deletion_protection = false
