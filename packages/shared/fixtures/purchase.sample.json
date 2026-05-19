@@ -24,6 +24,7 @@
   "status": "monitoring",
   "claim_type": "self_service",
   "monitoring_cadence_minutes": 360,
+  "last_checked_at": null,
   "ingested_at": "2026-05-04T18:30:00Z",
   "ingestion_source": "gmail",
   "receipt_storage_url": "gs://claimit-receipts/22222222-receipt.pdf",
