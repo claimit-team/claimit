@@ -40,7 +40,7 @@ def _as_utc_aware(value: datetime) -> datetime:
 async def run_cron(db: MongoDBClient) -> dict[str, int]:
     """Run one cadence sweep. Returns counter summary; always finishes successfully."""
     now = datetime.now(UTC)
-    scanned = due_count = fetched = errors = skipped_expired = 0
+    scanned = due_count = fetched = errors = skipped_expired = skipped_source = 0
 
     purchases = await db.find_purchases({"status": "monitoring"}, limit=_SCAN_LIMIT)
 
@@ -113,7 +113,8 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
                         member_tier=purchase.member_tier_at_purchase,
                     )
                 fetched += 1
-                await _persist_price_history(db, purchase, snap)
+                if not await _persist_price_history(db, purchase, snap):
+                    skipped_source += 1
             except PriceFetchError as exc:
                 errors += 1
                 logger.warning("cron.fetch_error purchase_id=%s reason=%s", purchase.id, exc.reason)
@@ -133,31 +134,35 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
         "fetched": fetched,
         "errors": errors,
         "skipped_expired": skipped_expired,
+        "skipped_source": skipped_source,
     }
     logger.info(
-        "cron.summary scanned=%d due=%d fetched=%d errors=%d skipped_expired=%d",
+        "cron.summary scanned=%d due=%d fetched=%d errors=%d skipped_expired=%d skipped_source=%d",
         scanned,
         due_count,
         fetched,
         errors,
         skipped_expired,
+        skipped_source,
     )
     return summary
 
 
 async def _persist_price_history(
     db: MongoDBClient, purchase: Purchase, snap: PriceSnapshot
-) -> None:
+) -> bool:
     """Write a PriceHistory row when the adapter's source maps to the enum.
 
-    Seeded snapshots use `source="seeded"`, which is not in `PriceSource` today —
-    they're logged and skipped here. See issue #110 for the enum expansion.
+    Returns True if a row was written, False if the source did not map and the
+    snapshot was skipped. Seeded snapshots use `source="seeded"`, which is not
+    in `PriceSource` today (see issue #110 for the enum expansion); a skip here
+    means the price data did not reach history storage, so we log at WARNING.
     """
     try:
         source = PriceSource(snap.source)
     except ValueError:
-        logger.info("cron.price_history_skip source=%s purchase_id=%s", snap.source, purchase.id)
-        return
+        logger.warning("cron.price_history_skip source=%s purchase_id=%s", snap.source, purchase.id)
+        return False
 
     record = PriceHistory(
         _id=uuid4(),
@@ -174,3 +179,4 @@ async def _persist_price_history(
         raw_response_hash=snap.raw_response_hash,
     )
     await db.insert_price_history(record)
+    return True
