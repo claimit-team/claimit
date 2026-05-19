@@ -2,10 +2,11 @@
 
 from fastapi import APIRouter
 
-from . import auth, conversations, dashboard, events, gmail, notifications, settings
+from . import auth, claims, conversations, dashboard, events, gmail, notifications, settings
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth.router)
+router.include_router(claims.router)
 router.include_router(conversations.router)
 router.include_router(dashboard.router)
 router.include_router(events.router)
