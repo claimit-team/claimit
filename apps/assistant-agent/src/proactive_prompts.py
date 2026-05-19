@@ -75,6 +75,20 @@ def _format_currency(amount: Any) -> str:
         return "$?.??"
 
 
+def _safe_list(data: dict[str, Any], key: str) -> list[str]:
+    """Get a list value from payload, coercing non-list to an empty list.
+
+    Notification payloads come from multiple producers and are not schema-
+    validated; a field that should be a list may arrive as a string, None,
+    or even a dict. Treat any non-list value as missing rather than letting
+    `len(...)` or `", ".join(...)` blow up the Floating Panel render.
+    """
+    val = data.get(key)
+    if isinstance(val, list):
+        return [str(x) for x in val]
+    return []
+
+
 # ---------------------------------------------------------------------------
 # The 10 templates. Order mirrors NotificationEventType in enums.py.
 # ---------------------------------------------------------------------------
@@ -200,7 +214,7 @@ def claim_resolved_success(data: dict[str, Any]) -> ProactiveOutput:
 
 
 def low_confidence_extract(data: dict[str, Any]) -> ProactiveOutput:
-    fields = data.get("low_confidence_fields") or []
+    fields = _safe_list(data, "low_confidence_fields")
     confidence = _safe_get(data, "overall_min", "?")
     field_str = ", ".join(fields) if fields else "some fields"
     return ProactiveOutput(
@@ -221,7 +235,7 @@ def low_confidence_extract(data: dict[str, Any]) -> ProactiveOutput:
 
 
 def first_time_dashboard(data: dict[str, Any]) -> ProactiveOutput:
-    platforms = data.get("platforms_monitored") or []
+    platforms = _safe_list(data, "platforms_monitored")
     gmail = bool(data.get("gmail_connected"))
     platform_count = len(platforms)
     platform_str = f"{platform_count} platforms" if platform_count else "your purchases"
