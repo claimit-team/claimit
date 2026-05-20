@@ -1,0 +1,23 @@
+[project]
+name = "claimit-pubsub"
+version = "0.1.0"
+description = "ClaimIt shared Pub/Sub publisher — typed events + helper for publishing to Google Cloud Pub/Sub topics."
+requires-python = ">=3.12"
+dependencies = [
+    "google-cloud-pubsub>=2.23.0",
+    "pydantic>=2.9.0",
+]
+license = { text = "MIT" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["claimit_pubsub"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.6.0",
+]

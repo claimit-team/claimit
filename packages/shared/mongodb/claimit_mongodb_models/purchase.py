@@ -62,4 +62,6 @@ class Purchase(BaseDocument):
     ingestion_source: IngestionSource
     receipt_storage_url: str | None
     receipt_hash: str | None
+    format_hash: str | None = None
+    sender: str | None = None
     extraction_confidence: ExtractionConfidence

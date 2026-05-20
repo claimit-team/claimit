@@ -15,6 +15,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from claimit_mongodb_models import (
+    SKIPLIST_MAX_ENTRIES,
     Category,
     ClaimType,
     ExtractionConfidence,
@@ -26,6 +27,7 @@ from claimit_mongodb_models import (
     PurchaseDateBasis,
     PurchaseStatus,
     User,
+    normalize_sender,
 )
 from pydantic import ValidationError
 
@@ -310,18 +312,16 @@ async def _append_ingestion_skiplist(
     db: MongoDBClient,
 ) -> bool:
     """Append an IngestionSkiplistEntry. Returns False on duplicate (no-op)."""
-    format_hash = purchase.receipt_hash or ""
+    format_hash = purchase.format_hash
     if not format_hash:
         _log.warning(
-            "Dismiss without receipt_hash; skiplist entry may be weak purchase_id=%s",
+            "Dismiss without format_hash; skipping skiplist write purchase_id=%s",
             purchase.id,
         )
+        return False
 
-    cleaned = (sender or "").strip()
+    cleaned = normalize_sender(sender or purchase.sender or "")
     if not cleaned:
-        # No sender available — write a marker so the user's intent
-        # ("ignore this kind of email") is captured against the
-        # receipt_hash, but flag it for the future cleanup ticket.
         _log.warning(
             "Dismiss with remember_sender but no sender; storing 'unknown' purchase_id=%s",
             purchase.id,
@@ -337,12 +337,15 @@ async def _append_ingestion_skiplist(
     )
 
     if any(
-        e.sender == entry.sender and e.format_hash == entry.format_hash
+        normalize_sender(e.sender) == entry.sender and e.format_hash == entry.format_hash
         for e in user.ingestion_skiplist
     ):
         return False
 
-    user.ingestion_skiplist = [*user.ingestion_skiplist, entry]
+    updated_skiplist = [*user.ingestion_skiplist, entry]
+    if len(updated_skiplist) > SKIPLIST_MAX_ENTRIES:
+        updated_skiplist = updated_skiplist[-SKIPLIST_MAX_ENTRIES:]
+    user.ingestion_skiplist = updated_skiplist
     user.updated_at = now
     await db.upsert("users", user.id, user)
     return True
