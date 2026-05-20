@@ -56,6 +56,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     deps._state_jwt_key = os.environ["STATE_JWT_SECRET"]
     deps._token_cache = AccessTokenCache()
     deps.init_pubsub_publisher()
+    deps.init_receipts_uploader()
     yield
     if deps._db is not None:
         await deps._db.close()
