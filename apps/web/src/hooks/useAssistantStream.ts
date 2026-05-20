@@ -157,9 +157,47 @@ export function useAssistantStream(): UseAssistantStreamResult {
         return;
       }
 
-      if (!response.ok || !response.body) {
-        setError(`Stream request failed: ${response.status}`);
+      if (!response.ok) {
+        // Drain the error body so the user sees the backend's actual
+        // explanation, not a bare HTTP status. FastAPI returns
+        // {error: {code, message}} for typed errors and {detail: ...}
+        // for Pydantic validation failures (422). Cover both shapes.
+        let errorMsg = `Stream request failed: ${response.status}`;
+        try {
+          const bodyText = await response.text();
+          try {
+            const parsed = JSON.parse(bodyText) as {
+              error?: { code?: string; message?: string };
+              detail?: unknown;
+            };
+            if (parsed.error?.message) {
+              errorMsg = parsed.error.message;
+            } else if (parsed.detail !== undefined) {
+              errorMsg =
+                typeof parsed.detail === "string" ? parsed.detail : JSON.stringify(parsed.detail);
+            }
+          } catch {
+            // Non-JSON body — some intermediaries (Cloud Run cold-start
+            // error pages, load balancers, nginx default error responses)
+            // return plain text. Surface that verbatim rather than a bare
+            // status code; the trim() guard avoids replacing the
+            // useful default with an empty string.
+            const fallbackText = bodyText.trim();
+            if (fallbackText.length > 0) {
+              errorMsg = fallbackText;
+            }
+          }
+        } catch {
+          // Body read failed entirely — keep the status-only fallback.
+        }
+        setError(errorMsg);
         markAssistantError(setMessages, assistantId, `HTTP ${response.status}`);
+        setStreaming(false);
+        return;
+      }
+      if (!response.body) {
+        setError("Stream response had no body.");
+        markAssistantError(setMessages, assistantId, "no response body");
         setStreaming(false);
         return;
       }
@@ -175,8 +213,19 @@ export function useAssistantStream(): UseAssistantStreamResult {
           onToolResult: (toolName, summary) => {
             setMessages((prev) => addToolResultToAssistant(prev, assistantId, toolName, summary));
           },
-          onDone: () => {
-            setMessages((prev) => finalizeAssistant(prev, assistantId));
+          onDone: (errorMsg) => {
+            if (errorMsg) {
+              // The server uses the `done` frame to signal both happy
+              // completion and terminal failures (e.g. "Conversation not
+              // found", "Access denied", agent stream exceptions). When
+              // the done payload carries an `error` field, surface it
+              // and mark the assistant bubble as failed so the user sees
+              // a clear failure state rather than an empty reply.
+              setError(errorMsg);
+              markAssistantError(setMessages, assistantId, errorMsg);
+            } else {
+              setMessages((prev) => finalizeAssistant(prev, assistantId));
+            }
           },
           onUnknown: () => {
             // Forward-compatibility: unknown event types are ignored.
@@ -210,7 +259,13 @@ interface FrameHandlers {
   onTextChunk: (chunk: string) => void;
   onToolCall: (call: { tool: string; input: Record<string, unknown> }) => void;
   onToolResult: (tool: string, output_summary: string) => void;
-  onDone: () => void;
+  /**
+   * Fired when the server emits `event: done`. The optional `errorMsg`
+   * carries the value of `done.data.error` if present — the api-gateway
+   * uses the same done frame for happy completion and for terminal
+   * failures (conversation_not_found, access_denied, agent crash).
+   */
+  onDone: (errorMsg?: string) => void;
   onUnknown: (eventType: string, data: string) => void;
 }
 
@@ -308,9 +363,24 @@ function dispatchFrame(raw: string, handlers: FrameHandlers): void {
       }
       return;
     }
-    case "done":
-      handlers.onDone();
+    case "done": {
+      // The server may attach a terminal error to the done frame —
+      // {"error": "Conversation not found"} or similar. Extract it so
+      // the caller can render a clear failure rather than an empty
+      // assistant reply. Malformed JSON falls through to the
+      // success-shaped path; nothing user-facing changes.
+      let errorMsg: string | undefined;
+      try {
+        const parsed = JSON.parse(data) as { error?: string };
+        if (typeof parsed.error === "string" && parsed.error.length > 0) {
+          errorMsg = parsed.error;
+        }
+      } catch {
+        // ignore — treat as happy completion
+      }
+      handlers.onDone(errorMsg);
       return;
+    }
     default:
       handlers.onUnknown(eventType, data);
   }
@@ -346,16 +416,20 @@ function addToolResultToAssistant(
   return prev.map((m) => {
     if (m.id !== id) return m;
     const calls = m.tool_calls ?? [];
-    // Match the most recent tool_call entry for this tool name that
-    // doesn't already have a result attached.
-    let attached = false;
-    const nextCalls = calls.map((c) => {
-      if (!attached && c.tool === toolName && c.output_summary === undefined) {
-        attached = true;
-        return { ...c, output_summary: summary };
+    // Match the MOST RECENT unfilled tool_call for this tool — agents
+    // can issue the same tool repeatedly (e.g. several search_policies
+    // calls in one turn). The matching tool_result frame is always
+    // paired with the latest such call, so scanning forward would attach
+    // the result to an earlier call and shift every subsequent pairing
+    // by one. Scan backward to honor call order.
+    const nextCalls = [...calls];
+    for (let i = nextCalls.length - 1; i >= 0; i -= 1) {
+      const c = nextCalls[i];
+      if (c.tool === toolName && c.output_summary === undefined) {
+        nextCalls[i] = { ...c, output_summary: summary };
+        break;
       }
-      return c;
-    });
+    }
     return { ...m, tool_calls: nextCalls };
   });
 }

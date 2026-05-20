@@ -183,7 +183,11 @@ function FloatingPanel({ onActionClick }: { onActionClick: (a: string) => void }
   const { messages, streaming, error, sendMessage, reset } = useAssistantStream();
 
   const [draft, setDraft] = useState("");
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Sentinel pinned at the bottom of the message list — scrollIntoView
+  // walks up to find the actual scroll parent (the shadcn ScrollArea
+  // Viewport), avoiding the previous bug where setting scrollTop on the
+  // wrong wrapper element was a silent no-op.
+  const bottomRef = useRef<HTMLDivElement | null>(null);
   const conversationIdRef = useRef<string | null>(currentConversation?._id ?? null);
 
   useEffect(() => {
@@ -198,9 +202,7 @@ function FloatingPanel({ onActionClick }: { onActionClick: (a: string) => void }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `messages` is the intentional trigger for the scroll effect even though the body doesn't read it
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
+    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [messages]);
 
   const handleSend = useCallback(async () => {
@@ -248,7 +250,7 @@ function FloatingPanel({ onActionClick }: { onActionClick: (a: string) => void }
       </div>
 
       <ScrollArea className="flex-1 min-h-0">
-        <div ref={scrollRef} className="space-y-3 p-4">
+        <div className="space-y-3 p-4">
           <ProactiveCard onAction={onActionClick} />
 
           {messages.length === 0 ? (
@@ -299,6 +301,7 @@ function FloatingPanel({ onActionClick }: { onActionClick: (a: string) => void }
               {error}
             </p>
           ) : null}
+          <div ref={bottomRef} aria-hidden="true" />
         </div>
       </ScrollArea>
 

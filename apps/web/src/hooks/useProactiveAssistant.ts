@@ -95,6 +95,14 @@ export function useProactiveAssistant(): void {
         if (cancelled) return;
         source.close();
         sourceRef.current = null;
+        // The previous connect()'s refresh timer is now stale — it would
+        // close-and-reconnect a connection that doesn't exist anymore, or
+        // worse, a NEW one our backoff is about to open. Cancel it so
+        // there's exactly one timeline owning the next reconnect.
+        if (refreshTimerRef.current) {
+          clearTimeout(refreshTimerRef.current);
+          refreshTimerRef.current = null;
+        }
         scheduleReconnect();
       });
 

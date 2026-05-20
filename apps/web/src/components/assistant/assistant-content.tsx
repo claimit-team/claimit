@@ -108,7 +108,11 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
 
   const [draft, setDraft] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Sentinel at the bottom of the message list. scrollIntoView walks up
+  // to find the actual scroll parent (the shadcn ScrollArea Viewport),
+  // unlike scrollTop on a wrapper div which was a silent no-op inside
+  // the Viewport hierarchy.
+  const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const active = conversationId ? conversations.find((c) => c._id === conversationId) : undefined;
   const unknownId = Boolean(conversationId) && !active && !convLoading;
@@ -126,9 +130,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `messages` is the intentional trigger for the scroll effect even though the body doesn't read it
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
+    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [messages]);
 
   const groupedList = useMemo(() => groupConversations(conversations), [conversations]);
@@ -290,7 +292,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
           </div>
         </div>
         <ScrollArea className="min-h-0 flex-1">
-          <div ref={scrollRef} className="space-y-4 px-4 py-6 lg:px-10">
+          <div className="space-y-4 px-4 py-6 lg:px-10">
             <ProactiveCard />
             {messages.map((msg) => (
               <article
@@ -334,6 +336,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
                 <AlertDescription>{streamError}</AlertDescription>
               </Alert>
             ) : null}
+            <div ref={bottomRef} aria-hidden="true" />
           </div>
         </ScrollArea>
         <div className="border-t border-neutral-200 bg-neutral-0 px-4 py-3 lg:px-8">
