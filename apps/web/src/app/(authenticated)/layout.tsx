@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { useProactiveAssistant } from "@/hooks/useProactiveAssistant";
 import { useUnreadCount } from "@/hooks/useUnreadCount";
 import { signOutUser } from "@/lib/auth-actions";
 import { cn } from "@/lib/utils";
@@ -97,6 +98,12 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
   const isClaimDetail = /^\/claims\/[^/]+$/.test(pathname);
   const setClaimEmbeddedAssistantExpanded = useUIStore((s) => s.setClaimEmbeddedAssistantExpanded);
   const { unreadCount } = useUnreadCount();
+
+  // Subscribe to the notifications SSE stream so proactive-eligible
+  // events surface the Floating Assistant panel anywhere in the
+  // authenticated shell. Mounted once at the layout level — multiple
+  // mounts would open redundant EventSource connections.
+  useProactiveAssistant();
 
   useEffect(() => {
     if (isLoading) return;
