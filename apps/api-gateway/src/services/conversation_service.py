@@ -3,17 +3,28 @@
 import json
 import logging
 import os
+import re
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+import vertexai
 import vertexai.agent_engines
 from claimit_mongodb_models.client import MongoDBClient
 from claimit_mongodb_models.conversation import Conversation, ConversationMessage, ToolCall
 from claimit_mongodb_models.enums import ConversationMode, ConversationStatus, MessageRole
 
 logger = logging.getLogger(__name__)
+
+# Resource names are in the form
+# `projects/{project}/locations/{location}/reasoningEngines/{id}`.
+# We parse project + location from this string to drive vertexai.init()
+# — see the comment in stream_agent_response below for why init() is
+# load-bearing.
+_RESOURCE_NAME_RE = re.compile(
+    r"^projects/(?P<project>[^/]+)/locations/(?P<location>[^/]+)/reasoningEngines/"
+)
 
 
 async def create_conversation(
@@ -107,6 +118,22 @@ async def stream_agent_response(
     prompt = prefix + user_message
 
     try:
+        # The Vertex AI SDK uses REGIONAL service endpoints — calling
+        # agent_engines.get() without prior vertexai.init() defaults to
+        # the global / us-central1 endpoint, which has no visibility
+        # into us-east1 reasoning engines. The symptom is
+        # `google.api_core.exceptions.NotFound: 404 The reasoning engine
+        # resource [...] is not found.` for a resource that demonstrably
+        # exists when queried with explicit init.
+        #
+        # Parse project + location from the resource name itself so we
+        # don't need GOOGLE_CLOUD_LOCATION as a separate env var, and
+        # so deploys never drift apart. vertexai.init() is idempotent;
+        # calling it on every request is fine.
+        match = _RESOURCE_NAME_RE.match(resource_name)
+        if match:
+            vertexai.init(project=match["project"], location=match["location"])
+
         # SDK signature: `get(resource_name: str)` — the kwarg is
         # `resource_name`, not `name`. Passing `name=` raised TypeError on
         # every call, which the surrounding except swallowed into a
