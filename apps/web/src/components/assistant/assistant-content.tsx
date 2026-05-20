@@ -114,7 +114,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
   // the Viewport hierarchy.
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  const active = conversationId ? conversations.find((c) => c._id === conversationId) : undefined;
+  const active = conversationId ? conversations.find((c) => c.id === conversationId) : undefined;
   const unknownId = Boolean(conversationId) && !active && !convLoading;
 
   // Hydrate local stream buffer with the active conversation's persisted
@@ -140,11 +140,11 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
     if (!text || streaming) return;
     setDraft("");
 
-    let convId = active?._id ?? null;
+    let convId = active?.id ?? null;
     if (!convId) {
       try {
         const created = await createConversation("general");
-        convId = created._id;
+        convId = created.id;
         router.push(`/assistant/${convId}`);
       } catch {
         return;
@@ -177,13 +177,13 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
             </p>
             <ul className="space-y-1">
               {items.map((c) => (
-                <li key={c._id}>
+                <li key={c.id}>
                   <Link
-                    href={`/assistant/${c._id}`}
+                    href={`/assistant/${c.id}`}
                     onClick={() => setHistoryOpen(false)}
                     className={cn(
                       "flex flex-col gap-0.5 rounded-lg px-3 py-2 text-sm transition-colors",
-                      c._id === conversationId
+                      c.id === conversationId
                         ? "bg-brand-primary-50 text-brand-primary-900"
                         : "text-neutral-800 hover:bg-neutral-100",
                     )}

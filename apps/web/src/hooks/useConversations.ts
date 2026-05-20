@@ -110,16 +110,18 @@ export function useConversations({ mode }: UseConversationsArgs = {}): UseConver
   const createConversation = useCallback(
     async (modeArg: ConversationMode, claimId?: string): Promise<Conversation> => {
       const created = await createApi({ mode: modeArg, claim_id: claimId });
+      // Note: Conversation.id (not _id) — see the comment on the type
+      // definition in types/assistant.ts for the rationale.
       // Prepend so the new conversation lands at the top of the list.
       setConversations((prev) => [created, ...prev]);
-      setCurrentId(created._id);
+      setCurrentId(created.id);
       return created;
     },
     [],
   );
 
   const currentConversation =
-    currentId === null ? null : (conversations.find((c) => c._id === currentId) ?? null);
+    currentId === null ? null : (conversations.find((c) => c.id === currentId) ?? null);
 
   return {
     conversations,

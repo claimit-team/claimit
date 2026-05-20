@@ -163,7 +163,7 @@ export async function getConversation(conversationId: string): Promise<Conversat
   // hackathon scale (≤50 conversations per user) and lets the UI render
   // a full message thread without waiting for the server route.
   const page = await listConversations({ limit: 50 });
-  const found = page.conversations.find((c) => c._id === conversationId);
+  const found = page.conversations.find((c) => c.id === conversationId);
   if (!found) {
     throw new ConversationsApiError(
       "conversation_not_found",

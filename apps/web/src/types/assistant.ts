@@ -66,11 +66,20 @@ export interface UIToolCall {
 }
 
 /**
- * Conversation list-page payload from GET /api/v1/conversations.
+ * Conversation list-page payload from GET/POST /api/v1/conversations.
  * (Mirrors api-gateway conversations route + claimit_mongodb_models.Conversation.)
+ *
+ * Field naming note: this type uses `id`, not `_id` like User and
+ * NotificationEvent. The reason is purely a backend serialization
+ * inconsistency — the conversations route emits `model_dump(mode="json")`
+ * without `by_alias=True`, so Pydantic returns the field by its name
+ * (`id`) rather than its `_id` alias. Notifications and other endpoints
+ * pass `by_alias=True` and thus emit `_id`. We mirror the actual wire
+ * shape rather than papering over it in the API client so future
+ * contributors can diff the type against the network tab without surprise.
  */
 export interface Conversation {
-  _id: string;
+  id: string;
   user_id: string;
   mode: "general" | "claim_focused";
   claim_id: string | null;
