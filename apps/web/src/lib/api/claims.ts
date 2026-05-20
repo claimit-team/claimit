@@ -39,6 +39,17 @@ export type StatusGroup = "pending" | "in_progress" | "resolved";
  * whose linked Purchase has been deleted) are intentionally surfaced —
  * the user can still see and manage them; their joined fields are null.
  *
+ * The enum-typed fields (`platform`, `claim_type`, `outcome`,
+ * `category`) are typed as `Enum | string | null` because the backend
+ * is read-tolerant (PR #142) — a legacy doc may carry a value the
+ * current enum no longer recognises (e.g. `claim_type="price_drop_refund"`
+ * from a pre-2.2 schema scratch). The list endpoint surfaces the raw
+ * value rather than 500ing; consumers render via Title Case fallback
+ * helpers (`claimTypeLabel`, `ClaimOutcomeBadge`, `PlatformLogo`,
+ * `outcomeToGroup`). Required scalars (`claim_amount`, `currency`,
+ * `redraft_count`) are also widened so a missing/null field renders
+ * as "—" rather than crashing the page.
+ *
  * Heavy claim fields (draft_content, draft_versions, policy_clause_cited,
  * outcome_note, etc.) are NOT in this payload — fetch the detail
  * endpoint for those.
@@ -46,19 +57,19 @@ export type StatusGroup = "pending" | "in_progress" | "resolved";
 export type ClaimListItem = {
   _id: string;
   updated_at: string | null;
-  purchase_id: string;
-  user_id: string;
-  platform: Platform;
-  claim_amount: number;
-  currency: "USD";
-  claim_type: ClaimType;
-  outcome: ClaimOutcome;
+  purchase_id: string | null;
+  user_id: string | null;
+  platform: Platform | string | null;
+  claim_amount: number | null;
+  currency: string | null;
+  claim_type: ClaimType | string | null;
+  outcome: ClaimOutcome | string | null;
   submitted_at: string | null;
   resolved_at: string | null;
-  redraft_count: number;
+  redraft_count: number | null;
   // Joined from Purchase (nullable for orphan claims).
   product_name: string | null;
-  category: Category | null;
+  category: Category | string | null;
   window_expires: string | null;
 };
 

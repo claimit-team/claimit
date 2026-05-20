@@ -277,6 +277,98 @@ async def test_get_purchase_404_when_missing(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_purchase_with_rogue_enum_does_not_500(client: AsyncClient) -> None:
+    """Read-tolerance contract (PR #142): a Purchase with a null required
+    field (e.g. category=None, the exact rogue shape from the §3 audit)
+    must not 500 the detail endpoint. The route surfaces the null
+    verbatim and the frontend renders it as '—'."""
+    from claimit_mongodb_models import PurchaseReadTolerant
+
+    rogue = PurchaseReadTolerant.model_construct(
+        id=PURCHASE_ID,
+        user_id=USER_ID,
+        platform="best_buy",
+        category=None,
+        product_name=None,
+        product_id=None,
+        price_paid=99.99,
+        currency="USD",
+        purchase_date=None,
+        purchase_date_basis=None,
+        window_expires=None,
+        order_id=None,
+        status="monitoring",
+        claim_type=None,
+        monitoring_cadence_minutes=60,
+        ingested_at=None,
+        ingestion_source="gmail",
+    )
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=rogue)
+    _set_overrides(mock_db)
+    try:
+        response = await client.get(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        # Verbatim nulls reach the wire; no 500.
+        assert payload["purchase"]["category"] is None
+        assert payload["purchase"]["product_name"] is None
+        assert payload["purchase"]["claim_type"] is None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_list_purchases_rogue_enum_does_not_500(client: AsyncClient) -> None:
+    """A page that contains one rogue Purchase among valid ones must not
+    crash the entire list — the rogue row deserialises through the
+    tolerant variant and surfaces verbatim alongside the valid rows."""
+    from claimit_mongodb_models import PurchaseReadTolerant
+
+    valid = _purchase_fixture(status="monitoring")
+    rogue = PurchaseReadTolerant.model_construct(
+        id=OTHER_USER_PURCHASE_ID,
+        user_id=USER_ID,
+        platform="rogue_marketplace",
+        category=None,
+        product_name=None,
+        product_id="X",
+        price_paid=10.0,
+        currency="USD",
+        purchase_date=None,
+        purchase_date_basis=None,
+        window_expires=None,
+        order_id=None,
+        status="monitoring",
+        claim_type="price_drop_refund",  # legacy, not in current ClaimType
+        monitoring_cadence_minutes=60,
+        ingested_at=None,
+        ingestion_source="gmail",
+    )
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.find_many = AsyncMock(return_value=[valid, rogue])
+    mock_db.count = AsyncMock(return_value=2)
+    _set_overrides(mock_db)
+    try:
+        response = await client.get(
+            "/api/v1/purchases",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+        purchases = response.json()["purchases"]
+        assert len(purchases) == 2
+        # Rogue platform / claim_type pass through verbatim.
+        rogue_row = next(p for p in purchases if p["platform"] == "rogue_marketplace")
+        assert rogue_row["claim_type"] == "price_drop_refund"
+        assert rogue_row["product_name"] is None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
 async def test_get_purchase_404_when_owned_by_other_user(client: AsyncClient) -> None:
     """Cross-user access must 404 (never 403) so existence cannot be probed."""
     mock_db = AsyncMock(spec=MongoDBClient)

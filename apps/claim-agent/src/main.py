@@ -18,6 +18,7 @@ from claimit_mongodb_models import (
     NotificationEntityType,
     NotificationEventType,
     Platform,
+    PurchaseReadTolerant,
     write_notification_event,
 )
 from claimit_observability import init_phoenix
@@ -30,6 +31,40 @@ from .draft.type_d_self_service import generate_self_service_walkthrough
 from .plan import PriceDroppedEvent, plan_claim
 
 _log = logging.getLogger(__name__)
+
+
+def _purchase_degraded_reason(purchase: PurchaseReadTolerant) -> str | None:
+    """Return a human-readable reason if `purchase` is missing fields the
+    drafting pipeline needs, or `None` if it's processable.
+
+    Mirrors `monitor-agent.cron._is_degraded`: same field set the
+    downstream draft generators dereference on every run
+    (`purchase.platform`, `price_paid`, `purchase_date`, `window_expires`,
+    `order_id`, `product_name`). A null/unknown value here means we'd
+    otherwise hand garbage to the LLM and persist a half-baked claim.
+    The §4 contract is to log a warning + skip rather than abort — the
+    upstream Pub/Sub event ack is still 200 so the broker doesn't
+    redeliver.
+    """
+    if purchase.id is None:
+        return "null _id"
+    if purchase.platform is None:
+        return "null platform"
+    try:
+        Platform(purchase.platform)
+    except ValueError:
+        return f"unknown platform {purchase.platform!r}"
+    if purchase.price_paid is None:
+        return "null price_paid"
+    if purchase.purchase_date is None:
+        return "null purchase_date"
+    if purchase.window_expires is None:
+        return "null window_expires"
+    if not purchase.order_id:
+        return "null/empty order_id"
+    if not purchase.product_name:
+        return "null/empty product_name"
+    return None
 
 
 @asynccontextmanager
@@ -87,10 +122,26 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         db = MongoDBClient()
         claim_plan = await plan_claim(event, db)
 
+        # `db.get_purchase` returns the read-tolerant variant so a legacy
+        # doc with a now-invalid enum or a null required field doesn't 500
+        # this handler. The downstream draft generators consume the same
+        # field set whether the source is strict or tolerant — they
+        # already use `str(purchase.platform)` and similar safe accessors —
+        # so we pass the tolerant instance through directly after a
+        # degraded-fields gate. This is the §4 "don't draft garbage"
+        # contract from the read-tolerance follow-up.
         purchase = await db.get_purchase(event.purchase_id)
         if purchase is None:
             _log.error("Purchase not found: %s", event.purchase_id)
             return {"status": "error", "reason": "purchase_not_found"}
+        degraded_reason = _purchase_degraded_reason(purchase)
+        if degraded_reason is not None:
+            _log.warning(
+                "claim_agent.skip_degraded_purchase purchase_id=%s reason=%s",
+                event.purchase_id,
+                degraded_reason,
+            )
+            return {"status": "skipped", "reason": "degraded_purchase"}
 
         policy = await db.get_policy(event.platform_id)
         if policy is None:
