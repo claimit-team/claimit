@@ -26,17 +26,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
 from claimit_mongodb_models import Claim, MongoDBClient
 from claimit_mongodb_models.enums import (
+    Category,
     ClaimOutcome,
+    ClaimType,
     DraftGeneratedBy,
     Platform,
     SendMode,
 )
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..middleware.errors import ApiError
 from ..middleware.pagination import decode_cursor, encode_cursor
@@ -47,26 +51,130 @@ logger = logging.getLogger(__name__)
 CLAIM_APPROVED_TOPIC = "claim.approved"
 _AUTO_SEND_CANCEL_WINDOW = timedelta(minutes=5)
 
+# UI-facing groupings for the /claims filter chips. Each group maps to a set
+# of ClaimOutcome values that the chip should surface. The mapping is
+# deliberately defined here (not in enums.py) because this is a presentation
+# concern owned by the list endpoint, not part of the canonical schema.
+STATUS_GROUP_OUTCOMES: dict[str, list[ClaimOutcome]] = {
+    "pending": [ClaimOutcome.DRAFT_PENDING],
+    "in_progress": [ClaimOutcome.PENDING],
+    "resolved": [
+        ClaimOutcome.APPROVED,
+        ClaimOutcome.DENIED,
+        ClaimOutcome.EXPIRED,
+        ClaimOutcome.USER_SELF_SERVICE,
+        ClaimOutcome.USER_CANCELLED,
+        ClaimOutcome.NO_RESPONSE,
+    ],
+}
+
+# Search input cap — keeps regex compilation bounded and avoids accidental
+# query-string DOS. The route layer enforces this cap so a too-long `q` is
+# rejected at the API edge before it reaches the service.
+Q_MAX_LENGTH = 100
+
+
+class ClaimListItem(BaseModel):
+    """Enriched list-row shape returned by GET /api/v1/claims.
+
+    Claim core fields plus three fields joined from the linked Purchase via
+    `$lookup`: `product_name`, `category`, `window_expires`. The joined
+    fields are Optional because the list endpoint preserves orphan claims
+    (claim whose Purchase has been deleted or never existed) so they can
+    still be surfaced and managed; in that case the joined fields are
+    `None`.
+
+    Heavy fields from the Claim document (`draft_content`, `draft_versions`,
+    `policy_clause_cited`, `outcome_note`, etc.) are intentionally dropped
+    from the list response — the detail endpoint exposes the full Claim.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: UUID = Field(alias="_id")
+    updated_at: datetime | None = None
+    purchase_id: UUID
+    user_id: UUID
+    platform: Platform
+    claim_amount: float
+    currency: str
+    claim_type: ClaimType
+    outcome: ClaimOutcome
+    submitted_at: datetime | None = None
+    resolved_at: datetime | None = None
+    redraft_count: int
+
+    # Joined from Purchase via $lookup.
+    product_name: str | None = None
+    category: Category | None = None
+    window_expires: datetime | None = None
+
 
 async def list_claims(
     db: MongoDBClient,
     user_id: UUID,
     outcome: ClaimOutcome | None = None,
+    status_group: str | None = None,
     platform: Platform | None = None,
+    q: str | None = None,
     limit: int = 20,
     cursor: str | None = None,
 ) -> dict[str, object]:
-    """List the authenticated user's claims with optional filters.
+    """List the authenticated user's claims, enriched with linked Purchase
+    fields, with optional filters and search.
+
+    Pipeline ordering — branched by whether `q` is set:
+
+    - When `q` is None (the common case): claim filters + cursor + sort +
+      limit all run BEFORE `$lookup`. The sort keys (`updated_at`, `_id`)
+      live on the Claim document, so they don't need the join. This caps
+      enrichment work at the page size (~limit + 1) instead of the user's
+      whole matched history.
+
+    - When `q` is set: must `$lookup` before the q-filter `$match` so the
+      regex can match against the joined `purchase.product_name`. Sort and
+      limit run after the q-filter, so cursor pages may come back short
+      when `q` is set — `Load more` keys off the last surviving item's
+      `(updated_at, _id)`, which stays correct under the skew.
+
+    `preserveNullAndEmptyArrays` keeps orphan claims (claim whose Purchase
+    is missing/deleted) visible in the list — their joined fields are
+    `None`. Both branches preserve this behavior.
+
+    Filter precedence:
+    - `outcome` wins over `status_group`. If both are set, `status_group`
+      is silently ignored. This is a deliberate design choice so a UI that
+      drives the chips with `status_group` and an admin tool that filters
+      by a precise `outcome` can both call the same endpoint without
+      collision logic.
+
+    Search semantics:
+    - `q` is `re.escape`d before regex construction. User input cannot
+      inject regex metacharacters or trigger ReDoS — a stray "(" or "*"
+      becomes a literal substring match.
+    - `q` matches case-insensitively against `platform` OR
+      `purchase.product_name`. An empty/whitespace-only `q` is treated as
+      "no filter".
 
     Returns:
         {
-          "claims": list[dict],          # Claim docs as JSON
+          "claims": list[dict],          # ClaimListItem JSON (by_alias)
           "next_cursor": str | None,
         }
     """
     match: dict[str, Any] = {"user_id": user_id}
     if outcome is not None:
         match["outcome"] = outcome.value
+    elif status_group is not None:
+        outcomes = STATUS_GROUP_OUTCOMES.get(status_group)
+        if outcomes is None:
+            raise ApiError(
+                "invalid_status_group",
+                f"Unknown status_group {status_group!r}; expected one of "
+                f"{sorted(STATUS_GROUP_OUTCOMES)}",
+                status_code=400,
+            )
+        match["outcome"] = {"$in": [o.value for o in outcomes]}
     if platform is not None:
         match["platform"] = platform.value
 
@@ -89,11 +197,105 @@ async def list_claims(
             {"updated_at": sort_dt, "_id": {"$lt": cursor_uuid}},
         ]
 
-    pipeline = [
-        {"$match": match},
-        {"$sort": {"updated_at": -1, "_id": -1}},
-        {"$limit": limit + 1},
-    ]
+    # Stages reused by both branches. Pulled out so the two pipeline orderings
+    # below stay obviously identical except for the $sort/$limit placement.
+    lookup_stage: dict[str, Any] = {
+        "$lookup": {
+            "from": "purchases",
+            "localField": "purchase_id",
+            "foreignField": "_id",
+            "as": "purchase",
+            # Sub-pipeline projects only the fields the list view needs,
+            # keeping the joined sub-doc small (purchases carry receipt
+            # blobs and extraction metadata that the list never renders).
+            "pipeline": [
+                {
+                    "$project": {
+                        "_id": 0,
+                        "product_name": 1,
+                        "category": 1,
+                        "window_expires": 1,
+                    }
+                }
+            ],
+        }
+    }
+    # preserveNullAndEmptyArrays keeps orphan claims (claim whose
+    # Purchase is missing/deleted) in the result; their `purchase`
+    # field is null and the joined fields project to None.
+    unwind_stage: dict[str, Any] = {
+        "$unwind": {"path": "$purchase", "preserveNullAndEmptyArrays": True}
+    }
+    sort_stage: dict[str, Any] = {"$sort": {"updated_at": -1, "_id": -1}}
+    limit_stage: dict[str, Any] = {"$limit": limit + 1}
+    project_stage: dict[str, Any] = {
+        # Whitelist projection — final shape matches ClaimListItem.
+        # Drops draft_content, draft_versions, policy_clause_cited,
+        # send_override, outcome_note, denial_reason_extracted,
+        # submitted_via, evidence_screenshot_url, trace_id from the
+        # list response. The detail endpoint exposes them.
+        "$project": {
+            "_id": 1,
+            "updated_at": 1,
+            "purchase_id": 1,
+            "user_id": 1,
+            "platform": 1,
+            "claim_amount": 1,
+            "currency": 1,
+            "claim_type": 1,
+            "outcome": 1,
+            "submitted_at": 1,
+            "resolved_at": 1,
+            "redraft_count": 1,
+            "product_name": "$purchase.product_name",
+            "category": "$purchase.category",
+            "window_expires": "$purchase.window_expires",
+        }
+    }
+
+    q_clean = q.strip() if q is not None else None
+    pipeline: list[dict[str, Any]]
+    if q_clean:
+        # q path: must $lookup before filtering on joined product_name.
+        # Sort/limit run after the q $match so the cursor page reflects
+        # post-filter results; this is the same shape as before this
+        # commit and the result set is unchanged from the pre-fix code.
+        # re.escape makes `q` a literal substring match — no metachar
+        # injection, no ReDoS. Mongo's $regex uses Perl-compatible syntax,
+        # so Python's re.escape produces a compatible literal pattern.
+        pattern = re.escape(q_clean)
+        q_match_stage: dict[str, Any] = {
+            "$match": {
+                "$or": [
+                    {"platform": {"$regex": pattern, "$options": "i"}},
+                    {"purchase.product_name": {"$regex": pattern, "$options": "i"}},
+                ]
+            }
+        }
+        pipeline = [
+            {"$match": match},
+            lookup_stage,
+            unwind_stage,
+            q_match_stage,
+            sort_stage,
+            limit_stage,
+            project_stage,
+        ]
+    else:
+        # No-q path: sort+limit pre-$lookup so we only enrich the page
+        # (~limit+1 claims) instead of the user's whole matched history.
+        # Sort keys live on the Claim document so this is semantically
+        # identical to the q path's ordering on the same input — verified
+        # end-to-end by scripts/validate_claims_lookup.py against Atlas.
+        pipeline = [
+            {"$match": match},
+            sort_stage,
+            limit_stage,
+            lookup_stage,
+            unwind_stage,
+            project_stage,
+        ]
+
     raw_docs = await db.aggregate("claims", pipeline)
 
     has_more = len(raw_docs) > limit
@@ -109,8 +311,10 @@ async def list_claims(
             sort_key_out = str(last_updated)
         next_cursor = encode_cursor(doc_id=str(last["_id"]), sort_key=sort_key_out)
 
-    claims = [Claim.model_validate(d).model_dump(mode="json", by_alias=True) for d in visible]
-    return {"claims": claims, "next_cursor": next_cursor}
+    items = [
+        ClaimListItem.model_validate(d).model_dump(mode="json", by_alias=True) for d in visible
+    ]
+    return {"claims": items, "next_cursor": next_cursor}
 
 
 async def get_claim_detail(
@@ -356,6 +560,9 @@ def _to_utc(dt: datetime) -> datetime:
 
 
 __all__ = [
+    "Q_MAX_LENGTH",
+    "STATUS_GROUP_OUTCOMES",
+    "ClaimListItem",
     "approve_claim",
     "cancel_claim",
     "edit_claim_draft",

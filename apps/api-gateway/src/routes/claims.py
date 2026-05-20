@@ -7,7 +7,7 @@ ownership at the DB layer — 404 on mismatch, never 403).
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from claimit_mongodb_models import MongoDBClient, User
@@ -17,10 +17,13 @@ from pydantic import BaseModel, Field
 
 from ..deps import get_db, get_pubsub_publisher
 from ..middleware.auth import get_current_user
+from ..middleware.errors import ApiError
 from ..services import claims_service
 from ..services.pubsub_publisher import PubSubPublisher
 
 router = APIRouter(prefix="/claims", tags=["claims"])
+
+StatusGroup = Literal["pending", "in_progress", "resolved"]
 
 
 class ApproveClaimRequest(BaseModel):
@@ -41,19 +44,51 @@ async def list_claims(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[MongoDBClient, Depends(get_db)],
     outcome: Annotated[ClaimOutcome | None, Query()] = None,
+    status_group: Annotated[StatusGroup | None, Query()] = None,
     platform: Annotated[Platform | None, Query()] = None,
+    q: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     cursor: Annotated[str | None, Query()] = None,
 ) -> dict[str, object]:
-    """Paginated claims list, sorted by most recent activity first.
+    """Paginated, enriched claims list, sorted by most recent activity first.
 
-    Response: { claims: Claim[], next_cursor: str | null }
+    Each row is a `ClaimListItem` — claim core fields plus `product_name`,
+    `category`, `window_expires` joined from the linked Purchase via
+    `$lookup`. Heavy claim fields (draft body, version history, etc.) are
+    omitted from the list response and exposed only via the detail endpoint.
+
+    Filter precedence: when both `outcome` and `status_group` are supplied,
+    `outcome` wins and `status_group` is silently ignored. This keeps the UI
+    (which drives `status_group` from filter chips) and admin tools (which
+    filter by precise `outcome`) able to share the same endpoint without
+    collision logic.
+
+    Search:
+    - `q` is matched case-insensitively against `platform` and the joined
+      `product_name`. Input is `re.escape`d server-side, so regex
+      metacharacters and ReDoS payloads degrade to literal substring matches.
+    - Strings beyond `Q_MAX_LENGTH` (100 chars) are rejected with 400 so
+      runaway-input regex compile cost stays bounded.
+
+    Response: { claims: ClaimListItem[], next_cursor: str | null }
     """
+    if q is not None:
+        q = q.strip()
+        if len(q) > claims_service.Q_MAX_LENGTH:
+            raise ApiError(
+                "invalid_search_query",
+                f"Search query must be at most {claims_service.Q_MAX_LENGTH} characters",
+                status_code=400,
+            )
+        if not q:
+            q = None
     return await claims_service.list_claims(
         db=db,
         user_id=user.id,
         outcome=outcome,
+        status_group=status_group,
         platform=platform,
+        q=q,
         limit=limit,
         cursor=cursor,
     )
