@@ -18,6 +18,12 @@ import type { Conversation, ConversationMode } from "@/types/assistant";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 const CONVERSATIONS_TIMEOUT_MS = 10000;
 
+// The backend types claim_id as `UUID | None`. Pydantic returns a 422
+// before our handler runs if the value isn't UUID-shaped. Validate
+// client-side so we surface a clear typed error instead of a generic 422
+// — this is how mock-data claim_ids like "claim_001" used to silently fail.
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export type ListConversationsParams = {
   mode?: ConversationMode;
   status?: "active" | "archived";
@@ -131,6 +137,16 @@ export async function listConversations(
 export async function createConversation(params: CreateConversationParams): Promise<Conversation> {
   const body: Record<string, unknown> = { mode: params.mode };
   if (params.claim_id !== undefined) {
+    if (!UUID_REGEX.test(params.claim_id)) {
+      // Short-circuit the network call. The backend would return 422
+      // anyway (Pydantic UUID parse failure); raising a typed error here
+      // lets the calling component render a useful message instead of a
+      // generic HTTP 422 status.
+      throw new ConversationsApiError(
+        "invalid_claim_id",
+        `claim_id must be a UUID; received ${JSON.stringify(params.claim_id)}.`,
+      );
+    }
     body.claim_id = params.claim_id;
   }
   const raw = await _request<{ conversation: Conversation }>(

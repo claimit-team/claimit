@@ -120,7 +120,12 @@ export function AssistantPane({ claimId, onDoubleClickHeader }: AssistantPanePro
   const [inputValue, setInputValue] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  // Surface conversation-creation errors locally — useConversations.error
+  // only tracks the list call. A 422 from create_conversation (e.g. when
+  // a mock claim_id arrives that's not UUID-shaped) needs its own surface.
+  const [createError, setCreateError] = useState<string | null>(null);
+  // Sentinel for scrollIntoView — see scroll effect below.
+  const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Locate (or lazily create) the claim_focused conversation for this claim.
@@ -138,19 +143,26 @@ export function AssistantPane({ claimId, onDoubleClickHeader }: AssistantPanePro
     // duplicate-creation races. createConversation prepends the new entry
     // to the list, so this effect re-runs and the `existing` branch fires.
     if (creating) return;
+    if (createError) return; // Don't retry a known-bad claim id on every render.
     setCreating(true);
     void (async () => {
       try {
         const created = await createConversation("claim_focused", claimId);
         setActiveId(created._id);
         hydrate([]);
-      } catch {
-        // useConversations.error renders the failure; nothing else to do.
+      } catch (err) {
+        // Typed ConversationsApiError exposes a `message` — surface it so
+        // the user understands why the assistant is unavailable. The most
+        // common cause is invalid_claim_id (mock-data claim ids that
+        // aren't UUID-shaped); the message will say so explicitly.
+        setCreateError(
+          err instanceof Error ? err.message : "Failed to start the claim-focused assistant.",
+        );
       } finally {
         setCreating(false);
       }
     })();
-  }, [conversations, convLoading, claimId, creating, createConversation, hydrate]);
+  }, [conversations, convLoading, claimId, creating, createError, createConversation, hydrate]);
 
   // Reset stream buffer if the claimId switches under us (e.g. user
   // navigates between claim details without unmounting the shell).
@@ -163,9 +175,7 @@ export function AssistantPane({ claimId, onDoubleClickHeader }: AssistantPanePro
   // biome-ignore lint/correctness/useExhaustiveDependencies: `messages` is the intentional trigger for the scroll effect even though the body doesn't read it
   useEffect(() => {
     queueMicrotask(() => {
-      const el = scrollRef.current;
-      if (!el) return;
-      el.scrollTop = el.scrollHeight;
+      bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
     });
   }, [messages]);
 
@@ -194,7 +204,7 @@ export function AssistantPane({ claimId, onDoubleClickHeader }: AssistantPanePro
     <div className="flex h-full flex-col bg-neutral-0">
       <PaneHeader onDoubleClick={onDoubleClickHeader} />
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {convError ? (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
@@ -202,12 +212,19 @@ export function AssistantPane({ claimId, onDoubleClickHeader }: AssistantPanePro
           </Alert>
         ) : null}
 
-        {!activeId && (convLoading || creating) ? (
+        {createError ? (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{createError}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {!activeId && !createError && (convLoading || creating) ? (
           <div className="flex items-center gap-2 text-sm text-neutral-500">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
             Preparing assistant for this claim…
           </div>
-        ) : (
+        ) : !createError ? (
           <div className="space-y-4">
             {messages.length === 0 ? (
               <p className="text-sm text-neutral-500">
@@ -222,8 +239,9 @@ export function AssistantPane({ claimId, onDoubleClickHeader }: AssistantPanePro
                 <AlertDescription>{streamError}</AlertDescription>
               </Alert>
             ) : null}
+            <div ref={bottomRef} aria-hidden="true" />
           </div>
-        )}
+        ) : null}
       </div>
 
       <div className="border-neutral-200 border-t px-4 py-2">

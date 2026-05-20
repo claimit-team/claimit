@@ -42,6 +42,20 @@ function formatCurrency(amount: unknown): string {
   }).format(n);
 }
 
+/**
+ * Coerce an unknown payload value to a finite number, or fall back.
+ *
+ * Notification payloads aren't schema-validated end-to-end; producers may
+ * accidentally send `"3"` instead of `3`, or `null`, or NaN-shaped strings.
+ * Counts that flow into prompts ("Welcome back! I caught X drops") look
+ * broken if "NaN" or "undefined" lands in the user-facing string, so we
+ * coerce defensively and fall back to a known-good integer.
+ */
+function safeNumber(value: unknown, fallback: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 // ---------------------------------------------------------------------------
 // The 10 templates — order mirrors NotificationEventType in the backend enums.
 // ---------------------------------------------------------------------------
@@ -171,7 +185,7 @@ function firstTimeDashboard(data: PayloadDict): ProactiveOutput {
 }
 
 function userReturnedAfterLongAbsence(data: PayloadDict): ProactiveOutput {
-  const drops = data.drops_caught ?? 0;
+  const drops = safeNumber(data.drops_caught, 0);
   const amount = formatCurrency(data.total_savings_while_away ?? 0);
   return {
     opening_message: `Welcome back! While you were away, I caught ${drops} price drops worth ${amount}.`,
@@ -184,7 +198,7 @@ function userReturnedAfterLongAbsence(data: PayloadDict): ProactiveOutput {
 }
 
 function consecutiveRejections(data: PayloadDict): ProactiveOutput {
-  const count = data.rejection_count ?? 3;
+  const count = safeNumber(data.rejection_count, 3);
   return {
     opening_message: `I notice you've rejected ${count} versions of this draft. Want to tell me what tone you're looking for?`,
     key_facts: [`Rejected drafts: ${count}`],
