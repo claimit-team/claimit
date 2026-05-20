@@ -1,0 +1,482 @@
+"""Purchases service: list/detail/confirm/dismiss/upload business logic.
+
+See Attachment 2 §3.3 for the endpoint contract. Routes in
+`routes/purchases.py` are thin wrappers that adapt request/response
+shapes; all DB and storage work lives here.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+import uuid
+from datetime import UTC, datetime
+from typing import Any, Literal
+from uuid import UUID
+
+from claimit_mongodb_models import (
+    SKIPLIST_MAX_ENTRIES,
+    Category,
+    ClaimType,
+    ExtractionConfidence,
+    IngestionSkiplistEntry,
+    IngestionSource,
+    MongoDBClient,
+    Platform,
+    Purchase,
+    PurchaseDateBasis,
+    PurchaseStatus,
+    User,
+    normalize_sender,
+)
+from pydantic import ValidationError
+
+from ..middleware.errors import ApiError
+from ..middleware.pagination import apply_cursor_to_query, encode_cursor
+from ..services.receipts_storage import ReceiptsUploader
+
+_log = logging.getLogger(__name__)
+
+DismissReason = Literal["not_an_order", "duplicate", "other"]
+
+# Fields a user may correct via POST /confirm. System-managed fields
+# (identity, status, extraction metadata, infra-derived dates) are
+# disallowed — any attempt to set them returns 400.
+_ALLOWED_CORRECTABLE_FIELDS: frozenset[str] = frozenset(
+    {
+        "platform",
+        "category",
+        "product_name",
+        "product_id",
+        "product_url",
+        "variant",
+        "fare_class",
+        "room_type",
+        "bed_type",
+        "rate_type",
+        "price_paid",
+        "member_price_at_purchase",
+        "non_member_price_at_purchase",
+        "purchase_date",
+        "purchase_date_basis",
+        "order_id",
+        "member_tier_at_purchase",
+        "monitoring_cadence_minutes",
+    }
+)
+
+_ALLOWED_UPLOAD_CONTENT_TYPES: dict[str, IngestionSource] = {
+    "application/pdf": IngestionSource.UPLOAD_PDF,
+    "image/png": IngestionSource.UPLOAD_IMAGE,
+    "image/jpeg": IngestionSource.UPLOAD_IMAGE,
+}
+
+# 10 MB per Attachment 2 §3.3 + acceptance criteria.
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+# Pending-confirmation upload defaults. The ingest agent overwrites every
+# one of these once it picks up the upload (via change stream or future
+# Pub/Sub). Frontend must not display these literal values — it should
+# render the upload as "Processing…" while status == pending_confirmation.
+_UPLOAD_PURCHASE_DEFAULTS: dict[str, Any] = {
+    "platform": Platform.AMAZON,
+    "category": Category.RETAIL,
+    "product_name": "",
+    "product_id": "",
+    "product_url": None,
+    "variant": None,
+    "fare_class": None,
+    "room_type": None,
+    "bed_type": None,
+    "rate_type": None,
+    # price_paid has gt=0; use 0.01 sentinel until extraction fills it in.
+    "price_paid": 0.01,
+    "member_price_at_purchase": None,
+    "non_member_price_at_purchase": None,
+    "currency": "USD",
+    "purchase_date_basis": PurchaseDateBasis.ORDER_DATE,
+    "order_id": "",
+    "member_tier_at_purchase": None,
+    "claim_type": ClaimType.SELF_SERVICE,
+    "monitoring_cadence_minutes": 360,
+}
+
+
+def parse_purchase_id(purchase_id: str) -> UUID:
+    try:
+        return UUID(purchase_id)
+    except ValueError as err:
+        raise ApiError("invalid_purchase_id", "Invalid purchase id", status_code=400) from err
+
+
+async def list_purchases(
+    db: MongoDBClient,
+    user_id: UUID,
+    status: PurchaseStatus | None,
+    category: Category | None,
+    limit: int,
+    cursor: str | None,
+) -> dict[str, object]:
+    """Paginated list of the authenticated user's purchases.
+
+    Pagination is `_id` ASC via the shared `apply_cursor_to_query` helper.
+    `total_count` reflects the full filtered set, not just the current page.
+    """
+    base_filter: dict[str, Any] = {"user_id": user_id}
+    if status is not None:
+        base_filter["status"] = status.value
+    if category is not None:
+        base_filter["category"] = category.value
+
+    total_count = await db.count("purchases", base_filter)
+
+    page_filter = apply_cursor_to_query(base_filter, cursor)
+    fetched = await db.find_many(
+        "purchases",
+        page_filter,
+        Purchase,
+        limit=limit + 1,
+        sort=[("_id", 1)],
+    )
+
+    has_more = len(fetched) > limit
+    visible = fetched[:limit]
+    next_cursor = encode_cursor(str(visible[-1].id)) if has_more and visible else None
+
+    return {
+        "purchases": [p.model_dump(mode="json", by_alias=True) for p in visible],
+        "next_cursor": next_cursor,
+        "total_count": total_count,
+    }
+
+
+async def get_purchase_for_user(
+    db: MongoDBClient,
+    user_id: UUID,
+    purchase_id: UUID,
+) -> Purchase:
+    """Fetch a purchase owned by the user. Raises 404 otherwise.
+
+    Returns the same 404 for missing-doc and wrong-owner cases so callers
+    cannot probe for existence of another user's purchases.
+    """
+    purchase = await db.get_purchase(purchase_id)
+    if purchase is None or purchase.user_id != user_id:
+        raise ApiError("not_found", "Purchase not found", status_code=404)
+    return purchase
+
+
+async def confirm_purchase(
+    db: MongoDBClient,
+    user: User,
+    purchase_id: UUID,
+    corrected_fields: dict[str, Any] | None,
+) -> Purchase:
+    """Apply any user corrections and transition status → monitoring.
+
+    Raises:
+        ApiError(not_found, 404) if purchase is missing or not owned.
+        ApiError(invalid_status, 409) if status is not pending_confirmation.
+        ApiError(invalid_field, 400) if corrected_fields contains a
+            system-managed or unknown key.
+    """
+    purchase = await get_purchase_for_user(db, user.id, purchase_id)
+
+    if purchase.status != PurchaseStatus.PENDING_CONFIRMATION:
+        raise ApiError(
+            "invalid_status",
+            f"Purchase cannot be confirmed from status '{purchase.status}'",
+            status_code=409,
+        )
+
+    updates: dict[str, Any] = {"status": PurchaseStatus.MONITORING}
+    if corrected_fields:
+        for key in corrected_fields:
+            if key not in _ALLOWED_CORRECTABLE_FIELDS:
+                raise ApiError(
+                    "invalid_field",
+                    f"Field '{key}' is not user-correctable",
+                    status_code=400,
+                )
+        updates.update(corrected_fields)
+
+    try:
+        matched = await db.partial_update("purchases", purchase_id, updates, model=Purchase)
+    except ValidationError as err:
+        raise ApiError(
+            "invalid_field",
+            "One or more corrected fields failed validation",
+            status_code=400,
+            details=_validation_error_details(err),
+        ) from err
+    except ValueError as err:
+        raise ApiError(
+            "invalid_field",
+            str(err),
+            status_code=400,
+        ) from err
+    if not matched:
+        # Document deleted between read and write — same surface as 404.
+        raise ApiError("not_found", "Purchase not found", status_code=404)
+
+    updated = await db.get_purchase(purchase_id)
+    if updated is None:
+        raise ApiError("not_found", "Purchase not found", status_code=404)
+
+    _log.info(
+        "Purchase confirmed purchase_id=%s user_id=%s corrected_fields=%s",
+        purchase_id,
+        user.id,
+        sorted(corrected_fields.keys()) if corrected_fields else [],
+    )
+    return updated
+
+
+async def dismiss_purchase(
+    db: MongoDBClient,
+    user: User,
+    purchase_id: UUID,
+    reason: DismissReason,
+    remember_sender: bool,
+    sender: str | None,
+) -> dict[str, object]:
+    """Mark a pending purchase dismissed; optionally write the skiplist.
+
+    `sender` is accepted for backward compat with frontend wiring
+    (issue #103) — once Purchase carries the original email sender, the
+    request body will shrink to just `{reason, remember_sender}`.
+    Skiplist writes are best-effort: a Mongo error is logged but does
+    not fail the dismiss.
+
+    Returns the response envelope (dict) so the route doesn't have to
+    reshape — keeps the dismiss handler trivial.
+    """
+    purchase = await get_purchase_for_user(db, user.id, purchase_id)
+
+    if purchase.status != PurchaseStatus.PENDING_CONFIRMATION:
+        raise ApiError(
+            "invalid_status",
+            f"Purchase cannot be dismissed from status '{purchase.status}'",
+            status_code=409,
+        )
+
+    matched = await db.partial_update(
+        "purchases",
+        purchase_id,
+        {"status": PurchaseStatus.DISMISSED},
+        model=Purchase,
+    )
+    if not matched:
+        raise ApiError("not_found", "Purchase not found", status_code=404)
+
+    skiplist_written = False
+    if remember_sender and reason in ("not_an_order", "other"):
+        try:
+            skiplist_written = await _append_ingestion_skiplist(
+                user=user,
+                purchase=purchase,
+                sender=sender,
+                reason=reason,
+                db=db,
+            )
+        except Exception:
+            _log.exception(
+                "Skiplist write failed (best-effort) purchase_id=%s user_id=%s",
+                purchase_id,
+                user.id,
+            )
+
+    _log.info(
+        "Purchase dismissed purchase_id=%s user_id=%s reason=%s remember=%s skiplist=%s",
+        purchase_id,
+        user.id,
+        reason,
+        remember_sender,
+        skiplist_written,
+    )
+    return {
+        "success": True,
+        "purchase_id": str(purchase_id),
+        "status": PurchaseStatus.DISMISSED,
+        "reason": reason,
+        "skiplist_written": skiplist_written,
+    }
+
+
+async def _append_ingestion_skiplist(
+    *,
+    user: User,
+    purchase: Purchase,
+    sender: str | None,
+    reason: str,
+    db: MongoDBClient,
+) -> bool:
+    """Append an IngestionSkiplistEntry. Returns False on duplicate (no-op)."""
+    format_hash = purchase.format_hash
+    if not format_hash:
+        _log.warning(
+            "Dismiss without format_hash; skipping skiplist write purchase_id=%s",
+            purchase.id,
+        )
+        return False
+
+    cleaned = normalize_sender(sender or purchase.sender or "")
+    if not cleaned:
+        _log.warning(
+            "Dismiss with remember_sender but no sender; storing 'unknown' purchase_id=%s",
+            purchase.id,
+        )
+        cleaned = "unknown"
+
+    now = datetime.now(UTC)
+    entry = IngestionSkiplistEntry(
+        sender=cleaned,
+        format_hash=format_hash,
+        added_at=now,
+        reason=reason,
+    )
+
+    if any(
+        normalize_sender(e.sender) == entry.sender and e.format_hash == entry.format_hash
+        for e in user.ingestion_skiplist
+    ):
+        return False
+
+    updated_skiplist = [*user.ingestion_skiplist, entry]
+    if len(updated_skiplist) > SKIPLIST_MAX_ENTRIES:
+        updated_skiplist = updated_skiplist[-SKIPLIST_MAX_ENTRIES:]
+    user.ingestion_skiplist = updated_skiplist
+    user.updated_at = now
+    await db.upsert("users", user.id, user)
+    return True
+
+
+async def upload_receipt(
+    *,
+    db: MongoDBClient,
+    uploader: ReceiptsUploader,
+    user: User,
+    file_bytes: bytes,
+    content_type: str,
+    filename: str | None,
+) -> Purchase:
+    """Persist an uploaded receipt and create a pending_confirmation Purchase.
+
+    The new Purchase carries sentinel field values (price_paid=0.01,
+    empty strings for ids/names, etc.) because nothing has been
+    extracted yet — the ingest agent will overwrite these once it
+    picks up the upload. Status is `pending_confirmation` so consumers
+    know not to trust the field values yet.
+
+    Raises:
+        ApiError(unsupported_media_type, 415) for non-PDF/PNG/JPEG.
+        ApiError(file_too_large, 413) for files > 10 MB.
+    """
+    ingestion_source = validate_upload_content_type(content_type)
+    validate_upload_size(len(file_bytes))
+
+    purchase_id = uuid.uuid4()
+    now = datetime.now(UTC)
+    blob_path = _build_receipt_blob_path(
+        user_id=user.id,
+        purchase_id=purchase_id,
+        filename=filename,
+        content_type=content_type,
+        uploaded_at=now,
+    )
+
+    storage_url = await uploader.upload(
+        data=file_bytes,
+        content_type=content_type,
+        blob_path=blob_path,
+    )
+
+    purchase = Purchase(
+        id=purchase_id,
+        user_id=user.id,
+        status=PurchaseStatus.PENDING_CONFIRMATION,
+        ingestion_source=ingestion_source,
+        receipt_storage_url=storage_url,
+        receipt_hash=None,
+        purchase_date=now,
+        # window_expires is filled by ingest extraction; default to now so
+        # the field is non-null. Status pending_confirmation prevents the
+        # monitor-agent from treating window as authoritative.
+        window_expires=now,
+        ingested_at=now,
+        updated_at=now,
+        extraction_confidence=ExtractionConfidence(
+            platform=0.0,
+            price=0.0,
+            overall_min=0.0,
+        ),
+        **_UPLOAD_PURCHASE_DEFAULTS,
+    )
+    await db.upsert("purchases", purchase_id, purchase)
+
+    _log.info(
+        "Receipt uploaded purchase_id=%s user_id=%s content_type=%s bytes=%d",
+        purchase_id,
+        user.id,
+        content_type,
+        len(file_bytes),
+    )
+    return purchase
+
+
+def validate_upload_content_type(content_type: str) -> IngestionSource:
+    ingestion_source = _ALLOWED_UPLOAD_CONTENT_TYPES.get(content_type)
+    if ingestion_source is None:
+        raise ApiError(
+            "unsupported_media_type",
+            f"Unsupported content type: {content_type}. Allowed: PDF, PNG, JPEG.",
+            status_code=415,
+        )
+    return ingestion_source
+
+
+def validate_upload_size(size_bytes: int) -> None:
+    if size_bytes > MAX_UPLOAD_BYTES:
+        raise ApiError(
+            "file_too_large",
+            f"File exceeds {MAX_UPLOAD_BYTES} byte limit",
+            status_code=413,
+        )
+
+
+def _validation_error_details(err: ValidationError) -> dict[str, object]:
+    return {
+        "fields": [
+            {"loc": item.get("loc"), "type": item.get("type"), "msg": item.get("msg")}
+            for item in err.errors()
+        ]
+    }
+
+
+_FILENAME_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _build_receipt_blob_path(
+    *,
+    user_id: UUID,
+    purchase_id: UUID,
+    filename: str | None,
+    content_type: str,
+    uploaded_at: datetime,
+) -> str:
+    """GCS path: receipts/{user_id}/{purchase_id}/{ts}-{safe_filename}.
+
+    Filename is sanitised to ASCII-safe chars to prevent header injection
+    or path-traversal attempts via the multipart filename field.
+    """
+    ts = uploaded_at.strftime("%Y%m%dT%H%M%SZ")
+    if filename:
+        cleaned = _FILENAME_SAFE.sub("_", filename).strip("._-") or "receipt"
+    else:
+        ext = {
+            "application/pdf": "pdf",
+            "image/png": "png",
+            "image/jpeg": "jpg",
+        }.get(content_type, "bin")
+        cleaned = f"receipt.{ext}"
+    return f"receipts/{user_id}/{purchase_id}/{ts}-{cleaned}"
