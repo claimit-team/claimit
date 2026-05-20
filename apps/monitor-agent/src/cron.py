@@ -13,9 +13,11 @@ from uuid import uuid4
 
 from claimit_mongodb_models import (
     MongoDBClient,
+    Platform,
     PriceHistory,
     PriceSource,
     Purchase,
+    PurchaseReadTolerant,
 )
 from claimit_observability import get_tracer, span_with_attributes
 
@@ -37,16 +39,63 @@ def _as_utc_aware(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+def _is_degraded(purchase: PurchaseReadTolerant) -> str | None:
+    """Return a human-readable reason if `purchase` is missing fields the
+    cron sweep depends on, or `None` if it's processable.
+
+    The §1 audit (PR #141 follow-up) found one rogue Purchase in prod
+    with `category=None`, `product_name=None`, `claim_type=None`. With
+    `db.find_purchases` now returning `PurchaseReadTolerant`, that doc
+    no longer 500s deserialization — but the cron's `compute_target_cadence`,
+    `is_due`, and `get_adapter` calls expect non-null `window_expires`,
+    `monitoring_cadence_minutes`, `platform`, and `product_id`. Skip
+    such docs with a logged warning so the rest of the sweep continues.
+    """
+    if purchase.id is None:
+        return "null _id (impossible from Mongo, but be defensive)"
+    if purchase.window_expires is None:
+        return "null window_expires"
+    if purchase.monitoring_cadence_minutes is None:
+        return "null monitoring_cadence_minutes"
+    if purchase.price_paid is None:
+        return "null price_paid"
+    if purchase.platform is None:
+        return "null platform"
+    try:
+        Platform(purchase.platform)
+    except ValueError:
+        return f"unknown platform {purchase.platform!r}"
+    if not purchase.product_id:
+        return "null/empty product_id"
+    return None
+
+
 async def run_cron(db: MongoDBClient) -> dict[str, int]:
     """Run one cadence sweep. Returns counter summary; always finishes successfully."""
     now = datetime.now(UTC)
     scanned = due_count = fetched = errors = skipped_expired = skipped_source = 0
+    skipped_degraded = 0
 
     purchases = await db.find_purchases({"status": "monitoring"}, limit=_SCAN_LIMIT)
 
     with span_with_attributes(tracer, "cron.run", {"purchases.scanned": len(purchases)}):
         for purchase in purchases:
             scanned += 1
+            # Skip degraded docs (legacy/rogue rows where required cron
+            # inputs are null or carry an unknown enum value). Emitting
+            # a warning + skipping per-row is the §4 contract — never
+            # abort the whole sweep on one bad doc.
+            degraded_reason = _is_degraded(purchase)
+            if degraded_reason is not None:
+                skipped_degraded += 1
+                logger.warning(
+                    "cron.skip_degraded purchase_id=%s reason=%s",
+                    purchase.id,
+                    degraded_reason,
+                )
+                continue
+
+            # The non-null guarantees below are established by `_is_degraded`.
             purchase.window_expires = _as_utc_aware(purchase.window_expires)
             if purchase.last_checked_at is not None:
                 purchase.last_checked_at = _as_utc_aware(purchase.last_checked_at)
@@ -104,17 +153,21 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
             )
 
             try:
+                # `purchase.platform` is the raw string (validated by
+                # `_is_degraded` to map to the Platform enum) and
+                # `product_id` is non-empty by the same gate.
+                platform_value = purchase.platform
                 with span_with_attributes(
                     tracer,
                     "cron.fetch",
                     {
                         "purchase.id": str(purchase.id),
-                        "purchase.platform": purchase.platform.value,
+                        "purchase.platform": platform_value,
                     },
                 ):
-                    adapter = get_adapter(purchase.platform.value)
+                    adapter = get_adapter(platform_value)
                     snap = await adapter.fetch_current_price(
-                        platform=purchase.platform.value,
+                        platform=platform_value,
                         product_id=purchase.product_id,
                         product_url=purchase.product_url,
                         member_tier=purchase.member_tier_at_purchase,
@@ -148,21 +201,26 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
         "errors": errors,
         "skipped_expired": skipped_expired,
         "skipped_source": skipped_source,
+        "skipped_degraded": skipped_degraded,
     }
     logger.info(
-        "cron.summary scanned=%d due=%d fetched=%d errors=%d skipped_expired=%d skipped_source=%d",
+        "cron.summary scanned=%d due=%d fetched=%d errors=%d "
+        "skipped_expired=%d skipped_source=%d skipped_degraded=%d",
         scanned,
         due_count,
         fetched,
         errors,
         skipped_expired,
         skipped_source,
+        skipped_degraded,
     )
     return summary
 
 
 async def _persist_price_history(
-    db: MongoDBClient, purchase: Purchase, snap: PriceSnapshot
+    db: MongoDBClient,
+    purchase: PurchaseReadTolerant,
+    snap: PriceSnapshot,
 ) -> bool:
     """Write a PriceHistory row when the adapter's source maps to the enum.
 

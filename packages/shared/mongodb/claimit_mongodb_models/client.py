@@ -26,11 +26,13 @@ from pydantic import TypeAdapter, ValidationError
 
 from .base import BaseDocument
 from .claim import Claim
+from .claim_read_tolerant import ClaimReadTolerant
 from .conversation import Conversation
 from .notification_event import NotificationEvent
 from .policy import Policy
 from .price_history import PriceHistory
 from .purchase import Purchase
+from .purchase_read_tolerant import PurchaseReadTolerant
 from .user import User
 
 T = TypeVar("T", bound=BaseDocument)
@@ -41,6 +43,15 @@ logger = logging.getLogger(__name__)
 # validate dict inputs against the canonical schema before the write hits
 # the database — Pydantic instances are trusted (already validated at
 # construction) and bypass this lookup.
+#
+# IMPORTANT: This map is the WRITE gate. It must always point at the
+# STRICT models for `claims` and `purchases`, never at the read-tolerant
+# variants. The typed read helpers below (`get_claim`, `get_purchase`,
+# `find_claims`, `find_purchases`) deliberately return tolerant instances
+# so legacy/degraded docs don't 500 the read paths — but a write that
+# happens to round-trip a tolerant instance back through `upsert` would
+# still re-validate against the strict class here. That's the
+# strict-on-write guarantee.
 COLLECTION_MODELS: dict[str, type[BaseDocument]] = {
     "purchases": Purchase,
     "claims": Claim,
@@ -317,23 +328,39 @@ class MongoDBClient:
     # thin wrapper around the generic helpers above so the caller can stay in
     # typed-Pydantic-land without remembering collection-name strings.
 
-    async def get_purchase(self, id: str | UUID) -> Purchase | None:
-        return await self.get("purchases", id, Purchase)
+    # ---------- Purchase + Claim typed READS return TOLERANT models ----------
+    # The §1 audit (PR #141 follow-up) found eight read sites that 500 when
+    # a legacy/degraded doc lives in the user's history. These typed
+    # shortcuts default to the read-tolerant variants so callers are
+    # auto-safe — the strict `Purchase` / `Claim` classes stay reserved
+    # for the WRITE path (the constructor calls in upload/ingest/agents
+    # plus `db.upsert("purchases"/"claims", …)` which validates against
+    # the strict `COLLECTION_MODELS` entries above).
+
+    async def get_purchase(self, id: str | UUID) -> PurchaseReadTolerant | None:
+        return await self.get("purchases", id, PurchaseReadTolerant)
 
     async def upsert_purchase(self, purchase: Purchase) -> str:
+        # Param annotation stays strict — only fully-validated Purchase
+        # instances should be written. Read-tolerant instances must NOT
+        # round-trip back through writes.
         return await self.upsert("purchases", purchase.id, purchase)
 
-    async def find_purchases(self, filter: dict[str, Any], limit: int = 100) -> list[Purchase]:
-        return await self.find_many("purchases", filter, Purchase, limit=limit)
+    async def find_purchases(
+        self, filter: dict[str, Any], limit: int = 100
+    ) -> list[PurchaseReadTolerant]:
+        return await self.find_many("purchases", filter, PurchaseReadTolerant, limit=limit)
 
-    async def get_claim(self, id: str | UUID) -> Claim | None:
-        return await self.get("claims", id, Claim)
+    async def get_claim(self, id: str | UUID) -> ClaimReadTolerant | None:
+        return await self.get("claims", id, ClaimReadTolerant)
 
     async def upsert_claim(self, claim: Claim) -> str:
         return await self.upsert("claims", claim.id, claim)
 
-    async def find_claims(self, filter: dict[str, Any], limit: int = 100) -> list[Claim]:
-        return await self.find_many("claims", filter, Claim, limit=limit)
+    async def find_claims(
+        self, filter: dict[str, Any], limit: int = 100
+    ) -> list[ClaimReadTolerant]:
+        return await self.find_many("claims", filter, ClaimReadTolerant, limit=limit)
 
     async def get_policy(self, platform: str) -> Policy | None:
         """Fetch the active policy for a given platform (find_one by platform)."""

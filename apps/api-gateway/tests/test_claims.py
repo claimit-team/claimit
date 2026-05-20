@@ -407,6 +407,52 @@ async def test_list_claims_orphan_claim_no_purchase(client: AsyncClient) -> None
 
 
 @pytest.mark.asyncio
+async def test_list_claims_rogue_enum_does_not_500(client: AsyncClient) -> None:
+    """Read-tolerance contract (PR #142): an enriched aggregation row with
+    a `claim_type` value no longer in the current ClaimType enum
+    (e.g. legacy `price_drop_refund`) must surface verbatim in the
+    response rather than 500ing `ClaimListItem.model_validate`. This is
+    the exact rogue-claim shape from the PR #141 follow-up audit."""
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=lambda *_a, **_k: _user_for_auth())
+    rogue_row = _enriched_doc(claim_type="price_drop_refund", outcome="approved")
+    db.aggregate = AsyncMock(return_value=[rogue_row])
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get("/api/v1/claims", headers={"Authorization": "Bearer t"})
+        assert response.status_code == 200
+        row = response.json()["claims"][0]
+        # Verbatim pass-through: not None, not coerced.
+        assert row["claim_type"] == "price_drop_refund"
+        assert row["outcome"] == "approved"
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_list_claims_null_required_fields_do_not_500(client: AsyncClient) -> None:
+    """Read-tolerance contract (PR #142): null `claim_amount` / `currency` /
+    `redraft_count` (all required on the strict Claim) must surface as
+    null on the wire instead of crashing the page."""
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=lambda *_a, **_k: _user_for_auth())
+    half_null = _enriched_doc(claim_amount=None, currency=None, redraft_count=None)
+    db.aggregate = AsyncMock(return_value=[half_null])
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get("/api/v1/claims", headers={"Authorization": "Bearer t"})
+        assert response.status_code == 200
+        row = response.json()["claims"][0]
+        assert row["claim_amount"] is None
+        assert row["currency"] is None
+        assert row["redraft_count"] is None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
 async def test_list_claims_invalid_status_group_rejected(client: AsyncClient) -> None:
     """FastAPI's Literal validator rejects unknown status_group values
     before the service ever runs."""
@@ -463,6 +509,59 @@ async def test_get_claim_detail_success(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_claim_detail_with_rogue_enum_does_not_500(client: AsyncClient) -> None:
+    """Read-tolerance contract (PR #142): the detail endpoint must not 500
+    when the loaded claim carries a legacy enum value (`claim_type` no
+    longer in the current ClaimType enum). The tolerant variant absorbs
+    the rogue string and the response surfaces it verbatim."""
+    from claimit_mongodb_models import ClaimReadTolerant
+
+    # Build a rogue claim by direct model_construct on the tolerant variant —
+    # the strict Claim would refuse the rogue claim_type at construction.
+    rogue = ClaimReadTolerant.model_construct(
+        id=UUID(_CLAIM_ID),
+        purchase_id=UUID("30000000-0000-0000-0000-000000000001"),
+        user_id=UUID(_USER_ID),
+        platform="best_buy",
+        claim_amount=50.0,
+        currency="USD",
+        claim_type="price_drop_refund",  # rogue, no longer in ClaimType
+        draft_content="hi",
+        draft_versions=[],
+        redraft_count=0,
+        policy_clause_cited="",
+        outcome="approved",
+        submitted_at=None,
+        resolved_at=None,
+        evidence_screenshot_url=None,
+        send_override=None,
+        submitted_via=None,
+        outcome_note=None,
+        denial_reason_extracted=None,
+        trace_id=None,
+    )
+
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), rogue])
+    db.get_purchase = AsyncMock(return_value=None)
+    db.get_policy = AsyncMock(return_value=None)
+
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_CLAIM_ID}", headers={"Authorization": "Bearer t"}
+            )
+        assert response.status_code == 200
+        payload = response.json()
+        # Verbatim pass-through of the rogue enum.
+        assert payload["claim"]["claim_type"] == "price_drop_refund"
+        assert payload["claim"]["outcome"] == "approved"
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
 async def test_get_claim_detail_not_found(client: AsyncClient) -> None:
     db = AsyncMock(spec=MongoDBClient)
     # auth: User. service load: None → 404.
@@ -489,7 +588,10 @@ async def test_approve_claim_success_publishes_event(client: AsyncClient) -> Non
     claim = Claim.model_validate(_claim_doc(outcome="draft_pending", submitted_at=None))
     db = AsyncMock(spec=MongoDBClient)
     db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
-    db.upsert_claim = AsyncMock(return_value=_CLAIM_ID)
+    # Approve now writes via partial_update (PR #142 — read-tolerance) so
+    # legacy claims don't re-validate their full strict schema on every
+    # write. Mock returns True (matched).
+    db.partial_update = AsyncMock(return_value=True)
 
     publisher = AsyncMock(spec=PubSubPublisher)
     publisher.publish = AsyncMock(return_value="msg-id-123")
@@ -518,7 +620,14 @@ async def test_approve_claim_success_publishes_event(client: AsyncClient) -> Non
         assert "event_id" in event
         assert "approved_at" in event
 
-        db.upsert_claim.assert_awaited_once()
+        # The approve write: only the mutated fields go through
+        # partial_update (outcome, submitted_at, send_override).
+        db.partial_update.assert_awaited_once()
+        coll, _id, updates = db.partial_update.await_args.args[:3]
+        assert coll == "claims"
+        assert updates["outcome"] == "pending"
+        assert updates["send_override"] == "auto"
+        assert updates["submitted_at"] is not None
     finally:
         _clear_overrides()
 
@@ -528,7 +637,7 @@ async def test_approve_claim_with_edited_draft_appends_version(client: AsyncClie
     claim = Claim.model_validate(_claim_doc(outcome="draft_pending", submitted_at=None))
     db = AsyncMock(spec=MongoDBClient)
     db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
-    db.upsert_claim = AsyncMock(return_value=_CLAIM_ID)
+    db.partial_update = AsyncMock(return_value=True)
 
     publisher = AsyncMock(spec=PubSubPublisher)
     publisher.publish = AsyncMock(return_value="msg-id")
@@ -543,14 +652,20 @@ async def test_approve_claim_with_edited_draft_appends_version(client: AsyncClie
                 headers={"Authorization": "Bearer t"},
             )
         assert response.status_code == 200
-        # Inspect the persisted Claim — should have a v2 draft version.
-        persisted = db.upsert_claim.await_args.args[0]
-        assert persisted.draft_content == "My edited draft."
-        assert len(persisted.draft_versions) == 2
-        assert persisted.draft_versions[-1].content == "My edited draft."
-        assert persisted.draft_versions[-1].generated_by.value == "user_edit"
-        # Pydantic invariant: draft_content == draft_versions[-1].content
-        assert persisted.draft_content == persisted.draft_versions[-1].content
+        # Inspect the partial_update payload — should append a v2 draft
+        # version and set draft_content in the same write.
+        db.partial_update.assert_awaited_once()
+        updates = db.partial_update.await_args.args[2]
+        assert updates["draft_content"] == "My edited draft."
+        assert len(updates["draft_versions"]) == 2
+        assert updates["draft_versions"][-1]["content"] == "My edited draft."
+        assert updates["draft_versions"][-1]["generated_by"] == "user_edit"
+        # The draft_content == draft_versions[-1].content invariant is
+        # now enforced PROGRAMMATICALLY by approve_claim rather than via
+        # the @model_validator(after) on Claim — partial_update never
+        # instantiates a full Claim. Asserting both fields stay
+        # consistent in the same write payload locks in the invariant.
+        assert updates["draft_content"] == updates["draft_versions"][-1]["content"]
     finally:
         _clear_overrides()
 
@@ -562,7 +677,8 @@ async def test_approve_rollback_outcome_on_publish_failure(client: AsyncClient) 
     claim = Claim.model_validate(_claim_doc(outcome="draft_pending", submitted_at=None))
     db = AsyncMock(spec=MongoDBClient)
     db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
-    db.upsert_claim = AsyncMock(return_value=_CLAIM_ID)
+    # Two partial_update calls expected: (1) the approve write itself,
+    # (2) the rollback after publish fails.
     db.partial_update = AsyncMock(return_value=True)
 
     publisher = AsyncMock(spec=PubSubPublisher)
@@ -579,12 +695,16 @@ async def test_approve_rollback_outcome_on_publish_failure(client: AsyncClient) 
             )
         assert response.status_code == 502
         assert response.json()["error"]["code"] == "publish_failed"
-        # Rollback partial_update was called with outcome=DRAFT_PENDING
-        db.partial_update.assert_awaited_once()
-        coll, _id, updates = db.partial_update.await_args.args[:3]
-        assert coll == "claims"
-        assert updates["outcome"] == "draft_pending"
-        assert updates["submitted_at"] is None
+        assert db.partial_update.await_count == 2
+        # First call: the approve write (outcome -> pending).
+        first_call = db.partial_update.await_args_list[0]
+        assert first_call.args[0] == "claims"
+        assert first_call.args[2]["outcome"] == "pending"
+        # Second call: the rollback (outcome -> draft_pending).
+        rollback_call = db.partial_update.await_args_list[1]
+        assert rollback_call.args[0] == "claims"
+        assert rollback_call.args[2]["outcome"] == "draft_pending"
+        assert rollback_call.args[2]["submitted_at"] is None
     finally:
         _clear_overrides()
 
@@ -704,7 +824,7 @@ async def test_approve_with_no_body_uses_defaults(client: AsyncClient) -> None:
     claim = Claim.model_validate(_claim_doc(outcome="draft_pending", submitted_at=None))
     db = AsyncMock(spec=MongoDBClient)
     db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
-    db.upsert_claim = AsyncMock(return_value=_CLAIM_ID)
+    db.partial_update = AsyncMock(return_value=True)
 
     publisher = AsyncMock(spec=PubSubPublisher)
     publisher.publish = AsyncMock(return_value="msg-id")
@@ -754,8 +874,12 @@ async def test_edit_draft_appends_version(client: AsyncClient) -> None:
     assert len(claim.draft_versions) == 1  # baseline
 
     db = AsyncMock(spec=MongoDBClient)
+    # find_one is hit twice: (1) the auth user lookup, (2) _load_owned_claim.
+    # get_claim is hit once at the end to reload the post-edit claim for the
+    # response body.
     db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
-    db.upsert_claim = AsyncMock(return_value=_CLAIM_ID)
+    db.partial_update = AsyncMock(return_value=True)
+    db.get_claim = AsyncMock(return_value=claim)
 
     _override_db(db)
     try:
@@ -766,12 +890,18 @@ async def test_edit_draft_appends_version(client: AsyncClient) -> None:
                 headers={"Authorization": "Bearer t"},
             )
         assert response.status_code == 200
-        persisted = db.upsert_claim.await_args.args[0]
-        assert len(persisted.draft_versions) == 2
-        assert persisted.draft_versions[-1].version == 2
-        assert persisted.draft_versions[-1].content == "Edited body v2"
-        assert persisted.draft_versions[-1].generated_by.value == "user_edit"
-        assert persisted.draft_content == "Edited body v2"  # invariant
+        # Edit now writes via partial_update. Inspect the update payload —
+        # the appended draft version + draft_content go in the same write
+        # so the (draft_content == draft_versions[-1].content) invariant
+        # is enforced programmatically.
+        db.partial_update.assert_awaited_once()
+        updates = db.partial_update.await_args.args[2]
+        assert len(updates["draft_versions"]) == 2
+        assert updates["draft_versions"][-1]["version"] == 2
+        assert updates["draft_versions"][-1]["content"] == "Edited body v2"
+        assert updates["draft_versions"][-1]["generated_by"] == "user_edit"
+        assert updates["draft_content"] == "Edited body v2"
+        assert updates["draft_content"] == updates["draft_versions"][-1]["content"]
     finally:
         _clear_overrides()
 

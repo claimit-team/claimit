@@ -97,6 +97,7 @@ async def _run() -> int:
     purchase_id = uuid4()
     linked_claim_id = uuid4()
     orphan_claim_id = uuid4()
+    rogue_claim_id = uuid4()  # carries a legacy `claim_type` not in current enum
     bogus_purchase_id = uuid4()  # no Purchase doc with this id ever inserted
 
     now = datetime.now(UTC)
@@ -151,6 +152,21 @@ async def _run() -> int:
         "outcome": "pending",
         "updated_at": now - timedelta(seconds=1),
     }
+    # Read-tolerance scenario (PR #142): the exact rogue shape from the
+    # PR #141 follow-up audit — `claim_type='price_drop_refund'` is no
+    # longer in the current `ClaimType` enum. Pre-fix this 500'd the
+    # entire list page; post-fix the row deserialises through
+    # `ClaimReadTolerant` / `ClaimListItem` and surfaces the rogue value
+    # verbatim. Linked to the same purchase so enrichment also works.
+    rogue_claim = {
+        **base_claim,
+        "_id": rogue_claim_id,
+        "purchase_id": purchase_id,
+        "outcome": "approved",
+        "claim_type": "price_drop_refund",  # rogue
+        "updated_at": now - timedelta(seconds=2),
+        "resolved_at": now - timedelta(hours=1),
+    }
 
     failures: list[str] = []
 
@@ -158,14 +174,15 @@ async def _run() -> int:
         await raw_db["purchases"].insert_one(purchase_doc)
         await raw_db["claims"].insert_one(linked_claim)
         await raw_db["claims"].insert_one(orphan_claim)
+        await raw_db["claims"].insert_one(rogue_claim)
 
-        # ---- S1: no filters → both claims, enrichment populated on linked ----
+        # ---- S1: no filters → all 3 claims, enrichment populated where joined ----
         s1 = await claims_service.list_claims(db=db, user_id=run_user_id)
         _print_scenario("S1 / no filters", s1)
         try:
             claims = s1["claims"]
             assert isinstance(claims, list)
-            _expect(len(claims) == 2, f"expected 2 claims, got {len(claims)}")
+            _expect(len(claims) == 3, f"expected 3 claims, got {len(claims)}")
             by_id = {c["_id"]: c for c in claims}
             linked_row = by_id[str(linked_claim_id)]
             orphan_row = by_id[str(orphan_claim_id)]
@@ -197,6 +214,27 @@ async def _run() -> int:
         except AssertionError as exc:
             failures.append(f"S1: {exc}")
             print(f"S1 FAIL: {exc}")
+
+        # ---- S1b: rogue claim surfaces verbatim, no 500 ----
+        try:
+            rogue_row = by_id[str(rogue_claim_id)]
+            _expect(
+                rogue_row["claim_type"] == "price_drop_refund",
+                f"rogue claim_type should pass through verbatim, got {rogue_row['claim_type']!r}",
+            )
+            _expect(
+                rogue_row["outcome"] == "approved",
+                f"rogue outcome should be 'approved', got {rogue_row['outcome']!r}",
+            )
+            # Enrichment from the linked purchase still works on the rogue claim.
+            _expect(
+                rogue_row["product_name"] == "Test Sony Headphones",
+                f"rogue product_name = {rogue_row['product_name']!r}",
+            )
+            print("S1b PASS (rogue enum value surfaced verbatim, list did not 500)")
+        except (AssertionError, KeyError) as exc:
+            failures.append(f"S1b: {exc}")
+            print(f"S1b FAIL: {exc}")
 
         # ---- S2: status_group=pending → only linked (DRAFT_PENDING) ----
         s2 = await claims_service.list_claims(db=db, user_id=run_user_id, status_group="pending")
@@ -240,29 +278,35 @@ async def _run() -> int:
             failures.append(f"S3: {exc}")
             print(f"S3 FAIL: {exc}")
 
-        # ---- S4: q="sony" → linked claim via product_name ----
+        # ---- S4: q="sony" → both claims linked to the Sony purchase (linked + rogue) ----
+        # Both `linked_claim` and `rogue_claim` share `purchase_id=purchase_id`
+        # and the joined Purchase has `product_name="Test Sony Headphones"`.
         s4 = await claims_service.list_claims(db=db, user_id=run_user_id, q="sony")
         _print_scenario("S4 / q=sony (product_name)", s4)
         try:
             claims = s4["claims"]
             assert isinstance(claims, list)
-            _expect(len(claims) == 1, f"expected 1 claim, got {len(claims)}")
+            _expect(len(claims) == 2, f"expected 2 claims, got {len(claims)}")
+            ids = {c["_id"] for c in claims}
+            _expect(str(linked_claim_id) in ids, "linked_claim missing from q=sony result")
+            _expect(str(rogue_claim_id) in ids, "rogue_claim missing from q=sony result")
+            # Orphan must NOT match — its joined product_name is null.
             _expect(
-                claims[0]["_id"] == str(linked_claim_id),
-                f"expected linked_claim_id, got {claims[0]['_id']}",
+                str(orphan_claim_id) not in ids,
+                "orphan_claim should not match q=sony (no joined product_name)",
             )
             print("S4 PASS")
         except AssertionError as exc:
             failures.append(f"S4: {exc}")
             print(f"S4 FAIL: {exc}")
 
-        # ---- S5: q="amazon" → both claims via platform field ----
+        # ---- S5: q="amazon" → all 3 claims via platform field ----
         s5 = await claims_service.list_claims(db=db, user_id=run_user_id, q="amazon")
         _print_scenario("S5 / q=amazon (platform)", s5)
         try:
             claims = s5["claims"]
             assert isinstance(claims, list)
-            _expect(len(claims) == 2, f"expected 2 claims, got {len(claims)}")
+            _expect(len(claims) == 3, f"expected 3 claims, got {len(claims)}")
             print("S5 PASS")
         except AssertionError as exc:
             failures.append(f"S5: {exc}")
@@ -300,7 +344,7 @@ async def _run() -> int:
         for f in failures:
             print(f"  - {f}")
         return 1
-    print("\nALL 6 SCENARIOS PASSED")
+    print("\nALL 7 SCENARIOS PASSED (S1, S1b, S2, S3, S4, S5, S6)")
     return 0
 
 

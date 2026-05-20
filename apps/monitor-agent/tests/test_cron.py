@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 from uuid import uuid4
 
-from claimit_mongodb_models import PriceHistory, Purchase
+from claimit_mongodb_models import PriceHistory, Purchase, PurchaseReadTolerant
 from src import cron as cron_module
 from src.adapters.base import PriceFetchError, PriceSnapshot, PriceSourceAdapter
 from src.cron import run_cron
@@ -291,3 +291,79 @@ class TestRunCron(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["fetched"], 1)
         self.assertEqual(summary["skipped_source"], 1)
         self.assertEqual(len(db.price_history), 0)
+
+    async def test_degraded_purchase_is_skipped_with_warning(self) -> None:
+        """Read-tolerance contract (PR #142): a Purchase with null
+        critical fields must not 500 the sweep. The bad doc is logged
+        and skipped; valid docs in the same batch still get processed.
+        """
+        now = datetime.now(UTC)
+
+        # Construct via the read-tolerant variant directly (the strict
+        # `Purchase` would reject these). This matches what
+        # `db.find_purchases` returns at runtime.
+        degraded = PurchaseReadTolerant.model_construct(
+            id=uuid4(),
+            user_id=uuid4(),
+            platform=None,
+            category=None,
+            product_name=None,
+            product_id=None,
+            price_paid=None,
+            currency="USD",
+            purchase_date=None,
+            window_expires=None,
+            order_id=None,
+            status="monitoring",
+            claim_type=None,
+            monitoring_cadence_minutes=None,
+            ingested_at=now,
+            ingestion_source=None,
+        )
+        good = _make_purchase(
+            last_checked_at=None,
+            window_expires=now + timedelta(days=3),
+        )
+
+        db = _FakeDB([degraded, good])  # type: ignore[list-item]
+        adapter = _StubAdapter()
+
+        with patch.object(cron_module, "get_adapter", return_value=adapter):
+            summary = await run_cron(db)  # type: ignore[arg-type]
+
+        # Degraded was skipped (counter), good was fetched.
+        self.assertEqual(summary["scanned"], 2)
+        self.assertEqual(summary["skipped_degraded"], 1)
+        self.assertEqual(summary["fetched"], 1)
+        self.assertEqual(adapter.calls, 1)
+
+    async def test_unknown_platform_purchase_is_skipped(self) -> None:
+        """A purchase whose `platform` string isn't in the current Platform
+        enum is also a degraded doc — adapter routing would crash on it."""
+        now = datetime.now(UTC)
+        rogue = PurchaseReadTolerant.model_construct(
+            id=uuid4(),
+            user_id=uuid4(),
+            platform="defunct_marketplace",
+            category="retail",
+            product_name="Test",
+            product_id="ABC",
+            price_paid=10.0,
+            currency="USD",
+            purchase_date=now,
+            window_expires=now + timedelta(days=3),
+            order_id="ord-1",
+            status="monitoring",
+            claim_type="email",
+            monitoring_cadence_minutes=60,
+            ingested_at=now,
+            ingestion_source="gmail",
+        )
+        db = _FakeDB([rogue])  # type: ignore[list-item]
+        adapter = _StubAdapter()
+        with patch.object(cron_module, "get_adapter", return_value=adapter):
+            summary = await run_cron(db)  # type: ignore[arg-type]
+
+        self.assertEqual(summary["skipped_degraded"], 1)
+        self.assertEqual(summary["fetched"], 0)
+        self.assertEqual(adapter.calls, 0)

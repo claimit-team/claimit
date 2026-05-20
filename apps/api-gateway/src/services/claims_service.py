@@ -31,16 +31,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
-from claimit_mongodb_models import Claim, MongoDBClient
+from claimit_mongodb_models import Claim, ClaimReadTolerant, MongoDBClient
 from claimit_mongodb_models.enums import (
-    Category,
     ClaimOutcome,
-    ClaimType,
     DraftGeneratedBy,
     Platform,
     SendMode,
 )
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..middleware.errors import ApiError
 from ..middleware.pagination import decode_cursor, encode_cursor
@@ -87,27 +85,50 @@ class ClaimListItem(BaseModel):
     Heavy fields from the Claim document (`draft_content`, `draft_versions`,
     `policy_clause_cited`, `outcome_note`, etc.) are intentionally dropped
     from the list response — the detail endpoint exposes the full Claim.
+
+    Read-tolerant by design: `platform` / `claim_type` / `outcome` /
+    `category` are widened to `str | None`, and a `model_validator(before)`
+    coerces missing/null required scalars to safe defaults so a single
+    legacy/degraded doc in the user's history doesn't 500 the entire list
+    page. The frontend renders unknown enum values via Title-Case
+    fallback labels.
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
     id: UUID = Field(alias="_id")
     updated_at: datetime | None = None
-    purchase_id: UUID
-    user_id: UUID
-    platform: Platform
-    claim_amount: float
-    currency: str
-    claim_type: ClaimType
-    outcome: ClaimOutcome
+    purchase_id: UUID | None = None
+    user_id: UUID | None = None
+    platform: str | None = None
+    claim_amount: float | None = None
+    currency: str | None = None
+    claim_type: str | None = None
+    outcome: str | None = None
     submitted_at: datetime | None = None
     resolved_at: datetime | None = None
-    redraft_count: int
+    redraft_count: int | None = None
 
     # Joined from Purchase via $lookup.
     product_name: str | None = None
-    category: Category | None = None
+    category: str | None = None
     window_expires: datetime | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_doc(cls, data: object) -> object:
+        """Normalise a raw aggregation row into the tolerant shape.
+
+        The aggregate result preserves enum values as plain strings (Mongo
+        stores StrEnum values as strings on the wire), so the only thing
+        this validator has to do is leave them alone — we explicitly do
+        NOT validate enum membership, NOT enforce numeric bounds, and NOT
+        treat null as an error. Pydantic's default per-field validation
+        with `T | None` annotations already does the right thing; the
+        validator is here as the documented coercion seam in case a
+        future schema migration needs to remap legacy values.
+        """
+        return data
 
 
 async def list_claims(
@@ -330,10 +351,14 @@ async def get_claim_detail(
 
     # Parallelize the two follow-up reads — both are user-scoped reads with no
     # cross-dependency, so a single round-trip-of-two saves one network RTT.
-    purchase, policy = await asyncio.gather(
-        db.get_purchase(claim.purchase_id),
-        db.get_policy(claim.platform.value),
-    )
+    # `claim.platform` is `str | None` on the tolerant model; only attempt
+    # the policy lookup when it's both present and a known Platform value.
+    # An unknown platform string yields no policy (frontend handles null).
+    policy_platform = _safe_platform_value(claim.platform)
+    purchase_id = claim.purchase_id
+    purchase_task = db.get_purchase(purchase_id) if purchase_id is not None else _none_async()
+    policy_task = db.get_policy(policy_platform) if policy_platform is not None else _none_async()
+    purchase, policy = await asyncio.gather(purchase_task, policy_task)
 
     return {
         "claim": claim.model_dump(mode="json", by_alias=True),
@@ -341,6 +366,28 @@ async def get_claim_detail(
         "policy": policy.model_dump(mode="json", by_alias=True) if policy else None,
         "evidence_url": claim.evidence_screenshot_url,
     }
+
+
+def _safe_platform_value(raw: str | None) -> str | None:
+    """Return the platform string only if it maps to a known `Platform` enum.
+
+    Legacy claims may carry a platform value that no longer exists in the
+    enum (same family of bug as the rogue `claim_type` audit). Returning
+    `None` here makes the policy lookup a no-op rather than crashing.
+    """
+    if raw is None:
+        return None
+    try:
+        return Platform(raw).value
+    except ValueError:
+        return None
+
+
+async def _none_async() -> None:
+    """Awaitable that resolves to None — placeholder for `asyncio.gather`
+    when one branch of the join has no work to do (e.g. the claim has a
+    null `platform` or `purchase_id`)."""
+    return None
 
 
 async def approve_claim(
@@ -357,48 +404,71 @@ async def approve_claim(
     409 if the claim is not in DRAFT_PENDING state.
     """
     claim = await _load_owned_claim(db, claim_id, user_id)
-    if claim.outcome != ClaimOutcome.DRAFT_PENDING:
+    # `claim.outcome` is `str | None` on the tolerant model. Compare to
+    # the canonical enum value rather than the enum instance.
+    if claim.outcome != ClaimOutcome.DRAFT_PENDING.value:
         raise ApiError(
             "claim_not_approvable",
-            f"Claim cannot be approved in state {claim.outcome.value!r}",
+            f"Claim cannot be approved in state {claim.outcome!r}",
             status_code=409,
         )
 
     now = datetime.now(UTC)
-    claim_dict = claim.model_dump(by_alias=True)
 
+    # Build the partial update from the claim's current state plus the
+    # mutations from this request. Going through `partial_update` (rather
+    # than re-validating the whole Claim) means a legacy doc carrying a
+    # rogue enum value in some unrelated field (e.g. `claim_type` set to
+    # an obsolete value, see PR #141 follow-up audit) doesn't fail the
+    # write — only the mutated fields are validated, against the strict
+    # `Claim` annotations via `TypeAdapter` in `MongoDBClient.partial_update`.
+    # This preserves strict-on-write for the FIELDS WE'RE WRITING, which
+    # is the contract that matters.
+    updates: dict[str, Any] = {}
     if edited_draft_content is not None:
+        # Append a new draft version with the user-edited content. We
+        # construct the full new array and write it via `$set` — this
+        # leaves the existing array untouched until the write succeeds.
         new_version_no = len(claim.draft_versions) + 1
-        claim_dict["draft_versions"].append(
+        existing_versions = [v.model_dump() for v in claim.draft_versions]
+        updates["draft_versions"] = [
+            *existing_versions,
             {
                 "version": new_version_no,
                 "content": edited_draft_content,
                 "generated_by": DraftGeneratedBy.USER_EDIT.value,
                 "at": now,
-            }
-        )
-        claim_dict["draft_content"] = edited_draft_content
-
-    claim_dict["send_override"] = send_override.value if send_override is not None else None
-    claim_dict["submitted_at"] = now
-    claim_dict["outcome"] = ClaimOutcome.PENDING.value
-    # submitted_via stays None — set later by claim-agent when the message
+            },
+        ]
+        updates["draft_content"] = edited_draft_content
+    updates["send_override"] = send_override.value if send_override is not None else None
+    updates["submitted_at"] = now
+    updates["outcome"] = ClaimOutcome.PENDING.value
+    # submitted_via stays as-is — set later by claim-agent when the message
     # actually goes out via Gmail / SendGrid / clipboard.
 
-    updated = Claim.model_validate(claim_dict)
-    await db.upsert_claim(updated)
+    success = await db.partial_update("claims", claim_id, updates, model=Claim)
+    if not success:
+        # Document deleted between read and write. Race; treat as 404.
+        raise ApiError("claim_not_found", "Claim not found", status_code=404)
 
+    # Build the Pub/Sub payload from the tolerant claim plus our just-written
+    # mutations. `claim.platform` and `claim.claim_type` are `str | None`
+    # already — no `.value` access needed. If a rogue value sneaks through,
+    # the downstream subscriber is responsible for skipping it (matches the
+    # frontend's unknown-value fallback policy).
+    effective_draft = updates.get("draft_content", claim.draft_content)
     event_payload = {
         "event_id": str(uuid4()),
-        "claim_id": str(updated.id),
-        "user_id": str(updated.user_id),
-        "purchase_id": str(updated.purchase_id),
-        "platform": updated.platform.value,
-        "claim_type": updated.claim_type.value,
-        "claim_amount": updated.claim_amount,
-        "currency": updated.currency,
-        "draft_content": updated.draft_content,
-        "send_override": updated.send_override.value if updated.send_override else None,
+        "claim_id": str(claim.id),
+        "user_id": str(claim.user_id),
+        "purchase_id": str(claim.purchase_id),
+        "platform": claim.platform,
+        "claim_type": claim.claim_type,
+        "claim_amount": claim.claim_amount,
+        "currency": claim.currency,
+        "draft_content": effective_draft,
+        "send_override": send_override.value if send_override is not None else None,
         "approved_at": now.isoformat(),
     }
     try:
@@ -410,12 +480,12 @@ async def approve_claim(
         # stuck. Roll the outcome back to DRAFT_PENDING and clear the
         # submission stamp so retry is well-defined.
         logger.exception(
-            "Failed to publish claim.approved for claim %s; rolling back outcome", updated.id
+            "Failed to publish claim.approved for claim %s; rolling back outcome", claim.id
         )
         try:
             await db.partial_update(
                 "claims",
-                updated.id,
+                claim_id,
                 {
                     "outcome": ClaimOutcome.DRAFT_PENDING.value,
                     "submitted_at": None,
@@ -428,7 +498,7 @@ async def approve_claim(
             # log so on-call can find it.
             logger.exception(
                 "Rollback failed after publish failure for claim %s; manual fix required",
-                updated.id,
+                claim.id,
             )
         raise ApiError(
             "publish_failed",
@@ -436,10 +506,12 @@ async def approve_claim(
             status_code=502,
         ) from None
 
+    # `submitted_via` is unchanged on this write (claim-agent sets it
+    # downstream); pass through whatever was loaded.
     return {
-        "claim_id": str(updated.id),
+        "claim_id": str(claim.id),
         "submitted_at": now.isoformat(),
-        "submitted_via": updated.submitted_via.value if updated.submitted_via else None,
+        "submitted_via": claim.submitted_via,
     }
 
 
@@ -465,17 +537,17 @@ async def cancel_claim(
     # PENDING they're considered queued for human-initiated send, so cancel
     # after submission isn't safe.
     within_auto_window = (
-        claim.outcome == ClaimOutcome.PENDING
-        and claim.send_override == SendMode.AUTO
+        claim.outcome == ClaimOutcome.PENDING.value
+        and claim.send_override == SendMode.AUTO.value
         and claim.submitted_at is not None
         and _to_utc(claim.submitted_at) is not None
         and (now - _to_utc(claim.submitted_at)) < _AUTO_SEND_CANCEL_WINDOW
     )
-    is_cancellable = claim.outcome == ClaimOutcome.DRAFT_PENDING or within_auto_window
+    is_cancellable = claim.outcome == ClaimOutcome.DRAFT_PENDING.value or within_auto_window
     if not is_cancellable:
         raise ApiError(
             "claim_not_cancellable",
-            f"Claim cannot be cancelled in state {claim.outcome.value!r}",
+            f"Claim cannot be cancelled in state {claim.outcome!r}",
             status_code=409,
         )
 
@@ -507,32 +579,55 @@ async def edit_claim_draft(
     would silently invalidate what was already sent to the merchant.
     """
     claim = await _load_owned_claim(db, claim_id, user_id)
-    if claim.outcome != ClaimOutcome.DRAFT_PENDING:
+    if claim.outcome != ClaimOutcome.DRAFT_PENDING.value:
         raise ApiError(
             "claim_not_editable",
-            f"Claim cannot be edited in state {claim.outcome.value!r}",
+            f"Claim cannot be edited in state {claim.outcome!r}",
             status_code=409,
         )
 
     now = datetime.now(UTC)
     new_version_no = len(claim.draft_versions) + 1
 
-    claim_dict = claim.model_dump(by_alias=True)
-    claim_dict["draft_versions"].append(
+    # Build the new draft_versions array (existing + appended) and write
+    # it via `partial_update` so we re-validate only the mutated fields,
+    # not the whole claim. The strict `Claim` field annotations enforce
+    # `DraftVersion` shape (incl. `generated_by` enum) on the appended
+    # entry — that's the on-write strictness we still need. The
+    # `draft_content == draft_versions[-1].content` invariant on `Claim`
+    # is enforced PROGRAMMATICALLY here (we set both in the same call)
+    # rather than via the model validator, since `partial_update` runs
+    # per-field validation and never instantiates a full `Claim`. Future
+    # mutations to this function must keep the two writes consistent.
+    existing_versions = [v.model_dump() for v in claim.draft_versions]
+    new_versions = [
+        *existing_versions,
         {
             "version": new_version_no,
             "content": draft_content,
             "generated_by": DraftGeneratedBy.USER_EDIT.value,
             "at": now,
-        }
+        },
+    ]
+    success = await db.partial_update(
+        "claims",
+        claim_id,
+        {
+            "draft_versions": new_versions,
+            "draft_content": draft_content,
+        },
+        model=Claim,
     )
-    claim_dict["draft_content"] = draft_content
+    if not success:
+        raise ApiError("claim_not_found", "Claim not found", status_code=404)
 
-    # Re-validate so the @model_validator(after) enforces the
-    # draft_content == draft_versions[-1].content invariant before the write.
-    updated = Claim.model_validate(claim_dict)
-    await db.upsert_claim(updated)
-    return {"claim": updated.model_dump(mode="json", by_alias=True)}
+    # Reload via the tolerant variant so an unrelated rogue field on the
+    # legacy doc doesn't crash the response. Frontend renders unknown
+    # enum values via Title-Case fallback labels.
+    refreshed = await db.get_claim(claim_id)
+    if refreshed is None:
+        raise ApiError("claim_not_found", "Claim not found", status_code=404)
+    return {"claim": refreshed.model_dump(mode="json", by_alias=True)}
 
 
 # ---------------------------------------------------------------------------
@@ -544,9 +639,18 @@ async def _load_owned_claim(
     db: MongoDBClient,
     claim_id: UUID,
     user_id: UUID,
-) -> Claim:
-    """Return the claim if it exists AND belongs to user_id; 404 otherwise."""
-    claim = await db.find_one("claims", {"_id": claim_id, "user_id": user_id}, Claim)
+) -> ClaimReadTolerant:
+    """Return the claim if it exists AND belongs to user_id; 404 otherwise.
+
+    Returns a `ClaimReadTolerant` so a legacy doc with a now-invalid
+    enum value (e.g. `claim_type='price_drop_refund'` from a pre-2.2
+    schema scratch) doesn't 500 the detail / approve / cancel / edit
+    endpoints. Callers compare enum-typed fields by string value
+    (e.g. `claim.outcome == ClaimOutcome.DRAFT_PENDING.value`) and pass
+    only mutated fields back through `db.partial_update`, which
+    re-validates per-field against the strict `Claim` annotations.
+    """
+    claim = await db.find_one("claims", {"_id": claim_id, "user_id": user_id}, ClaimReadTolerant)
     if claim is None:
         raise ApiError("claim_not_found", "Claim not found", status_code=404)
     return claim

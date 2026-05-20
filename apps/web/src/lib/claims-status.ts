@@ -16,7 +16,38 @@ import type { ClaimOutcome, ClaimType } from "@claimit/mongodb-types";
 import type { StatusGroup } from "@/lib/api/claims";
 import { formatClaimRemainingTime } from "@/lib/claim-detail";
 
-export function outcomeToGroup(outcome: ClaimOutcome): StatusGroup {
+/**
+ * Convert an unknown enum-ish string into a human-friendly Title Case
+ * label by splitting on `_` and capitalising the first word. Used as
+ * the safe-fallback branch on every claim/purchase enum→label consumer
+ * — see PR #142 (read-tolerance) for why the backend now returns
+ * verbatim legacy values like `"price_drop_refund"` rather than 500ing.
+ *
+ * Examples:
+ *   "price_drop_refund" → "Price drop refund"
+ *   "best_buy"          → "Best buy"
+ *   ""                  → "—"
+ *   null/undefined      → "—"
+ */
+export function snakeToTitleLabel(raw: string | null | undefined): string {
+  if (raw === null || raw === undefined || raw === "") return "—";
+  const parts = raw.split("_").filter(Boolean);
+  if (parts.length === 0) return "—";
+  const [first, ...rest] = parts;
+  // Capitalise the first word; remaining words stay lowercase. Reads as
+  // a sentence ("Price drop refund") rather than Title Case All Words.
+  const capitalised = first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+  if (rest.length === 0) return capitalised;
+  return `${capitalised} ${rest.join(" ").toLowerCase()}`;
+}
+
+/**
+ * `outcome` may be `null` (legacy doc never populated it) or a string
+ * the current `ClaimOutcome` enum no longer recognises (PR #142). Both
+ * cases land in `resolved` — better to surface the row in the most
+ * generic chip than to throw.
+ */
+export function outcomeToGroup(outcome: ClaimOutcome | string | null | undefined): StatusGroup {
   switch (outcome) {
     case "draft_pending":
       return "pending";
@@ -29,15 +60,19 @@ export function outcomeToGroup(outcome: ClaimOutcome): StatusGroup {
     case "user_cancelled":
     case "no_response":
       return "resolved";
-    default: {
-      // exhaustiveness check — the never type ensures all variants handled
-      const _exhaustive: never = outcome;
-      return _exhaustive;
-    }
+    default:
+      return "resolved";
   }
 }
 
-export function claimTypeLabel(claimType: ClaimType): string {
+/**
+ * Maps a `ClaimType` enum value to its display label, with a Title Case
+ * fallback for legacy/unknown values returned by a read-tolerant
+ * backend. The backend can now surface values like `"price_drop_refund"`
+ * (a pre-2.2 enum value still living in production data) — rendering
+ * "Price drop refund" is preferable to crashing.
+ */
+export function claimTypeLabel(claimType: ClaimType | string | null | undefined): string {
   switch (claimType) {
     case "email":
       return "Email";
@@ -47,10 +82,8 @@ export function claimTypeLabel(claimType: ClaimType): string {
       return "In store";
     case "self_service":
       return "Self service";
-    default: {
-      const _exhaustive: never = claimType;
-      return _exhaustive;
-    }
+    default:
+      return snakeToTitleLabel(claimType);
   }
 }
 
