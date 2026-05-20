@@ -8,11 +8,13 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from claimit_mongodb_models import (
+    SKIPLIST_MAX_ENTRIES,
     IngestionSkiplistEntry,
     MongoDBClient,
     Purchase,
     PurchaseStatus,
     User,
+    normalize_sender,
 )
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -146,15 +148,22 @@ async def _append_ingestion_skiplist(
     body: DismissPurchaseRequest,
     db: MongoDBClient,
 ) -> bool:
-    """Append a skiplist entry for ticket 3.7 prep (filtering applied in 3.7)."""
-    format_hash = purchase.receipt_hash or ""
+    """Append a skiplist entry so the classifier auto-skips this sender+format.
+
+    Entry shape per ticket 3.7: `{sender, format_hash, added_at, reason}` where
+    `format_hash` is computed at ingest time from `subject + first 500 chars`
+    (see `compute_format_hash`). Caps at `SKIPLIST_MAX_ENTRIES` with FIFO
+    eviction of the oldest entry.
+    """
+    format_hash = purchase.format_hash
     if not format_hash:
         _log.warning(
-            "Dismiss not_an_order without receipt_hash; skiplist entry may be weak purchase_id=%s",
+            "Dismiss not_an_order without format_hash; skipping skiplist write purchase_id=%s",
             purchase.id,
         )
+        return False
 
-    sender = (body.sender or "").strip()
+    sender = normalize_sender(body.sender or purchase.sender or "")
     if not sender:
         _log.warning(
             "Dismiss not_an_order without sender; using 'unknown' purchase_id=%s",
@@ -170,10 +179,16 @@ async def _append_ingestion_skiplist(
     )
 
     existing = user.ingestion_skiplist
-    if any(e.sender == entry.sender and e.format_hash == entry.format_hash for e in existing):
+    if any(
+        normalize_sender(e.sender) == entry.sender and e.format_hash == entry.format_hash
+        for e in existing
+    ):
         return False
 
     updated_skiplist = [*existing, entry]
+    if len(updated_skiplist) > SKIPLIST_MAX_ENTRIES:
+        # FIFO eviction: drop the oldest entries first.
+        updated_skiplist = updated_skiplist[-SKIPLIST_MAX_ENTRIES:]
     user.ingestion_skiplist = updated_skiplist
     user.updated_at = now
     await db.upsert("users", user.id, user)
