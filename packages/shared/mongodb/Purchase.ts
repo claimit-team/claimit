@@ -56,5 +56,7 @@ export interface Purchase {
   ingestion_source: IngestionSource;
   receipt_storage_url: string | null;
   receipt_hash: string | null;
+  format_hash?: string | null;
+  sender?: string | null;
   extraction_confidence: ExtractionConfidence;
 }

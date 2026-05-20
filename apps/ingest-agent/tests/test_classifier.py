@@ -6,6 +6,7 @@ import asyncio
 import json
 
 import pytest
+from claimit_mongodb_models import IngestionSkiplistEntry, compute_format_hash
 from pydantic import ValidationError
 from src import classifier
 from src.classifier import (
@@ -95,6 +96,58 @@ def test_format_email_truncates_body_deterministically() -> None:
 
     assert payload["body_text"] == "x" * classifier.MAX_BODY_CHARS
     assert list(payload) == ["body_text", "sender", "snippet", "subject"]
+
+
+def test_classify_short_circuits_on_skiplist_match(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Skiplist hit must return not-an-order WITHOUT calling the Gemini agent."""
+    called = False
+
+    async def fake_run_agent(_email: EmailForClassification) -> str:
+        nonlocal called
+        called = True
+        return json.dumps({"is_order": True, "confidence": 0.99})
+
+    monkeypatch.setattr(classifier, "_run_classifier_agent", fake_run_agent)
+
+    email = _sample_email()
+    from datetime import UTC, datetime
+
+    entry = IngestionSkiplistEntry(
+        sender="ORDERS@example.com",  # case differs to verify normalization
+        format_hash=compute_format_hash(email.subject, email.body_text),
+        added_at=datetime.now(UTC),
+        reason="not_an_order",
+    )
+
+    result = asyncio.run(classify(email, skiplist=[entry]))
+
+    assert called is False
+    assert result.is_order is False
+    assert result.confidence == 1.0
+    assert result.skiplist_hit is True
+
+
+def test_classify_falls_through_when_skiplist_does_not_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_run_agent(_email: EmailForClassification) -> str:
+        return json.dumps({"is_order": True, "confidence": 0.95})
+
+    monkeypatch.setattr(classifier, "_run_classifier_agent", fake_run_agent)
+
+    from datetime import UTC, datetime
+
+    unrelated = IngestionSkiplistEntry(
+        sender="someone-else@example.com",
+        format_hash="sha256:not-a-match",
+        added_at=datetime.now(UTC),
+        reason="not_an_order",
+    )
+
+    result = asyncio.run(classify(_sample_email(), skiplist=[unrelated]))
+
+    assert result.is_order is True
+    assert result.skiplist_hit is False
 
 
 def test_run_classifier_agent_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
