@@ -4,11 +4,13 @@ import json
 import logging
 import os
 import re
+import time
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+import google.api_core.exceptions
 import vertexai
 import vertexai.agent_engines
 from claimit_mongodb_models.client import MongoDBClient
@@ -20,11 +22,22 @@ logger = logging.getLogger(__name__)
 # Resource names are in the form
 # `projects/{project}/locations/{location}/reasoningEngines/{id}`.
 # We parse project + location from this string to drive vertexai.init()
-# — see the comment in stream_agent_response below for why init() is
-# load-bearing.
+# — the SDK uses regional endpoints and defaults to global / us-central1
+# without explicit init, returning 404 for us-east1 resources.
 _RESOURCE_NAME_RE = re.compile(
     r"^projects/(?P<project>[^/]+)/locations/(?P<location>[^/]+)/reasoningEngines/"
 )
+
+# Wall-clock ceiling on a single agent stream. Cloud Run's request budget
+# is 300s, so 120s leaves headroom for the SSE response to drain to the
+# client. The per-event 15s heartbeat at the route layer keeps the
+# connection alive even when the agent is slow within this window.
+_MAX_STREAM_SECONDS = 120
+
+# Bounds session-stale recovery. If the second attempt also gets NotFound,
+# something deeper is wrong (agent fully redeployed, IAM revoked, etc.)
+# and we surface the error rather than recursing forever.
+_SESSION_RETRY_LIMIT = 1
 
 
 async def create_conversation(
@@ -35,6 +48,8 @@ async def create_conversation(
 ) -> Conversation:
     if mode == ConversationMode.CLAIM_FOCUSED and claim_id is None:
         raise ValueError("claim_id is required for claim_focused mode")
+
+    agent_session_id = await _try_create_agent_session(user_id)
 
     conv = Conversation(
         id=uuid4(),
@@ -48,6 +63,7 @@ async def create_conversation(
         created_at=datetime.now(UTC),
         last_message_at=datetime.now(UTC),
         archived_at=None,
+        agent_session_id=agent_session_id,
     )
     await db.upsert_conversation(conv)
     return conv
@@ -101,103 +117,347 @@ async def append_message(
     return conv
 
 
+# ---------------------------------------------------------------------------
+# Agent stream
+# ---------------------------------------------------------------------------
+
+
+def _init_vertexai_from_resource_name(resource_name: str) -> None:
+    """Parse project + location from the resource name and init the SDK.
+
+    vertexai.init() is idempotent so per-call invocation is fine. If the
+    resource name is malformed (doesn't match the expected shape), skip
+    init and let the downstream call fail with its own error — better
+    than crashing here with a regex mismatch.
+    """
+    match = _RESOURCE_NAME_RE.match(resource_name)
+    if match:
+        vertexai.init(project=match["project"], location=match["location"])
+    else:
+        logger.warning("Could not parse project/location from resource_name: %s", resource_name)
+
+
+async def _try_create_agent_session(user_id: UUID) -> str | None:
+    """Best-effort agent-session creation at conversation-create time.
+
+    Returns the new session id, or None if the SDK call failed for any
+    reason (no agent configured, network blip, IAM issue). On None,
+    `stream_agent_response` will lazy-backfill on the first send.
+    Persistence to MongoDB happens in the caller via the returned id.
+    """
+    resource_name = os.environ.get("CLAIMIT_ASSISTANT_AGENT_ID")
+    if not resource_name:
+        return None
+    try:
+        _init_vertexai_from_resource_name(resource_name)
+        remote_agent = vertexai.agent_engines.get(resource_name=resource_name)
+        session = remote_agent.create_session(user_id=str(user_id))
+        return session["id"]
+    except Exception:
+        # Don't let a Vertex-side hiccup block conversation creation.
+        # Lazy backfill on first send is the safety net.
+        logger.warning(
+            "Failed to create agent session at conversation-create time", exc_info=True
+        )
+        return None
+
+
+async def _ensure_agent_and_session(
+    db: MongoDBClient,
+    conversation: Conversation,
+    user_id: UUID,
+) -> tuple[Any, str | None]:
+    """Return (remote_agent, session_id) for an active stream.
+
+    Raises ValueError when the agent isn't configured at all (env var
+    missing). Other exceptions (network, 404 on get(), IAM) bubble up so
+    the caller can render a connectivity-failure message.
+
+    Lazy backfill: if the conversation has no agent_session_id (created
+    before this feature shipped, or the create-time attempt failed),
+    create a session and persist the id so subsequent turns reuse it.
+    """
+    resource_name = os.environ.get("CLAIMIT_ASSISTANT_AGENT_ID")
+    if not resource_name:
+        raise ValueError("Assistant agent not configured")
+
+    _init_vertexai_from_resource_name(resource_name)
+    remote_agent = vertexai.agent_engines.get(resource_name=resource_name)
+
+    session_id = conversation.agent_session_id
+    if session_id is None:
+        try:
+            session = remote_agent.create_session(user_id=str(user_id))
+            session_id = session["id"]
+            await db.partial_update(
+                "conversations",
+                conversation.id,
+                {"agent_session_id": session_id},
+            )
+            # Mirror onto the in-memory model so a same-request recursive
+            # retry path sees the new id without an extra read.
+            conversation.agent_session_id = session_id
+        except Exception:
+            logger.warning(
+                "Failed to create agent session, proceeding without", exc_info=True
+            )
+            session_id = None
+
+    return remote_agent, session_id
+
+
+def _extract_parts(event: Any) -> list[dict[str, Any]]:
+    """Pull the `parts` list out of an event, tolerant of dict or object."""
+    content = event.get("content") if isinstance(event, dict) else getattr(event, "content", None)
+    if content is None:
+        return []
+    if isinstance(content, dict):
+        return content.get("parts", []) or []
+    return getattr(content, "parts", []) or []
+
+
+def _part_to_dict(part: Any) -> dict[str, Any]:
+    """Coerce a part (dict or proto-shaped object) to a dict for inspection."""
+    if isinstance(part, dict):
+        return part
+    if hasattr(type(part), "to_dict"):
+        try:
+            return type(part).to_dict(part)
+        except Exception:
+            pass
+    # Best-effort: introspect common attributes.
+    out: dict[str, Any] = {}
+    for key in ("text", "function_call", "function_response"):
+        val = getattr(part, key, None)
+        if val is not None:
+            out[key] = val
+    return out
+
+
+def _finish_reason_is_safe(event: Any) -> bool:
+    """True if event has no finish_reason OR it's a normal STOP.
+
+    Gemini reports safety / recitation blocks via finish_reason. STOP is
+    the only happy completion value; everything else (SAFETY, RECITATION,
+    MAX_TOKENS, OTHER) is a degraded / blocked response.
+    """
+    finish = event.get("finish_reason") if isinstance(event, dict) else getattr(event, "finish_reason", None)
+    if finish is None:
+        return True
+    finish_str = str(finish)
+    return finish_str in ("STOP", "0", "FinishReason.STOP")
+
+
 async def stream_agent_response(
+    db: MongoDBClient,
     user_id: UUID,
     conversation: Conversation,
     user_message: str,
+    *,
+    _retry_count: int = 0,
 ) -> AsyncGenerator[dict[str, Any], None]:
-    resource_name = os.environ.get("CLAIMIT_ASSISTANT_AGENT_ID")
-    if not resource_name:
-        yield {"event": "done", "data": json.dumps({"error": "Assistant agent not configured"})}
-        return
+    """Stream Gemini's response to `user_message` as SSE-shaped event dicts.
 
-    if conversation.mode == ConversationMode.CLAIM_FOCUSED and conversation.claim_id:
-        prefix = f"[Context: claim_id={conversation.claim_id}] "
-    else:
-        prefix = ""
-    prompt = prefix + user_message
+    Yields one of:
+      - {"event": "text_chunk",   "data": '{"text": "..."}'}
+      - {"event": "tool_call",    "data": '{"tool": "...", "input": {...}}'}
+      - {"event": "tool_result",  "data": '{"tool": "...", "output_summary": "..."}'}
+      - {"event": "done",         "data": '{}' | '{"error": "..."}'}
 
+    Multi-turn memory: passes `session_id` to the agent if the conversation
+    has one, so the model sees prior turns. Lazy-creates a session for
+    pre-feature conversations. On a NotFound from a stale session, retries
+    once with a fresh session (bounded by `_SESSION_RETRY_LIMIT`).
+    """
+
+    # -------- Phase 1: setup --------
     try:
-        # The Vertex AI SDK uses REGIONAL service endpoints — calling
-        # agent_engines.get() without prior vertexai.init() defaults to
-        # the global / us-central1 endpoint, which has no visibility
-        # into us-east1 reasoning engines. The symptom is
-        # `google.api_core.exceptions.NotFound: 404 The reasoning engine
-        # resource [...] is not found.` for a resource that demonstrably
-        # exists when queried with explicit init.
-        #
-        # Parse project + location from the resource name itself so we
-        # don't need GOOGLE_CLOUD_LOCATION as a separate env var, and
-        # so deploys never drift apart. vertexai.init() is idempotent;
-        # calling it on every request is fine.
-        match = _RESOURCE_NAME_RE.match(resource_name)
-        if match:
-            vertexai.init(project=match["project"], location=match["location"])
-
-        # SDK signature: `get(resource_name: str)` — the kwarg is
-        # `resource_name`, not `name`. Passing `name=` raised TypeError on
-        # every call, which the surrounding except swallowed into a
-        # generic `done` SSE frame; symptomatic in the UI as "every chat
-        # message returns an error".
-        remote_agent = vertexai.agent_engines.get(resource_name=resource_name)
-
-        collected_text = ""
-        collected_tool_calls: list[dict] = []
-
-        async for event in remote_agent.async_stream_query(
-            user_id=str(user_id),
-            message=prompt,
-        ):
-            for part in event.get("content", {}).get("parts", []):
-                if "text" in part:
-                    collected_text += part["text"]
-                    yield {
-                        "event": "text_chunk",
-                        "data": json.dumps({"text": part["text"]}),
-                    }
-
-                if "function_call" in part:
-                    fc = part["function_call"]
-                    tool_event = {"tool": fc.get("name"), "input": fc.get("args", {})}
-                    collected_tool_calls.append(tool_event)
-                    yield {
-                        "event": "tool_call",
-                        "data": json.dumps(tool_event),
-                    }
-
-                if "function_response" in part:
-                    fr = part["function_response"]
-                    yield {
-                        "event": "tool_result",
-                        "data": json.dumps(
-                            {
-                                "tool": fr.get("name"),
-                                "output_summary": str(fr.get("response", ""))[:200],
-                            }
-                        ),
-                    }
-
-            if "code" in event and "message" in event:
-                logger.warning(
-                    "Agent error event: code=%s message=%s", event["code"], event["message"]
-                )
-                yield {
-                    "event": "done",
-                    "data": json.dumps({"error": event["message"]}),
-                }
-                return
-
+        remote_agent, session_id = await _ensure_agent_and_session(db, conversation, user_id)
+    except ValueError as e:
+        # Agent not configured at all.
+        logger.error("Agent setup failed: %s", e)
+        yield {
+            "event": "done",
+            "data": json.dumps({"error": "I'm temporarily unavailable. Please try again later."}),
+        }
+        return
+    except Exception:
+        # get() failed (404 / 403 / network / etc.) — surface a generic
+        # connectivity error rather than the raw exception text.
+        logger.error("Agent connection failed", exc_info=True)
         yield {
             "event": "done",
             "data": json.dumps(
-                {
-                    "final_message": collected_text,
-                    "tool_calls_made": len(collected_tool_calls),
-                    "tool_calls": collected_tool_calls,
+                {"error": "I'm having trouble connecting. Please try again in a moment."}
+            ),
+        }
+        return
+
+    # -------- Phase 2: build prompt --------
+    prefix = ""
+    if conversation.mode == ConversationMode.CLAIM_FOCUSED and conversation.claim_id:
+        prefix = f"[Context: user is viewing claim {conversation.claim_id}] "
+    prompt = prefix + user_message
+
+    stream_kwargs: dict[str, Any] = {"user_id": str(user_id), "message": prompt}
+    if session_id:
+        stream_kwargs["session_id"] = session_id
+
+    collected_text = ""
+    collected_tool_calls: list[dict[str, Any]] = []
+    stream_started_at = time.monotonic()
+
+    # -------- Phase 3: stream --------
+    try:
+        async for event in remote_agent.async_stream_query(**stream_kwargs):
+            # Wall-clock cap. Per-event check is good enough — once an event
+            # arrives, we check elapsed and bail if we're past the ceiling.
+            # A fully stuck stream (no events) is bounded by Cloud Run's
+            # 300s request timeout instead.
+            if time.monotonic() - stream_started_at > _MAX_STREAM_SECONDS:
+                logger.warning("Stream exceeded %ds ceiling", _MAX_STREAM_SECONDS)
+                yield {
+                    "event": "done",
+                    "data": json.dumps({"error": "I'm taking too long to respond. Please try again."}),
                 }
+                return
+
+            # Per-event try/except — a single malformed event must not tear
+            # down the whole stream when subsequent events may be fine.
+            try:
+                parts = _extract_parts(event)
+                if not parts:
+                    # No content parts — check whether this is a safety-blocked
+                    # completion (Gemini reports those via finish_reason).
+                    if not _finish_reason_is_safe(event):
+                        yield {
+                            "event": "done",
+                            "data": json.dumps(
+                                {
+                                    "error": (
+                                        "I'm not able to help with that particular request. "
+                                        "Is there something else I can assist with?"
+                                    )
+                                }
+                            ),
+                        }
+                        return
+                    continue
+
+                for part in parts:
+                    p = _part_to_dict(part)
+                    text = p.get("text")
+                    if text:
+                        collected_text += text
+                        yield {"event": "text_chunk", "data": json.dumps({"text": text})}
+                        continue
+                    fc = p.get("function_call")
+                    if fc is not None:
+                        fc_dict = fc if isinstance(fc, dict) else _part_to_dict(fc)
+                        tool_entry = {
+                            "tool": fc_dict.get("name", "") or "",
+                            "input": dict(fc_dict.get("args", {}) or {}),
+                        }
+                        collected_tool_calls.append(tool_entry)
+                        yield {"event": "tool_call", "data": json.dumps(tool_entry)}
+                        continue
+                    fr = p.get("function_response")
+                    if fr is not None:
+                        fr_dict = fr if isinstance(fr, dict) else _part_to_dict(fr)
+                        yield {
+                            "event": "tool_result",
+                            "data": json.dumps(
+                                {
+                                    "tool": fr_dict.get("name", "") or "",
+                                    "output_summary": str(fr_dict.get("response", ""))[:200],
+                                }
+                            ),
+                        }
+            except Exception:
+                # Per-event parse error — log and skip, the next event may
+                # still be valid (especially mid-tool-call sequences).
+                logger.warning("Failed to parse stream event", exc_info=True)
+                continue
+
+        # Stream ended normally.
+        if not collected_text.strip() and not collected_tool_calls:
+            # Empty response — avoid the dreaded silent assistant bubble.
+            fallback = (
+                "I wasn't able to generate a response. Could you rephrase your question?"
+            )
+            yield {"event": "text_chunk", "data": json.dumps({"text": fallback})}
+        yield {"event": "done", "data": json.dumps({})}
+
+    except google.api_core.exceptions.NotFound:
+        # Almost always a stale session_id (agent redeployed between
+        # session-create and this query). Recreate once and retry.
+        if _retry_count < _SESSION_RETRY_LIMIT and session_id is not None:
+            logger.warning(
+                "Session %s stale for conversation %s; recreating", session_id, conversation.id
+            )
+            try:
+                new_session = remote_agent.create_session(user_id=str(user_id))
+                new_sid = new_session["id"]
+                await db.partial_update(
+                    "conversations",
+                    conversation.id,
+                    {"agent_session_id": new_sid},
+                )
+                conversation.agent_session_id = new_sid
+                async for frame in stream_agent_response(
+                    db,
+                    user_id,
+                    conversation,
+                    user_message,
+                    _retry_count=_retry_count + 1,
+                ):
+                    yield frame
+                return
+            except Exception:
+                logger.exception("Failed to recreate stale session")
+                yield {
+                    "event": "done",
+                    "data": json.dumps(
+                        {"error": "I lost my train of thought. Could you repeat that?"}
+                    ),
+                }
+                return
+        yield {
+            "event": "done",
+            "data": json.dumps(
+                {"error": "I'm having trouble connecting. Please try again in a moment."}
             ),
         }
 
-    except Exception as e:
-        logger.exception("Agent stream error")
-        yield {"event": "done", "data": json.dumps({"error": str(e)})}
+    except TimeoutError:
+        yield {
+            "event": "done",
+            "data": json.dumps({"error": "I'm taking too long to respond. Please try again."}),
+        }
+
+    except GeneratorExit:
+        # Client disconnected mid-stream. Normal lifecycle — don't log
+        # as error, don't yield (the consumer is gone). Must re-raise so
+        # the generator finalizes properly.
+        logger.debug("Client disconnected during stream")
+        raise
+
+    except Exception:
+        logger.error("Unexpected stream error", exc_info=True)
+        if collected_text or collected_tool_calls:
+            yield {
+                "event": "done",
+                "data": json.dumps(
+                    {
+                        "error": (
+                            "I encountered an issue while responding. The partial "
+                            "answer above may be incomplete."
+                        )
+                    }
+                ),
+            }
+        else:
+            yield {
+                "event": "done",
+                "data": json.dumps({"error": "Something went wrong. Please try again."}),
+            }
