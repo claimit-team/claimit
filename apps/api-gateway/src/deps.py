@@ -19,6 +19,7 @@ from claimit_mongodb_models import MongoDBClient
 from google.cloud import secretmanager
 
 from .services.pubsub_publisher import PubSubPublisher
+from .services.receipts_storage import ReceiptsUploader
 from .services.token_cache import AccessTokenCache
 
 _db: MongoDBClient | None = None
@@ -26,6 +27,7 @@ _secret_manager_client: secretmanager.SecretManagerServiceClient | None = None
 _state_jwt_key: str | None = None
 _token_cache: AccessTokenCache | None = None
 _pubsub_publisher: PubSubPublisher | None = None
+_receipts_uploader: ReceiptsUploader | None = None
 
 
 async def get_db() -> MongoDBClient:
@@ -62,6 +64,18 @@ def get_pubsub_publisher() -> PubSubPublisher:
     if _pubsub_publisher is None:
         raise RuntimeError("PubSubPublisher not initialized")
     return _pubsub_publisher
+
+
+def init_receipts_uploader() -> None:
+    """Initialize the module-global receipts uploader. Called from lifespan()."""
+    global _receipts_uploader
+    _receipts_uploader = ReceiptsUploader()
+
+
+async def get_receipts_uploader() -> ReceiptsUploader:
+    if _receipts_uploader is None:
+        raise RuntimeError("ReceiptsUploader not initialized")
+    return _receipts_uploader
 
 
 def derive_user_id(firebase_uid: str) -> uuid.UUID:

@@ -198,14 +198,34 @@ function PageHeader({
 }
 
 function DevPulseTrigger() {
-  const triggerProactiveEvent = useUIStore((s) => s.triggerProactiveEvent);
+  const setProactiveEvent = useUIStore((s) => s.setProactiveEvent);
   return (
     <Button
       type="button"
       variant="outline"
       size="sm"
       onClick={() => {
-        triggerProactiveEvent();
+        // Synthetic price_dropped payload so the Floating Panel renders
+        // the full ProactiveCard (opening message + facts + actions),
+        // not just the FAB pulse. notificationId is fake — the ack on
+        // dismiss will 404, which the card swallows by design.
+        setProactiveEvent({
+          notificationId: "dev-pulse-trigger",
+          eventType: "price_dropped",
+          output: {
+            opening_message:
+              "Your Best Buy item just dropped $25.00. You have 12 hours left in the claim window — want me to file it?",
+            key_facts: [
+              "Platform: best_buy",
+              "Refund amount: $25.00",
+              "Window remaining: 12 hours",
+            ],
+            quick_actions: [
+              { label: "Review draft", action: "navigate_claim" },
+              { label: "Auto-file now", action: "approve_claim" },
+            ],
+          },
+        });
         toast.info("Proactive event queued — watch the assistant FAB pulse.");
       }}
       className="border-dashed border-neutral-400 text-neutral-600"

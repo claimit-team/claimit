@@ -1,150 +1,205 @@
 "use client";
 
-import { Menu, Trash2 } from "lucide-react";
+import { AlertCircle, Loader2, Menu } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useMemo, useState } from "react";
-import { toast } from "sonner";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+
+import { ProactiveCard } from "@/components/assistant/proactive-card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  ASSISTANT_GROUP_ORDER,
-  type AssistantConversation,
-  type AssistantMessage,
-  mockExamplePrompts,
-  mockConversations as seedConversations,
-} from "@/lib/mock-assistant";
+import { useAssistantStream } from "@/hooks/useAssistantStream";
+import { useConversations } from "@/hooks/useConversations";
 import { cn } from "@/lib/utils";
+import type { Conversation, UIMessage, WireConversationMessage } from "@/types/assistant";
 
-function groupBuckets(conversations: AssistantConversation[]) {
-  const buckets = new Map<string, AssistantConversation[]>();
-  for (const bucket of ASSISTANT_GROUP_ORDER) {
-    buckets.set(bucket, []);
-  }
+const EXAMPLE_PROMPTS: string[] = [
+  "Summarize Hilton best-rate rules for Waikiki prepaid stays.",
+  "What screenshots should I upload for Southwest refund chat?",
+  "Rewrite Delta schedule-change email politely but firmly.",
+];
+
+type Bucket = "Today" | "Yesterday" | "Last 7 days" | "Older";
+const BUCKET_ORDER: Bucket[] = ["Today", "Yesterday", "Last 7 days", "Older"];
+
+function bucketFor(isoTimestamp: string): Bucket {
+  const then = new Date(isoTimestamp);
+  if (Number.isNaN(then.getTime())) return "Older";
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const ts = then.getTime();
+  const dayMs = 24 * 60 * 60 * 1000;
+  if (ts >= today) return "Today";
+  if (ts >= today - dayMs) return "Yesterday";
+  if (ts >= today - 7 * dayMs) return "Last 7 days";
+  return "Older";
+}
+
+function formatTimestamp(isoTimestamp: string): string {
+  const d = new Date(isoTimestamp);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function wireToUI(messages: WireConversationMessage[]): UIMessage[] {
+  return messages.map((m, idx) => ({
+    id: `srv-${idx}-${m.at}`,
+    role: m.role,
+    content: m.content,
+    at: m.at,
+    tool_calls: m.tool_calls?.map((tc) => ({
+      tool: tc.tool,
+      input: tc.input,
+      output_summary: tc.output_summary,
+    })),
+  }));
+}
+
+function groupConversations(
+  conversations: Conversation[],
+): { label: Bucket; items: Conversation[] }[] {
+  const buckets = new Map<Bucket, Conversation[]>();
+  for (const b of BUCKET_ORDER) buckets.set(b, []);
   for (const c of conversations) {
-    buckets.get(c.group)?.push(c);
+    const b = bucketFor(c.last_message_at);
+    buckets.get(b)?.push(c);
   }
-  return ASSISTANT_GROUP_ORDER.map((label) => ({
-    label,
-    items: buckets.get(label) ?? [],
-  })).filter((g) => g.items.length > 0);
+  return BUCKET_ORDER.map((label) => ({ label, items: buckets.get(label) ?? [] })).filter(
+    (g) => g.items.length > 0,
+  );
+}
+
+function deriveTitle(c: Conversation): string {
+  if (c.title && c.title !== "New Conversation") return c.title;
+  const firstUser = c.messages.find((m) => m.role === "user");
+  if (firstUser) return firstUser.content.slice(0, 60);
+  return c.mode === "claim_focused" ? "Claim conversation" : "New conversation";
+}
+
+function derivePreview(c: Conversation): string {
+  if (c.messages.length === 0) return "No messages yet";
+  return c.messages[c.messages.length - 1].content.slice(0, 90);
 }
 
 export function AssistantContent({ conversationId }: { conversationId: string | null }) {
   const router = useRouter();
-  const [conversations, setConversations] = useState(seedConversations);
+  const {
+    conversations,
+    isLoading: convLoading,
+    error: convError,
+    createConversation,
+  } = useConversations({ mode: "general" });
+  const {
+    messages,
+    streaming,
+    error: streamError,
+    sendMessage,
+    hydrate,
+    reset,
+  } = useAssistantStream();
+
   const [draft, setDraft] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  // Sentinel at the bottom of the message list. scrollIntoView walks up
+  // to find the actual scroll parent (the shadcn ScrollArea Viewport),
+  // unlike scrollTop on a wrapper div which was a silent no-op inside
+  // the Viewport hierarchy.
+  const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  const active = conversationId ? conversations.find((c) => c.id === conversationId) : undefined;
+  const active = conversationId ? conversations.find((c) => c._id === conversationId) : undefined;
+  const unknownId = Boolean(conversationId) && !active && !convLoading;
 
-  const unknownId = Boolean(conversationId) && conversations.every((c) => c.id !== conversationId);
+  // Hydrate local stream buffer with the active conversation's persisted
+  // messages whenever the active conversation changes. The stream
+  // continues to layer streaming messages on top.
+  useEffect(() => {
+    if (active) {
+      hydrate(wireToUI(active.messages));
+    } else {
+      reset();
+    }
+  }, [active, hydrate, reset]);
 
-  const groupedList = useMemo(() => groupBuckets(conversations), [conversations]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `messages` is the intentional trigger for the scroll effect even though the body doesn't read it
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+  }, [messages]);
 
-  function appendMessage(
-    convId: string,
-    message: Omit<AssistantMessage, "id"> & Partial<Pick<AssistantMessage, "id">>,
-  ) {
-    const withId: AssistantMessage = {
-      ...message,
-      id:
-        typeof message.id === "string"
-          ? message.id
-          : typeof crypto !== "undefined" && "randomUUID" in crypto
-            ? crypto.randomUUID()
-            : `m-${Date.now()}`,
-    };
+  const groupedList = useMemo(() => groupConversations(conversations), [conversations]);
 
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === convId
-          ? {
-              ...c,
-              messages: [...c.messages, withId],
-              preview: withId.content.slice(0, 140),
-            }
-          : c,
-      ),
-    );
-  }
-
-  function sendDraftIfPossible() {
+  async function sendDraftIfPossible() {
     const text = draft.trim();
-    if (!text || !active) return;
-
-    appendMessage(active.id, { role: "user", content: text });
+    if (!text || streaming) return;
     setDraft("");
-    toast.message("Assistant (demo)", {
-      description: "Full agent wiring ships later — conversation updated locally.",
-    });
+
+    let convId = active?._id ?? null;
+    if (!convId) {
+      try {
+        const created = await createConversation("general");
+        convId = created._id;
+        router.push(`/assistant/${convId}`);
+      } catch {
+        return;
+      }
+    }
+    await sendMessage(convId, text);
   }
 
-  function confirmDelete() {
-    if (!deleteTarget) return;
-    setConversations((prev) => prev.filter((c) => c.id !== deleteTarget));
-
-    const shouldLeave = conversationId === deleteTarget;
-    setDeleteTarget(null);
-    if (shouldLeave) router.push("/assistant");
-
-    toast.success("Conversation removed");
-  }
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      void sendDraftIfPossible();
+    }
+  };
 
   const conversationLinks: ReactNode = (
     <div className="px-3 py-4 space-y-6">
-      {groupedList.map(({ label, items }) => (
-        <div key={label}>
-          <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-            {label}
-          </p>
-          <ul className="space-y-1">
-            {items.map((c) => (
-              <li key={c.id} className="relative group/item">
-                <Link
-                  href={`/assistant/${c.id}`}
-                  onClick={() => setHistoryOpen(false)}
-                  className={cn(
-                    "flex flex-col gap-0.5 rounded-lg px-3 py-2 pr-11 text-sm transition-colors",
-                    c.id === conversationId
-                      ? "bg-brand-primary-50 text-brand-primary-900"
-                      : "text-neutral-800 hover:bg-neutral-100",
-                  )}
-                >
-                  <span className="truncate font-medium leading-snug">{c.title}</span>
-                  <span className="truncate text-xs text-neutral-500">{c.preview}</span>
-                  <span className="text-[11px] text-neutral-400">{c.timestamp}</span>
-                </Link>
-                <button
-                  type="button"
-                  aria-label={`Delete conversation ${c.title}`}
-                  className={cn(
-                    "absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-neutral-500 opacity-75 hover:bg-neutral-200 hover:text-neutral-900 md:opacity-0 md:group-hover/item:opacity-100",
-                  )}
-                  onClick={(evt) => {
-                    evt.preventDefault();
-                    evt.stopPropagation();
-                    setDeleteTarget(c.id);
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden />
-                </button>
-              </li>
-            ))}
-          </ul>
+      {convLoading && conversations.length === 0 ? (
+        <div className="flex items-center gap-2 px-3 text-sm text-neutral-500">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          Loading conversations…
         </div>
-      ))}
+      ) : groupedList.length === 0 ? (
+        <p className="px-3 text-sm text-neutral-500">No conversations yet — start one below.</p>
+      ) : (
+        groupedList.map(({ label, items }) => (
+          <div key={label}>
+            <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+              {label}
+            </p>
+            <ul className="space-y-1">
+              {items.map((c) => (
+                <li key={c._id}>
+                  <Link
+                    href={`/assistant/${c._id}`}
+                    onClick={() => setHistoryOpen(false)}
+                    className={cn(
+                      "flex flex-col gap-0.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                      c._id === conversationId
+                        ? "bg-brand-primary-50 text-brand-primary-900"
+                        : "text-neutral-800 hover:bg-neutral-100",
+                    )}
+                  >
+                    <span className="truncate font-medium leading-snug">{deriveTitle(c)}</span>
+                    <span className="truncate text-xs text-neutral-500">{derivePreview(c)}</span>
+                    <span className="text-[11px] text-neutral-400">
+                      {formatTimestamp(c.last_message_at)}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      )}
     </div>
   );
 
@@ -167,6 +222,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
       <>
         <div className="flex flex-1 flex-col px-8 py-12 overflow-y-auto">
           <div className="mx-auto flex max-w-lg flex-col gap-6">
+            <ProactiveCard />
             <div className="text-center md:text-left">
               <p className="text-xs font-semibold uppercase tracking-wide text-brand-primary-600">
                 ClaimIt Assistant
@@ -182,7 +238,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
             <div>
               <p className="mb-3 text-xs font-medium text-neutral-500">Try:</p>
               <div className="flex flex-col gap-2">
-                {mockExamplePrompts.map((prompt) => (
+                {EXAMPLE_PROMPTS.map((prompt) => (
                   <Button
                     key={prompt}
                     type="button"
@@ -202,17 +258,24 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
             <Textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="Draft a prompt, then choose a conversation to send it..."
+              onKeyDown={handleKeyDown}
+              placeholder="Type a message to start a new conversation…"
               aria-label="Draft assistant message"
               className="min-h-[56px]"
               rows={3}
+              disabled={streaming}
             />
-            <Button type="button" variant="secondary" className="shrink-0" disabled>
+            <Button
+              type="button"
+              className="shrink-0 bg-brand-primary-600 text-neutral-0 hover:bg-brand-primary-700"
+              onClick={() => void sendDraftIfPossible()}
+              disabled={!draft.trim() || streaming}
+            >
               Send
             </Button>
           </div>
           <p className="mx-auto mt-2 max-w-4xl text-center text-[11px] text-neutral-400">
-            Open a conversation from the sidebar to send messages (demo shell).
+            Ctrl/Cmd + Enter to send — a new conversation is created on first message.
           </p>
         </div>
       </>
@@ -225,12 +288,13 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
             <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
               Assistant
             </p>
-            <h2 className="text-lg font-semibold text-neutral-900">{active.title}</h2>
+            <h2 className="text-lg font-semibold text-neutral-900">{deriveTitle(active)}</h2>
           </div>
         </div>
         <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-4 px-4 py-6 lg:px-10">
-            {active.messages.map((msg) => (
+            <ProactiveCard />
+            {messages.map((msg) => (
               <article
                 key={msg.id}
                 className={cn(
@@ -246,15 +310,33 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
                       : "bg-neutral-0 text-neutral-900 ring-neutral-100",
                   )}
                 >
-                  {msg.role === "assistant" && msg.toolSummary && (
+                  {msg.role === "assistant" && msg.tool_calls && msg.tool_calls.length > 0 && (
                     <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-brand-primary-500">
-                      Tools · {msg.toolSummary}
+                      Tools · {msg.tool_calls.map((t) => t.tool).join(", ")}
                     </p>
                   )}
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  <p className="whitespace-pre-wrap break-words">
+                    {msg.content}
+                    {msg.streaming && msg.role === "assistant" ? (
+                      <Loader2
+                        aria-hidden
+                        className="ml-1 inline-block h-3 w-3 animate-spin text-neutral-500 align-middle"
+                      />
+                    ) : null}
+                  </p>
                 </div>
+                {msg.error ? (
+                  <span className="text-[11px] text-semantic-danger mt-1">{msg.error}</span>
+                ) : null}
               </article>
             ))}
+            {streamError ? (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{streamError}</AlertDescription>
+              </Alert>
+            ) : null}
+            <div ref={bottomRef} aria-hidden="true" />
           </div>
         </ScrollArea>
         <div className="border-t border-neutral-200 bg-neutral-0 px-4 py-3 lg:px-8">
@@ -262,28 +344,24 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
             <Textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={handleKeyDown}
               placeholder="Message the assistant..."
               aria-label="Message the assistant"
               className="min-h-[56px]"
               rows={3}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                  e.preventDefault();
-                  sendDraftIfPossible();
-                }
-              }}
+              disabled={streaming}
             />
             <Button
               type="button"
               className="shrink-0 bg-brand-primary-600 text-neutral-0 hover:bg-brand-primary-700"
-              onClick={sendDraftIfPossible}
-              disabled={!draft.trim()}
+              onClick={() => void sendDraftIfPossible()}
+              disabled={!draft.trim() || streaming}
             >
               Send
             </Button>
           </div>
           <p className="mx-auto mt-2 max-w-4xl text-center text-[11px] text-neutral-400">
-            Ctrl/Cmd + Enter to send • Demo transcripts only refresh locally for now.
+            Ctrl/Cmd + Enter to send.
           </p>
         </div>
       </>
@@ -305,6 +383,12 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
             New chat
           </Button>
         </div>
+        {convError ? (
+          <Alert variant="destructive" className="mx-3 mt-3">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{convError.message}</AlertDescription>
+          </Alert>
+        ) : null}
         <ScrollArea className="min-h-0 flex-1">{conversationLinks}</ScrollArea>
       </aside>
 
@@ -344,7 +428,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
               Assistant
             </p>
             <p className="truncate font-medium text-neutral-900">
-              {active?.title ?? "Pick a conversation"}
+              {active ? deriveTitle(active) : "Pick a conversation"}
             </p>
           </div>
           <Button
@@ -359,30 +443,6 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
 
         <div className="flex min-h-0 flex-1 flex-col">{mainPaneContent}</div>
       </div>
-
-      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Remove conversation?</DialogTitle>
-            <DialogDescription>
-              This only removes it from local demo history for now.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setDeleteTarget(null)}>
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={confirmDelete}
-              className="bg-semantic-danger hover:bg-semantic-danger/90"
-            >
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
