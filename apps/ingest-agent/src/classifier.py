@@ -8,6 +8,11 @@ import json
 from typing import Any
 from uuid import uuid4
 
+from claimit_mongodb_models import (
+    IngestionSkiplistEntry,
+    compute_format_hash,
+    normalize_sender,
+)
 from google.adk import Agent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -134,11 +139,34 @@ class EmailForClassification(BaseModel):
     body_text: str = ""
 
 
+class _LLMClassification(BaseModel):
+    """Schema the Gemini model is asked to produce (no skiplist signal)."""
+
+    is_order: bool
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
 class ClassificationResult(BaseModel):
     """Structured classifier decision."""
 
     is_order: bool
     confidence: float = Field(ge=0.0, le=1.0)
+    skiplist_hit: bool = False
+
+
+def _skiplist_match(
+    email: EmailForClassification,
+    skiplist: list[IngestionSkiplistEntry] | None,
+) -> bool:
+    """True when (sender, format_hash) matches any entry in the user skiplist."""
+    if not skiplist:
+        return False
+    sender = normalize_sender(email.sender)
+    format_hash = compute_format_hash(email.subject, email.body_text)
+    for entry in skiplist:
+        if normalize_sender(entry.sender) == sender and entry.format_hash == format_hash:
+            return True
+    return False
 
 
 def _build_classifier_agent() -> Agent:
@@ -146,7 +174,7 @@ def _build_classifier_agent() -> Agent:
         name="order_confirmation_classifier",
         model=MODEL_NAME,
         instruction=CLASSIFIER_SYSTEM_PROMPT,
-        output_schema=ClassificationResult,
+        output_schema=_LLMClassification,
         tools=[],
     )
 
@@ -193,11 +221,16 @@ def _parse_classification_output(raw_output: str | None) -> ClassificationResult
         raise ClassifierError("Classifier returned malformed JSON") from exc
 
     try:
-        return ClassificationResult.model_validate(payload)
+        llm_result = _LLMClassification.model_validate(payload)
     except ValidationError:
         raise
     except Exception as exc:
         raise ClassifierError("Classifier returned an invalid payload") from exc
+
+    return ClassificationResult(
+        is_order=llm_result.is_order,
+        confidence=llm_result.confidence,
+    )
 
 
 async def _maybe_await[T](value: T) -> T:
@@ -247,8 +280,21 @@ async def _run_classifier_agent(email: EmailForClassification) -> str | None:
     return final_text
 
 
-async def classify(email: EmailForClassification) -> ClassificationResult:
-    """Return whether an email is an order confirmation and the model confidence."""
+async def classify(
+    email: EmailForClassification,
+    *,
+    skiplist: list[IngestionSkiplistEntry] | None = None,
+) -> ClassificationResult:
+    """Return whether an email is an order confirmation and the model confidence.
+
+    When `skiplist` contains an entry whose `sender` + `format_hash` match this
+    email, the classifier short-circuits with `is_order=False` and does not
+    call Gemini — saving the expensive extraction round-trip on repeat
+    promotional senders the user has already dismissed (ticket 3.7).
+    """
+
+    if _skiplist_match(email, skiplist):
+        return ClassificationResult(is_order=False, confidence=1.0, skiplist_hit=True)
 
     raw_output = await _run_classifier_agent(email)
     return _parse_classification_output(raw_output)

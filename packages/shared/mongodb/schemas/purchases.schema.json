@@ -423,6 +423,30 @@
       ],
       "title": "Receipt Hash"
     },
+    "format_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Format Hash"
+    },
+    "sender": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sender"
+    },
     "extraction_confidence": {
       "$ref": "#/$defs/ExtractionConfidence"
     }
