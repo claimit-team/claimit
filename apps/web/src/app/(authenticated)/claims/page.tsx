@@ -1,18 +1,16 @@
 "use client";
 
-import { ArrowUpDown, Search } from "lucide-react";
+import type { ClaimOutcome } from "@claimit/mongodb-types";
+import { Search } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+
+import { ClaimOutcomeBadge } from "@/components/claims/claim-outcome-badge";
+import { PlatformLogo } from "@/components/claims/platform-logo";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -21,40 +19,47 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { type Claim, type ClaimStatus, mockClaims } from "@/lib/mock-claims";
+import { useClaims } from "@/hooks/useClaims";
+import type { ClaimListItem, StatusGroup } from "@/lib/api/claims";
+import { claimTypeLabel, formatWindowRemaining } from "@/lib/claims-status";
 import { cn } from "@/lib/utils";
 
-const STATUSES_FILTER: ClaimStatus[] = [
-  "drafted",
-  "awaiting_approval",
-  "queued_for_send",
-  "low_confidence",
-  "submitted",
-  "approved",
-  "denied",
-  "expired",
-  "no_response",
+// --- chip group config ---------------------------------------------------
+
+type ChipKey = "all" | StatusGroup;
+const CHIPS: { key: ChipKey; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "pending", label: "Pending" },
+  { key: "in_progress", label: "In progress" },
+  { key: "resolved", label: "Resolved" },
 ];
 
-function statusBadgeVariant(
-  status: ClaimStatus,
-): "default" | "secondary" | "outline" | "destructive" {
-  switch (status) {
-    case "approved":
-      return "default";
-    case "denied":
-    case "expired":
-      return "destructive";
-    case "submitted":
-    case "queued_for_send":
-    case "awaiting_approval":
-      return "secondary";
-    default:
-      return "outline";
-  }
-}
+// --- empty-state copy (per v0 prompt §5) ---------------------------------
+//
+// Fixed copy per filter so the page is never just a blank slate. No money
+// totals or aspirational stats — those belong on the dashboard.
+const EMPTY_COPY: Record<ChipKey, { title: string; body: string }> = {
+  all: {
+    title: "No claims yet",
+    body: "When ClaimIt drafts a claim from a monitored purchase, it will show up here.",
+  },
+  pending: {
+    title: "Nothing pending",
+    body: "Claims waiting for your approval will land here.",
+  },
+  in_progress: {
+    title: "No claims in progress",
+    body: "Claims that have been submitted to the merchant and are waiting on a reply.",
+  },
+  resolved: {
+    title: "No resolved claims yet",
+    body: "Once a merchant replies — approved, denied, or otherwise — claims show up here.",
+  },
+};
 
-function formatMoney(amount: number, currency: string) {
+// --- formatting helpers --------------------------------------------------
+
+function formatMoney(amount: number, currency: string): string {
   try {
     return new Intl.NumberFormat(undefined, {
       style: "currency",
@@ -67,148 +72,320 @@ function formatMoney(amount: number, currency: string) {
   }
 }
 
-function formatClaimType(t: Claim["claimType"]) {
-  switch (t) {
-    case "chat_script":
-      return "Chat script";
-    case "in_store":
-      return "In store";
-    case "self_service":
-      return "Self service";
-    default:
-      return "Email";
+function formatDateShort(iso: string | null): string {
+  if (iso === null) return "—";
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "—";
+  return new Date(ms).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function formatRelativeFromNow(iso: string): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "—";
+  const days = Math.floor((Date.now() - ms) / (24 * 60 * 60 * 1000));
+  if (days < 1) return "Submitted today";
+  if (days === 1) return "Submitted 1 day ago";
+  return `Submitted ${days} days ago`;
+}
+
+/**
+ * Compute the "Window/Resolved" cell text for a row, encoding the
+ * outcome-driven copy rules from the v0 prompt:
+ *
+ * - draft_pending -> "11 days remaining" (countdown vs window_expires)
+ * - pending       -> "Submitted N days ago" or "Outcome needed" (no submitted_at)
+ * - approved/denied/user_self_service/user_cancelled/no_response -> resolved_at
+ * - expired       -> "Window expired"
+ */
+function windowOrResolvedCell(claim: ClaimListItem): string {
+  switch (claim.outcome) {
+    case "draft_pending":
+      return formatWindowRemaining(claim.window_expires);
+    case "pending":
+      return claim.submitted_at !== null
+        ? formatRelativeFromNow(claim.submitted_at)
+        : "Outcome needed";
+    case "approved":
+    case "denied":
+    case "user_self_service":
+    case "user_cancelled":
+    case "no_response":
+      return claim.resolved_at !== null
+        ? `Resolved ${formatDateShort(claim.resolved_at)}`
+        : "Resolved";
+    case "expired":
+      return "Window expired";
+    default: {
+      const _exhaustive: never = claim.outcome;
+      return _exhaustive;
+    }
   }
 }
 
-export default function ClaimsPage() {
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ClaimStatus | "all">("all");
+function amountClassName(outcome: ClaimOutcome): string {
+  // approved -> green semantic. Everything else stays neutral so that
+  // unresolved or denied claims never visually masquerade as money won.
+  return outcome === "approved" ? "text-brand-accent-500" : "text-neutral-700";
+}
 
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return mockClaims.filter((c) => {
-      if (statusFilter !== "all" && c.status !== statusFilter) return false;
-      if (!q) return true;
-      return (
-        c.claimId.toLowerCase().includes(q) ||
-        c.platform.toLowerCase().includes(q) ||
-        c.productName.toLowerCase().includes(q) ||
-        c.windowLabel.toLowerCase().includes(q)
-      );
-    });
-  }, [query, statusFilter]);
+// --- skeleton + empty + error states -------------------------------------
+
+// Skeleton placeholder keys — fixed-count, fixed-order, no semantic
+// identity beyond "Nth row in the loading state", so a hand-rolled stable
+// id list satisfies React's key constraint without an index.
+const ROW_SKELETON_KEYS = ["sk-row-1", "sk-row-2", "sk-row-3", "sk-row-4", "sk-row-5"] as const;
+const CARD_SKELETON_KEYS = ["sk-card-1", "sk-card-2", "sk-card-3", "sk-card-4"] as const;
+
+function LoadingSkeleton() {
+  return (
+    <>
+      <div className="hidden rounded-xl border border-neutral-200 bg-neutral-0 shadow-sm md:block">
+        <div className="space-y-3 p-4">
+          {ROW_SKELETON_KEYS.map((key) => (
+            <Skeleton key={key} className="h-12 w-full" />
+          ))}
+        </div>
+      </div>
+      <div className="space-y-3 md:hidden">
+        {CARD_SKELETON_KEYS.map((key) => (
+          <Skeleton key={key} className="h-28 w-full rounded-xl" />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function EmptyState({ chip }: { chip: ChipKey }) {
+  const copy = EMPTY_COPY[chip];
+  return (
+    <Card className="mx-auto max-w-md">
+      <CardContent className="py-10 text-center">
+        <h3 className="text-base font-medium text-neutral-900">{copy.title}</h3>
+        <p className="mt-2 text-sm text-neutral-600">{copy.body}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <Alert className="mx-auto max-w-xl">
+      <AlertTitle>Couldn't load claims</AlertTitle>
+      <AlertDescription>
+        <p className="mb-3 text-sm">{message}</p>
+        <Button size="sm" variant="outline" onClick={onRetry}>
+          Try again
+        </Button>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+// --- row renderers -------------------------------------------------------
+
+function ClaimRow({ claim }: { claim: ClaimListItem }) {
+  return (
+    <TableRow>
+      <TableCell>
+        <ClaimOutcomeBadge outcome={claim.outcome} />
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-3">
+          <PlatformLogo platform={claim.platform} category={claim.category} />
+          <div className="flex min-w-0 flex-col">
+            <span className="truncate font-medium text-neutral-900">
+              {claim.product_name ?? "Unlinked claim"}
+            </span>
+            <span className="text-xs text-neutral-500 capitalize">
+              {claim.platform.replace(/_/g, " ")}
+            </span>
+          </div>
+        </div>
+      </TableCell>
+      <TableCell className="text-sm text-neutral-700">{claimTypeLabel(claim.claim_type)}</TableCell>
+      <TableCell
+        className={cn("text-right font-medium tabular-nums", amountClassName(claim.outcome))}
+      >
+        {formatMoney(claim.claim_amount, claim.currency)}
+      </TableCell>
+      <TableCell className="text-sm text-neutral-700">{windowOrResolvedCell(claim)}</TableCell>
+      <TableCell className="text-sm text-neutral-500">
+        {formatDateShort(claim.submitted_at)}
+      </TableCell>
+      <TableCell className="text-right">
+        <Button render={<Link href={`/claims/${claim._id}`} />} size="sm" variant="outline">
+          View
+        </Button>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function ClaimCard({ claim }: { claim: ClaimListItem }) {
+  return (
+    <Card className="overflow-hidden">
+      <CardContent className="space-y-3 py-4">
+        <div className="flex items-center justify-between">
+          <ClaimOutcomeBadge outcome={claim.outcome} />
+          <span className={cn("font-medium tabular-nums", amountClassName(claim.outcome))}>
+            {formatMoney(claim.claim_amount, claim.currency)}
+          </span>
+        </div>
+        <div className="flex items-start gap-3">
+          <PlatformLogo platform={claim.platform} category={claim.category} />
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate font-medium text-neutral-900">
+              {claim.product_name ?? "Unlinked claim"}
+            </span>
+            <span className="text-xs text-neutral-500 capitalize">
+              {claim.platform.replace(/_/g, " ")} · {claimTypeLabel(claim.claim_type)}
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center justify-between border-t border-neutral-100 pt-3 text-xs text-neutral-500">
+          <span>{windowOrResolvedCell(claim)}</span>
+          <Link
+            href={`/claims/${claim._id}`}
+            className="font-medium text-brand-primary-500 hover:underline"
+          >
+            View
+          </Link>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- main page -----------------------------------------------------------
+
+export default function ClaimsPage() {
+  const {
+    claims,
+    nextCursor,
+    isLoading,
+    isLoadingMore,
+    error,
+    statusGroup,
+    setStatusGroup,
+    q,
+    setQ,
+    refetch,
+    loadMore,
+  } = useClaims();
+
+  const activeChip: ChipKey = statusGroup ?? "all";
+
+  // Group inferred from outcome for the empty-state copy when there are 0
+  // claims AND a chip is active. When all chips are clear, we fall back to
+  // "all" copy.
+  const emptyChipKey: ChipKey =
+    claims.length === 0 && statusGroup === null && q.length === 0 ? "all" : activeChip;
 
   return (
-    <div className="p-4 lg:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="mx-auto max-w-7xl space-y-6 p-4 lg:p-8">
       <div>
         <h1 className="text-2xl font-semibold text-neutral-900">Claims</h1>
-        <p className="text-neutral-600 mt-1 text-sm">
+        <p className="mt-1 text-sm text-neutral-600">
           Track drafts, submissions, and outcomes across every monitored purchase.
         </p>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-        <div className="relative w-full sm:max-w-xs">
-          <Search
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400 pointer-events-none"
-            aria-hidden
-          />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search claims..."
-            aria-label="Search claims"
-            className="pl-9"
-          />
+      <div className="sticky top-0 z-10 -mx-4 border-b border-neutral-100 bg-background/80 px-4 py-3 backdrop-blur lg:-mx-8 lg:px-8">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap gap-2">
+            {CHIPS.map((chip) => {
+              const isActive = chip.key === activeChip;
+              return (
+                <button
+                  key={chip.key}
+                  type="button"
+                  onClick={() => setStatusGroup(chip.key === "all" ? null : chip.key)}
+                  className={cn(
+                    "rounded-full border px-3 py-1.5 text-sm transition-colors",
+                    isActive
+                      ? "border-brand-primary-500 bg-brand-primary-500 text-primary-foreground"
+                      : "border-neutral-200 bg-neutral-0 text-neutral-700 hover:bg-neutral-50",
+                  )}
+                  aria-pressed={isActive}
+                >
+                  {chip.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="relative w-full sm:max-w-xs">
+            <Search
+              className="pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 -translate-y-1/2 text-neutral-400"
+              aria-hidden
+            />
+            <Input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search platform or product…"
+              aria-label="Search claims"
+              className="pl-9"
+            />
+          </div>
         </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className={cn(
-              buttonVariants({ variant: "outline" }),
-              "w-full sm:w-auto justify-between",
-            )}
-          >
-            <ArrowUpDown className="w-4 h-4 mr-2" aria-hidden />
-            Status:{" "}
-            <span className="font-normal ml-1">
-              {statusFilter === "all" ? "All" : statusFilter.replace(/_/g, " ")}
-            </span>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
-            <DropdownMenuRadioGroup
-              value={statusFilter}
-              onValueChange={(v) => setStatusFilter(v === "all" ? "all" : (v as ClaimStatus))}
-            >
-              <DropdownMenuRadioItem value="all">All statuses</DropdownMenuRadioItem>
-              {STATUSES_FILTER.map((s) => (
-                <DropdownMenuRadioItem key={s} value={s}>
-                  {s.replace(/_/g, " ")}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
       </div>
 
-      <div className="rounded-xl border border-neutral-200 bg-neutral-0 overflow-hidden shadow-sm">
-        <Table className="min-w-[760px]">
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="w-[112px]">Claim</TableHead>
-              <TableHead>Product</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Est. refund</TableHead>
-              <TableHead>Window</TableHead>
-              <TableHead className="text-right">Action</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center py-12 text-neutral-500">
-                  No claims match your filters.
-                </TableCell>
-              </TableRow>
-            ) : (
-              rows.map((c) => (
-                <TableRow key={c.claimId}>
-                  <TableCell className="font-mono text-xs text-neutral-700">{c.claimId}</TableCell>
-                  <TableCell>
-                    <div className="flex flex-col">
-                      <span className="font-medium text-neutral-900">{c.productName}</span>
-                      <span className="text-xs text-neutral-500">{c.platform}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-neutral-700 text-sm capitalize">
-                    {formatClaimType(c.claimType)}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={statusBadgeVariant(c.status)}>
-                      {c.status.replace(/_/g, " ")}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {formatMoney(c.amount, c.currency)}
-                  </TableCell>
-                  <TableCell className="text-neutral-700 text-sm max-w-[220px] whitespace-normal">
-                    {c.windowLabel}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      render={<Link href={`/claims/${c.claimId}`} />}
-                      size="sm"
-                      variant="outline"
-                    >
-                      Open
-                    </Button>
-                  </TableCell>
+      {error !== null && claims.length === 0 ? (
+        <ErrorState message={error.message} onRetry={refetch} />
+      ) : isLoading ? (
+        <LoadingSkeleton />
+      ) : claims.length === 0 ? (
+        <EmptyState chip={emptyChipKey} />
+      ) : (
+        <>
+          <div className="hidden rounded-xl border border-neutral-200 bg-neutral-0 shadow-sm md:block">
+            <Table className="min-w-[760px]">
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="w-[140px]">Status</TableHead>
+                  <TableHead>Platform / Product</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead>Window / Resolved</TableHead>
+                  <TableHead>Submitted</TableHead>
+                  <TableHead className="w-[100px] text-right">Action</TableHead>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+              </TableHeader>
+              <TableBody>
+                {claims.map((claim) => (
+                  <ClaimRow key={claim._id} claim={claim} />
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="space-y-3 md:hidden">
+            {claims.map((claim) => (
+              <ClaimCard key={claim._id} claim={claim} />
+            ))}
+          </div>
+
+          {/* If a refresh failed AFTER the first page rendered, surface the
+              error inline below the list — stale-while-error pattern, the
+              user keeps their data while seeing why the refresh hiccuped. */}
+          {error !== null ? (
+            <div className="text-center">
+              <ErrorState message={error.message} onRetry={refetch} />
+            </div>
+          ) : null}
+
+          {nextCursor !== null ? (
+            <div className="flex justify-center">
+              <Button variant="outline" onClick={loadMore} disabled={isLoadingMore}>
+                {isLoadingMore ? "Loading…" : "Load more"}
+              </Button>
+            </div>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
