@@ -23,6 +23,8 @@ import pytest
 from claimit_mongodb_models import (
     Claim,
     ClaimReadTolerant,
+    PriceHistory,
+    PriceHistoryReadTolerant,
     Purchase,
     PurchaseReadTolerant,
 )
@@ -350,3 +352,115 @@ class TestPurchaseReadTolerant:
             Purchase.model_validate(doc)
         loc_keys = {e["loc"][0] for e in excinfo.value.errors() if e["loc"]}
         assert "extraction_confidence" in loc_keys
+
+
+# ---------------------------------------------------------------------------
+# PriceHistory — round-trip + strict-still-rejects pairs (ticket 5.6).
+# ---------------------------------------------------------------------------
+
+
+def _valid_price_history_doc() -> dict:
+    """Schema-valid PriceHistory row — round-trips through both variants.
+
+    Mirrors what monitor-agent's `_persist_price_history` writes (see
+    `apps/monitor-agent/src/cron.py`): `price_non_member` populated,
+    `price_member` null unless the purchase has a member tier, all
+    enum fields canonical.
+    """
+    now = datetime.now(UTC)
+    return {
+        "_id": uuid4(),
+        "updated_at": now,
+        "purchase_id": uuid4(),
+        "platform": "best_buy",
+        "product_id": "BBY-987654",
+        "price_member": None,
+        "price_non_member": 249.99,
+        "member_tier_required": None,
+        "currency": "USD",
+        "checked_at": now,
+        "source": "scraperapi",
+        "evidence_screenshot_url": None,
+        "raw_response_hash": "deadbeef",
+    }
+
+
+class TestPriceHistoryReadTolerant:
+    def test_valid_doc_round_trips_through_both_variants(self) -> None:
+        """Valid price-history row deserialises through tolerant AND strict —
+        no behaviour change for normal monitor-agent writes."""
+        doc = _valid_price_history_doc()
+        tolerant = PriceHistoryReadTolerant.model_validate(doc)
+        strict = PriceHistory.model_validate(doc)
+        assert tolerant.id == strict.id
+        assert tolerant.platform == strict.platform.value
+        assert tolerant.source == strict.source.value
+        assert tolerant.price_non_member == strict.price_non_member
+
+    def test_rogue_source_passes_tolerant_rejects_strict(self) -> None:
+        """`source` is the field most likely to drift — `PriceSource` is
+        a tight enum (keepa/scraperapi/apify/amadeus/direct) and the
+        monitor-agent cron already logs a `cron.price_history_skip` when
+        a legacy/experimental value like `"seeded"` doesn't map. A row
+        written before that gate was tightened must still load on read.
+        """
+        doc = _valid_price_history_doc()
+        doc["source"] = "seeded"
+
+        tolerant = PriceHistoryReadTolerant.model_validate(doc)
+        assert tolerant.source == "seeded"
+
+        with pytest.raises(ValidationError) as excinfo:
+            PriceHistory.model_validate(doc)
+        assert any("source" in e["loc"] for e in excinfo.value.errors())
+
+    def test_null_platform_passes_tolerant_rejects_strict(self) -> None:
+        """`platform` is required on strict (`Platform` enum); tolerant
+        widens to `str | None` so a degraded row still loads."""
+        doc = _valid_price_history_doc()
+        doc["platform"] = None
+
+        tolerant = PriceHistoryReadTolerant.model_validate(doc)
+        assert tolerant.platform is None
+
+        with pytest.raises(ValidationError):
+            PriceHistory.model_validate(doc)
+
+    def test_null_currency_passes_tolerant_rejects_strict(self) -> None:
+        """`currency: Literal["USD"]` on strict; tolerant widens so a
+        future multi-currency migration or a malformed row still loads."""
+        doc = _valid_price_history_doc()
+        doc["currency"] = None
+
+        tolerant = PriceHistoryReadTolerant.model_validate(doc)
+        assert tolerant.currency is None
+
+        with pytest.raises(ValidationError):
+            PriceHistory.model_validate(doc)
+
+    def test_null_checked_at_passes_tolerant_rejects_strict(self) -> None:
+        """`checked_at` is required for the chart x-axis but a malformed
+        legacy row with a null timestamp must not crash the read. The
+        consumer view-model drops timestampless rows from the plotted
+        series."""
+        doc = _valid_price_history_doc()
+        doc["checked_at"] = None
+
+        tolerant = PriceHistoryReadTolerant.model_validate(doc)
+        assert tolerant.checked_at is None
+
+        with pytest.raises(ValidationError):
+            PriceHistory.model_validate(doc)
+
+    def test_negative_price_passes_tolerant_rejects_strict(self) -> None:
+        """Strict `Field(ge=0)` on `price_member` / `price_non_member`;
+        tolerant drops the constraint. A legacy row with a sentinel
+        negative value still loads."""
+        doc = _valid_price_history_doc()
+        doc["price_non_member"] = -1.0
+
+        tolerant = PriceHistoryReadTolerant.model_validate(doc)
+        assert tolerant.price_non_member == -1.0
+
+        with pytest.raises(ValidationError):
+            PriceHistory.model_validate(doc)
