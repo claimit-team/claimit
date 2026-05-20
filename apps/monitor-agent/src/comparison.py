@@ -14,8 +14,12 @@ from claimit_mongodb_models import Purchase
 
 from .adapters.base import PriceSnapshot
 
-# Sentinel string for "not a member" stored in Purchase.member_tier_at_purchase.
-# Matches LoyaltyTier.NONE in claimit_mongodb_models.enums.
+# LoyaltyTier.NONE serializes as the literal string "none" (see enums.py).
+# Today's ingest extractor stores Python None for non-members, but the enum is
+# also reachable via user-edit flows, admin migrations, and LLM edge cases —
+# anything that funnels through LoyaltyTier produces this string. Treating it
+# as a member tier would cause the exact false-positive (member-price compared
+# against a non-member's price_paid) this module exists to prevent.
 _TIER_NONE = "none"
 
 
