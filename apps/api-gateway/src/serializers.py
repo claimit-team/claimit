@@ -6,7 +6,12 @@ sensitive fields. Used by routes that return User payloads.
 
 from __future__ import annotations
 
-from claimit_mongodb_models import NotificationEvent, Purchase, User
+from claimit_mongodb_models import (
+    NotificationEvent,
+    Purchase,
+    PurchaseReadTolerant,
+    User,
+)
 
 
 def serialize_user(user: User) -> dict[str, object]:
@@ -25,8 +30,15 @@ def serialize_user(user: User) -> dict[str, object]:
     )
 
 
-def serialize_purchase(purchase: Purchase) -> dict[str, object]:
+def serialize_purchase(purchase: Purchase | PurchaseReadTolerant) -> dict[str, object]:
     """JSON-serialize a Purchase for response.
+
+    Accepts both the strict `Purchase` model (used on the write paths —
+    /upload constructs one directly) and the read-tolerant variant
+    `PurchaseReadTolerant` (returned by `db.get_purchase` / `find_many`
+    so legacy/degraded docs don't 500 the read endpoints). The wire
+    shape is identical because the field set is identical and StrEnum
+    values serialise as plain strings either way.
 
     No fields are stripped today; the helper exists for symmetry with
     serialize_user/serialize_notification and to centralize any future

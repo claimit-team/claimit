@@ -16,6 +16,7 @@
 import type { ClaimOutcome } from "@claimit/mongodb-types";
 
 import { Badge } from "@/components/ui/badge";
+import { snakeToTitleLabel } from "@/lib/claims-status";
 import { cn } from "@/lib/utils";
 
 type Variant = "default" | "secondary" | "outline" | "destructive" | "ghost";
@@ -61,14 +62,42 @@ const OUTCOME_DISPLAY: Record<
   },
 };
 
+/**
+ * Resolve the display config for a possibly-unknown outcome string.
+ *
+ * The backend is now read-tolerant for `outcome` (PR #142), so a legacy
+ * doc may surface a value not in `ClaimOutcome`. Rather than crashing
+ * with `OUTCOME_DISPLAY[outcome]` returning undefined, fall back to a
+ * neutral outline badge with a Title Case label derived from the raw
+ * string. `null` / empty renders as an em-dash.
+ */
+function resolveOutcomeDisplay(outcome: ClaimOutcome | string | null | undefined): {
+  label: string;
+  variant: Variant;
+  extraClassName?: string;
+} {
+  // `Object.hasOwn` (not `in`) so a rogue/legacy outcome that happens to
+  // collide with an `Object.prototype` member name (`"toString"`,
+  // `"hasOwnProperty"`, `"constructor"`, …) doesn't accidentally walk the
+  // prototype chain and return a broken display config. Read-tolerance
+  // means `outcome` is free-form here — never trust the input as a key.
+  if (outcome != null && outcome !== "" && Object.hasOwn(OUTCOME_DISPLAY, outcome)) {
+    return OUTCOME_DISPLAY[outcome as ClaimOutcome];
+  }
+  return {
+    label: snakeToTitleLabel(outcome),
+    variant: "outline",
+  };
+}
+
 export function ClaimOutcomeBadge({
   outcome,
   className,
 }: {
-  outcome: ClaimOutcome;
+  outcome: ClaimOutcome | string | null | undefined;
   className?: string;
 }) {
-  const { label, variant, extraClassName } = OUTCOME_DISPLAY[outcome];
+  const { label, variant, extraClassName } = resolveOutcomeDisplay(outcome);
   return (
     <Badge variant={variant} className={cn(extraClassName, className)}>
       {label}
@@ -76,6 +105,6 @@ export function ClaimOutcomeBadge({
   );
 }
 
-export function getClaimOutcomeLabel(outcome: ClaimOutcome): string {
-  return OUTCOME_DISPLAY[outcome].label;
+export function getClaimOutcomeLabel(outcome: ClaimOutcome | string | null | undefined): string {
+  return resolveOutcomeDisplay(outcome).label;
 }

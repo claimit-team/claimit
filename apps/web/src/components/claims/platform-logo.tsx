@@ -26,13 +26,18 @@ import { useEffect, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
+// `platform` and `category` are widened to plain strings (with null) so
+// a read-tolerant backend that surfaces a legacy/unknown enum value
+// (PR #142) doesn't crash this component. The fallback icon picks
+// generously: known category → matching Lucide icon, anything else →
+// generic Store.
 type PlatformLogoProps = {
-  platform: Platform;
-  category: Category | null;
+  platform: Platform | string | null | undefined;
+  category: Category | string | null | undefined;
   className?: string;
 };
 
-function FallbackIcon({ category }: { category: Category | null }) {
+function FallbackIcon({ category }: { category: Category | string | null | undefined }) {
   switch (category) {
     case "retail":
       return <ShoppingBag className="h-4 w-4 text-neutral-600" aria-hidden />;
@@ -46,17 +51,31 @@ function FallbackIcon({ category }: { category: Category | null }) {
 }
 
 export function PlatformLogo({ platform, category, className }: PlatformLogoProps) {
-  const [errored, setErrored] = useState(false);
-  // Reset the error gate when `platform` changes so a reused component
+  // Treat empty/null/whitespace platform as immediately-errored so we
+  // skip the `<img src="/platformlogo/.svg">` 404 round-trip and render
+  // the category fallback right away. Also treats whitespace defensively.
+  const safePlatform = typeof platform === "string" ? platform.trim() : "";
+  const hasPlatform = safePlatform.length > 0;
+  const [errored, setErrored] = useState(!hasPlatform);
+  // Reset the error gate when the brand changes so a reused component
   // instance retries the new asset instead of sticking on the fallback
   // icon. (List rows are usually fresh instances, but a parent that
   // memoises rows by claim_id and updates the platform in place would
-  // otherwise be stuck.)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: platform is the intentional trigger — the effect body resets `errored` whenever the prop changes and does not need to read platform inside.
+  // otherwise be stuck.) An empty/null new value re-arms the fallback
+  // immediately rather than re-fetching `/platformlogo/.svg`.
+  //
+  // Depend on `safePlatform` (the trimmed string) — NOT just
+  // `hasPlatform` (boolean), and NOT raw `platform` (untrimmed). The
+  // boolean would miss A→B brand switches where both are non-empty
+  // (best_buy → amazon stays `true`, so a previously-errored logo
+  // would stick on the fallback after switching brands — CodeRabbit
+  // Major on 9051d38). The trimmed string fires on every distinct
+  // brand transition while still ignoring whitespace-only edits.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: safePlatform is the intentional brand-change trigger; the effect body reads hasPlatform (which is derived from safePlatform.length > 0) so the value depended on is sufficient — no separate read of hasPlatform is needed.
   useEffect(() => {
-    setErrored(false);
-  }, [platform]);
-  const src = `/platformlogo/${platform}.svg`;
+    setErrored(!hasPlatform);
+  }, [safePlatform]);
+  const src = hasPlatform ? `/platformlogo/${safePlatform}.svg` : "";
 
   return (
     <div
@@ -69,10 +88,10 @@ export function PlatformLogo({ platform, category, className }: PlatformLogoProp
       )}
       // The platform name itself is the alt text for screen readers; the
       // visual logo is decorative inside the chip.
-      aria-label={platform}
+      aria-label={safePlatform || "Unknown platform"}
       role="img"
     >
-      {errored ? (
+      {errored || !hasPlatform ? (
         <FallbackIcon category={category} />
       ) : (
         // biome-ignore lint/performance/noImgElement: brand SVGs need document-isolated rendering to avoid id/class collisions across logos on the same page; next/image cannot solve that and adds optimisation overhead for tiny static assets.

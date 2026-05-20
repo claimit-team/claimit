@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from claimit_mongodb_models import Purchase
+from claimit_mongodb_models import Purchase, PurchaseReadTolerant
 
 CADENCE_LONG_MIN = 360  # > 7 days remaining
 CADENCE_MID_MIN = 60  # 1-7 days remaining
@@ -25,9 +25,22 @@ def compute_target_cadence_minutes(window_expires: datetime, now: datetime) -> i
     return CADENCE_LONG_MIN
 
 
-def is_due(purchase: Purchase, now: datetime) -> bool:
-    """True if the purchase has never been checked, or the cadence interval has elapsed."""
+def is_due(purchase: Purchase | PurchaseReadTolerant, now: datetime) -> bool:
+    """True if the purchase has never been checked, or the cadence interval has elapsed.
+
+    Accepts both the strict and read-tolerant Purchase variants. The
+    tolerant variant carries `monitoring_cadence_minutes: int | None`;
+    callers in the cron sweep are expected to skip-with-warning before
+    calling this when the field is None (see `cron.run_cron`), so this
+    function asserts non-null at the type level.
+    """
     if purchase.last_checked_at is None:
         return True
+    cadence = purchase.monitoring_cadence_minutes
+    if cadence is None:
+        # Defensive — caller is supposed to skip first. Treat as
+        # always-due so a misuse becomes visible via the next fetch
+        # rather than silently returning False.
+        return True
     elapsed = now - purchase.last_checked_at
-    return elapsed >= timedelta(minutes=purchase.monitoring_cadence_minutes)
+    return elapsed >= timedelta(minutes=cadence)
