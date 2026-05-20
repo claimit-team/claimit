@@ -21,7 +21,14 @@ class ReceiptsUploader:
     """Upload a receipt file to the receipts GCS bucket."""
 
     def __init__(self, bucket_name: str | None = None) -> None:
-        self._bucket_name = bucket_name or os.environ.get("RECEIPTS_BUCKET")
+        # Fail fast at startup if the bucket isn't configured — matches how
+        # the api-gateway lifespan already KeyErrors on MONGODB_URI and
+        # STATE_JWT_SECRET. A misconfigured deployment crashes the container
+        # immediately instead of 500-ing on the first upload request.
+        resolved = bucket_name or os.environ.get("RECEIPTS_BUCKET")
+        if not resolved:
+            raise RuntimeError("RECEIPTS_BUCKET environment variable is not configured")
+        self._bucket_name: str = resolved
         self._client: storage.Client | None = None
 
     def _get_client(self) -> storage.Client:
@@ -31,11 +38,8 @@ class ReceiptsUploader:
 
     async def upload(self, *, data: bytes, content_type: str, blob_path: str) -> str:
         """Upload bytes and return the gs:// URI of the persisted object."""
-        if not self._bucket_name:
-            raise RuntimeError("RECEIPTS_BUCKET environment variable is not configured")
-        bucket_name = self._bucket_name
         await asyncio.to_thread(self._upload_sync, data, content_type, blob_path)
-        return f"gs://{bucket_name}/{blob_path}"
+        return f"gs://{self._bucket_name}/{blob_path}"
 
     def _upload_sync(self, data: bytes, content_type: str, blob_path: str) -> None:
         bucket = self._get_client().bucket(self._bucket_name)
