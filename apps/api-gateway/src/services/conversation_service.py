@@ -107,7 +107,12 @@ async def stream_agent_response(
     prompt = prefix + user_message
 
     try:
-        remote_agent = vertexai.agent_engines.get(name=resource_name)
+        # SDK signature: `get(resource_name: str)` — the kwarg is
+        # `resource_name`, not `name`. Passing `name=` raised TypeError on
+        # every call, which the surrounding except swallowed into a
+        # generic `done` SSE frame; symptomatic in the UI as "every chat
+        # message returns an error".
+        remote_agent = vertexai.agent_engines.get(resource_name=resource_name)
 
         collected_text = ""
         collected_tool_calls: list[dict] = []
