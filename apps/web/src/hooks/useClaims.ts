@@ -72,6 +72,15 @@ export function useClaims({ pageSize = DEFAULT_PAGE_SIZE }: UseClaimsArgs = {}):
   // the new filter.
   const generationRef = useRef(0);
 
+  // Last query key successfully serving the rows currently in `claims`.
+  // Used to scope stale-while-error to SAME-key refetches. When the user
+  // changes statusGroup / q (or signs in/out), the effect compares the
+  // new key against this ref; if they differ, it clears claims +
+  // nextCursor BEFORE the fetch so a failure on the new key shows
+  // empty/error state (not stale wrong-filter rows) and a subsequent
+  // loadMore has no stale cursor to paginate from.
+  const lastQueryKeyRef = useRef<string | null>(null);
+
   const setStatusGroup = useCallback((group: StatusGroup | null) => {
     setStatusGroupState(group);
   }, []);
@@ -96,11 +105,28 @@ export function useClaims({ pageSize = DEFAULT_PAGE_SIZE }: UseClaimsArgs = {}):
     };
   }, [q]);
 
+  // Composite key for "what filter/search is the current claims[] showing".
+  // Re-evaluated each render; the effect below treats a change vs
+  // lastQueryKeyRef as a hard reset (clear claims + cursor before fetching),
+  // and a match as same-query refetch (stale-while-error preserves rows).
+  const queryKey = `${userId ?? "anon"}|${statusGroup ?? "all"}|${debouncedQ}|${pageSize}`;
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: reloadTick is an intentional refetch trigger; not read inside the effect body
   useEffect(() => {
     // Bump first so any in-flight loadMore (started under the previous
     // generation) is invalidated regardless of which branch we take below.
     generationRef.current += 1;
+
+    // Hard reset on a query-key change — see lastQueryKeyRef docstring.
+    // A failed first-page fetch must NOT leave stale rows under the new
+    // filter, and loadMore must not paginate from the previous query's
+    // cursor. Same-key refetches (manual refetch tick or transient
+    // re-render) keep stale-while-error behavior.
+    const isSameQuery = lastQueryKeyRef.current === queryKey;
+    if (!isSameQuery) {
+      setClaims([]);
+      setNextCursor(null);
+    }
 
     if (isAuthLoading) {
       setIsLoading(true);
@@ -111,6 +137,10 @@ export function useClaims({ pageSize = DEFAULT_PAGE_SIZE }: UseClaimsArgs = {}):
       setNextCursor(null);
       setError(new ClaimsApiError("unauthenticated", "User must be signed in."));
       setIsLoading(false);
+      // Mark the unauth state as "served" so the next render with the
+      // same null-userId doesn't re-clear (no-op, but keeps the
+      // invariant clean).
+      lastQueryKeyRef.current = queryKey;
       return;
     }
 
@@ -125,6 +155,12 @@ export function useClaims({ pageSize = DEFAULT_PAGE_SIZE }: UseClaimsArgs = {}):
     })
       .then((page) => {
         if (!mounted) return;
+        // Commit the new query key only on success — if the fetch fails
+        // the ref stays on the LAST known-good key so the next render
+        // (a retry of the new key) keeps clearing rows pre-fetch
+        // instead of accidentally treating a failed-then-retried new
+        // key as a "same-query" refetch.
+        lastQueryKeyRef.current = queryKey;
         setClaims(page.claims);
         setNextCursor(page.next_cursor);
         setError(null);
@@ -141,8 +177,13 @@ export function useClaims({ pageSize = DEFAULT_PAGE_SIZE }: UseClaimsArgs = {}):
             ),
           );
         }
-        // Stale-while-error: keep the previously rendered page so a
-        // transient hiccup doesn't blank the entire list.
+        // Stale-while-error semantics:
+        // - Same-query refetch failed -> keep the previously rendered
+        //   rows so a transient hiccup doesn't blank the list.
+        // - Different-query fetch failed -> rows + cursor were already
+        //   cleared above, and we deliberately do NOT commit
+        //   lastQueryKeyRef, so a subsequent retry of this same key
+        //   still treats it as a fresh query and shows empty/error.
       })
       .finally(() => {
         if (!mounted) return;
@@ -152,7 +193,7 @@ export function useClaims({ pageSize = DEFAULT_PAGE_SIZE }: UseClaimsArgs = {}):
     return () => {
       mounted = false;
     };
-  }, [userId, isAuthLoading, statusGroup, debouncedQ, pageSize, reloadTick]);
+  }, [queryKey, userId, isAuthLoading, statusGroup, debouncedQ, pageSize, reloadTick]);
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || isLoadingMore) return;

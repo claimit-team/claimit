@@ -22,7 +22,7 @@
 
 import type { Category, Platform } from "@claimit/mongodb-types";
 import { Hotel, Plane, ShoppingBag, Store } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -47,6 +47,15 @@ function FallbackIcon({ category }: { category: Category | null }) {
 
 export function PlatformLogo({ platform, category, className }: PlatformLogoProps) {
   const [errored, setErrored] = useState(false);
+  // Reset the error gate when `platform` changes so a reused component
+  // instance retries the new asset instead of sticking on the fallback
+  // icon. (List rows are usually fresh instances, but a parent that
+  // memoises rows by claim_id and updates the platform in place would
+  // otherwise be stuck.)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: platform is the intentional trigger — the effect body resets `errored` whenever the prop changes and does not need to read platform inside.
+  useEffect(() => {
+    setErrored(false);
+  }, [platform]);
   const src = `/platformlogo/${platform}.svg`;
 
   return (

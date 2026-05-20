@@ -123,11 +123,23 @@ async def list_claims(
     """List the authenticated user's claims, enriched with linked Purchase
     fields, with optional filters and search.
 
-    The pipeline is structured so claim-level filters and the cursor are
-    applied BEFORE `$lookup` (the cursor key lives on the Claim document),
-    while the search predicate is applied AFTER `$lookup` so it can match
-    against the joined `product_name`. `preserveNullAndEmptyArrays` keeps
-    orphan claims visible in the list — their joined fields are `None`.
+    Pipeline ordering — branched by whether `q` is set:
+
+    - When `q` is None (the common case): claim filters + cursor + sort +
+      limit all run BEFORE `$lookup`. The sort keys (`updated_at`, `_id`)
+      live on the Claim document, so they don't need the join. This caps
+      enrichment work at the page size (~limit + 1) instead of the user's
+      whole matched history.
+
+    - When `q` is set: must `$lookup` before the q-filter `$match` so the
+      regex can match against the joined `purchase.product_name`. Sort and
+      limit run after the q-filter, so cursor pages may come back short
+      when `q` is set — `Load more` keys off the last surviving item's
+      `(updated_at, _id)`, which stays correct under the skew.
+
+    `preserveNullAndEmptyArrays` keeps orphan claims (claim whose Purchase
+    is missing/deleted) visible in the list — their joined fields are
+    `None`. Both branches preserve this behavior.
 
     Filter precedence:
     - `outcome` wins over `status_group`. If both are set, `status_group`
@@ -143,10 +155,6 @@ async def list_claims(
     - `q` matches case-insensitively against `platform` OR
       `purchase.product_name`. An empty/whitespace-only `q` is treated as
       "no filter".
-    - `q` runs after `$lookup`/`$unwind`, so cursor pages may come back
-      short when `q` is set. The frontend keys "Load more" off the last
-      surviving item's `(updated_at, _id)`, which remains correct under
-      this skew.
 
     Returns:
         {
@@ -189,82 +197,104 @@ async def list_claims(
             {"updated_at": sort_dt, "_id": {"$lt": cursor_uuid}},
         ]
 
-    pipeline: list[dict[str, Any]] = [
-        {"$match": match},
-        {
-            "$lookup": {
-                "from": "purchases",
-                "localField": "purchase_id",
-                "foreignField": "_id",
-                "as": "purchase",
-                # Sub-pipeline projects only the fields the list view needs,
-                # keeping the joined sub-doc small (purchases carry receipt
-                # blobs and extraction metadata that the list never renders).
-                "pipeline": [
-                    {
-                        "$project": {
-                            "_id": 0,
-                            "product_name": 1,
-                            "category": 1,
-                            "window_expires": 1,
-                        }
+    # Stages reused by both branches. Pulled out so the two pipeline orderings
+    # below stay obviously identical except for the $sort/$limit placement.
+    lookup_stage: dict[str, Any] = {
+        "$lookup": {
+            "from": "purchases",
+            "localField": "purchase_id",
+            "foreignField": "_id",
+            "as": "purchase",
+            # Sub-pipeline projects only the fields the list view needs,
+            # keeping the joined sub-doc small (purchases carry receipt
+            # blobs and extraction metadata that the list never renders).
+            "pipeline": [
+                {
+                    "$project": {
+                        "_id": 0,
+                        "product_name": 1,
+                        "category": 1,
+                        "window_expires": 1,
                     }
-                ],
-            }
-        },
-        # preserveNullAndEmptyArrays keeps orphan claims (claim whose
-        # Purchase is missing/deleted) in the result; their `purchase`
-        # field is null and the joined fields project to None.
-        {"$unwind": {"path": "$purchase", "preserveNullAndEmptyArrays": True}},
-    ]
+                }
+            ],
+        }
+    }
+    # preserveNullAndEmptyArrays keeps orphan claims (claim whose
+    # Purchase is missing/deleted) in the result; their `purchase`
+    # field is null and the joined fields project to None.
+    unwind_stage: dict[str, Any] = {
+        "$unwind": {"path": "$purchase", "preserveNullAndEmptyArrays": True}
+    }
+    sort_stage: dict[str, Any] = {"$sort": {"updated_at": -1, "_id": -1}}
+    limit_stage: dict[str, Any] = {"$limit": limit + 1}
+    project_stage: dict[str, Any] = {
+        # Whitelist projection — final shape matches ClaimListItem.
+        # Drops draft_content, draft_versions, policy_clause_cited,
+        # send_override, outcome_note, denial_reason_extracted,
+        # submitted_via, evidence_screenshot_url, trace_id from the
+        # list response. The detail endpoint exposes them.
+        "$project": {
+            "_id": 1,
+            "updated_at": 1,
+            "purchase_id": 1,
+            "user_id": 1,
+            "platform": 1,
+            "claim_amount": 1,
+            "currency": 1,
+            "claim_type": 1,
+            "outcome": 1,
+            "submitted_at": 1,
+            "resolved_at": 1,
+            "redraft_count": 1,
+            "product_name": "$purchase.product_name",
+            "category": "$purchase.category",
+            "window_expires": "$purchase.window_expires",
+        }
+    }
 
     q_clean = q.strip() if q is not None else None
+    pipeline: list[dict[str, Any]]
     if q_clean:
+        # q path: must $lookup before filtering on joined product_name.
+        # Sort/limit run after the q $match so the cursor page reflects
+        # post-filter results; this is the same shape as before this
+        # commit and the result set is unchanged from the pre-fix code.
         # re.escape makes `q` a literal substring match — no metachar
         # injection, no ReDoS. Mongo's $regex uses Perl-compatible syntax,
         # so Python's re.escape produces a compatible literal pattern.
         pattern = re.escape(q_clean)
-        pipeline.append(
-            {
-                "$match": {
-                    "$or": [
-                        {"platform": {"$regex": pattern, "$options": "i"}},
-                        {"purchase.product_name": {"$regex": pattern, "$options": "i"}},
-                    ]
-                }
+        q_match_stage: dict[str, Any] = {
+            "$match": {
+                "$or": [
+                    {"platform": {"$regex": pattern, "$options": "i"}},
+                    {"purchase.product_name": {"$regex": pattern, "$options": "i"}},
+                ]
             }
-        )
-
-    pipeline.extend(
-        [
-            {"$sort": {"updated_at": -1, "_id": -1}},
-            {"$limit": limit + 1},
-            {
-                # Whitelist projection — final shape matches ClaimListItem.
-                # Drops draft_content, draft_versions, policy_clause_cited,
-                # send_override, outcome_note, denial_reason_extracted,
-                # submitted_via, evidence_screenshot_url, trace_id from the
-                # list response. The detail endpoint exposes them.
-                "$project": {
-                    "_id": 1,
-                    "updated_at": 1,
-                    "purchase_id": 1,
-                    "user_id": 1,
-                    "platform": 1,
-                    "claim_amount": 1,
-                    "currency": 1,
-                    "claim_type": 1,
-                    "outcome": 1,
-                    "submitted_at": 1,
-                    "resolved_at": 1,
-                    "redraft_count": 1,
-                    "product_name": "$purchase.product_name",
-                    "category": "$purchase.category",
-                    "window_expires": "$purchase.window_expires",
-                }
-            },
+        }
+        pipeline = [
+            {"$match": match},
+            lookup_stage,
+            unwind_stage,
+            q_match_stage,
+            sort_stage,
+            limit_stage,
+            project_stage,
         ]
-    )
+    else:
+        # No-q path: sort+limit pre-$lookup so we only enrich the page
+        # (~limit+1 claims) instead of the user's whole matched history.
+        # Sort keys live on the Claim document so this is semantically
+        # identical to the q path's ordering on the same input — verified
+        # end-to-end by scripts/validate_claims_lookup.py against Atlas.
+        pipeline = [
+            {"$match": match},
+            sort_stage,
+            limit_stage,
+            lookup_stage,
+            unwind_stage,
+            project_stage,
+        ]
 
     raw_docs = await db.aggregate("claims", pipeline)
 
