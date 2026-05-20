@@ -1,18 +1,44 @@
 "use client";
 
-import { Bot, Send, Sparkles, User } from "lucide-react";
-import { type KeyboardEvent, useRef, useState } from "react";
+import { AlertCircle, Bot, Loader2, Send, Sparkles, User } from "lucide-react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import type { ClaimConversation, ClaimMessage } from "@/lib/claim-detail-types";
+import { useAssistantStream } from "@/hooks/useAssistantStream";
+import { useConversations } from "@/hooks/useConversations";
 import { cn } from "@/lib/utils";
+import type { UIMessage, UIToolCall, WireConversationMessage } from "@/types/assistant";
 
 interface AssistantPaneProps {
-  conversation: ClaimConversation;
-  onSendMessage?: (message: string) => void;
+  /** Claim id this conversation is scoped to. */
+  claimId: string;
   onDoubleClickHeader?: () => void;
+}
+
+const QUICK_ACTIONS = [
+  "Make it friendlier",
+  "Why this template?",
+  "Make it shorter",
+  "Explain the policy match",
+];
+
+function wireToUI(messages: WireConversationMessage[]): UIMessage[] {
+  return messages.map((m, idx) => ({
+    id: `srv-${idx}-${m.at}`,
+    role: m.role,
+    content: m.content,
+    at: m.at,
+    tool_calls: m.tool_calls?.map(
+      (tc): UIToolCall => ({
+        tool: tc.tool,
+        input: tc.input,
+        output_summary: tc.output_summary,
+      }),
+    ),
+  }));
 }
 
 function PaneHeader({ onDoubleClick }: { onDoubleClick?: () => void }) {
@@ -33,9 +59,8 @@ function PaneHeader({ onDoubleClick }: { onDoubleClick?: () => void }) {
   );
 }
 
-function MessageBubble({ message }: { message: ClaimMessage }) {
+function MessageBubble({ message }: { message: UIMessage }) {
   const isAssistant = message.role === "assistant";
-
   return (
     <div className={cn("flex gap-3", isAssistant ? "justify-start" : "justify-end")}>
       {isAssistant ? (
@@ -49,11 +74,22 @@ function MessageBubble({ message }: { message: ClaimMessage }) {
           isAssistant ? "bg-neutral-100 text-neutral-700" : "bg-brand-primary-500 text-white",
         )}
       >
-        <p className="text-sm leading-relaxed">{message.content}</p>
-        {message.toolSummary ? (
+        <p className="whitespace-pre-wrap text-sm leading-relaxed">
+          {message.content}
+          {message.streaming && isAssistant ? (
+            <Loader2
+              aria-hidden
+              className="ml-1 inline-block h-3 w-3 animate-spin text-neutral-500 align-middle"
+            />
+          ) : null}
+        </p>
+        {message.tool_calls && message.tool_calls.length > 0 ? (
           <Badge variant="secondary" className="mt-2 bg-neutral-200/50 text-neutral-500 text-xs">
-            {message.toolSummary}
+            Tools · {message.tool_calls.map((t) => t.tool).join(", ")}
           </Badge>
+        ) : null}
+        {message.error ? (
+          <p className="mt-1 text-[11px] text-semantic-danger">{message.error}</p>
         ) : null}
       </div>
       {!isAssistant ? (
@@ -65,55 +101,79 @@ function MessageBubble({ message }: { message: ClaimMessage }) {
   );
 }
 
-const QUICK_ACTIONS = [
-  "Make it friendlier",
-  "Why this template?",
-  "Make it shorter",
-  "Explain the policy match",
-];
+export function AssistantPane({ claimId, onDoubleClickHeader }: AssistantPaneProps) {
+  const {
+    conversations,
+    isLoading: convLoading,
+    error: convError,
+    createConversation,
+  } = useConversations({ mode: "claim_focused" });
+  const {
+    messages,
+    streaming,
+    error: streamError,
+    sendMessage,
+    hydrate,
+    reset,
+  } = useAssistantStream();
 
-export function AssistantPane({
-  conversation,
-  onSendMessage,
-  onDoubleClickHeader,
-}: AssistantPaneProps) {
   const [inputValue, setInputValue] = useState("");
-  const [messages, setMessages] = useState<ClaimMessage[]>(conversation.messages);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const scrollToBottom = () => {
+  // Locate (or lazily create) the claim_focused conversation for this claim.
+  // The list is server-truth so we re-resolve on every conversations change;
+  // selectedId tracks our active row across reloads.
+  useEffect(() => {
+    if (convLoading) return;
+    const existing = conversations.find((c) => c.claim_id === claimId);
+    if (existing) {
+      setActiveId(existing._id);
+      hydrate(wireToUI(existing.messages));
+      return;
+    }
+    // No conversation yet — create one. Run only once per claimId to avoid
+    // duplicate-creation races. createConversation prepends the new entry
+    // to the list, so this effect re-runs and the `existing` branch fires.
+    if (creating) return;
+    setCreating(true);
+    void (async () => {
+      try {
+        const created = await createConversation("claim_focused", claimId);
+        setActiveId(created._id);
+        hydrate([]);
+      } catch {
+        // useConversations.error renders the failure; nothing else to do.
+      } finally {
+        setCreating(false);
+      }
+    })();
+  }, [conversations, convLoading, claimId, creating, createConversation, hydrate]);
+
+  // Reset stream buffer if the claimId switches under us (e.g. user
+  // navigates between claim details without unmounting the shell).
+  useEffect(() => {
+    return () => {
+      reset();
+    };
+  }, [reset]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `messages` is the intentional trigger for the scroll effect even though the body doesn't read it
+  useEffect(() => {
     queueMicrotask(() => {
       const el = scrollRef.current;
       if (!el) return;
       el.scrollTop = el.scrollHeight;
     });
-  };
+  }, [messages]);
 
-  const handleSend = () => {
-    if (!inputValue.trim()) return;
-
-    const nextUser: ClaimMessage = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: inputValue,
-    };
-    setMessages((prev) => [...prev, nextUser]);
-    scrollToBottom();
-    onSendMessage?.(inputValue);
-
-    window.setTimeout(() => {
-      const reply: ClaimMessage = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content:
-          "I've noted your feedback. In production this would regenerate the draft and cite the exact policy language we relied on.",
-      };
-      setMessages((prev) => [...prev, reply]);
-      scrollToBottom();
-    }, 500);
-
+  const handleSend = async () => {
+    const text = inputValue.trim();
+    if (!text || streaming || !activeId) return;
     setInputValue("");
+    await sendMessage(activeId, text);
   };
 
   const handleQuickAction = (action: string) => {
@@ -124,20 +184,46 @@ export function AssistantPane({
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      void handleSend();
     }
   };
+
+  const inputDisabled = streaming || !activeId;
 
   return (
     <div className="flex h-full flex-col bg-neutral-0">
       <PaneHeader onDoubleClick={onDoubleClickHeader} />
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <div className="space-y-4">
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
-          ))}
-        </div>
+        {convError ? (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{convError.message}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {!activeId && (convLoading || creating) ? (
+          <div className="flex items-center gap-2 text-sm text-neutral-500">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            Preparing assistant for this claim…
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {messages.length === 0 ? (
+              <p className="text-sm text-neutral-500">
+                Ask about this claim — try a quick action below or type your own question.
+              </p>
+            ) : (
+              messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)
+            )}
+            {streamError ? (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{streamError}</AlertDescription>
+              </Alert>
+            ) : null}
+          </div>
+        )}
       </div>
 
       <div className="border-neutral-200 border-t px-4 py-2">
@@ -147,7 +233,8 @@ export function AssistantPane({
               key={action}
               type="button"
               onClick={() => handleQuickAction(action)}
-              className="rounded-full border border-neutral-200 bg-neutral-0 px-3 py-1 text-neutral-700 text-xs transition-colors hover:bg-neutral-100"
+              disabled={inputDisabled}
+              className="rounded-full border border-neutral-200 bg-neutral-0 px-3 py-1 text-neutral-700 text-xs transition-colors hover:bg-neutral-100 disabled:opacity-50"
             >
               {action}
             </button>
@@ -165,13 +252,14 @@ export function AssistantPane({
             placeholder="Ask about this claim..."
             className="max-h-32 min-h-10 resize-none"
             rows={1}
+            disabled={inputDisabled}
           />
           <Button
             type="button"
             size="icon"
             className="shrink-0"
-            onClick={handleSend}
-            disabled={!inputValue.trim()}
+            onClick={() => void handleSend()}
+            disabled={!inputValue.trim() || inputDisabled}
           >
             <Send className="h-4 w-4" />
             <span className="sr-only">Send</span>

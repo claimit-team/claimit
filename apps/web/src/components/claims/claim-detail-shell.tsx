@@ -12,6 +12,9 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import type { ClaimConversation, ClaimDetail, OutcomeStatus } from "@/lib/claim-detail-types";
+// ClaimConversation is still consumed for the page's mock-detail loader,
+// but AssistantPane now fetches its own claim_focused conversation via
+// the conversations API.
 import { useUIStore } from "@/store";
 
 interface ClaimDetailShellProps {
@@ -21,7 +24,11 @@ interface ClaimDetailShellProps {
 
 export function ClaimDetailShell({ initialClaim, initialConversation }: ClaimDetailShellProps) {
   const [claim, setClaim] = useState<ClaimDetail>(initialClaim);
-  const [conversation] = useState<ClaimConversation>(initialConversation);
+  // initialConversation is no longer rendered — AssistantPane fetches a
+  // real claim_focused conversation via the API. Reference here keeps the
+  // prop in scope without an unused-variable warning, and leaves the
+  // parent page contract unchanged for now.
+  void initialConversation;
 
   const [paneMax, setPaneMax] = useState<"draft" | "evidence" | null>(null);
   const [mobileTab, setMobileTab] = useState<"draft" | "evidence" | "assistant">("draft");
@@ -98,8 +105,6 @@ export function ClaimDetailShell({ initialClaim, initialConversation }: ClaimDet
     }
   };
 
-  const handleSendMessage = (_message: string) => {};
-
   const renderDesktopLayout = () => {
     const defaultSizes = paneMax === "draft" ? [80, 20] : [40, 60];
 
@@ -125,8 +130,7 @@ export function ClaimDetailShell({ initialClaim, initialConversation }: ClaimDet
 
             <ResizablePanel defaultSize={rightBottom} minSize={15}>
               <AssistantPane
-                conversation={conversation}
-                onSendMessage={handleSendMessage}
+                claimId={claim.claim_id}
                 onDoubleClickHeader={() => {
                   toggleEmbedded();
                   setPaneMax(null);
@@ -168,7 +172,7 @@ export function ClaimDetailShell({ initialClaim, initialConversation }: ClaimDet
               <EvidencePane claim={claim} />
             </TabsContent>
             <TabsContent value="assistant" className="m-0 flex-1 overflow-hidden">
-              <AssistantPane conversation={conversation} onSendMessage={handleSendMessage} />
+              <AssistantPane claimId={claim.claim_id} />
             </TabsContent>
           </Tabs>
         </ResizablePanel>
@@ -203,7 +207,7 @@ export function ClaimDetailShell({ initialClaim, initialConversation }: ClaimDet
           <EvidencePane claim={claim} />
         </TabsContent>
         <TabsContent value="assistant" className="m-0 flex-1 overflow-hidden">
-          <AssistantPane conversation={conversation} onSendMessage={handleSendMessage} />
+          <AssistantPane claimId={claim.claim_id} />
         </TabsContent>
       </Tabs>
     );
