@@ -188,10 +188,10 @@ function FloatingPanel({ onActionClick }: { onActionClick: (a: string) => void }
   // Viewport), avoiding the previous bug where setting scrollTop on the
   // wrong wrapper element was a silent no-op.
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const conversationIdRef = useRef<string | null>(currentConversation?.id ?? null);
+  const conversationIdRef = useRef<string | null>(currentConversation?._id ?? null);
 
   useEffect(() => {
-    conversationIdRef.current = currentConversation?.id ?? null;
+    conversationIdRef.current = currentConversation?._id ?? null;
   }, [currentConversation]);
 
   // Reset the local stream buffer when no conversation is selected so a
@@ -214,7 +214,7 @@ function FloatingPanel({ onActionClick }: { onActionClick: (a: string) => void }
     if (!convId) {
       try {
         const created = await createConversation("general");
-        convId = created.id;
+        convId = created._id;
         conversationIdRef.current = convId;
       } catch {
         // useAssistantStream surfaces its own errors; conversation

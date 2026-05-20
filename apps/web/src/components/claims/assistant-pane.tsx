@@ -135,7 +135,7 @@ export function AssistantPane({ claimId, onDoubleClickHeader }: AssistantPanePro
     if (convLoading) return;
     const existing = conversations.find((c) => c.claim_id === claimId);
     if (existing) {
-      setActiveId(existing.id);
+      setActiveId(existing._id);
       hydrate(wireToUI(existing.messages));
       return;
     }
@@ -148,7 +148,7 @@ export function AssistantPane({ claimId, onDoubleClickHeader }: AssistantPanePro
     void (async () => {
       try {
         const created = await createConversation("claim_focused", claimId);
-        setActiveId(created.id);
+        setActiveId(created._id);
         hydrate([]);
       } catch (err) {
         // Typed ConversationsApiError exposes a `message` — surface it so
