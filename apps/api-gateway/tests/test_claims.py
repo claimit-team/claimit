@@ -15,6 +15,7 @@ an Atlas dev cluster.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
@@ -634,10 +635,15 @@ async def test_approve_claim_success_publishes_event(client: AsyncClient) -> Non
 
 @pytest.mark.asyncio
 async def test_approve_claim_with_edited_draft_appends_version(client: AsyncClient) -> None:
+    """The edited-draft approval path now uses `db.array_push` so existing
+    `draft_versions[]` are NEVER read or re-validated on write — only the
+    new element is. Asserts both halves: $push targets `draft_versions`
+    with a strict `DraftVersion`, and the paired $set keeps the
+    `draft_content == draft_versions[-1].content` invariant."""
     claim = Claim.model_validate(_claim_doc(outcome="draft_pending", submitted_at=None))
     db = AsyncMock(spec=MongoDBClient)
     db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
-    db.partial_update = AsyncMock(return_value=True)
+    db.array_push = AsyncMock(return_value=True)
 
     publisher = AsyncMock(spec=PubSubPublisher)
     publisher.publish = AsyncMock(return_value="msg-id")
@@ -652,22 +658,139 @@ async def test_approve_claim_with_edited_draft_appends_version(client: AsyncClie
                 headers={"Authorization": "Bearer t"},
             )
         assert response.status_code == 200
-        # Inspect the partial_update payload — should append a v2 draft
-        # version and set draft_content in the same write.
-        db.partial_update.assert_awaited_once()
-        updates = db.partial_update.await_args.args[2]
-        assert updates["draft_content"] == "My edited draft."
-        assert len(updates["draft_versions"]) == 2
-        assert updates["draft_versions"][-1]["content"] == "My edited draft."
-        assert updates["draft_versions"][-1]["generated_by"] == "user_edit"
-        # The draft_content == draft_versions[-1].content invariant is
-        # now enforced PROGRAMMATICALLY by approve_claim rather than via
-        # the @model_validator(after) on Claim — partial_update never
-        # instantiates a full Claim. Asserting both fields stay
-        # consistent in the same write payload locks in the invariant.
-        assert updates["draft_content"] == updates["draft_versions"][-1]["content"]
+
+        # The edited path uses array_push, NOT partial_update.
+        db.array_push.assert_awaited_once()
+        kwargs = db.array_push.await_args.kwargs
+        args = db.array_push.await_args.args
+        assert args[0] == "claims"
+        assert kwargs["field"] == "draft_versions"
+        # The new element is a strict DraftVersion (rejected at the
+        # call site if any field is bad), not a dict — guarantees the
+        # nested DraftVersion model gates new data.
+        from claimit_mongodb_models import DraftVersion
+
+        assert isinstance(kwargs["element"], DraftVersion)
+        assert kwargs["element"].content == "My edited draft."
+        assert kwargs["element"].generated_by.value == "user_edit"
+        assert kwargs["element_model"] is DraftVersion
+        # The paired $set: scalar mutations + draft_content (kept
+        # equal to the just-pushed version's content).
+        set_fields = kwargs["set_fields"]
+        assert set_fields["draft_content"] == "My edited draft."
+        assert set_fields["outcome"] == "pending"
+        assert set_fields["submitted_at"] is not None
+        # Invariant lock: draft_content matches the new version.
+        assert set_fields["draft_content"] == kwargs["element"].content
     finally:
         _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_approve_with_edit_succeeds_on_legacy_rogue_generated_by(
+    client: AsyncClient,
+) -> None:
+    """The principle locked in PR #144 (round 2): historical
+    `draft_versions[].generated_by` values are NEVER re-validated on
+    write. A claim whose existing v1 carries a value not in the current
+    `DraftGeneratedBy` enum (here `"legacy_gen"`) must still be
+    approve-with-edit-able. The mock `array_push` doesn't touch the
+    historical entries — only the new v2 element is validated, against
+    the strict `DraftVersion` model.
+    """
+    from claimit_mongodb_models import ClaimReadTolerant
+    from claimit_mongodb_models.claim_read_tolerant import DraftVersionReadTolerant
+
+    rogue = ClaimReadTolerant.model_construct(
+        id=UUID(_CLAIM_ID),
+        purchase_id=UUID("30000000-0000-0000-0000-000000000001"),
+        user_id=UUID(_USER_ID),
+        platform="best_buy",
+        claim_amount=50.0,
+        currency="USD",
+        claim_type="email",
+        draft_content="v1 body",
+        # Tolerant variant carries a generated_by no longer in the
+        # current enum — mirrors a long-lived claim that survived a
+        # `DraftGeneratedBy` schema migration.
+        draft_versions=[
+            DraftVersionReadTolerant(
+                version=1,
+                content="v1 body",
+                generated_by="legacy_gen",
+                at=datetime(2025, 1, 1, tzinfo=UTC),
+            )
+        ],
+        redraft_count=0,
+        policy_clause_cited="",
+        outcome="draft_pending",
+        submitted_at=None,
+        resolved_at=None,
+        evidence_screenshot_url=None,
+        send_override=None,
+        submitted_via=None,
+        outcome_note=None,
+        denial_reason_extracted=None,
+        trace_id=None,
+    )
+
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), rogue])
+    db.array_push = AsyncMock(return_value=True)
+
+    publisher = AsyncMock(spec=PubSubPublisher)
+    publisher.publish = AsyncMock(return_value="msg-id")
+
+    _override_db(db)
+    _override_publisher(publisher)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/approve",
+                json={"edited_draft_content": "My v2 body"},
+                headers={"Authorization": "Bearer t"},
+            )
+        # Pre-fix this would have 500'd because the previous code dumped
+        # the rogue v1 and re-validated it via partial_update(model=Claim).
+        assert response.status_code == 200
+
+        # The new v2 was pushed with version=2 (one more than the
+        # legacy v1 the tolerant load saw).
+        db.array_push.assert_awaited_once()
+        new_element = db.array_push.await_args.kwargs["element"]
+        assert new_element.version == 2
+        assert new_element.content == "My v2 body"
+
+        # Critical: the historical v1 is NOT in any write payload.
+        # (`array_push` keeps it in-place via Mongo $push.)
+        push_kwargs = db.array_push.await_args.kwargs
+        # `set_fields` is the $set portion — must NOT contain
+        # `draft_versions` (which would be a full-array overwrite).
+        assert "draft_versions" not in push_kwargs["set_fields"]
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_approve_rejects_invalid_new_generated_by(client: AsyncClient) -> None:
+    """Strict-on-NEW-data still holds. A bad value on the NEW DraftVersion
+    must be rejected — only HISTORICAL entries are exempt from
+    re-validation. We can't reach the production code's
+    `DraftGeneratedBy.USER_EDIT` line via the API (that's a hard-coded
+    constant), so this test exercises `array_push` directly: a
+    `DraftVersion` constructed with a rogue `generated_by` raises a
+    `ValidationError` at the model boundary, before any write happens.
+    """
+    from claimit_mongodb_models import DraftVersion
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        DraftVersion(
+            version=2,
+            content="hi",
+            generated_by="legacy_gen",  # type: ignore[arg-type]
+            at=datetime(2026, 5, 20, tzinfo=UTC),
+        )
 
 
 @pytest.mark.asyncio
@@ -947,6 +1070,9 @@ async def test_cancel_claim_rejected_after_resolved(client: AsyncClient) -> None
 
 @pytest.mark.asyncio
 async def test_edit_draft_appends_version(client: AsyncClient) -> None:
+    """Edit-draft now uses `db.array_push` so historical draft_versions
+    entries are NEVER read or rewritten on this write — only the new
+    element is validated against the strict `DraftVersion` model."""
     claim = Claim.model_validate(_claim_doc(outcome="draft_pending", submitted_at=None))
     assert len(claim.draft_versions) == 1  # baseline
 
@@ -955,7 +1081,7 @@ async def test_edit_draft_appends_version(client: AsyncClient) -> None:
     # get_claim is hit once at the end to reload the post-edit claim for the
     # response body.
     db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
-    db.partial_update = AsyncMock(return_value=True)
+    db.array_push = AsyncMock(return_value=True)
     db.get_claim = AsyncMock(return_value=claim)
 
     _override_db(db)
@@ -967,18 +1093,96 @@ async def test_edit_draft_appends_version(client: AsyncClient) -> None:
                 headers={"Authorization": "Bearer t"},
             )
         assert response.status_code == 200
-        # Edit now writes via partial_update. Inspect the update payload —
-        # the appended draft version + draft_content go in the same write
-        # so the (draft_content == draft_versions[-1].content) invariant
-        # is enforced programmatically.
-        db.partial_update.assert_awaited_once()
-        updates = db.partial_update.await_args.args[2]
-        assert len(updates["draft_versions"]) == 2
-        assert updates["draft_versions"][-1]["version"] == 2
-        assert updates["draft_versions"][-1]["content"] == "Edited body v2"
-        assert updates["draft_versions"][-1]["generated_by"] == "user_edit"
-        assert updates["draft_content"] == "Edited body v2"
-        assert updates["draft_content"] == updates["draft_versions"][-1]["content"]
+
+        db.array_push.assert_awaited_once()
+        kwargs = db.array_push.await_args.kwargs
+        args = db.array_push.await_args.args
+        assert args[0] == "claims"
+        assert kwargs["field"] == "draft_versions"
+        # New element is a strict DraftVersion → enum validation on
+        # generated_by happens at construction in the service layer.
+        from claimit_mongodb_models import DraftVersion
+
+        assert isinstance(kwargs["element"], DraftVersion)
+        assert kwargs["element"].version == 2
+        assert kwargs["element"].content == "Edited body v2"
+        assert kwargs["element"].generated_by.value == "user_edit"
+        # The paired $set keeps draft_content == new version content
+        # atomically. `draft_versions` MUST NOT appear in set_fields —
+        # that would be a full-array overwrite and re-validate
+        # historical entries (the bug this fix prevents).
+        set_fields = kwargs["set_fields"]
+        assert set_fields == {"draft_content": "Edited body v2"}
+        assert "draft_versions" not in set_fields
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_edit_draft_succeeds_on_legacy_rogue_generated_by(
+    client: AsyncClient,
+) -> None:
+    """Counterpart to the approve-with-edit rogue test — same principle
+    on the dedicated edit endpoint. A claim whose existing v1 has a
+    `generated_by` value not in `DraftGeneratedBy` must still be
+    edit-able. Pre-fix: the previous code dumped that v1 and writes
+    the whole array via `partial_update(model=Claim)`, which
+    re-validated v1 and 500'd. Post-fix: $push leaves v1 untouched.
+    """
+    from claimit_mongodb_models import ClaimReadTolerant
+    from claimit_mongodb_models.claim_read_tolerant import DraftVersionReadTolerant
+
+    rogue = ClaimReadTolerant.model_construct(
+        id=UUID(_CLAIM_ID),
+        purchase_id=UUID("30000000-0000-0000-0000-000000000001"),
+        user_id=UUID(_USER_ID),
+        platform="best_buy",
+        claim_amount=50.0,
+        currency="USD",
+        claim_type="email",
+        draft_content="v1 body",
+        draft_versions=[
+            DraftVersionReadTolerant(
+                version=1,
+                content="v1 body",
+                generated_by="legacy_gen",  # not in DraftGeneratedBy
+                at=datetime(2025, 1, 1, tzinfo=UTC),
+            )
+        ],
+        redraft_count=0,
+        policy_clause_cited="",
+        outcome="draft_pending",
+        submitted_at=None,
+        resolved_at=None,
+        evidence_screenshot_url=None,
+        send_override=None,
+        submitted_via=None,
+        outcome_note=None,
+        denial_reason_extracted=None,
+        trace_id=None,
+    )
+
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), rogue])
+    db.array_push = AsyncMock(return_value=True)
+    db.get_claim = AsyncMock(return_value=rogue)
+
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.put(
+                f"/api/v1/claims/{_CLAIM_ID}/edit",
+                json={"draft_content": "Edited v2"},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 200
+        db.array_push.assert_awaited_once()
+        kwargs = db.array_push.await_args.kwargs
+        # New v2 → version 2, content matches.
+        assert kwargs["element"].version == 2
+        assert kwargs["element"].content == "Edited v2"
+        # Critical: the rogue v1 is NOT in the write payload.
+        assert "draft_versions" not in kwargs["set_fields"]
     finally:
         _clear_overrides()
 

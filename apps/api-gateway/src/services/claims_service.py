@@ -31,7 +31,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
-from claimit_mongodb_models import Claim, ClaimReadTolerant, MongoDBClient
+from claimit_mongodb_models import Claim, ClaimReadTolerant, DraftVersion, MongoDBClient
 from claimit_mongodb_models.enums import (
     ClaimOutcome,
     DraftGeneratedBy,
@@ -415,39 +415,57 @@ async def approve_claim(
 
     now = datetime.now(UTC)
 
-    # Build the partial update from the claim's current state plus the
-    # mutations from this request. Going through `partial_update` (rather
-    # than re-validating the whole Claim) means a legacy doc carrying a
-    # rogue enum value in some unrelated field (e.g. `claim_type` set to
-    # an obsolete value, see PR #141 follow-up audit) doesn't fail the
-    # write — only the mutated fields are validated, against the strict
-    # `Claim` annotations via `TypeAdapter` in `MongoDBClient.partial_update`.
-    # This preserves strict-on-write for the FIELDS WE'RE WRITING, which
-    # is the contract that matters.
-    updates: dict[str, Any] = {}
-    if edited_draft_content is not None:
-        # Append a new draft version with the user-edited content. We
-        # construct the full new array and write it via `$set` — this
-        # leaves the existing array untouched until the write succeeds.
+    # Two write paths:
+    #
+    # 1. No edited draft → plain `partial_update` over the scalar fields
+    #    (outcome / submitted_at / send_override). The `Claim` field
+    #    validations on these scalars run via `TypeAdapter` per-field; no
+    #    historical sub-document is read or rewritten. This is the
+    #    strict-on-write contract from the original §6 fix.
+    #
+    # 2. Edited draft → append the new `DraftVersion` via Mongo `$push`
+    #    in the SAME write that $sets the scalars. `partial_update` with
+    #    `draft_versions: [...new_array...]` would re-validate every
+    #    historical entry against the strict `DraftVersion` schema —
+    #    same class of bug as the original §6 limitation, just one
+    #    level deeper. With `$push`, the existing entries are never read
+    #    or rewritten; ONLY the new element is validated, against the
+    #    nested `DraftVersion` model. (Bug-bot finding on PR #144,
+    #    second round.)
+    if edited_draft_content is None:
+        updates: dict[str, Any] = {
+            "send_override": (send_override.value if send_override is not None else None),
+            "submitted_at": now,
+            "outcome": ClaimOutcome.PENDING.value,
+        }
+        success = await db.partial_update("claims", claim_id, updates, model=Claim)
+    else:
         new_version_no = len(claim.draft_versions) + 1
-        existing_versions = [v.model_dump() for v in claim.draft_versions]
-        updates["draft_versions"] = [
-            *existing_versions,
-            {
-                "version": new_version_no,
-                "content": edited_draft_content,
-                "generated_by": DraftGeneratedBy.USER_EDIT.value,
-                "at": now,
+        new_version = DraftVersion(
+            version=new_version_no,
+            content=edited_draft_content,
+            generated_by=DraftGeneratedBy.USER_EDIT,
+            at=now,
+        )
+        success = await db.array_push(
+            "claims",
+            claim_id,
+            field="draft_versions",
+            element=new_version,
+            element_model=DraftVersion,
+            set_fields={
+                # Pair the $push with the scalar mutations atomically —
+                # one write, one $set, no torn states. The
+                # `draft_content == draft_versions[-1].content` invariant
+                # is preserved because we set draft_content to the same
+                # content we just $push'd.
+                "draft_content": edited_draft_content,
+                "send_override": (send_override.value if send_override is not None else None),
+                "submitted_at": now,
+                "outcome": ClaimOutcome.PENDING.value,
             },
-        ]
-        updates["draft_content"] = edited_draft_content
-    updates["send_override"] = send_override.value if send_override is not None else None
-    updates["submitted_at"] = now
-    updates["outcome"] = ClaimOutcome.PENDING.value
-    # submitted_via stays as-is — set later by claim-agent when the message
-    # actually goes out via Gmail / SendGrid / clipboard.
-
-    success = await db.partial_update("claims", claim_id, updates, model=Claim)
+            parent_model=Claim,
+        )
     if not success:
         # Document deleted between read and write. Race; treat as 404.
         raise ApiError("claim_not_found", "Claim not found", status_code=404)
@@ -460,7 +478,11 @@ async def approve_claim(
     # gets an explicit None guard so a degraded claim produces a JSON null
     # rather than a poisonous `"None"` literal. `claim.platform` /
     # `claim_type` are already `str | None`, so they pass through verbatim.
-    effective_draft = updates.get("draft_content", claim.draft_content)
+    # The just-written draft body, falling back to whatever the tolerant
+    # load saw if no edit was supplied.
+    effective_draft = (
+        edited_draft_content if edited_draft_content is not None else claim.draft_content
+    )
     event_payload = {
         "event_id": str(uuid4()),
         "claim_id": str(claim.id) if claim.id is not None else None,
@@ -595,34 +617,31 @@ async def edit_claim_draft(
     now = datetime.now(UTC)
     new_version_no = len(claim.draft_versions) + 1
 
-    # Build the new draft_versions array (existing + appended) and write
-    # it via `partial_update` so we re-validate only the mutated fields,
-    # not the whole claim. The strict `Claim` field annotations enforce
-    # `DraftVersion` shape (incl. `generated_by` enum) on the appended
-    # entry — that's the on-write strictness we still need. The
-    # `draft_content == draft_versions[-1].content` invariant on `Claim`
-    # is enforced PROGRAMMATICALLY here (we set both in the same call)
-    # rather than via the model validator, since `partial_update` runs
-    # per-field validation and never instantiates a full `Claim`. Future
-    # mutations to this function must keep the two writes consistent.
-    existing_versions = [v.model_dump() for v in claim.draft_versions]
-    new_versions = [
-        *existing_versions,
-        {
-            "version": new_version_no,
-            "content": draft_content,
-            "generated_by": DraftGeneratedBy.USER_EDIT.value,
-            "at": now,
-        },
-    ]
-    success = await db.partial_update(
+    # Append the new `DraftVersion` via Mongo `$push` (atomic with the
+    # `$set` of `draft_content`). Only the NEW element is validated
+    # against the strict `DraftVersion` model — historical entries are
+    # never re-read or re-validated on this write. That keeps the
+    # strict-on-new-data contract intact while allowing a long-lived
+    # claim whose existing `draft_versions[].generated_by` carries a
+    # legacy value (no longer in the current `DraftGeneratedBy` enum)
+    # to still be edited cleanly. The
+    # `draft_content == draft_versions[-1].content` invariant is
+    # preserved by setting `draft_content` to the same content we just
+    # $push'd inside the same write — atomic, no torn state.
+    new_version = DraftVersion(
+        version=new_version_no,
+        content=draft_content,
+        generated_by=DraftGeneratedBy.USER_EDIT,
+        at=now,
+    )
+    success = await db.array_push(
         "claims",
         claim_id,
-        {
-            "draft_versions": new_versions,
-            "draft_content": draft_content,
-        },
-        model=Claim,
+        field="draft_versions",
+        element=new_version,
+        element_model=DraftVersion,
+        set_fields={"draft_content": draft_content},
+        parent_model=Claim,
     )
     if not success:
         raise ApiError("claim_not_found", "Claim not found", status_code=404)
