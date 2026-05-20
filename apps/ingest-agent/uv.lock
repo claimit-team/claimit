@@ -356,6 +356,7 @@ dependencies = [
     { name = "claimit-mcp" },
     { name = "claimit-mongodb-models" },
     { name = "claimit-observability" },
+    { name = "claimit-pubsub" },
     { name = "fastapi" },
     { name = "google-adk" },
     { name = "google-auth" },
@@ -380,6 +381,7 @@ requires-dist = [
     { name = "claimit-mcp", directory = "../../packages/shared/mcp" },
     { name = "claimit-mongodb-models", directory = "../../packages/shared/mongodb" },
     { name = "claimit-observability", directory = "../../packages/shared/observability" },
+    { name = "claimit-pubsub", directory = "../../packages/shared/pubsub" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "google-adk", specifier = ">=1.0.0" },
     { name = "google-auth", specifier = ">=2.29.0" },
@@ -456,6 +458,27 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.48b0" },
     { name = "opentelemetry-instrumentation-pymongo", specifier = ">=0.48b0" },
     { name = "opentelemetry-sdk", specifier = ">=1.27.0" },
+]
+
+[[package]]
+name = "claimit-pubsub"
+version = "0.1.0"
+source = { directory = "../../packages/shared/pubsub" }
+dependencies = [
+    { name = "google-cloud-pubsub" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "google-cloud-pubsub", specifier = ">=2.23.0" },
+    { name = "pydantic", specifier = ">=2.9.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0.0" },
+    { name = "ruff", specifier = ">=0.6.0" },
 ]
 
 [[package]]

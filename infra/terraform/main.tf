@@ -244,6 +244,7 @@ module "api_gateway" {
     GMAIL_OAUTH_REDIRECT_URI  = "https://claimit-api-gateway-i4zxjn67hq-ue.a.run.app/api/v1/gmail/callback"
     FRONTEND_BASE_URL         = var.web_frontend_url
     GCP_PROJECT_ID            = var.project_id
+    RECEIPTS_BUCKET           = google_storage_bucket.receipts.name
   }
   deletion_protection = false
 

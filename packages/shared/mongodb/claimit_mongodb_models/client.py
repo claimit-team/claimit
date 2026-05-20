@@ -97,9 +97,13 @@ class MongoDBClient:
         model: type[T],
         limit: int = 100,
         skip: int = 0,
+        sort: list[tuple[str, int]] | None = None,
     ) -> list[T]:
         """Return up to `limit` documents matching `filter`."""
-        cursor = self._db[collection].find(filter).skip(skip).limit(limit)
+        cursor = self._db[collection].find(filter)
+        if sort is not None:
+            cursor = cursor.sort(sort)
+        cursor = cursor.skip(skip).limit(limit)
         return [model.model_validate(doc) async for doc in cursor]
 
     async def upsert(
