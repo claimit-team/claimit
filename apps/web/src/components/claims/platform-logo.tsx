@@ -57,18 +57,24 @@ export function PlatformLogo({ platform, category, className }: PlatformLogoProp
   const safePlatform = typeof platform === "string" ? platform.trim() : "";
   const hasPlatform = safePlatform.length > 0;
   const [errored, setErrored] = useState(!hasPlatform);
-  // Reset the error gate when `platform` changes so a reused component
+  // Reset the error gate when the brand changes so a reused component
   // instance retries the new asset instead of sticking on the fallback
   // icon. (List rows are usually fresh instances, but a parent that
   // memoises rows by claim_id and updates the platform in place would
   // otherwise be stuck.) An empty/null new value re-arms the fallback
-  // immediately rather than re-fetching `/platformlogo/.svg`. Depend
-  // on `hasPlatform` directly (the value the effect actually reads)
-  // rather than just `platform` — keeps the contract explicit and
-  // self-maintaining if the derivation ever gains another input.
+  // immediately rather than re-fetching `/platformlogo/.svg`.
+  //
+  // Depend on `safePlatform` (the trimmed string) — NOT just
+  // `hasPlatform` (boolean), and NOT raw `platform` (untrimmed). The
+  // boolean would miss A→B brand switches where both are non-empty
+  // (best_buy → amazon stays `true`, so a previously-errored logo
+  // would stick on the fallback after switching brands — CodeRabbit
+  // Major on 9051d38). The trimmed string fires on every distinct
+  // brand transition while still ignoring whitespace-only edits.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: safePlatform is the intentional brand-change trigger; the effect body reads hasPlatform (which is derived from safePlatform.length > 0) so the value depended on is sufficient — no separate read of hasPlatform is needed.
   useEffect(() => {
     setErrored(!hasPlatform);
-  }, [hasPlatform]);
+  }, [safePlatform]);
   const src = hasPlatform ? `/platformlogo/${safePlatform}.svg` : "";
 
   return (
