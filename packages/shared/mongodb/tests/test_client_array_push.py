@@ -112,6 +112,46 @@ async def test_array_push_returns_false_on_no_match() -> None:
 
 
 @pytest.mark.asyncio
+async def test_array_push_rejects_wrong_type_instance() -> None:
+    """The fast-path that trusts pre-validated Pydantic instances must
+    require the element to be an instance of `element_model` exactly.
+
+    A previous version of the helper trusted any `BaseDocument` as
+    already-valid (CodeRabbit Major on 65e583d), which would let
+    `array_push(field='draft_versions', element=Claim(...),
+    element_model=DraftVersion)` skip validation and $push a serialized
+    Claim into `draft_versions`. That breaks the strict-on-new contract.
+
+    We only need a stub `BaseDocument` subclass to reproduce — building a
+    real `Claim` would require a long valid fixture. The contract under
+    test is "wrong-type instance → routed through model_validate →
+    raises". The DB call must not happen.
+    """
+    from claimit_mongodb_models.base import BaseDocument
+
+    client, collection_mock = _client_with_matched_count(matched_count=1)
+
+    class _OtherDoc(BaseDocument):
+        # A different BaseDocument subclass; specifically NOT a DraftVersion.
+        irrelevant: str = "x"
+
+    other_instance = _OtherDoc(_id=uuid4())  # type: ignore[call-arg]
+
+    with pytest.raises(ValidationError):
+        await client.array_push(
+            "claims",
+            uuid4(),
+            field="draft_versions",
+            element=other_instance,
+            element_model=DraftVersion,
+        )
+
+    # Routed through model_validate, which can't coerce an _OtherDoc into
+    # a DraftVersion → raised before any update_one call.
+    collection_mock.update_one.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_array_push_validates_dict_element_strictly() -> None:
     """A dict element with an invalid value (here `generated_by` not in
     `DraftGeneratedBy`) is rejected by `model_validate` BEFORE the DB

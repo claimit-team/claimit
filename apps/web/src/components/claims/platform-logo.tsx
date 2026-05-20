@@ -62,11 +62,13 @@ export function PlatformLogo({ platform, category, className }: PlatformLogoProp
   // icon. (List rows are usually fresh instances, but a parent that
   // memoises rows by claim_id and updates the platform in place would
   // otherwise be stuck.) An empty/null new value re-arms the fallback
-  // immediately rather than re-fetching `/platformlogo/.svg`.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: platform is the intentional trigger — the effect body resets `errored` whenever the prop changes and does not need to read platform inside.
+  // immediately rather than re-fetching `/platformlogo/.svg`. Depend
+  // on `hasPlatform` directly (the value the effect actually reads)
+  // rather than just `platform` — keeps the contract explicit and
+  // self-maintaining if the derivation ever gains another input.
   useEffect(() => {
     setErrored(!hasPlatform);
-  }, [platform]);
+  }, [hasPlatform]);
   const src = hasPlatform ? `/platformlogo/${safePlatform}.svg` : "";
 
   return (

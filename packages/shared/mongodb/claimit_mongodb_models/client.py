@@ -285,7 +285,16 @@ class MongoDBClient:
             raise ValueError("`set_fields` may not contain '_id'; identity is fixed by `id`.")
 
         try:
-            if isinstance(element, BaseDocument | element_model):
+            # Trust ONLY when the caller already constructed an instance
+            # of the exact element_model — `BaseDocument` (or any other
+            # broader type) is too wide: an `array_push(field='draft_versions',
+            # element=Claim(...), element_model=DraftVersion)` would
+            # otherwise skip validation and $push a serialized Claim into
+            # the draft_versions array, breaking strict-on-new-data.
+            # Anything else (dict, mismatched-type instance, …) goes
+            # through `model_validate` so the wrong-type case raises a
+            # ValidationError before the DB call.
+            if isinstance(element, element_model):
                 validated_element = element
             else:
                 validated_element = element_model.model_validate(element)
