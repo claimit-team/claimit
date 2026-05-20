@@ -177,7 +177,15 @@ export function useAssistantStream(): UseAssistantStreamResult {
                 typeof parsed.detail === "string" ? parsed.detail : JSON.stringify(parsed.detail);
             }
           } catch {
-            // Non-JSON body — keep the status-only fallback.
+            // Non-JSON body — some intermediaries (Cloud Run cold-start
+            // error pages, load balancers, nginx default error responses)
+            // return plain text. Surface that verbatim rather than a bare
+            // status code; the trim() guard avoids replacing the
+            // useful default with an empty string.
+            const fallbackText = bodyText.trim();
+            if (fallbackText.length > 0) {
+              errorMsg = fallbackText;
+            }
           }
         } catch {
           // Body read failed entirely — keep the status-only fallback.
