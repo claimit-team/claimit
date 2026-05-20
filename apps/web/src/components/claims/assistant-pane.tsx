@@ -164,8 +164,23 @@ export function AssistantPane({ claimId, onDoubleClickHeader }: AssistantPanePro
     })();
   }, [conversations, convLoading, claimId, creating, createError, createConversation, hydrate]);
 
-  // Reset stream buffer if the claimId switches under us (e.g. user
-  // navigates between claim details without unmounting the shell).
+  // When the claimId changes (user navigates between claim details
+  // without unmounting the shell), wipe everything tied to the previous
+  // claim:
+  // - createError so a fresh attempt can be made for the new claim
+  // - activeId so the locate-or-create effect re-resolves against the
+  //   new claimId rather than streaming to the old conversation
+  // - the stream buffer so stale assistant text doesn't render over
+  //   the new claim's thread before hydrate() lands
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `claimId` is the intentional trigger for the reset effect; the body doesn't read it but its change is the whole point
+  useEffect(() => {
+    setCreateError(null);
+    setActiveId(null);
+    reset();
+  }, [claimId, reset]);
+
+  // Unmount cleanup — also resets the stream so a dangling reader
+  // doesn't write to setState after the component is gone.
   useEffect(() => {
     return () => {
       reset();
