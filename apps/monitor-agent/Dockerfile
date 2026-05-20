@@ -34,6 +34,11 @@ COPY apps/${APP_NAME}/pyproject.toml apps/${APP_NAME}/uv.lock ./
 COPY packages/shared/observability /build/packages/shared/observability
 COPY packages/shared/mcp /build/packages/shared/mcp
 COPY packages/shared/mongodb /build/packages/shared/mongodb
+# Ship demo fixtures used by SeededAdapter (the default for non-hero
+# platforms in PRICE_SOURCE_MODE=mixed). Copied into the build stage so
+# the monorepo-mirroring layout is preserved and the runtime stage can
+# COPY from a single source-of-truth location below.
+COPY packages/shared/fixtures /build/packages/shared/fixtures
 
 RUN uv sync --frozen --no-dev --no-install-project
 
@@ -51,6 +56,11 @@ WORKDIR /app
 
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --from=builder --chown=app:app /build/apps/${APP_NAME}/src /app/src
+# SeededAdapter resolves _FIXTURE_DIR via Path(__file__).parents[2] /
+# "packages" / "shared" / "fixtures", which lands at
+# /app/packages/shared/fixtures here. Keep the layout in lock-step with
+# adapters/seeded.py::_find_fixture_dir().
+COPY --from=builder --chown=app:app /build/packages/shared/fixtures /app/packages/shared/fixtures
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \

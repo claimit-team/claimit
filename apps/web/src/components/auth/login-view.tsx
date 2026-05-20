@@ -44,7 +44,7 @@ export function LoginView() {
 
   useEffect(() => {
     if (user) {
-      router.replace("/dashboard");
+      router.replace(user.onboarded ? "/dashboard" : "/onboarding");
     }
   }, [user, router]);
 
@@ -52,7 +52,14 @@ export function LoginView() {
     setIsLoading(true);
     try {
       await signInWithGoogle();
-      router.push("/dashboard");
+      // Redirect is handled by the useEffect above once AuthInit hydrates
+      // the user from getMe(); branching on user.onboarded sends new users
+      // to /onboarding and returning users to /dashboard. The brief window
+      // where the button re-enables before the redirect fires is invisible
+      // because the page is navigating away. The finally block exists so
+      // that if AuthInit's getMe() fails after the popup succeeds (network
+      // / timeout), AuthInit signs the user back out and the button is
+      // re-enabled rather than stuck on "Opening Google…".
     } catch (err) {
       toast.error("Sign-in failed", { description: (err as Error).message });
     } finally {

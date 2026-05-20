@@ -27,6 +27,34 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # PR visibility: post deploy start/completion on the merged PR (if any).
+  # Uses commits/{sha}/pulls to resolve the PR for this push; skips quietly on
+  # direct pushes with no associated PR. Does not gate the deploy pipeline.
+  # ---------------------------------------------------------------------------
+  pr-deploy-started:
+    name: PR Deploy Started Comment
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Post starting comment on merged PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PR_NUMBER=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+            --jq '.[0].number // empty' 2>/dev/null || true)
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No associated PR for ${GITHUB_SHA}; skipping start comment."
+            exit 0
+          fi
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --body "🚀 Deploy Prod started — [workflow run](${RUN_URL})"
+
+  # ---------------------------------------------------------------------------
   # Job 1: terraform-apply
   # Applies infra changes (Artifact Registry, Secret Manager shells, Cloud Run
   # service shells, IAM, Pub/Sub, Scheduler) before any image push so that the
@@ -233,3 +261,38 @@ jobs:
 
       - name: Run health check
         run: bash scripts/verify_health.sh
+
+  pr-deploy-completed:
+    name: PR Deploy Completed Comment
+    if: always()
+    needs:
+      - terraform-apply
+      - build-and-push-images
+      - deploy-cloud-run
+      - run-migrations
+      - verify-health
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Post completion comment on merged PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PR_NUMBER=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+            --jq '.[0].number // empty' 2>/dev/null || true)
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No associated PR for ${GITHUB_SHA}; skipping completion comment."
+            exit 0
+          fi
+          if [ "$DEPLOY_FAILED" = "true" ]; then
+            BODY="❌ Deploy Prod failed — [logs](${RUN_URL})"
+          else
+            BODY="✅ Deploy Prod succeeded — [workflow run](${RUN_URL})"
+          fi
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"

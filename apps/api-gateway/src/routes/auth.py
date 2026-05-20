@@ -37,6 +37,7 @@ class PatchUserMeRequest(BaseModel):
     default_location: DefaultLocation | None = None
     loyalty_memberships: list[LoyaltyMembership] | None = None
     ingestion_skiplist: list[IngestionSkiplistEntry] | None = None
+    onboarded: bool | None = None
 
 
 @router.get("/me")
@@ -88,5 +89,7 @@ async def patch_me(
         user.loyalty_memberships = list(body.loyalty_memberships)
     if body.ingestion_skiplist is not None:
         user.ingestion_skiplist = list(body.ingestion_skiplist)
+    if body.onboarded is not None:
+        user.onboarded = body.onboarded
 
     return {"user": serialize_user(user)}

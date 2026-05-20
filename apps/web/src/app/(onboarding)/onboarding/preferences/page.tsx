@@ -3,6 +3,7 @@
 import { AlertCircle, CheckCircle, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { toast } from "sonner";
 
 import { OnboardingLogo } from "@/components/onboarding/onboarding-logo";
 import { StepIndicator } from "@/components/onboarding/step-indicator";
@@ -17,7 +18,10 @@ import {
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { AuthApiError, patchUserMe } from "@/lib/api/auth";
+import { SettingsApiError, updateSendPreference } from "@/lib/api/settings";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/store";
 
 type PreferenceValue = "approval" | "auto";
 
@@ -48,18 +52,52 @@ const options: PreferenceOption[] = [
 
 export default function OnboardingPreferencesPage() {
   const router = useRouter();
-  const [selectedPreference, setSelectedPreference] = useState<PreferenceValue>("approval");
+  const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
+  // Pre-fill with the user's current send mode if any (returning users
+  // re-entering onboarding via admin reset); fall back to "approval" so
+  // the safer choice is selected by default.
+  const [selectedPreference, setSelectedPreference] = useState<PreferenceValue>(
+    (user?.send_preference?.default_mode as PreferenceValue | undefined) ?? "approval",
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleContinue() {
+  // Two sequential writes so each is atomic and observable on its own:
+  // 1) PUT /settings/send-preference commits the user's chosen mode.
+  // 2) PATCH /auth/me {onboarded: true} flips the gate flag.
+  // If step 2 fails after step 1 succeeds the user is in a consistent
+  // state (preference saved, still un-onboarded), and a retry of Finish
+  // will re-PUT the preference (idempotent) then PATCH again.
+  async function handleFinish() {
+    if (!user) return;
     setIsSaving(true);
     setError(null);
 
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    try {
+      const userAfterPref = await updateSendPreference({
+        default_mode: selectedPreference,
+        auto_send_delay_seconds: user.send_preference?.auto_send_delay_seconds ?? 300,
+      });
+      setUser(userAfterPref);
 
-    setIsSaving(false);
-    router.push("/onboarding/upload");
+      const userAfterOnboard = await patchUserMe({ onboarded: true });
+      setUser(userAfterOnboard);
+
+      toast.success("Welcome to ClaimIt!");
+      router.replace("/dashboard");
+      // Intentionally no setIsSaving(false) on success — the page is
+      // unmounting via redirect; clearing state would briefly re-enable
+      // the button.
+    } catch (err) {
+      const message =
+        err instanceof SettingsApiError || err instanceof AuthApiError
+          ? err.message
+          : "Could not complete setup. Please try again.";
+      setError(message);
+      toast.error("Setup couldn't complete", { description: "Please try again." });
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -159,9 +197,9 @@ export default function OnboardingPreferencesPage() {
             type="button"
             disabled={isSaving}
             className="w-full bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600"
-            onClick={() => void handleContinue()}
+            onClick={() => void handleFinish()}
           >
-            {isSaving ? "Saving…" : "Continue"}
+            {isSaving ? "Saving…" : "Finish"}
           </Button>
 
           <Button
