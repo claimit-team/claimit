@@ -191,7 +191,11 @@ export function useAssistantStream(): UseAssistantStreamResult {
           // Body read failed entirely — keep the status-only fallback.
         }
         setError(errorMsg);
-        markAssistantError(setMessages, assistantId, `HTTP ${response.status}`);
+        // Both surfaces (page-level error banner + per-message bubble
+        // footer) show the same detailed message — the bubble used to
+        // show a bare `HTTP 422` which was less useful than the body
+        // we already extracted above.
+        markAssistantError(setMessages, assistantId, errorMsg);
         setStreaming(false);
         return;
       }
@@ -292,7 +296,13 @@ async function readSSEStream(
         const frameRaw = buffer.slice(0, frameEnd);
         // Consume the frame + its terminator.
         buffer = buffer.slice(frameEnd + frameTerminatorLength(buffer, frameEnd));
-        dispatchFrame(frameRaw, handlers);
+        // `done` is a terminal event — anything the server sends after
+        // it (extra heartbeats, stale frames, garbage) should not be
+        // processed. dispatchFrame returns `true` only for the done
+        // case, signaling early exit from the outer read loop. The
+        // `finally` block below still runs and releases the reader.
+        const terminal = dispatchFrame(frameRaw, handlers);
+        if (terminal) return;
       }
     }
   } finally {
@@ -313,7 +323,13 @@ function frameTerminatorLength(buffer: string, frameEnd: number): number {
   return buffer.startsWith("\r\n\r\n", frameEnd) ? 4 : 2;
 }
 
-function dispatchFrame(raw: string, handlers: FrameHandlers): void {
+/**
+ * Returns `true` iff the frame was a terminal `done` event. The caller
+ * uses this signal to break out of the read loop so any subsequent
+ * frames (heartbeats, late-arriving garbage, an over-eager server) are
+ * ignored — `done` is contractually the last meaningful event.
+ */
+function dispatchFrame(raw: string, handlers: FrameHandlers): boolean {
   let eventType = "message";
   const dataLines: string[] = [];
 
@@ -336,7 +352,7 @@ function dispatchFrame(raw: string, handlers: FrameHandlers): void {
       } catch {
         // Malformed payload — skip rather than throw.
       }
-      return;
+      return false;
     }
     case "tool_call": {
       try {
@@ -350,7 +366,7 @@ function dispatchFrame(raw: string, handlers: FrameHandlers): void {
       } catch {
         // ignore
       }
-      return;
+      return false;
     }
     case "tool_result": {
       try {
@@ -361,7 +377,7 @@ function dispatchFrame(raw: string, handlers: FrameHandlers): void {
       } catch {
         // ignore
       }
-      return;
+      return false;
     }
     case "done": {
       // The server may attach a terminal error to the done frame —
@@ -379,10 +395,11 @@ function dispatchFrame(raw: string, handlers: FrameHandlers): void {
         // ignore — treat as happy completion
       }
       handlers.onDone(errorMsg);
-      return;
+      return true;
     }
     default:
       handlers.onUnknown(eventType, data);
+      return false;
   }
 }
 
