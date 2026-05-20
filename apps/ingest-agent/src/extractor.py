@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
-from claimit_mongodb_models import Purchase
+from claimit_mongodb_models import Purchase, compute_format_hash, normalize_sender
 from google.adk import Agent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -347,6 +347,8 @@ def _purchase_payload(
         "ingestion_source": email.ingestion_source,
         "receipt_storage_url": email.receipt_storage_url,
         "receipt_hash": email.receipt_hash,
+        "format_hash": compute_format_hash(email.subject, email.body_text),
+        "sender": normalize_sender(email.sender),
         "extraction_confidence": confidence,
     }
 

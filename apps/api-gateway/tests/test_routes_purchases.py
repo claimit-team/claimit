@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import copy
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
-from claimit_mongodb_models import MongoDBClient, Purchase, PurchaseStatus, User
+from claimit_mongodb_models import (
+    SKIPLIST_MAX_ENTRIES,
+    MongoDBClient,
+    Purchase,
+    PurchaseStatus,
+    User,
+)
 from httpx import AsyncClient
 from src.deps import get_db
 from src.main import app
@@ -56,6 +63,8 @@ def _purchase_fixture(status: str = "pending_confirmation") -> Purchase:
             "ingestion_source": "gmail",
             "receipt_storage_url": None,
             "receipt_hash": "sha256:abc123",
+            "format_hash": "sha256:format123",
+            "sender": "orders@retailer.example",
             "extraction_confidence": {
                 "platform": 0.94,
                 "price": 0.94,
@@ -173,8 +182,161 @@ async def test_dismiss_not_an_order_writes_skiplist(client: AsyncClient) -> None
         assert len(upserted_user.ingestion_skiplist) == 1
         entry = upserted_user.ingestion_skiplist[0]
         assert entry.sender == "promo@retailer.example"
-        assert entry.format_hash == "sha256:abc123"
+        assert entry.format_hash == "sha256:format123"
         assert entry.reason == "not_an_order"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+async def test_dismiss_not_an_order_without_format_hash_skips_skiplist(
+    client: AsyncClient,
+) -> None:
+    """Legacy purchases without format_hash cannot create classifier-matchable skiplist entries."""
+    purchase = _purchase_fixture()
+    purchase.format_hash = None
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=purchase)
+    mock_db.partial_update = AsyncMock(return_value=True)
+    mock_db.upsert = AsyncMock(return_value=str(USER_ID))
+
+    async def _override_db() -> MongoDBClient:
+        return mock_db
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_current_user] = _override_user
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/dismiss",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"reason": "not_an_order", "sender": "promo@retailer.example"},
+        )
+        assert response.status_code == 200
+        assert response.json()["skiplist_written"] is False
+        mock_db.upsert.assert_not_awaited()
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+async def test_dismiss_not_an_order_prefers_purchase_format_hash(client: AsyncClient) -> None:
+    """When the purchase has format_hash set, the skiplist entry uses it (not receipt_hash)."""
+    purchase = _purchase_fixture()
+    purchase.format_hash = "sha256:format-from-extractor"
+    purchase.sender = "newsletter@retailer.example"
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=purchase)
+    mock_db.partial_update = AsyncMock(return_value=True)
+    mock_db.upsert = AsyncMock(return_value=str(USER_ID))
+
+    async def _override_db() -> MongoDBClient:
+        return mock_db
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_current_user] = _override_user
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/dismiss",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"reason": "not_an_order"},  # sender omitted; falls back to purchase.sender
+        )
+        assert response.status_code == 200
+        upserted_user = mock_db.upsert.await_args.args[2]
+        entry = upserted_user.ingestion_skiplist[0]
+        assert entry.format_hash == "sha256:format-from-extractor"
+        assert entry.sender == "newsletter@retailer.example"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+async def test_dismiss_not_an_order_enforces_1000_entry_cap(client: AsyncClient) -> None:
+    """Adding a new entry past the cap evicts oldest entries (FIFO)."""
+    purchase = _purchase_fixture()
+    purchase.format_hash = "sha256:brand-new-format"
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=purchase)
+    mock_db.partial_update = AsyncMock(return_value=True)
+    mock_db.upsert = AsyncMock(return_value=str(USER_ID))
+
+    base_now = datetime.now(UTC)
+    user_doc = copy.deepcopy(USER_FIXTURE)
+    user_doc["ingestion_skiplist"] = [
+        {
+            "sender": f"sender-{i}@example.com",
+            "format_hash": f"sha256:hash-{i}",
+            "added_at": base_now.isoformat(),
+            "reason": "not_an_order",
+        }
+        for i in range(SKIPLIST_MAX_ENTRIES)
+    ]
+
+    async def _override_user_full() -> User:
+        return User.model_validate(user_doc)
+
+    async def _override_db() -> MongoDBClient:
+        return mock_db
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_current_user] = _override_user_full
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/dismiss",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"reason": "not_an_order", "sender": "new@example.com"},
+        )
+        assert response.status_code == 200
+        upserted_user = mock_db.upsert.await_args.args[2]
+        assert len(upserted_user.ingestion_skiplist) == SKIPLIST_MAX_ENTRIES
+        # Oldest entry (index 0) evicted; newest appended at the tail.
+        assert upserted_user.ingestion_skiplist[0].sender == "sender-1@example.com"
+        assert upserted_user.ingestion_skiplist[-1].sender == "new@example.com"
+        assert upserted_user.ingestion_skiplist[-1].format_hash == "sha256:brand-new-format"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+async def test_dismiss_not_an_order_dedupes_existing_entry(client: AsyncClient) -> None:
+    """Repeat dismiss of same (sender, format_hash) does not duplicate the entry."""
+    purchase = _purchase_fixture()
+    purchase.format_hash = "sha256:existing-format"
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=purchase)
+    mock_db.partial_update = AsyncMock(return_value=True)
+    mock_db.upsert = AsyncMock(return_value=str(USER_ID))
+
+    user_doc = copy.deepcopy(USER_FIXTURE)
+    user_doc["ingestion_skiplist"] = [
+        {
+            "sender": "promo@retailer.example",
+            "format_hash": "sha256:existing-format",
+            "added_at": datetime.now(UTC).isoformat(),
+            "reason": "not_an_order",
+        }
+    ]
+
+    async def _override_user_full() -> User:
+        return User.model_validate(user_doc)
+
+    async def _override_db() -> MongoDBClient:
+        return mock_db
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_current_user] = _override_user_full
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/dismiss",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"reason": "not_an_order", "sender": "promo@retailer.example"},
+        )
+        assert response.status_code == 200
+        assert response.json()["skiplist_written"] is False
+        mock_db.upsert.assert_not_awaited()
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_current_user, None)
