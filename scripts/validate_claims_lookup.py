@@ -179,11 +179,16 @@ async def _run() -> int:
         # ---- S1: no filters → all 3 claims, enrichment populated where joined ----
         s1 = await claims_service.list_claims(db=db, user_id=run_user_id)
         _print_scenario("S1 / no filters", s1)
+        # Hoist `by_id` outside the try so S1b stays self-sufficient even if
+        # S1 explodes before assignment (e.g. an `_expect` raises mid-block).
+        # Each scenario must be independent — a failure in S1 should not
+        # cascade into a NameError that masks S1b's own pass/fail signal.
+        by_id: dict[str, dict[str, object]] = {}
         try:
             claims = s1["claims"]
             assert isinstance(claims, list)
-            _expect(len(claims) == 3, f"expected 3 claims, got {len(claims)}")
             by_id = {c["_id"]: c for c in claims}
+            _expect(len(claims) == 3, f"expected 3 claims, got {len(claims)}")
             linked_row = by_id[str(linked_claim_id)]
             orphan_row = by_id[str(orphan_claim_id)]
             _expect(
@@ -216,7 +221,12 @@ async def _run() -> int:
             print(f"S1 FAIL: {exc}")
 
         # ---- S1b: rogue claim surfaces verbatim, no 500 ----
+        # Re-fetch independently if S1 didn't populate `by_id` so this
+        # scenario stands on its own.
         try:
+            if not by_id:
+                s1_alt = await claims_service.list_claims(db=db, user_id=run_user_id)
+                by_id = {c["_id"]: c for c in s1_alt["claims"]}
             rogue_row = by_id[str(rogue_claim_id)]
             _expect(
                 rogue_row["claim_type"] == "price_drop_refund",

@@ -55,8 +55,13 @@ def _is_degraded(purchase: PurchaseReadTolerant) -> str | None:
         return "null _id (impossible from Mongo, but be defensive)"
     if purchase.window_expires is None:
         return "null window_expires"
-    if purchase.monitoring_cadence_minutes is None:
-        return "null monitoring_cadence_minutes"
+    # Cadence must be > 0. With tolerant reads, a stored 0 / negative
+    # value would slip past `is None` and feed into `is_due`, which uses
+    # `last_checked_at + cadence_minutes <= now` — for cadence <= 0 that
+    # comparison is always true, tight-looping the sweep on the same
+    # purchase. Treat <=0 the same way we treat null: skip + warn.
+    if purchase.monitoring_cadence_minutes is None or purchase.monitoring_cadence_minutes <= 0:
+        return f"non-positive monitoring_cadence_minutes {purchase.monitoring_cadence_minutes!r}"
     if purchase.price_paid is None:
         return "null price_paid"
     if purchase.platform is None:

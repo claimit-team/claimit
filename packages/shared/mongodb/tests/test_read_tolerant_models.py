@@ -222,6 +222,29 @@ class TestClaimReadTolerant:
         with pytest.raises(ValidationError):
             Claim.model_validate(doc)
 
+    def test_explicit_null_draft_versions_passes_tolerant_rejects_strict(self) -> None:
+        """Explicit `null` on a list field is its own failure mode.
+
+        `default_factory=list` only fires for ABSENT keys; an explicit
+        `{"draft_versions": None}` would still raise on a strict
+        `list[...]` annotation. The tolerant variant widens the type to
+        `list[...] | None` and coerces None → [] in a model_validator,
+        so the consumer always sees a list.
+        """
+        doc = _valid_claim_doc()
+        doc["draft_versions"] = None
+        # Pair with a null draft_content so the strict invariant has nothing
+        # to fall back to either; guarantees the strict reject.
+        doc["draft_content"] = None
+
+        tolerant = ClaimReadTolerant.model_validate(doc)
+        # Coerced to empty list, NOT left as None — downstream iteration
+        # (e.g. `len(claim.draft_versions)`) stays safe.
+        assert tolerant.draft_versions == []
+
+        with pytest.raises(ValidationError):
+            Claim.model_validate(doc)
+
 
 # ---------------------------------------------------------------------------
 # Purchase — round-trip + strict-still-rejects pairs.
@@ -309,3 +332,21 @@ class TestPurchaseReadTolerant:
 
         with pytest.raises(ValidationError):
             Purchase.model_validate(doc)
+
+    def test_explicit_null_extraction_confidence_passes_tolerant_rejects_strict(
+        self,
+    ) -> None:
+        """`extraction_confidence: ExtractionConfidence` is required on the
+        strict model. The tolerant variant declares it `... | None = None`
+        so an explicit null in the stored doc loads cleanly.
+        """
+        doc = _valid_purchase_doc()
+        doc["extraction_confidence"] = None
+
+        tolerant = PurchaseReadTolerant.model_validate(doc)
+        assert tolerant.extraction_confidence is None
+
+        with pytest.raises(ValidationError) as excinfo:
+            Purchase.model_validate(doc)
+        loc_keys = {e["loc"][0] for e in excinfo.value.errors() if e["loc"]}
+        assert "extraction_confidence" in loc_keys

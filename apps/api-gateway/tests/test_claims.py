@@ -819,6 +819,83 @@ async def test_cancel_pending_auto_within_window_succeeds(client: AsyncClient) -
 
 
 @pytest.mark.asyncio
+async def test_approve_event_payload_guards_null_uuids(client: AsyncClient) -> None:
+    """Read-tolerance follow-up (PR #144 bot finding): a tolerant claim
+    can carry `purchase_id=None` / `user_id=None` if the doc is degraded.
+    `str(None)` produces the literal `"None"` — wrong wire shape (the
+    downstream subscriber tries to parse `purchase_id` as a UUID). The
+    approve event payload must emit a JSON null for null UUID fields,
+    NOT `"None"`.
+
+    Constructing via `ClaimReadTolerant` since the strict `Claim` would
+    refuse `purchase_id=None` at validation. This mirrors what
+    `_load_owned_claim` returns at runtime (same tolerant model).
+    """
+    from claimit_mongodb_models import ClaimReadTolerant
+
+    rogue = ClaimReadTolerant.model_construct(
+        id=UUID(_CLAIM_ID),
+        purchase_id=None,
+        user_id=None,
+        platform="best_buy",
+        claim_amount=50.0,
+        currency="USD",
+        claim_type="email",
+        draft_content="hi",
+        draft_versions=[],
+        redraft_count=0,
+        policy_clause_cited="",
+        outcome="draft_pending",
+        submitted_at=None,
+        resolved_at=None,
+        evidence_screenshot_url=None,
+        send_override=None,
+        submitted_via=None,
+        outcome_note=None,
+        denial_reason_extracted=None,
+        trace_id=None,
+    )
+
+    db = AsyncMock(spec=MongoDBClient)
+    # Two find_one calls: auth User → tolerant claim. Note: ownership
+    # filter on _load_owned_claim is matched on user_id; we override it
+    # to return the rogue claim regardless so the gate exercises the
+    # null-UUID code path.
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), rogue])
+    db.partial_update = AsyncMock(return_value=True)
+
+    publisher = AsyncMock(spec=PubSubPublisher)
+    publisher.publish = AsyncMock(return_value="msg-id")
+
+    _override_db(db)
+    _override_publisher(publisher)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/approve",
+                json={},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 200
+
+        publisher.publish.assert_awaited_once()
+        _topic, event = publisher.publish.await_args.args
+        # The bug being prevented: `str(None) == "None"`. The fix emits
+        # JSON null instead.
+        assert event["purchase_id"] is None, (
+            f"null purchase_id must serialize as JSON null, got {event['purchase_id']!r}"
+        )
+        assert event["user_id"] is None, (
+            f"null user_id must serialize as JSON null, got {event['user_id']!r}"
+        )
+        # claim_id comes from the request param, never from the loaded
+        # tolerant doc, so it stays a string.
+        assert event["claim_id"] == _CLAIM_ID
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
 async def test_approve_with_no_body_uses_defaults(client: AsyncClient) -> None:
     """POST /approve with no JSON body should succeed (all fields optional)."""
     claim = Claim.model_validate(_claim_doc(outcome="draft_pending", submitted_at=None))

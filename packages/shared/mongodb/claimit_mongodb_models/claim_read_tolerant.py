@@ -30,7 +30,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .base import BaseDocument
 
@@ -66,8 +66,11 @@ class ClaimReadTolerant(BaseDocument):
     - The `@model_validator(after)` invariant on `Claim`
       (`draft_content == draft_versions[-1].content`) is NOT replicated —
       legacy docs that violate it should still load.
-    - `draft_versions` defaults to an empty list rather than rejecting on
-      missing/null.
+    - `draft_versions` accepts both an absent key (defaults via the
+      `model_validator(after)` below) AND an EXPLICIT null in the stored
+      doc. Pydantic v2's `default_factory` only fires when the key is
+      missing, not when it's present-but-null, so a tolerant variant has
+      to widen the type to `... | None` and coerce after.
 
     Subclasses `BaseDocument` so the generic `MongoDBClient.find_one /
     find_many / get` helpers (whose `T = TypeVar("T", bound=BaseDocument)`)
@@ -91,7 +94,10 @@ class ClaimReadTolerant(BaseDocument):
     currency: str | None = None
     claim_type: str | None = None
     draft_content: str | None = None
-    draft_versions: list[DraftVersionReadTolerant] = Field(default_factory=list)
+    # `... | None` so an explicit `null` stored in Mongo doesn't 500 the
+    # read. Coerced to `[]` by `_coerce_null_collections` so the rest of
+    # the codebase can iterate freely without a None-check.
+    draft_versions: list[DraftVersionReadTolerant] | None = None
     redraft_count: int | None = None
     policy_clause_cited: str | None = None
     evidence_screenshot_url: str | None = None
@@ -103,3 +109,18 @@ class ClaimReadTolerant(BaseDocument):
     denial_reason_extracted: str | None = None
     resolved_at: datetime | None = None
     trace_id: str | None = None
+
+    @model_validator(mode="after")
+    def _coerce_null_collections(self) -> ClaimReadTolerant:
+        """Normalise `None` collections to their empty equivalents.
+
+        `default_factory=list` only fires when a key is absent from the
+        input dict; an explicit `{"draft_versions": None}` would still
+        raise on a strictly-typed list. Widening the field to
+        `list[...] | None` plus coercing to `[]` here gives us both:
+        explicit-null tolerance on read AND a non-None invariant the
+        rest of the consumers can rely on.
+        """
+        if self.draft_versions is None:
+            self.draft_versions = []
+        return self

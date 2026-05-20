@@ -337,6 +337,62 @@ class TestRunCron(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["fetched"], 1)
         self.assertEqual(adapter.calls, 1)
 
+    async def test_zero_or_negative_cadence_is_treated_as_degraded(self) -> None:
+        """`monitoring_cadence_minutes <= 0` would make `is_due` always
+        true (since `last_checked_at + 0 <= now`), tight-looping the
+        sweep on the same purchase. Read-tolerance widens the field to
+        `int | None`, so a stored 0 / negative value can slip past a
+        plain `is None` check. Verify the cron treats it as degraded
+        and skips with a warning instead.
+        """
+        now = datetime.now(UTC)
+        zero_cadence = PurchaseReadTolerant.model_construct(
+            id=uuid4(),
+            user_id=uuid4(),
+            platform="best_buy",
+            category="retail",
+            product_name="Test",
+            product_id="ABC",
+            price_paid=10.0,
+            currency="USD",
+            purchase_date=now,
+            window_expires=now + timedelta(days=3),
+            order_id="ord-1",
+            status="monitoring",
+            claim_type="email",
+            monitoring_cadence_minutes=0,
+            ingested_at=now,
+            ingestion_source="gmail",
+        )
+        negative_cadence = PurchaseReadTolerant.model_construct(
+            id=uuid4(),
+            user_id=uuid4(),
+            platform="best_buy",
+            category="retail",
+            product_name="Test",
+            product_id="ABC",
+            price_paid=10.0,
+            currency="USD",
+            purchase_date=now,
+            window_expires=now + timedelta(days=3),
+            order_id="ord-1",
+            status="monitoring",
+            claim_type="email",
+            monitoring_cadence_minutes=-15,
+            ingested_at=now,
+            ingestion_source="gmail",
+        )
+        db = _FakeDB([zero_cadence, negative_cadence])  # type: ignore[list-item]
+        adapter = _StubAdapter()
+        with patch.object(cron_module, "get_adapter", return_value=adapter):
+            summary = await run_cron(db)  # type: ignore[arg-type]
+
+        # Both got the degraded skip — neither was fetched.
+        self.assertEqual(summary["scanned"], 2)
+        self.assertEqual(summary["skipped_degraded"], 2)
+        self.assertEqual(summary["fetched"], 0)
+        self.assertEqual(adapter.calls, 0)
+
     async def test_unknown_platform_purchase_is_skipped(self) -> None:
         """A purchase whose `platform` string isn't in the current Platform
         enum is also a degraded doc — adapter routing would crash on it."""

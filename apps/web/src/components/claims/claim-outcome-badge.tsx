@@ -76,7 +76,12 @@ function resolveOutcomeDisplay(outcome: ClaimOutcome | string | null | undefined
   variant: Variant;
   extraClassName?: string;
 } {
-  if (outcome != null && outcome !== "" && outcome in OUTCOME_DISPLAY) {
+  // `Object.hasOwn` (not `in`) so a rogue/legacy outcome that happens to
+  // collide with an `Object.prototype` member name (`"toString"`,
+  // `"hasOwnProperty"`, `"constructor"`, …) doesn't accidentally walk the
+  // prototype chain and return a broken display config. Read-tolerance
+  // means `outcome` is free-form here — never trust the input as a key.
+  if (outcome != null && outcome !== "" && Object.hasOwn(OUTCOME_DISPLAY, outcome)) {
     return OUTCOME_DISPLAY[outcome as ClaimOutcome];
   }
   return {

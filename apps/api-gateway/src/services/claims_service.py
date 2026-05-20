@@ -453,16 +453,19 @@ async def approve_claim(
         raise ApiError("claim_not_found", "Claim not found", status_code=404)
 
     # Build the Pub/Sub payload from the tolerant claim plus our just-written
-    # mutations. `claim.platform` and `claim.claim_type` are `str | None`
-    # already — no `.value` access needed. If a rogue value sneaks through,
-    # the downstream subscriber is responsible for skipping it (matches the
-    # frontend's unknown-value fallback policy).
+    # mutations. `claim` is a `ClaimReadTolerant` so every field that was
+    # required-on-strict is now `T | None` here — `str(None)` produces the
+    # literal "None" string, which is the wrong wire shape (downstream
+    # consumers parse `purchase_id` as a UUID). Each UUID-bearing field
+    # gets an explicit None guard so a degraded claim produces a JSON null
+    # rather than a poisonous `"None"` literal. `claim.platform` /
+    # `claim_type` are already `str | None`, so they pass through verbatim.
     effective_draft = updates.get("draft_content", claim.draft_content)
     event_payload = {
         "event_id": str(uuid4()),
-        "claim_id": str(claim.id),
-        "user_id": str(claim.user_id),
-        "purchase_id": str(claim.purchase_id),
+        "claim_id": str(claim.id) if claim.id is not None else None,
+        "user_id": str(claim.user_id) if claim.user_id is not None else None,
+        "purchase_id": str(claim.purchase_id) if claim.purchase_id is not None else None,
         "platform": claim.platform,
         "claim_type": claim.claim_type,
         "claim_amount": claim.claim_amount,
@@ -507,9 +510,12 @@ async def approve_claim(
         ) from None
 
     # `submitted_via` is unchanged on this write (claim-agent sets it
-    # downstream); pass through whatever was loaded.
+    # downstream); pass through whatever was loaded. `claim_id` here is
+    # the request param (always non-null), not `claim.id` from the
+    # tolerant load — keeps the response shape stable even on a degraded
+    # doc with a (theoretical) null `_id`.
     return {
-        "claim_id": str(claim.id),
+        "claim_id": str(claim_id),
         "submitted_at": now.isoformat(),
         "submitted_via": claim.submitted_via,
     }
