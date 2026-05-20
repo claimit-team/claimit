@@ -346,16 +346,20 @@ function addToolResultToAssistant(
   return prev.map((m) => {
     if (m.id !== id) return m;
     const calls = m.tool_calls ?? [];
-    // Match the most recent tool_call entry for this tool name that
-    // doesn't already have a result attached.
-    let attached = false;
-    const nextCalls = calls.map((c) => {
-      if (!attached && c.tool === toolName && c.output_summary === undefined) {
-        attached = true;
-        return { ...c, output_summary: summary };
+    // Match the MOST RECENT unfilled tool_call for this tool — agents
+    // can issue the same tool repeatedly (e.g. several search_policies
+    // calls in one turn). The matching tool_result frame is always
+    // paired with the latest such call, so scanning forward would attach
+    // the result to an earlier call and shift every subsequent pairing
+    // by one. Scan backward to honor call order.
+    const nextCalls = [...calls];
+    for (let i = nextCalls.length - 1; i >= 0; i -= 1) {
+      const c = nextCalls[i];
+      if (c.tool === toolName && c.output_summary === undefined) {
+        nextCalls[i] = { ...c, output_summary: summary };
+        break;
       }
-      return c;
-    });
+    }
     return { ...m, tool_calls: nextCalls };
   });
 }

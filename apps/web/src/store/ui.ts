@@ -53,10 +53,12 @@ export const useUIStore = create<UIState>((set) => ({
   toggleAssistantPane: () =>
     set((state) => ({
       assistantPaneOpen: !state.assistantPaneOpen,
-      // Opening the pane acknowledges any queued proactive event locally —
-      // server ack is fired by the dismiss-handler in ProactiveCard so a
-      // simple "open and close without engaging" still counts as seen.
-      proactiveEvent: !state.assistantPaneOpen ? null : state.proactiveEvent,
+      // Proactive events are NOT auto-cleared on open/close — they require
+      // an explicit dismiss (ProactiveCard's X button) which also fires the
+      // server ack. Auto-clearing on every open meant a user who briefly
+      // peeked at the panel and closed it lost the proactive context
+      // without ever interacting with the card.
+      proactiveEvent: state.proactiveEvent,
     })),
 
   claimEmbeddedAssistantExpanded: false,
