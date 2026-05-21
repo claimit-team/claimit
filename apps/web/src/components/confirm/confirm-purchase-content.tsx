@@ -26,16 +26,21 @@ import { buildInitialFormState, type ConfirmFormState } from "@/lib/confirm-form
 const PENDING_CONFIRMATION_THRESHOLD = 0.95;
 
 /**
- * Map a confidence record to the form-field name set the banner
- * renders. Mirrors `_compute_low_confidence_fields` in
- * apps/ingest-agent/src/finalize.py: drop the `overall_min` /
- * `price` aggregates and any explicit null (null = not-applicable
- * for this purchase, NOT low-confidence).
+ * Map a confidence record to the form-field name set the banner +
+ * form share. Mirrors `_compute_low_confidence_fields` in
+ * apps/ingest-agent/src/finalize.py for the exclusion rules:
+ *   - drop the `overall_min` aggregate;
+ *   - drop any explicit null (null = not-applicable for this
+ *     purchase, NOT low-confidence — e.g. retail rows carry null
+ *     `member_price_at_purchase` confidence; counting that as low
+ *     would surface a phantom amber banner).
  *
- * The FE additionally collapses `price` / `price_paid` to the form's
- * single "Purchase price" field — if either signal is low we surface
- * `price_paid` so the banner field names match the input the user
- * actually edits.
+ * Output keys are FORM-FIELD IDs (`price_paid`, `product_name`,
+ * `purchase_date`, `order_id`, `platform`, `category`,
+ * `member_tier_at_purchase`) so the form's `isLow(field)` check
+ * and the banner's label lookup both index off the same set. The
+ * `price` aggregate is collapsed onto `price_paid` (same input on
+ * the form) so the banner never lists "Purchase price" twice.
  */
 function deriveLowConfidenceFields(confidence: PurchaseDetailDoc["extraction_confidence"]): {
   fields: string[];
@@ -43,29 +48,37 @@ function deriveLowConfidenceFields(confidence: PurchaseDetailDoc["extraction_con
 } {
   if (!confidence) return { fields: [], isMostlyFailed: false };
 
-  const excluded = new Set(["overall_min", "price"]);
-  const fields: string[] = [];
+  const rawLow: string[] = [];
   let measured = 0;
-  let low = 0;
 
   for (const [key, value] of Object.entries(confidence)) {
-    if (excluded.has(key)) continue;
+    if (key === "overall_min") continue;
     if (value === null || value === undefined) continue;
     measured += 1;
-    if (value < PENDING_CONFIRMATION_THRESHOLD) {
-      low += 1;
-      // `price_paid` and `price` map to the same field on the form.
-      // If `price_paid` already surfaced we never re-add it for the
-      // mirror score.
-      if (!fields.includes(key)) fields.push(key);
+    if (value < PENDING_CONFIRMATION_THRESHOLD) rawLow.push(key);
+  }
+
+  // Collapse `price` → `price_paid` (same form field) and dedupe.
+  const fields: string[] = [];
+  let pricePaidPushed = false;
+  for (const key of rawLow) {
+    if (key === "price" || key === "price_paid") {
+      if (!pricePaidPushed) {
+        fields.push("price_paid");
+        pricePaidPushed = true;
+      }
+      continue;
     }
+    if (!fields.includes(key)) fields.push(key);
   }
 
   // Mostly-failed heuristic mirrors the PR2 banner threshold: an
-  // overall_min < 0.3 OR more than half the measured fields below
-  // the bar is the "couldn't extract most details" surface.
+  // overall_min < 0.3 AND ≥3 low fields (or more than half the
+  // measured non-null fields) lands the neutral "fill in manually"
+  // surface instead of naming the long list of low fields.
   const overall = confidence.overall_min ?? 0;
-  const isMostlyFailed = overall < 0.3 && low >= Math.max(3, Math.ceil(measured / 2));
+  const halfMeasured = Math.max(3, Math.ceil(measured / 2));
+  const isMostlyFailed = overall < 0.3 && fields.length >= halfMeasured;
 
   return { fields, isMostlyFailed };
 }
