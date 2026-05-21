@@ -1,5 +1,10 @@
 """Self-evaluation pass — Gemini quality check on generated claim drafts."""
 
+# NOTE: Self-serving bias — the same model family that generates the draft
+# also evaluates it, which may inflate scores. A production-grade solution
+# would use a separate evaluator model or a human-in-the-loop rubric.
+# Tracked as a post-hackathon improvement.
+
 from __future__ import annotations
 
 import asyncio
