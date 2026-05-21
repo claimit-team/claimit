@@ -288,6 +288,108 @@ async def test_verify_pubsub_oidc_no_proxy_falls_back_to_request_url(
 
 
 @pytest.mark.asyncio
+async def test_verify_pubsub_oidc_normalizes_whitespace_and_uppercase_forwarded_proto(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Some proxies emit `X-Forwarded-Proto` with stray whitespace or in
+    uppercase. Pub/Sub's `aud` claim is lowercase, so passing the raw
+    header to URL.replace would 401 every push. The verifier must
+    normalize to lowercase + stripped before substituting."""
+    monkeypatch.delenv("PUBSUB_AUTH_DISABLED", raising=False)
+    monkeypatch.setenv("GCP_PROJECT_ID", "test-project")
+    req = _make_request(
+        headers={
+            "Authorization": "Bearer faketoken",
+            "X-Forwarded-Proto": "  HTTPS  ",
+        },
+        scheme="http",
+    )
+
+    with patch.object(
+        auth.id_token,
+        "verify_oauth2_token",
+        return_value={
+            "email": "pubsub-pusher@test-project.iam.gserviceaccount.com",
+            "email_verified": True,
+            "aud": "https://test/pubsub/gmail-inbound",
+        },
+    ) as mock_verify:
+        await auth.verify_pubsub_oidc(req)
+
+    mock_verify.assert_called_once()
+    assert mock_verify.call_args.kwargs["audience"] == "https://test/pubsub/gmail-inbound"
+
+
+@pytest.mark.asyncio
+async def test_verify_pubsub_oidc_handles_forwarded_proto_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When multiple proxies front the request, X-Forwarded-Proto is a
+    comma-separated list with the original client's scheme leftmost
+    (RFC 7239 / common reverse-proxy convention). We take that first
+    value — anything else and we'd be using an intermediate hop's view
+    of the world, not the client's."""
+    monkeypatch.delenv("PUBSUB_AUTH_DISABLED", raising=False)
+    monkeypatch.setenv("GCP_PROJECT_ID", "test-project")
+    req = _make_request(
+        headers={
+            "Authorization": "Bearer faketoken",
+            "X-Forwarded-Proto": "https, http",
+        },
+        scheme="http",
+    )
+
+    with patch.object(
+        auth.id_token,
+        "verify_oauth2_token",
+        return_value={
+            "email": "pubsub-pusher@test-project.iam.gserviceaccount.com",
+            "email_verified": True,
+            "aud": "https://test/pubsub/gmail-inbound",
+        },
+    ) as mock_verify:
+        await auth.verify_pubsub_oidc(req)
+
+    mock_verify.assert_called_once()
+    assert mock_verify.call_args.kwargs["audience"] == "https://test/pubsub/gmail-inbound"
+
+
+@pytest.mark.asyncio
+async def test_verify_pubsub_oidc_rejects_invalid_forwarded_proto_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A header value that isn't `http` or `https` (junk, adversarial,
+    or a future scheme) must NOT be passed to URL.replace — that would
+    yield an audience like `ftp://...` and 401 the legitimate push.
+    The verifier treats invalid values as if the header were absent
+    and falls back to request.url.scheme."""
+    monkeypatch.delenv("PUBSUB_AUTH_DISABLED", raising=False)
+    monkeypatch.setenv("GCP_PROJECT_ID", "test-project")
+    req = _make_request(
+        headers={
+            "Authorization": "Bearer faketoken",
+            "X-Forwarded-Proto": "ftp",
+        },
+        scheme="http",  # falls back to this scheme since the header is rejected
+    )
+
+    with patch.object(
+        auth.id_token,
+        "verify_oauth2_token",
+        return_value={
+            "email": "pubsub-pusher@test-project.iam.gserviceaccount.com",
+            "email_verified": True,
+            "aud": "http://test/pubsub/gmail-inbound",
+        },
+    ) as mock_verify:
+        await auth.verify_pubsub_oidc(req)
+
+    mock_verify.assert_called_once()
+    # Audience falls back to request.url scheme (http), not "ftp".
+    assert mock_verify.call_args.kwargs["audience"] == "http://test/pubsub/gmail-inbound"
+
+
+@pytest.mark.asyncio
 async def test_verify_pubsub_oidc_propagates_signature_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

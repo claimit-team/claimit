@@ -72,8 +72,19 @@ def _expected_audience(request: Request) -> str:
     Query string is stripped defensively — Pub/Sub never adds one to
     the push endpoint, but a future routing tweak shouldn't be able
     to silently invalidate every token.
+
+    The header is normalized before use: trimmed, lowercased, and only
+    accepted if it ends up "http" or "https". An RFC 7239-style chain
+    ("https, http" when multiple proxies fronted the request) takes the
+    leftmost token — that's what the original client sent. Garbage
+    values (whitespace, mixed case, "ftp", empty after splitting) fall
+    through to the no-header branch so we get the in-container scheme
+    rather than a junk audience that would 401 every push.
     """
-    forwarded_proto = request.headers.get("x-forwarded-proto")
+    forwarded_proto_raw = request.headers.get("x-forwarded-proto", "")
+    forwarded_proto = forwarded_proto_raw.split(",", 1)[0].strip().lower()
+    if forwarded_proto not in {"http", "https"}:
+        forwarded_proto = ""
     url = (
         request.url.replace(scheme=forwarded_proto, query="")
         if forwarded_proto
