@@ -156,9 +156,7 @@ async def _try_create_agent_session(user_id: UUID) -> str | None:
     except Exception:
         # Don't let a Vertex-side hiccup block conversation creation.
         # Lazy backfill on first send is the safety net.
-        logger.warning(
-            "Failed to create agent session at conversation-create time", exc_info=True
-        )
+        logger.warning("Failed to create agent session at conversation-create time", exc_info=True)
         return None
 
 
@@ -198,9 +196,7 @@ async def _ensure_agent_and_session(
             # retry path sees the new id without an extra read.
             conversation.agent_session_id = session_id
         except Exception:
-            logger.warning(
-                "Failed to create agent session, proceeding without", exc_info=True
-            )
+            logger.warning("Failed to create agent session, proceeding without", exc_info=True)
             session_id = None
 
     return remote_agent, session_id
@@ -241,7 +237,11 @@ def _finish_reason_is_safe(event: Any) -> bool:
     the only happy completion value; everything else (SAFETY, RECITATION,
     MAX_TOKENS, OTHER) is a degraded / blocked response.
     """
-    finish = event.get("finish_reason") if isinstance(event, dict) else getattr(event, "finish_reason", None)
+    finish = (
+        event.get("finish_reason")
+        if isinstance(event, dict)
+        else getattr(event, "finish_reason", None)
+    )
     if finish is None:
         return True
     finish_str = str(finish)
@@ -318,7 +318,9 @@ async def stream_agent_response(
                 logger.warning("Stream exceeded %ds ceiling", _MAX_STREAM_SECONDS)
                 yield {
                     "event": "done",
-                    "data": json.dumps({"error": "I'm taking too long to respond. Please try again."}),
+                    "data": json.dumps(
+                        {"error": "I'm taking too long to respond. Please try again."}
+                    ),
                 }
                 return
 
@@ -382,9 +384,7 @@ async def stream_agent_response(
         # Stream ended normally.
         if not collected_text.strip() and not collected_tool_calls:
             # Empty response — avoid the dreaded silent assistant bubble.
-            fallback = (
-                "I wasn't able to generate a response. Could you rephrase your question?"
-            )
+            fallback = "I wasn't able to generate a response. Could you rephrase your question?"
             yield {"event": "text_chunk", "data": json.dumps({"text": fallback})}
         yield {"event": "done", "data": json.dumps({})}
 
