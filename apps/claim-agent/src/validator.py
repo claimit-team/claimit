@@ -63,7 +63,7 @@ def validate(draft: ClaimDraft, claim: Claim, purchase: Purchase) -> ValidationR
 
         # Check 2 — Order ID mismatch
         if purchase.order_id and purchase.order_id not in draft.draft_content:
-            issues.append(f"Order ID '{purchase.order_id}' not found in draft content")
+            issues.append(f"Order ID mismatch: '{purchase.order_id}' not found in draft content")
 
         # Check 3 — Numeric bounds (refund amount)
         if (
@@ -75,7 +75,7 @@ def validate(draft: ClaimDraft, claim: Claim, purchase: Purchase) -> ValidationR
             )
         ):
             issues.append(
-                f"Refund amount {draft.refund_amount} is implausible vs claim amount {claim.claim_amount}"
+                f"Numeric bounds: refund {draft.refund_amount} is implausible vs claim {claim.claim_amount}"
             )
 
         # Check 4 — Prohibited language
@@ -86,12 +86,14 @@ def validate(draft: ClaimDraft, claim: Claim, purchase: Purchase) -> ValidationR
 
         valid = len(issues) == 0
         if not valid:
-            span.set_attribute("validator.issues", str(issues))
+            issue_types = [issue.split(":")[0].strip() for issue in issues]
             span.set_attribute("validator.issue_count", len(issues))
+            span.set_attribute("validator.issue_types", str(issue_types))
             _log.warning(
-                "validator.failed claim_id=%s issues=%s",
+                "validator.failed claim_id=%s issue_count=%d issue_types=%s",
                 claim.id,
-                issues,
+                len(issues),
+                issue_types,
             )
 
         return ValidationResult(valid=valid, issues=issues)
