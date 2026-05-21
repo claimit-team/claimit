@@ -354,6 +354,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "claimit-elastic" },
+    { name = "claimit-maps" },
     { name = "claimit-mcp" },
     { name = "claimit-mongodb-models" },
     { name = "claimit-observability" },
@@ -378,6 +379,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "claimit-elastic", directory = "../../packages/shared/elastic" },
+    { name = "claimit-maps", directory = "../../packages/shared/maps" },
     { name = "claimit-mcp", directory = "../../packages/shared/mcp" },
     { name = "claimit-mongodb-models", directory = "../../packages/shared/mongodb" },
     { name = "claimit-observability", directory = "../../packages/shared/observability" },
@@ -413,6 +415,17 @@ requires-dist = [
     { name = "elasticsearch", extras = ["async"], specifier = ">=8.0.0" },
     { name = "motor", specifier = ">=3.6.0" },
 ]
+
+[[package]]
+name = "claimit-maps"
+version = "0.1.0"
+source = { directory = "../../packages/shared/maps" }
+dependencies = [
+    { name = "httpx" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "httpx", specifier = ">=0.27.0" }]
 
 [[package]]
 name = "claimit-mcp"

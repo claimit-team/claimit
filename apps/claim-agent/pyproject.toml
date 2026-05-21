@@ -17,6 +17,7 @@ dependencies = [
     "claimit-mongodb-models",
     "claimit-elastic",
     "claimit-search",
+    "claimit-maps",
 ]
 
 [tool.uv.sources]
@@ -25,6 +26,7 @@ claimit-mcp = { path = "../../packages/shared/mcp" }
 claimit-mongodb-models = { path = "../../packages/shared/mongodb" }
 claimit-search = { path = "../../packages/shared/search" }
 claimit-elastic = { path = "../../packages/shared/elastic" }
+claimit-maps = { path = "../../packages/shared/maps" }
 
 [dependency-groups]
 dev = [
