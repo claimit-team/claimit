@@ -444,6 +444,29 @@ def _purchase_status_from_outcome(outcome: ClaimOutcome) -> PurchaseStatus:
             return PurchaseStatus.EXPIRED
         case ClaimOutcome.NO_RESPONSE:
             return PurchaseStatus.MONITORING
+        case ClaimOutcome.USER_CANCELLED:
+            # User cancelled this claim. The PURCHASE itself may still
+            # have an open window, so we keep monitoring it (consistent
+            # with DENIED above). The /claims/[id] page maps this
+            # outcome to the "expired" workflow status, but that
+            # describes the CLAIM lifecycle, not the purchase one.
+            return PurchaseStatus.MONITORING
+        case ClaimOutcome.USER_SELF_SERVICE:
+            # User resolved the refund themselves (outside our flow).
+            # We stop tracking it for refund — match the APPROVED
+            # surface so the user sees "refund received" rather than
+            # an active monitoring state. Same UI signal as a
+            # platform-approved claim from the user's perspective.
+            return PurchaseStatus.REFUNDED
+        case _:
+            # Defensive: any future ClaimOutcome enum value added
+            # without updating this function falls through to a calm
+            # default rather than silently returning None (which would
+            # violate the `-> PurchaseStatus` annotation and pass an
+            # invalid value to the Pydantic Purchase model). Wildcard
+            # case makes the match exhaustive at runtime; the explicit
+            # member cases above stay for readability + grep-ability.
+            return PurchaseStatus.MONITORING
 
 
 def _build_purchase(

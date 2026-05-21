@@ -344,6 +344,57 @@ async def test_list_purchases_q_special_chars_escape(client: AsyncClient) -> Non
 
 
 @pytest.mark.asyncio
+async def test_list_purchases_q_with_cursor_preserves_search_filter(
+    client: AsyncClient,
+) -> None:
+    """Pagination must preserve the `q` `$or` on follow-up pages.
+
+    Regression guard suggested by CodeRabbit: a future refactor that
+    collapses or rewrites top-level filter keys could accidentally
+    drop `q`'s `$or` when the cursor branch adds its own `_id` key.
+    This test asserts both filters coexist on the cursor'd request.
+    """
+    docs = [
+        _purchase_fixture(purchase_id=UUID(f"{i:08d}-0000-4000-8000-000000000000"))
+        for i in range(1, 4)
+    ]
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.count = AsyncMock(return_value=3)
+    mock_db.find_many = AsyncMock(return_value=docs)
+    _set_overrides(mock_db)
+    try:
+        first = await client.get(
+            "/api/v1/purchases?limit=2&q=sony",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert first.status_code == 200
+        cursor = first.json()["next_cursor"]
+        assert cursor
+
+        second = await client.get(
+            f"/api/v1/purchases?limit=2&q=sony&cursor={cursor}",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert second.status_code == 200
+
+        # `count` is called with the base filter (no cursor) — q's `$or`
+        # must be present.
+        count_filter = mock_db.count.await_args.args[1]
+        assert "$or" in count_filter
+        assert len(count_filter["$or"]) == 3
+
+        # `find_many`'s positional filter on the second call carries
+        # BOTH the q `$or` AND the cursor's `_id` predicate — Mongo
+        # ANDs top-level keys, so neither overwrites the other.
+        page_filter = mock_db.find_many.await_args.args[1]
+        assert "$or" in page_filter
+        assert len(page_filter["$or"]) == 3
+        assert "_id" in page_filter
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
 async def test_list_purchases_cursor_roundtrip(client: AsyncClient) -> None:
     """A cursor produced by the server must be accepted on the next request."""
     docs = [
