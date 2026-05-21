@@ -34,3 +34,8 @@ class Conversation(BaseDocument):
     created_at: datetime
     last_message_at: datetime
     archived_at: datetime | None
+    # Vertex AI Agent Engine session id — primes server-side conversation
+    # memory across turns. Created lazily on first send for conversations
+    # that predate this field; nullable for backward compat with docs
+    # persisted before the session-memory feature shipped.
+    agent_session_id: str | None = None
