@@ -86,6 +86,7 @@ def _make_mock_request(body: dict) -> AsyncMock:
 @pytest.mark.asyncio
 async def test_write_notification_event_called_after_upsert_claim() -> None:
     mock_db = _make_mock_db()
+    claim_id = uuid4()
 
     claim_plan = MagicMock()
     claim_plan.draft_generator = "type_a_email"
@@ -98,7 +99,7 @@ async def test_write_notification_event_called_after_upsert_claim() -> None:
     mock_search = MagicMock()
     mock_search.get_search_adapter.return_value = AsyncMock()
 
-    request = _make_mock_request(_pubsub_body(_make_event_data()))
+    request = _make_mock_request(_pubsub_body(_make_event_data(claim_id=str(claim_id))))
 
     with (
         patch("src.main.MongoDBClient", return_value=mock_db),
@@ -111,10 +112,13 @@ async def test_write_notification_event_called_after_upsert_claim() -> None:
         result = await handle_price_dropped(request)
 
     assert result["status"] == "ok"
+    persisted_claim = mock_db.upsert_claim.await_args.args[0]
+    assert persisted_claim.id == claim_id
     mock_write.assert_called_once()
     call_kwargs = mock_write.call_args.kwargs
     assert call_kwargs["event_type"].value == "claim_drafted"
     assert call_kwargs["entity_type"].value == "claim"
+    assert call_kwargs["entity_id"] == str(claim_id)
 
 
 # ---------------------------------------------------------------------------

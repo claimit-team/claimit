@@ -34,6 +34,7 @@ COPY apps/${APP_NAME}/pyproject.toml apps/${APP_NAME}/uv.lock ./
 COPY packages/shared/observability /build/packages/shared/observability
 COPY packages/shared/mcp /build/packages/shared/mcp
 COPY packages/shared/mongodb /build/packages/shared/mongodb
+COPY packages/shared/pubsub /build/packages/shared/pubsub
 # Ship demo fixtures used by SeededAdapter (the default for non-hero
 # platforms in PRICE_SOURCE_MODE=mixed). Copied into the build stage so
 # the monorepo-mirroring layout is preserved and the runtime stage can

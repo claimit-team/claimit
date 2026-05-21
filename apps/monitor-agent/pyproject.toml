@@ -15,6 +15,7 @@ dependencies = [
     "claimit-observability",
     "claimit-mcp",
     "claimit-mongodb-models",
+    "claimit-pubsub",
     "requests>=2.31.0",
     "beautifulsoup4>=4.12.0",
     "google-cloud-secret-manager>=2.20.0",
@@ -26,6 +27,7 @@ dependencies = [
 claimit-observability = { path = "../../packages/shared/observability" }
 claimit-mcp = { path = "../../packages/shared/mcp" }
 claimit-mongodb-models = { path = "../../packages/shared/mongodb" }
+claimit-pubsub = { path = "../../packages/shared/pubsub" }
 
 [dependency-groups]
 dev = [

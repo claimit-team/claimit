@@ -469,9 +469,12 @@ class MongoDBClient:
         return await self.upsert("claims", claim.id, claim)
 
     async def find_claims(
-        self, filter: dict[str, Any], limit: int = 100
+        self,
+        filter: dict[str, Any],
+        limit: int = 100,
+        sort: list[tuple[str, int]] | None = None,
     ) -> list[ClaimReadTolerant]:
-        return await self.find_many("claims", filter, ClaimReadTolerant, limit=limit)
+        return await self.find_many("claims", filter, ClaimReadTolerant, limit=limit, sort=sort)
 
     async def get_policy(self, platform: str) -> Policy | None:
         """Fetch the active policy for a given platform (find_one by platform)."""

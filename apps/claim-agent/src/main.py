@@ -161,7 +161,11 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         search_client = get_search_adapter()
 
         now = datetime.now(UTC)
-        claim_id = uuid5(NAMESPACE_URL, f"claim:{event.event_id}")
+        claim_id = (
+            UUID(event.claim_id)
+            if event.claim_id is not None
+            else uuid5(NAMESPACE_URL, f"claim:{event.event_id}")
+        )
         placeholder = "Draft pending generation."
 
         # Temporary claim object satisfying the model validator (draft_content == draft_versions[-1].content)
