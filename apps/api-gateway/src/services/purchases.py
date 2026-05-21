@@ -312,7 +312,13 @@ async def confirm_purchase(
     # owns this number; a client trying to set it directly still 400s
     # at the allow-list check above.
     effective_platform = updates.get("platform") or purchase.platform
-    effective_purchase_date = updates.get("purchase_date") or purchase.purchase_date
+    # Use `dict.get(key, default)` (parity with `effective_member_tier`
+    # below) so a falsy-but-present corrected value (e.g. `""` or
+    # explicit `null`) flows into the `TypeAdapter` guard below and
+    # surfaces as a 400 with `details.fields` for purchase_date,
+    # instead of silently falling back to the OLD purchase.purchase_date
+    # for the window computation (then erroring later on the write).
+    effective_purchase_date = updates.get("purchase_date", purchase.purchase_date)
     effective_member_tier = updates.get("member_tier_at_purchase", purchase.member_tier_at_purchase)
     if effective_platform and effective_purchase_date:
         policy = await db.get_policy(effective_platform)
@@ -347,7 +353,13 @@ async def confirm_purchase(
             # `datetime.fromisoformat` would either leak a 500 (caller
             # never wrapped ValueError) or produce a bare 400 without
             # the `details.fields` payload the frontend's per-field
-            # error rendering consumes.
+            # error rendering consumes. `loc_prefix=("purchase_date",)`
+            # is required because `TypeAdapter(datetime)` validates a
+            # single bare value and returns `loc=()` — the field name
+            # has to be re-attached so PR-B's form can highlight the
+            # right input. The downstream `partial_update` path does
+            # not need this because the Purchase model itself supplies
+            # the field name in `loc` for the same kind of error.
             try:
                 pd = TypeAdapter(datetime).validate_python(effective_purchase_date)
             except ValidationError as err:
@@ -355,7 +367,7 @@ async def confirm_purchase(
                     "invalid_field",
                     "One or more corrected fields failed validation",
                     status_code=400,
-                    details=_validation_error_details(err),
+                    details=_validation_error_details(err, loc_prefix=("purchase_date",)),
                 ) from err
             updates["window_expires"] = pd + timedelta(days=days)
 
@@ -731,10 +743,30 @@ def validate_upload_size(size_bytes: int) -> None:
         )
 
 
-def _validation_error_details(err: ValidationError) -> dict[str, object]:
+def _validation_error_details(
+    err: ValidationError,
+    *,
+    loc_prefix: tuple[str, ...] = (),
+) -> dict[str, object]:
+    """Serialise a Pydantic `ValidationError` for the ApiError `details` payload.
+
+    `loc_prefix` is prepended to each error item's `loc` tuple. Defaults
+    to `()` so existing callers that already validate via a Pydantic
+    model (e.g. `partial_update(..., model=Purchase)`) are unchanged —
+    the model already supplies the field name in `loc`. The kwarg is
+    used by call sites that validate a single value via
+    `TypeAdapter(SomeType).validate_python(...)`, where Pydantic
+    returns `loc=()` and the field name has to be added by the caller
+    so the frontend's per-field error rendering can attach the message
+    to the right input.
+    """
     return {
         "fields": [
-            {"loc": item.get("loc"), "type": item.get("type"), "msg": item.get("msg")}
+            {
+                "loc": loc_prefix + tuple(item.get("loc") or ()),
+                "type": item.get("type"),
+                "msg": item.get("msg"),
+            }
             for item in err.errors()
         ]
     }

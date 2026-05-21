@@ -1187,8 +1187,73 @@ async def test_confirm_purchase_malformed_corrected_purchase_date_returns_400(
         # ApiError without `details` would skip the inline highlight.
         details = payload["error"].get("details", {})
         assert isinstance(details.get("fields"), list) and details["fields"]
+        # And the entry's `loc` must lead with "purchase_date" so PR-B
+        # can route the message to the right form field.
+        # `TypeAdapter(datetime)` returns `loc=()`; the call site
+        # supplies the field name via `loc_prefix=("purchase_date",)`.
+        first_loc = details["fields"][0]["loc"]
+        assert first_loc and first_loc[0] == "purchase_date"
         # Must NOT have proceeded to write — window block aborts first.
         mock_db.partial_update.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_purchase_falsy_corrected_purchase_date_does_not_use_old_date(
+    client: AsyncClient,
+) -> None:
+    """Bugbot LOW regression: falsy `purchase_date` correction must NOT silently
+    fall back to `purchase.purchase_date` for the window computation.
+
+    Pre-fix behaviour (`updates.get("purchase_date") or purchase.purchase_date`):
+    an empty string flowed through the truthy fallback, the OLD
+    `purchase.purchase_date` was used to compute `window_expires`, and
+    then `partial_update` rejected the empty string anyway. The user-
+    visible 400 was correct but the internal window computation was
+    based on a value the user is trying to overwrite.
+
+    Post-fix behaviour (`updates.get("purchase_date", purchase.purchase_date)`):
+    `effective_purchase_date == ""` (falsy) short-circuits the window
+    block entirely; `partial_update(..., model=Purchase)` then
+    produces the same 400 with `details.fields[*].loc == ("purchase_date",)`
+    from the Purchase model itself — no dead window computation.
+    """
+    purchase_date = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
+    pending = _purchase_fixture().model_copy(
+        update={
+            "platform": "best_buy",
+            "purchase_date": purchase_date,
+            "window_expires": purchase_date,
+        }
+    )
+    from claimit_mongodb_models import Policy
+
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=pending)
+    # Simulate Pydantic rejecting the empty-string write — same
+    # surface a real partial_update would produce.
+    mock_db.partial_update = AsyncMock(side_effect=_positive_float_validation_error())
+    mock_db.get_policy = AsyncMock(
+        return_value=Policy.model_validate(_policy_fixture(window_days=30))
+    )
+    _set_overrides(mock_db)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/confirm",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"corrected_fields": {"purchase_date": ""}},
+        )
+        assert response.status_code == 400
+        # The window block short-circuited (empty string is falsy), so
+        # partial_update fired and produced the 400 — i.e. NO call to
+        # `window_expires =` happened from a stale fallback value.
+        mock_db.partial_update.assert_awaited_once()
+        updates_arg = mock_db.partial_update.await_args.args[2]
+        assert "window_expires" not in updates_arg, (
+            "window block must short-circuit on falsy purchase_date instead of "
+            "computing from the OLD purchase.purchase_date"
+        )
     finally:
         _clear_overrides()
 
