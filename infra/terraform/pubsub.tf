@@ -64,3 +64,47 @@ resource "google_pubsub_topic_iam_member" "service_agent_publisher_on_dlq" {
   role    = "roles/pubsub.publisher"
   member  = local.pubsub_service_agent
 }
+
+# ---------- Gmail watch inbound (ticket 4.15) ----------
+# Not part of `main_topic_names` because:
+#   - Publisher is Google's Gmail service agent (gmail-api-push@system),
+#     not a ClaimIt-side service — needs its own IAM grant.
+#   - Payload shape is Google-defined ({emailAddress, historyId}), not one
+#     of our claimit-pubsub event models.
+#   - Naming convention differs (hyphen + category, not noun.past-tense).
+#
+# The DLQ stores messages the ingest-agent push subscription fails to ack
+# after `max_delivery_attempts`. Nothing currently consumes it; Cloud
+# Logging alerts on DLQ depth are tracked as a follow-up.
+resource "google_pubsub_topic" "gmail_inbound" {
+  name                       = "gmail-inbound"
+  project                    = var.project_id
+  message_retention_duration = "604800s" # 7 days
+}
+
+resource "google_pubsub_topic" "gmail_inbound_dlq" {
+  name                       = "gmail-inbound.dlq"
+  project                    = var.project_id
+  message_retention_duration = "604800s" # 7 days
+}
+
+# Gmail's push service agent (system-managed identity) needs publisher on
+# our topic so `users.watch` can deliver notifications. The SA name is
+# fixed by Google: gmail-api-push@system.gserviceaccount.com. IAM grants
+# to system-managed SAs succeed before the SA materializes; Google
+# auto-creates the identity on first publish.
+resource "google_pubsub_topic_iam_member" "gmail_push_publisher" {
+  project = var.project_id
+  topic   = google_pubsub_topic.gmail_inbound.name
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:gmail-api-push@system.gserviceaccount.com"
+}
+
+# Pub/Sub service agent → publisher on the gmail-inbound DLQ (matches the
+# pattern for the main DLQ topics above; needed for dead-letter forwarding).
+resource "google_pubsub_topic_iam_member" "service_agent_publisher_on_gmail_inbound_dlq" {
+  project = var.project_id
+  topic   = google_pubsub_topic.gmail_inbound_dlq.name
+  role    = "roles/pubsub.publisher"
+  member  = local.pubsub_service_agent
+}

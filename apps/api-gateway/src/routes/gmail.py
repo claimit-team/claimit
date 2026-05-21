@@ -24,7 +24,7 @@ from typing import Annotated
 
 from claimit_mongodb_models import MongoDBClient, User
 from claimit_mongodb_models.user import GmailIntegration
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from fastapi.responses import RedirectResponse
 from google.cloud import secretmanager
 
@@ -33,6 +33,7 @@ from ..middleware.auth import get_current_user
 from ..middleware.errors import ApiError
 from ..serializers import serialize_user
 from ..services import gmail_oauth, secret_manager, state_jwt
+from ..services.gmail_watch import register_watch
 from ..services.token_cache import AccessTokenCache
 
 _log = logging.getLogger(__name__)
@@ -81,6 +82,12 @@ async def get_gmail_status(
         "connected": g.connected,
         "email": g.connected_email if g.connected else None,
         "scopes": list(g.scopes_granted),
+        # Ticket 4.15: surfaced so the settings UI can render a "reconnect
+        # needed" prompt when the post-OAuth watch registration failed.
+        # `connected=True` + `watch_failed=True` means OAuth succeeded but
+        # the user won't see new-email triggered ingest until they reconnect.
+        "watch_failed": g.watch_failed,
+        "watch_error_message": g.watch_error_message,
     }
 
 
@@ -124,6 +131,7 @@ async def gmail_connect(
 async def gmail_callback(
     code: Annotated[str, Query()],
     state: Annotated[str, Query()],
+    background_tasks: BackgroundTasks,
     db: Annotated[MongoDBClient, Depends(get_db)],
     sm_client: Annotated[
         secretmanager.SecretManagerServiceClient, Depends(get_secret_manager_client)
@@ -201,7 +209,14 @@ async def gmail_callback(
         _log.exception("Gmail callback post-exchange failure for user_id=%s: %s", user_id_str, err)
         return _redirect_error(return_to, "internal_error")
 
-    # 7. Send the user back to the frontend page they started on.
+    # 7. Ticket 4.15: register a Gmail push watch in the background. Runs
+    # after the response is flushed so the user gets the success redirect
+    # without waiting on the Gmail API call (~500ms+). The watch function
+    # itself never raises — failure is recorded on the user document via
+    # gmail_integration.watch_failed and surfaced by /gmail/status.
+    background_tasks.add_task(register_watch, user_id_str, db, sm_client)
+
+    # 8. Send the user back to the frontend page they started on.
     base = os.environ["FRONTEND_BASE_URL"]
     return RedirectResponse(url=f"{base}{return_to}?status=connected", status_code=302)
 
@@ -230,6 +245,8 @@ async def gmail_disconnect(
         watch_history_id=None,
         watch_expires_at=None,
         last_processed_message_id=None,
+        watch_failed=False,
+        watch_error_message=None,
     )
     matched = await db.partial_update(
         "users",

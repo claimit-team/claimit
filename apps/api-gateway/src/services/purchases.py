@@ -116,21 +116,52 @@ def parse_purchase_id(purchase_id: str) -> UUID:
 async def list_purchases(
     db: MongoDBClient,
     user_id: UUID,
-    status: PurchaseStatus | None,
+    status: list[PurchaseStatus] | None,
     category: Category | None,
     limit: int,
     cursor: str | None,
+    q: str | None = None,
 ) -> dict[str, object]:
     """Paginated list of the authenticated user's purchases.
 
     Pagination is `_id` ASC via the shared `apply_cursor_to_query` helper.
     `total_count` reflects the full filtered set, not just the current page.
+
+    Search semantics (mirrors claims-list `q` precedent, simpler path
+    because purchases needs no `$lookup`):
+    - `q` is `re.escape`d before regex construction. User input cannot
+      inject regex metacharacters or trigger ReDoS — a stray "(" or "*"
+      becomes a literal substring match.
+    - `q` matches case-insensitively against `platform` OR
+      `product_name` OR `order_id`. Documents where any of these is
+      null/missing simply don't match (desired).
+    - Cursor + `q` coexist as top-level keys (Mongo ANDs them). The
+      cursor key is `_id`; `q` adds `$or` — separate top-level keys, no
+      conflict, no `$and` wrapping needed.
+    - Empty / whitespace-only `q` should be normalised to None by the
+      route before reaching the service. Defensive strip-and-skip
+      here anyway so unit tests calling the service directly behave
+      the same as the HTTP entry point.
     """
     base_filter: dict[str, Any] = {"user_id": user_id}
-    if status is not None:
-        base_filter["status"] = status.value
+    if status:
+        # `$in` whether status is a single-element list (backward-compat
+        # path for `?status=x`) or multi-element. A length-1 `$in` is
+        # semantically equivalent to equality and Mongo's planner uses
+        # the same index either way — no perf regression for the common
+        # single-value caller.
+        base_filter["status"] = {"$in": [s.value for s in status]}
     if category is not None:
         base_filter["category"] = category.value
+
+    q_clean = q.strip() if q is not None else None
+    if q_clean:
+        pattern = re.escape(q_clean)
+        base_filter["$or"] = [
+            {"platform": {"$regex": pattern, "$options": "i"}},
+            {"product_name": {"$regex": pattern, "$options": "i"}},
+            {"order_id": {"$regex": pattern, "$options": "i"}},
+        ]
 
     total_count = await db.count("purchases", base_filter)
 

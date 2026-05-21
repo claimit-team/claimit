@@ -159,3 +159,67 @@ export function getMonitoringStatusBadge(
 ): PurchaseStatusBadge {
   return BADGE_BY_MONITORING_STATUS[status];
 }
+
+/**
+ * List-ready status badge for a single purchase row.
+ *
+ * Unlike the detail page (`deriveMonitoringStatus`), the list does NOT
+ * have related-claim context, so an "eligible drop" promotion isn't
+ * possible — and per the v0 prompt + locked decision 4, the list MUST
+ * be honest about all 8 backend states with a per-status label rather
+ * than collapsing to 6 UI states.
+ *
+ * The list is also intentionally LESS generous than the detail on
+ * rogue values: an unknown status surfaces as "Unknown" with neutral
+ * styling rather than defaulting to "Monitoring". The detail page is a
+ * focused single-purchase context where a calm default reads as the
+ * right interpretation; the list is a fleet view where pretending a
+ * rogue row is "monitoring" would silently misclassify it.
+ *
+ * Palette is consistent with the detail header's existing
+ * `BADGE_BY_MONITORING_STATUS` so the same visual vocabulary applies
+ * across surfaces:
+ *  - monitoring / claimed     -> brand-primary (in-progress, calm)
+ *  - monitoring_degraded      -> brand-primary palette (caller can
+ *                                  surface a degraded dot beside the
+ *                                  label; the badge itself stays the
+ *                                  same shade so a degraded row
+ *                                  doesn't visually scream)
+ *  - pending_*                -> neutral (transient pre-monitor)
+ *  - refunded                 -> semantic-success
+ *  - expired                  -> semantic-danger
+ *  - dismissed                -> neutral (off-state)
+ *  - unknown / null           -> neutral with "Unknown" label
+ */
+export function getListStatusBadge(
+  status: PurchaseStatus | string | null | undefined,
+): PurchaseStatusBadge {
+  const brandPrimary = "bg-brand-primary-500/10 text-brand-primary-500 border-brand-primary-500/20";
+  const neutral = "bg-neutral-100 text-neutral-500 border-neutral-200";
+  const success = "bg-semantic-success/10 text-semantic-success border-semantic-success/20";
+  const danger = "bg-semantic-danger/10 text-semantic-danger border-semantic-danger/20";
+
+  switch (status) {
+    case "monitoring":
+      return { label: "Monitoring", className: brandPrimary };
+    case "monitoring_degraded":
+      // Same brand palette as `monitoring` so a degraded row stays
+      // calm; the v0 prompt expects the optional amber dot beside the
+      // label as the degraded signal, not a recolored badge.
+      return { label: "Monitoring", className: brandPrimary };
+    case "pending_confirmation":
+      return { label: "Pending confirmation", className: neutral };
+    case "pending_user_edit":
+      return { label: "Pending edit", className: neutral };
+    case "claimed":
+      return { label: "Claim active", className: brandPrimary };
+    case "refunded":
+      return { label: "Refund received", className: success };
+    case "expired":
+      return { label: "Window expired", className: danger };
+    case "dismissed":
+      return { label: "Stopped", className: neutral };
+    default:
+      return { label: "Unknown", className: neutral };
+  }
+}
