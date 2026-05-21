@@ -31,6 +31,7 @@ from .conversation import Conversation
 from .notification_event import NotificationEvent
 from .policy import Policy
 from .price_history import PriceHistory
+from .price_history_read_tolerant import PriceHistoryReadTolerant
 from .purchase import Purchase
 from .purchase_read_tolerant import PurchaseReadTolerant
 from .user import User
@@ -486,17 +487,36 @@ class MongoDBClient:
         return await self.upsert("users", user.id, user)
 
     async def insert_price_history(self, record: PriceHistory) -> str:
-        """Persist a price-history record (upsert keyed on `_id`)."""
+        """Persist a price-history record (upsert keyed on `_id`).
+
+        Param stays strict — only fully-validated `PriceHistory` instances
+        should be written. Read-tolerant instances must NOT round-trip back
+        through writes (would silently relax write validation and defeat
+        the strict-write guarantee enforced via `COLLECTION_MODELS`).
+        """
         return await self.upsert("price_history", record.id, record)
 
     async def find_price_history(
-        self, purchase_id: str | UUID, limit: int = 100
-    ) -> list[PriceHistory]:
+        self,
+        purchase_id: str | UUID,
+        limit: int = 100,
+        sort: list[tuple[str, int]] | None = None,
+    ) -> list[PriceHistoryReadTolerant]:
+        """List the price-history snapshots for a purchase.
+
+        Returns `PriceHistoryReadTolerant` instances so a single legacy row
+        (e.g. one with a `source` value the current `PriceSource` enum no
+        longer recognises, or a missing `currency`) doesn't 500 callers
+        that iterate the result. Write path is unaffected —
+        `insert_price_history` and `COLLECTION_MODELS["price_history"]`
+        stay on the strict `PriceHistory` class.
+        """
         return await self.find_many(
             "price_history",
             {"purchase_id": _coerce_uuid(purchase_id)},
-            PriceHistory,
+            PriceHistoryReadTolerant,
             limit=limit,
+            sort=sort,
         )
 
     async def get_conversation(self, id: str | UUID) -> Conversation | None:

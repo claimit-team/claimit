@@ -36,6 +36,7 @@ from .notification_event import NotificationEvent
 from .notification_helpers import write_notification_event
 from .policy import Policy
 from .price_history import PriceHistory
+from .price_history_read_tolerant import PriceHistoryReadTolerant
 from .purchase import ExtractionConfidence, Purchase
 from .purchase_read_tolerant import (
     ExtractionConfidenceReadTolerant,
@@ -93,6 +94,7 @@ __all__ = [
     "Platform",
     "Policy",
     "PriceHistory",
+    "PriceHistoryReadTolerant",
     "PriceSource",
     "Purchase",
     "PurchaseDateBasis",
