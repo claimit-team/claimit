@@ -210,6 +210,140 @@ async def test_list_purchases_invalid_cursor(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_purchases_q_matches_platform_product_or_order_id(
+    client: AsyncClient,
+) -> None:
+    """`q` adds an `$or` regex over platform / product_name / order_id.
+
+    The cursor `$or` (added by `apply_cursor_to_query`) and the q `$or`
+    coexist as separate top-level filter keys — Mongo ANDs all top-level
+    keys, so the cursor branch never reuses the same `$or` slot. No
+    cursor in this test (clean assertion on the q `$or` shape alone).
+    """
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.count = AsyncMock(return_value=0)
+    mock_db.find_many = AsyncMock(return_value=[])
+    _set_overrides(mock_db)
+    try:
+        response = await client.get(
+            "/api/v1/purchases?q=sony",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+
+        count_filter = mock_db.count.await_args.args[1]
+        assert count_filter["user_id"] == USER_ID
+        # `$or` regex covers exactly the three fields, case-insensitive,
+        # with `re.escape`d input. Literal substring "sony" round-trips
+        # unchanged through `re.escape`.
+        assert count_filter["$or"] == [
+            {"platform": {"$regex": "sony", "$options": "i"}},
+            {"product_name": {"$regex": "sony", "$options": "i"}},
+            {"order_id": {"$regex": "sony", "$options": "i"}},
+        ]
+        # Sort + limit unchanged (no compound cursor change in this PR).
+        assert mock_db.find_many.await_args.kwargs["sort"] == [("_id", 1)]
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_list_purchases_q_combines_with_status_category(
+    client: AsyncClient,
+) -> None:
+    """`q` ANDs with status + category — same filter dict carries every key."""
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.count = AsyncMock(return_value=0)
+    mock_db.find_many = AsyncMock(return_value=[])
+    _set_overrides(mock_db)
+    try:
+        response = await client.get(
+            "/api/v1/purchases?status=monitoring&category=retail&q=widget",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+
+        count_filter = mock_db.count.await_args.args[1]
+        assert count_filter["user_id"] == USER_ID
+        assert count_filter["status"] == "monitoring"
+        assert count_filter["category"] == "retail"
+        assert "$or" in count_filter
+        assert len(count_filter["$or"]) == 3
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_list_purchases_q_too_long_returns_400(client: AsyncClient) -> None:
+    """`q` longer than `Q_MAX_LENGTH` (100) is rejected with 400 so
+    runaway-input regex compile cost stays bounded. Same hard cap as
+    the claims-list endpoint."""
+    mock_db = AsyncMock(spec=MongoDBClient)
+    _set_overrides(mock_db)
+    try:
+        long_q = "a" * 101
+        response = await client.get(
+            f"/api/v1/purchases?q={long_q}",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "invalid_search_query"
+        # Service must never be reached — guard fires in the route.
+        mock_db.count.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_list_purchases_q_whitespace_is_ignored(client: AsyncClient) -> None:
+    """Whitespace-only `q` is treated as no filter — `$or` is NOT added."""
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.count = AsyncMock(return_value=0)
+    mock_db.find_many = AsyncMock(return_value=[])
+    _set_overrides(mock_db)
+    try:
+        response = await client.get(
+            "/api/v1/purchases?q=%20%20%20",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+
+        count_filter = mock_db.count.await_args.args[1]
+        assert "$or" not in count_filter
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_list_purchases_q_special_chars_escape(client: AsyncClient) -> None:
+    """`re.escape` turns regex metacharacters into literal substring matches —
+    user input cannot inject ReDoS payloads or alter the pattern."""
+    import re as _re
+
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.count = AsyncMock(return_value=0)
+    mock_db.find_many = AsyncMock(return_value=[])
+    _set_overrides(mock_db)
+    try:
+        # Url-encode the special chars so httpx doesn't strip them.
+        response = await client.get(
+            "/api/v1/purchases?q=%28%2A",  # "(*"
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+
+        count_filter = mock_db.count.await_args.args[1]
+        escaped = _re.escape("(*")
+        # The literal regex string is what re.escape produced — never the
+        # raw user input, which would be invalid as a regex anyway.
+        assert count_filter["$or"][0]["platform"]["$regex"] == escaped
+        assert count_filter["$or"][1]["product_name"]["$regex"] == escaped
+        assert count_filter["$or"][2]["order_id"]["$regex"] == escaped
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
 async def test_list_purchases_cursor_roundtrip(client: AsyncClient) -> None:
     """A cursor produced by the server must be accepted on the next request."""
     docs = [
