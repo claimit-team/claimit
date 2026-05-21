@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from claimit_mongodb_models import (
+    Category,
     MongoDBClient,
     Platform,
     PriceHistory,
@@ -24,6 +25,8 @@ from claimit_observability import get_tracer, span_with_attributes
 from .adapters.base import PriceFetchError, PriceSnapshot
 from .adapters.config import get_adapter
 from .cadence import compute_target_cadence_minutes, is_due
+from .comparison import compare_prices
+from .eligibility import validate_eligibility
 
 logger = logging.getLogger(__name__)
 tracer = get_tracer(__name__)
@@ -46,10 +49,10 @@ def _is_degraded(purchase: PurchaseReadTolerant) -> str | None:
     The §1 audit (PR #141 follow-up) found one rogue Purchase in prod
     with `category=None`, `product_name=None`, `claim_type=None`. With
     `db.find_purchases` now returning `PurchaseReadTolerant`, that doc
-    no longer 500s deserialization — but the cron's `compute_target_cadence`,
-    `is_due`, and `get_adapter` calls expect non-null `window_expires`,
-    `monitoring_cadence_minutes`, `platform`, and `product_id`. Skip
-    such docs with a logged warning so the rest of the sweep continues.
+    no longer 500s deserialization — but the cron's cadence, adapter,
+    price-comparison, and eligibility paths expect several fields to be
+    present and internally consistent. Skip such docs with a logged
+    warning so the rest of the sweep continues.
     """
     if purchase.id is None:
         return "null _id (impossible from Mongo, but be defensive)"
@@ -64,14 +67,27 @@ def _is_degraded(purchase: PurchaseReadTolerant) -> str | None:
         return f"non-positive monitoring_cadence_minutes {purchase.monitoring_cadence_minutes!r}"
     if purchase.price_paid is None:
         return "null price_paid"
+    if purchase.price_paid <= 0:
+        return f"non-positive price_paid {purchase.price_paid!r}"
     if purchase.platform is None:
         return "null platform"
     try:
         Platform(purchase.platform)
     except ValueError:
         return f"unknown platform {purchase.platform!r}"
+    if purchase.category is None:
+        return "null category"
+    try:
+        category = Category(purchase.category)
+    except ValueError:
+        return f"unknown category {purchase.category!r}"
     if not purchase.product_id:
         return "null/empty product_id"
+    if category == Category.HOTEL:
+        if purchase.purchase_date is None:
+            return "null hotel purchase_date"
+        if purchase.purchase_date_basis != "check_in_date":
+            return f"invalid hotel purchase_date_basis {purchase.purchase_date_basis!r}"
     return None
 
 
@@ -80,6 +96,7 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
     now = datetime.now(UTC)
     scanned = due_count = fetched = errors = skipped_expired = skipped_source = 0
     skipped_degraded = 0
+    eligible = ineligible = no_policy = 0
 
     purchases = await db.find_purchases({"status": "monitoring"}, limit=_SCAN_LIMIT)
 
@@ -180,6 +197,44 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
                 fetched += 1
                 if not await _persist_price_history(db, purchase, snap):
                     skipped_source += 1
+
+                # Eligibility decision. compare_prices is the tier-aware
+                # has-drop gate from 3.10; validate_eligibility encodes
+                # the full §5.4 rules engine on top of it (window, bundle,
+                # loyalty, award, basic-economy, identical-room, ...).
+                # The actual claim-draft write + price.dropped Pub/Sub
+                # are ticket 3.12 — here we only count and log.
+                comparison = compare_prices(purchase, snap)
+                if not comparison.is_eligible:
+                    # No drop, or tier-match precondition failed.
+                    # Already counted under `fetched`; no further bookkeeping.
+                    continue
+                policy = await db.get_policy(purchase.platform)
+                if policy is None:
+                    no_policy += 1
+                    logger.warning(
+                        "cron.no_policy purchase_id=%s platform=%s",
+                        purchase.id,
+                        purchase.platform,
+                    )
+                    continue
+                result = validate_eligibility(purchase, policy, snap, comparison, now=now)
+                if result.eligible:
+                    eligible += 1
+                    logger.info(
+                        "cron.eligible purchase_id=%s drop_pct=%.2f drop_amount=%.2f",
+                        purchase.id,
+                        comparison.drop_percentage,
+                        comparison.drop_amount,
+                    )
+                else:
+                    ineligible += 1
+                    logger.info(
+                        "cron.ineligible purchase_id=%s code=%s reason=%s",
+                        purchase.id,
+                        result.code,
+                        result.reason,
+                    )
             except PriceFetchError as exc:
                 errors += 1
                 logger.warning("cron.fetch_error purchase_id=%s reason=%s", purchase.id, exc.reason)
@@ -207,10 +262,14 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
         "skipped_expired": skipped_expired,
         "skipped_source": skipped_source,
         "skipped_degraded": skipped_degraded,
+        "eligible": eligible,
+        "ineligible": ineligible,
+        "no_policy": no_policy,
     }
     logger.info(
         "cron.summary scanned=%d due=%d fetched=%d errors=%d "
-        "skipped_expired=%d skipped_source=%d skipped_degraded=%d",
+        "skipped_expired=%d skipped_source=%d skipped_degraded=%d "
+        "eligible=%d ineligible=%d no_policy=%d",
         scanned,
         due_count,
         fetched,
@@ -218,6 +277,9 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
         skipped_expired,
         skipped_source,
         skipped_degraded,
+        eligible,
+        ineligible,
+        no_policy,
     )
     return summary
 

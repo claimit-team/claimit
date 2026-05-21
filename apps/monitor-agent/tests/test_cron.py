@@ -7,10 +7,41 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 from uuid import uuid4
 
-from claimit_mongodb_models import PriceHistory, Purchase, PurchaseReadTolerant
+from claimit_mongodb_models import Policy, PriceHistory, Purchase, PurchaseReadTolerant
 from src import cron as cron_module
 from src.adapters.base import PriceFetchError, PriceSnapshot, PriceSourceAdapter
 from src.cron import run_cron
+
+
+def _default_policy(platform: str = "best_buy") -> Policy:
+    """Permissive policy used by cron tests that hit the eligibility path.
+
+    Built via `model_construct` for the same reason as in `test_eligibility.py`:
+    several platforms in the seed aren't in the shared `Platform` enum yet.
+    """
+    return Policy.model_construct(
+        id=uuid4(),
+        platform=platform,
+        category="retail",
+        window_days=15,
+        window_days_member=60,
+        pre_arrival_hours_required=None,
+        covers_own_drops=True,
+        covers_competitor_drops=False,
+        claim_type="self_service",
+        claim_url="https://example.com",
+        claim_email=None,
+        claim_phone=None,
+        loyalty_required=False,
+        award_ticket_eligible=None,
+        bundle_exclusions=False,
+        key_exclusions=[],
+        policy_url="https://example.com",
+        policy_text_full="...",
+        policy_text_relevant_clause="...",
+        last_verified=datetime(2026, 5, 14, tzinfo=UTC),
+        active=True,
+    )
 
 
 def _make_purchase(
@@ -69,10 +100,20 @@ def _make_purchase(
 
 
 class _FakeDB:
-    def __init__(self, purchases: list[Purchase]) -> None:
+    def __init__(
+        self,
+        purchases: list[Purchase],
+        *,
+        policies: dict[str, Policy] | None = None,
+    ) -> None:
         self.purchases = purchases
         self.updates: list[tuple[object, dict[str, object]]] = []
         self.price_history: list[PriceHistory] = []
+        # Default: every platform that shows up in tests gets a permissive
+        # policy so the eligibility wiring (added in 3.11) doesn't bump
+        # `no_policy` in tests that pre-date it. Override via the kwarg to
+        # exercise the no_policy / ineligible counters.
+        self.policies = policies if policies is not None else {"best_buy": _default_policy()}
 
     async def find_purchases(self, _filter: dict[str, object], limit: int = 100) -> list[Purchase]:
         return self.purchases[:limit]
@@ -90,6 +131,9 @@ class _FakeDB:
     async def insert_price_history(self, record: PriceHistory) -> str:
         self.price_history.append(record)
         return str(record.id)
+
+    async def get_policy(self, platform: str) -> Policy | None:
+        return self.policies.get(platform)
 
 
 class _StubAdapter(PriceSourceAdapter):
@@ -393,6 +437,124 @@ class TestRunCron(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["fetched"], 0)
         self.assertEqual(adapter.calls, 0)
 
+    async def test_non_positive_price_paid_is_treated_as_degraded(self) -> None:
+        """Eligibility computes drop percentage from price_paid, so tolerant
+        rows that bypass strict `gt=0` validation must be skipped before
+        they can divide by zero or produce nonsensical drops.
+        """
+        now = datetime.now(UTC)
+        zero_price = PurchaseReadTolerant.model_construct(
+            id=uuid4(),
+            user_id=uuid4(),
+            platform="best_buy",
+            category="retail",
+            product_name="Test",
+            product_id="ABC",
+            price_paid=0.0,
+            currency="USD",
+            purchase_date=now,
+            window_expires=now + timedelta(days=3),
+            order_id="ord-1",
+            status="monitoring",
+            claim_type="email",
+            monitoring_cadence_minutes=60,
+            ingested_at=now,
+            ingestion_source="gmail",
+        )
+        negative_price = PurchaseReadTolerant.model_construct(
+            id=uuid4(),
+            user_id=uuid4(),
+            platform="best_buy",
+            category="retail",
+            product_name="Test",
+            product_id="ABC",
+            price_paid=-10.0,
+            currency="USD",
+            purchase_date=now,
+            window_expires=now + timedelta(days=3),
+            order_id="ord-1",
+            status="monitoring",
+            claim_type="email",
+            monitoring_cadence_minutes=60,
+            ingested_at=now,
+            ingestion_source="gmail",
+        )
+        db = _FakeDB([zero_price, negative_price])  # type: ignore[list-item]
+        adapter = _StubAdapter()
+        with patch.object(cron_module, "get_adapter", return_value=adapter):
+            summary = await run_cron(db)  # type: ignore[arg-type]
+
+        self.assertEqual(summary["scanned"], 2)
+        self.assertEqual(summary["skipped_degraded"], 2)
+        self.assertEqual(summary["fetched"], 0)
+        self.assertEqual(adapter.calls, 0)
+
+    async def test_missing_category_is_treated_as_degraded_before_eligibility(self) -> None:
+        """A missing category would skip category-specific validator rules and
+        could count a legacy row as eligible, so reject it at the cron gate.
+        """
+        now = datetime.now(UTC)
+        rogue = PurchaseReadTolerant.model_construct(
+            id=uuid4(),
+            user_id=uuid4(),
+            platform="best_buy",
+            category=None,
+            product_name="Test",
+            product_id="ABC",
+            price_paid=10.0,
+            currency="USD",
+            purchase_date=now,
+            window_expires=now + timedelta(days=3),
+            order_id="ord-1",
+            status="monitoring",
+            claim_type="email",
+            monitoring_cadence_minutes=60,
+            ingested_at=now,
+            ingestion_source="gmail",
+        )
+        db = _FakeDB([rogue])  # type: ignore[list-item]
+        adapter = _StubAdapter()
+        with patch.object(cron_module, "get_adapter", return_value=adapter):
+            summary = await run_cron(db)  # type: ignore[arg-type]
+
+        self.assertEqual(summary["skipped_degraded"], 1)
+        self.assertEqual(summary["fetched"], 0)
+        self.assertEqual(adapter.calls, 0)
+
+    async def test_hotel_without_check_in_basis_is_treated_as_degraded(self) -> None:
+        """Hotel pre-arrival rules need purchase_date to be the check-in
+        datetime; otherwise Wyndham-style policies can be over-approved.
+        """
+        now = datetime.now(UTC)
+        rogue = PurchaseReadTolerant.model_construct(
+            id=uuid4(),
+            user_id=uuid4(),
+            platform="hilton",
+            category="hotel",
+            product_name="Test Hotel",
+            product_id="HTL-1",
+            price_paid=100.0,
+            currency="USD",
+            purchase_date=now,
+            purchase_date_basis="order_date",
+            window_expires=now + timedelta(days=3),
+            order_id="ord-1",
+            member_tier_at_purchase="hilton_diamond",
+            status="monitoring",
+            claim_type="email",
+            monitoring_cadence_minutes=60,
+            ingested_at=now,
+            ingestion_source="gmail",
+        )
+        db = _FakeDB([rogue])  # type: ignore[list-item]
+        adapter = _StubAdapter()
+        with patch.object(cron_module, "get_adapter", return_value=adapter):
+            summary = await run_cron(db)  # type: ignore[arg-type]
+
+        self.assertEqual(summary["skipped_degraded"], 1)
+        self.assertEqual(summary["fetched"], 0)
+        self.assertEqual(adapter.calls, 0)
+
     async def test_unknown_platform_purchase_is_skipped(self) -> None:
         """A purchase whose `platform` string isn't in the current Platform
         enum is also a degraded doc — adapter routing would crash on it."""
@@ -423,3 +585,99 @@ class TestRunCron(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["skipped_degraded"], 1)
         self.assertEqual(summary["fetched"], 0)
         self.assertEqual(adapter.calls, 0)
+
+    # -- eligibility wiring (ticket 3.11) -------------------------------
+
+    async def test_eligible_drop_bumps_eligible_counter(self) -> None:
+        """Snapshot under price_paid + permissive policy → eligible=1."""
+        now = datetime.now(UTC)
+        purchase = _make_purchase(
+            last_checked_at=None,
+            window_expires=now + timedelta(days=3),
+        )
+        db = _FakeDB([purchase])  # default policies = best_buy permissive
+        adapter = _StubAdapter()  # returns 299.99 < paid 349.99 → is a drop
+
+        with patch.object(cron_module, "get_adapter", return_value=adapter):
+            summary = await run_cron(db)  # type: ignore[arg-type]
+
+        self.assertEqual(summary["fetched"], 1)
+        self.assertEqual(summary["eligible"], 1)
+        self.assertEqual(summary["ineligible"], 0)
+        self.assertEqual(summary["no_policy"], 0)
+
+    async def test_no_drop_does_not_bump_eligibility_counters(self) -> None:
+        """No drop → comparison.is_eligible=False → neither counter changes."""
+        now = datetime.now(UTC)
+        purchase = _make_purchase(
+            last_checked_at=None,
+            window_expires=now + timedelta(days=3),
+        )
+        db = _FakeDB([purchase])
+
+        class _SamePriceAdapter(PriceSourceAdapter):
+            async def fetch_current_price(
+                self,
+                platform: str,
+                product_id: str,
+                product_url: str | None = None,
+                member_tier: str | None = None,
+            ) -> PriceSnapshot:
+                return PriceSnapshot(
+                    platform=platform,
+                    product_id=product_id,
+                    price_member=None,
+                    price_non_member=349.99,  # same as price_paid
+                    member_tier_required=None,
+                    currency="USD",
+                    checked_at=datetime.now(UTC),
+                    source="direct",
+                )
+
+        with patch.object(cron_module, "get_adapter", return_value=_SamePriceAdapter()):
+            summary = await run_cron(db)  # type: ignore[arg-type]
+
+        self.assertEqual(summary["fetched"], 1)
+        self.assertEqual(summary["eligible"], 0)
+        self.assertEqual(summary["ineligible"], 0)
+
+    async def test_eligible_drop_against_inactive_policy_bumps_ineligible(self) -> None:
+        """Policy with active=False routes through `no_policy` (get_policy
+        filters active=True) — we exercise the *validator* rejection by
+        wiring a tolerant get_policy that returns the inactive policy.
+        """
+        now = datetime.now(UTC)
+        purchase = _make_purchase(
+            last_checked_at=None,
+            window_expires=now + timedelta(days=3),
+        )
+        inactive = _default_policy()
+        # Mutate via __dict__ since model_construct doesn't enforce setattr semantics.
+        object.__setattr__(inactive, "active", False)
+        db = _FakeDB([purchase], policies={"best_buy": inactive})
+        adapter = _StubAdapter()
+
+        with patch.object(cron_module, "get_adapter", return_value=adapter):
+            summary = await run_cron(db)  # type: ignore[arg-type]
+
+        self.assertEqual(summary["fetched"], 1)
+        self.assertEqual(summary["eligible"], 0)
+        self.assertEqual(summary["ineligible"], 1)
+
+    async def test_eligible_drop_with_no_policy_bumps_no_policy_counter(self) -> None:
+        """Adapter returns a drop but no policy seeded for the platform."""
+        now = datetime.now(UTC)
+        purchase = _make_purchase(
+            last_checked_at=None,
+            window_expires=now + timedelta(days=3),
+        )
+        db = _FakeDB([purchase], policies={})  # empty — no policy for any platform
+        adapter = _StubAdapter()
+
+        with patch.object(cron_module, "get_adapter", return_value=adapter):
+            summary = await run_cron(db)  # type: ignore[arg-type]
+
+        self.assertEqual(summary["fetched"], 1)
+        self.assertEqual(summary["eligible"], 0)
+        self.assertEqual(summary["ineligible"], 0)
+        self.assertEqual(summary["no_policy"], 1)
