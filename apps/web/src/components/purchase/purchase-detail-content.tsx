@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
-import type { PurchaseDetailMonitoringStatus, PurchaseDetailViewModel } from "@/lib/mock-purchases";
+import type { PurchaseDetailViewModel } from "@/lib/purchase-detail-view";
 
 import {
   OriginalPurchaseDetails,
@@ -18,19 +18,26 @@ export function PurchaseDetailContent({
 }: {
   purchase: PurchaseDetailViewModel;
 }) {
-  const [monitoringStatus, setMonitoringStatus] = useState<PurchaseDetailMonitoringStatus>(
-    () => initial.monitoringStatus,
-  );
+  // Header monitoring status is no longer locally mutable — the real
+  // detail page reads it from the server response. "Stop monitoring"
+  // and "Re-upload receipt" header actions are disabled with a TODO
+  // (decision 3 in the review): there's no backend endpoint that
+  // implements either today (POST /dismiss has a different semantic +
+  // a fixed reason enum; receipt re-upload belongs in the 5.13 upload
+  // flow), and we deliberately don't fake mutation success.
+  const monitoringStatus = initial.monitoringStatus;
 
   const headerModel: PurchasePageHeaderModel = useMemo(
     () => ({
       productTitle: initial.title,
       monitoringStatus,
       platform: initial.platform,
+      platformRaw: initial.platformRaw,
       category: initial.category,
+      categoryRaw: initial.categoryRaw,
       purchaseDate: initial.purchaseDate,
       orderId: initial.orderId,
-      primaryRelatedClaimId: initial.relatedClaims[0]?.claimId,
+      primaryRelatedClaimId: initial.primaryRelatedClaimId ?? undefined,
     }),
     [initial, monitoringStatus],
   );
@@ -45,8 +52,10 @@ export function PurchaseDetailContent({
       pricePaid: initial.pricePaid,
       currency: initial.currency,
       category: initial.category,
-      memberTier: initial.memberTier,
-      sourceEmail: initial.sourceEmail,
+      memberTier: initial.memberTier ?? undefined,
+      memberPriceAtPurchase: initial.memberPriceAtPurchase,
+      nonMemberPriceAtPurchase: initial.nonMemberPriceAtPurchase,
+      sourceEmail: initial.sourceEmail ?? undefined,
     }),
     [initial],
   );
@@ -54,7 +63,7 @@ export function PurchaseDetailContent({
   return (
     <div className="mx-auto max-w-[960px] px-4 py-6 lg:px-6">
       <div className="space-y-6">
-        <PurchasePageHeader purchase={headerModel} onMonitoringStatusChange={setMonitoringStatus} />
+        <PurchasePageHeader purchase={headerModel} />
 
         <PriceHistoryChart
           priceHistory={initial.priceHistory}

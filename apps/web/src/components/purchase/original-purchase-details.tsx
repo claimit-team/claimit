@@ -16,7 +16,7 @@ import {
   formatPurchaseDate,
   type PurchaseCategory,
   type PurchaseDetailOriginalSource,
-} from "@/lib/mock-purchases";
+} from "@/lib/purchase-detail-view";
 import { cn } from "@/lib/utils";
 
 export interface PurchaseOriginalDetailsModel {
@@ -29,6 +29,12 @@ export interface PurchaseOriginalDetailsModel {
   currency: string;
   category: PurchaseCategory;
   memberTier?: string;
+  /** When the purchase has a member tier, surface BOTH the member
+   * price (what was actually paid against) and the non-member list
+   * price so the user understands the comparison the chart is making.
+   * Both are null on a no-tier purchase. */
+  memberPriceAtPurchase: number | null;
+  nonMemberPriceAtPurchase: number | null;
   sourceEmail?: string;
 }
 
@@ -56,7 +62,26 @@ export function OriginalPurchaseDetails({ purchase }: OriginalPurchaseDetailsPro
       value: formatPurchaseCurrency(purchase.pricePaid, purchase.currency),
     },
     { label: "Source", value: sourceLabel },
+    // Member-tier rows only surface when the purchase had a tier; this
+    // both keeps the layout tight for no-tier purchases and avoids
+    // showing "—" for fields that are inherently inapplicable.
     ...(purchase.memberTier ? [{ label: "Member tier", value: purchase.memberTier }] : []),
+    ...(purchase.memberTier && purchase.memberPriceAtPurchase !== null
+      ? [
+          {
+            label: "Member price",
+            value: formatPurchaseCurrency(purchase.memberPriceAtPurchase, purchase.currency),
+          },
+        ]
+      : []),
+    ...(purchase.memberTier && purchase.nonMemberPriceAtPurchase !== null
+      ? [
+          {
+            label: "Non-member price",
+            value: formatPurchaseCurrency(purchase.nonMemberPriceAtPurchase, purchase.currency),
+          },
+        ]
+      : []),
     {
       label: "Category",
       value: `${purchase.category.charAt(0).toUpperCase()}${purchase.category.slice(1)}`,

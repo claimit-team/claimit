@@ -1,63 +1,28 @@
 "use client";
 
-import { ArrowRight, Mail, MessageSquare, Phone } from "lucide-react";
+import { ArrowRight, FileText } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
-import { Badge } from "@/components/ui/badge";
+import { ClaimOutcomeBadge } from "@/components/claims/claim-outcome-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { claimTypeLabel } from "@/lib/claims-status";
 import {
   formatPurchaseCurrency,
   formatPurchaseDate,
   type RelatedClaimBrief,
-  type RelatedClaimBriefStatus,
-  type RelatedClaimType,
-} from "@/lib/mock-purchases";
+} from "@/lib/purchase-detail-view";
 
 interface RelatedClaimsCardProps {
   claims: RelatedClaimBrief[];
 }
 
-const claimTypeIcons: Record<RelatedClaimType, ReactNode> = {
-  chat_script: <MessageSquare className="size-4" />,
-  email_template: <Mail className="size-4" />,
-  phone_guide: <Phone className="size-4" />,
-};
-
-const claimTypeLabels: Record<RelatedClaimType, string> = {
-  chat_script: "Chat script",
-  email_template: "Email template",
-  phone_guide: "Phone guide",
-};
-
-function statusBadgeVariant(
-  status: RelatedClaimBriefStatus,
-): "default" | "secondary" | "outline" | "destructive" {
-  switch (status) {
-    case "approved":
-    case "resolved":
-      return "default";
-    case "rejected":
-      return "destructive";
-    default:
-      return "secondary";
-  }
+function formatAmount(amount: number | null, currency: string | null): string {
+  if (amount === null || currency === null) return "—";
+  return formatPurchaseCurrency(amount, currency);
 }
 
-function statusLabel(status: RelatedClaimBriefStatus): string {
-  switch (status) {
-    case "draft":
-      return "Draft";
-    case "awaiting_approval":
-      return "Awaiting approval";
-    case "approved":
-      return "Approved";
-    case "rejected":
-      return "Rejected";
-    case "resolved":
-      return "Resolved";
-    default:
-      return status;
-  }
+function formatCreated(createdAt: string | null): string {
+  if (createdAt === null) return "—";
+  return `Created ${formatPurchaseDate(createdAt)}`;
 }
 
 export function RelatedClaimsCard({ claims }: RelatedClaimsCardProps) {
@@ -75,8 +40,10 @@ export function RelatedClaimsCard({ claims }: RelatedClaimsCardProps) {
       <CardContent>
         <div className="space-y-3">
           {claims.map((claim) => {
-            const isResolved = claim.status === "approved" || claim.status === "resolved";
-
+            // Approved claims surface as "money won" — match the
+            // /claims list amount-color convention so the same outcome
+            // reads the same way across the two pages.
+            const isApproved = claim.outcome === "approved";
             return (
               <Link
                 key={claim.claimId}
@@ -85,28 +52,26 @@ export function RelatedClaimsCard({ claims }: RelatedClaimsCardProps) {
               >
                 <div className="flex items-center gap-3">
                   <div className="flex size-10 items-center justify-center rounded-lg bg-neutral-50 text-neutral-500">
-                    {claimTypeIcons[claim.claimType]}
+                    <FileText className="size-4" aria-hidden />
                   </div>
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-neutral-900 text-sm">
-                        {claimTypeLabels[claim.claimType]}
+                        {claimTypeLabel(claim.claimType)}
                       </span>
-                      <Badge variant={statusBadgeVariant(claim.status)}>
-                        {statusLabel(claim.status)}
-                      </Badge>
+                      <ClaimOutcomeBadge outcome={claim.outcome} />
                     </div>
-                    <p className="text-neutral-500 text-xs">
-                      Created {formatPurchaseDate(claim.createdAt)}
-                    </p>
+                    <p className="text-neutral-500 text-xs">{formatCreated(claim.createdAt)}</p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3">
                   <span
-                    className={`font-medium text-sm tabular-nums ${isResolved ? "text-semantic-success" : "text-neutral-700"}`}
+                    className={`font-medium text-sm tabular-nums ${
+                      isApproved ? "text-brand-accent-500" : "text-neutral-700"
+                    }`}
                   >
-                    {formatPurchaseCurrency(claim.amount, claim.currency)}
+                    {formatAmount(claim.amount, claim.currency)}
                   </span>
                   <ArrowRight className="size-4 text-neutral-500 transition-transform group-hover:translate-x-0.5" />
                 </div>

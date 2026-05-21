@@ -12,7 +12,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import type { PurchaseDetailMonitoringStatus } from "@/lib/mock-purchases";
+import type { PurchaseDetailMonitoringStatus } from "@/lib/purchase-detail-view";
 
 interface RefundEligibilityCardProps {
   status: PurchaseDetailMonitoringStatus;
