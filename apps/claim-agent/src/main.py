@@ -244,6 +244,9 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
                 claim_id,
                 validation.issues,
             )
+            # NOTE: redraft_count on temp_claim is always 0 for new claims.
+            # This branch becomes reachable in task 3.21 when redrafting from
+            # a persisted claim with redraft_count >= 1.
             if temp_claim.redraft_count >= 1:
                 # Second consecutive failure — escalate to user
                 await write_notification_event(
@@ -329,3 +332,4 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             },
         )
         return {"status": "error"}
+
