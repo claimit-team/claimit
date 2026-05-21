@@ -299,19 +299,27 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
                 c.id,
                 feedback[:200],
             )
+            # TODO(task-3.21): pass feedback to generator once generators support it
             return await _dispatch_generator(c)
 
-        draft, eval_result, attempts = await evaluate_and_maybe_regenerate(
-            draft, temp_claim, purchase, policy, regenerate_fn=_regenerate
-        )
-
-        if not eval_result.passed:
-            _log.warning(
-                "claim %s proceeding with failed self_eval dims=%s after %d attempts",
-                claim_id,
-                eval_result.failed_dimensions,
-                attempts,
+        try:
+            draft, eval_result, attempts = await evaluate_and_maybe_regenerate(
+                draft, temp_claim, purchase, policy, regenerate_fn=_regenerate
             )
+            if not eval_result.passed:
+                _log.warning(
+                    "claim %s proceeding with failed self_eval dims=%s after %d attempts",
+                    claim_id,
+                    eval_result.failed_dimensions,
+                    attempts,
+                )
+        except Exception:
+            _log.exception(
+                "self_eval failed for claim %s — proceeding with validated draft",
+                claim_id,
+            )
+            eval_result = None
+            attempts = 0
 
         # Persist claim with real draft content
         generated_version = DraftVersion(
@@ -325,7 +333,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
                 "draft_content": draft.draft_content,
                 "draft_versions": [generated_version],
                 "policy_clause_cited": draft.policy_clause_cited,
-                "self_eval_score": eval_result.scores,
+                "self_eval_score": eval_result.scores if eval_result is not None else None,
                 "self_eval_attempts": attempts,
             }
         )

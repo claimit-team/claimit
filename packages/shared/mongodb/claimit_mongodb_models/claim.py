@@ -55,7 +55,7 @@ class Claim(BaseDocument):
     resolved_at: datetime | None
     trace_id: str | None
     self_eval_score: SelfEvalScore | None = None
-    self_eval_attempts: int = 0
+    self_eval_attempts: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def _validate_draft_invariant(self) -> "Claim":
