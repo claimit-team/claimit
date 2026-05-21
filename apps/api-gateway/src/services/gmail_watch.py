@@ -143,7 +143,11 @@ async def _exchange_refresh_for_access(
     secret_ref = user.gmail_integration.refresh_token_ref
     assert secret_ref is not None  # _load_user guarantees this
     try:
-        response = sm_client.access_secret_version(name=secret_ref)
+        # `access_secret_version` is a sync gRPC call that talks to Secret
+        # Manager over the network — running it inline blocks the ASGI
+        # loop. Offload to the default thread pool for the same reason
+        # `creds.refresh` is offloaded below.
+        response = await run_in_threadpool(sm_client.access_secret_version, name=secret_ref)
         refresh_token = response.payload.data.decode("utf-8")
     except Exception as err:
         raise WatchRegistrationError("Could not load refresh token") from err
