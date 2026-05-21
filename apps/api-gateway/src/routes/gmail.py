@@ -22,6 +22,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
+from claimit_gmail import register_watch_safe
 from claimit_mongodb_models import MongoDBClient, User
 from claimit_mongodb_models.user import GmailIntegration
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
@@ -33,7 +34,6 @@ from ..middleware.auth import get_current_user
 from ..middleware.errors import ApiError
 from ..serializers import serialize_user
 from ..services import gmail_oauth, secret_manager, state_jwt
-from ..services.gmail_watch import register_watch
 from ..services.token_cache import AccessTokenCache
 
 _log = logging.getLogger(__name__)
@@ -211,10 +211,11 @@ async def gmail_callback(
 
     # 7. Ticket 4.15: register a Gmail push watch in the background. Runs
     # after the response is flushed so the user gets the success redirect
-    # without waiting on the Gmail API call (~500ms+). The watch function
-    # itself never raises — failure is recorded on the user document via
-    # gmail_integration.watch_failed and surfaced by /gmail/status.
-    background_tasks.add_task(register_watch, user_id_str, db, sm_client)
+    # without waiting on the Gmail API call (~500ms+). The `_safe` variant
+    # swallows exceptions and persists `watch_failed=True` to the user
+    # doc — BackgroundTasks have no error channel, so we need the
+    # silent-on-failure contract.
+    background_tasks.add_task(register_watch_safe, user_id_str, db, sm_client)
 
     # 8. Send the user back to the frontend page they started on.
     base = os.environ["FRONTEND_BASE_URL"]

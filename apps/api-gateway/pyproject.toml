@@ -24,6 +24,7 @@ dependencies = [
     "claimit-elastic",
     "claimit-pubsub",
     "claimit-search",
+    "claimit-gmail",
 ]
 
 [tool.uv.sources]
@@ -32,6 +33,7 @@ claimit-mongodb-models = { path = "../../packages/shared/mongodb" }
 claimit-elastic = { path = "../../packages/shared/elastic" }
 claimit-pubsub = { path = "../../packages/shared/pubsub" }
 claimit-search = { path = "../../packages/shared/search" }
+claimit-gmail = { path = "../../packages/shared/gmail" }
 
 [dependency-groups]
 dev = [
