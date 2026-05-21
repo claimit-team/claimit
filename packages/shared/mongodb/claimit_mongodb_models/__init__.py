@@ -7,6 +7,7 @@ ISODateString in TypeScript), `_id` field) is identical across both languages by
 
 from .base import BaseDocument
 from .claim import Claim, DraftVersion
+from .claim_read_tolerant import ClaimReadTolerant, DraftVersionReadTolerant
 from .client import MongoDBClient
 from .conversation import Conversation, ConversationMessage, ToolCall
 from .create_indexes import INDEX_DEFINITIONS, create_indexes
@@ -36,6 +37,10 @@ from .notification_helpers import write_notification_event
 from .policy import Policy
 from .price_history import PriceHistory
 from .purchase import ExtractionConfidence, Purchase
+from .purchase_read_tolerant import (
+    ExtractionConfidenceReadTolerant,
+    PurchaseReadTolerant,
+)
 from .skiplist import (
     FORMAT_HASH_BODY_PREFIX_CHARS,
     SKIPLIST_MAX_ENTRIES,
@@ -61,6 +66,7 @@ __all__ = [
     "Category",
     "Claim",
     "ClaimOutcome",
+    "ClaimReadTolerant",
     "ClaimType",
     "Conversation",
     "ConversationMessage",
@@ -70,7 +76,9 @@ __all__ = [
     "DenialReason",
     "DraftGeneratedBy",
     "DraftVersion",
+    "DraftVersionReadTolerant",
     "ExtractionConfidence",
+    "ExtractionConfidenceReadTolerant",
     "GmailIntegration",
     "IngestionSkiplistEntry",
     "IngestionSource",
@@ -88,6 +96,7 @@ __all__ = [
     "PriceSource",
     "Purchase",
     "PurchaseDateBasis",
+    "PurchaseReadTolerant",
     "PurchaseStatus",
     "SendMode",
     "SendPreference",

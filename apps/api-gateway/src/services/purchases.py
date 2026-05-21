@@ -25,6 +25,7 @@ from claimit_mongodb_models import (
     Platform,
     Purchase,
     PurchaseDateBasis,
+    PurchaseReadTolerant,
     PurchaseStatus,
     User,
     normalize_sender,
@@ -134,7 +135,10 @@ async def list_purchases(
     fetched = await db.find_many(
         "purchases",
         page_filter,
-        Purchase,
+        # Read-tolerant model so a single legacy doc with a now-invalid
+        # enum or null required field doesn't 500 the page (every row is
+        # validated in a list comprehension inside `find_many`).
+        PurchaseReadTolerant,
         limit=limit + 1,
         sort=[("_id", 1)],
     )
@@ -154,11 +158,15 @@ async def get_purchase_for_user(
     db: MongoDBClient,
     user_id: UUID,
     purchase_id: UUID,
-) -> Purchase:
+) -> PurchaseReadTolerant:
     """Fetch a purchase owned by the user. Raises 404 otherwise.
 
     Returns the same 404 for missing-doc and wrong-owner cases so callers
-    cannot probe for existence of another user's purchases.
+    cannot probe for existence of another user's purchases. The return
+    type is `PurchaseReadTolerant` so a legacy doc with a now-invalid
+    enum value (e.g. `claim_type=None`) doesn't 500 the detail / confirm /
+    dismiss paths. Writes still validate against the strict `Purchase`
+    model via `db.partial_update("purchases", …, model=Purchase)`.
     """
     purchase = await db.get_purchase(purchase_id)
     if purchase is None or purchase.user_id != user_id:
@@ -171,7 +179,7 @@ async def confirm_purchase(
     user: User,
     purchase_id: UUID,
     corrected_fields: dict[str, Any] | None,
-) -> Purchase:
+) -> PurchaseReadTolerant:
     """Apply any user corrections and transition status → monitoring.
 
     Raises:
@@ -182,7 +190,9 @@ async def confirm_purchase(
     """
     purchase = await get_purchase_for_user(db, user.id, purchase_id)
 
-    if purchase.status != PurchaseStatus.PENDING_CONFIRMATION:
+    # `purchase.status` is `str | None` on the tolerant model — compare
+    # to the canonical enum value, not the enum instance.
+    if purchase.status != PurchaseStatus.PENDING_CONFIRMATION.value:
         raise ApiError(
             "invalid_status",
             f"Purchase cannot be confirmed from status '{purchase.status}'",
@@ -253,7 +263,7 @@ async def dismiss_purchase(
     """
     purchase = await get_purchase_for_user(db, user.id, purchase_id)
 
-    if purchase.status != PurchaseStatus.PENDING_CONFIRMATION:
+    if purchase.status != PurchaseStatus.PENDING_CONFIRMATION.value:
         raise ApiError(
             "invalid_status",
             f"Purchase cannot be dismissed from status '{purchase.status}'",
@@ -306,7 +316,7 @@ async def dismiss_purchase(
 async def _append_ingestion_skiplist(
     *,
     user: User,
-    purchase: Purchase,
+    purchase: PurchaseReadTolerant,
     sender: str | None,
     reason: str,
     db: MongoDBClient,

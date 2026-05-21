@@ -51,7 +51,10 @@ async def list_conversations_endpoint(
 ) -> dict:
     limit = min(limit, 50)
     convs = await list_conversations(db, user.id, mode, conv_status, limit, skip)
-    return {"conversations": [c.model_dump(mode="json") for c in convs], "count": len(convs)}
+    return {
+        "conversations": [c.model_dump(mode="json", by_alias=True) for c in convs],
+        "count": len(convs),
+    }
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -62,7 +65,7 @@ async def create_conversation_endpoint(
 ) -> dict:
     try:
         conv = await create_conversation(db, user.id, body.mode, body.claim_id)
-        return {"conversation": conv.model_dump(mode="json")}
+        return {"conversation": conv.model_dump(mode="json", by_alias=True)}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)) from e
 
@@ -87,7 +90,9 @@ async def send_message(
         conv = await append_message(db, conv, MessageRole.USER, body.content)
 
         collected_text = ""
-        agent_stream = stream_agent_response(user.id, conv, body.content)
+        # db is passed so the service can lazy-backfill agent_session_id
+        # via partial_update when a pre-feature conversation streams.
+        agent_stream = stream_agent_response(db, user.id, conv, body.content)
 
         while True:
             try:

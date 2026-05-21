@@ -40,8 +40,21 @@ def _make_event_data(**overrides: object) -> dict:
 
 
 def _make_mock_db() -> AsyncMock:
+    # Populate the degraded-purchase gate fields with realistic non-null
+    # values so claim-agent treats this as a processable purchase rather
+    # than skipping it (PR #142 — read-tolerance). Anything left as the
+    # default MagicMock attribute would trigger the gate.
+    from datetime import datetime, timedelta
+
+    now = datetime.now()
     purchase = MagicMock()
     purchase.id = uuid4()
+    purchase.platform = "best_buy"
+    purchase.price_paid = 100.0
+    purchase.purchase_date = now
+    purchase.window_expires = now + timedelta(days=14)
+    purchase.order_id = "ord-test-001"
+    purchase.product_name = "Mock Product"
 
     policy = MagicMock()
     policy.claim_type = "email"
@@ -131,4 +144,75 @@ async def test_write_notification_event_not_called_on_draft_failure() -> None:
         result = await handle_price_dropped(request)
 
     assert result["status"] == "error"
+    mock_write.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Read-tolerance smoke (PR #142): a degraded purchase must skip cleanly,
+# never crash, and never write a half-baked claim or notification.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_degraded_purchase_skips_without_drafting() -> None:
+    mock_db = _make_mock_db()
+    # Null out one of the gate fields — simulates the rogue Purchase
+    # from the §3 audit (`product_name=None`).
+    mock_db.get_purchase.return_value.product_name = None
+
+    claim_plan = MagicMock()
+    claim_plan.draft_generator = "type_a_email"
+    claim_plan.claim_type = ClaimType.EMAIL
+
+    mock_search = MagicMock()
+    mock_search.get_search_adapter.return_value = AsyncMock()
+
+    request = _make_mock_request(_pubsub_body(_make_event_data()))
+
+    with (
+        patch("src.main.MongoDBClient", return_value=mock_db),
+        patch("src.main.plan_claim", return_value=claim_plan),
+        patch("src.main.generate_email_draft") as mock_email,
+        patch("src.main.write_notification_event") as mock_write,
+        patch.dict(sys.modules, {"search": mock_search}),
+    ):
+        result = await handle_price_dropped(request)
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "degraded_purchase"
+    # Generators must NOT have been invoked.
+    mock_email.assert_not_called()
+    # No notification on a degraded skip.
+    mock_write.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_unknown_platform_purchase_skips_without_drafting() -> None:
+    """A purchase whose `platform` string is no longer in the Platform
+    enum is degraded for drafting purposes — generators rely on the
+    enum value to look up adapters/templates."""
+    mock_db = _make_mock_db()
+    mock_db.get_purchase.return_value.platform = "deprecated_platform"
+
+    claim_plan = MagicMock()
+    claim_plan.draft_generator = "type_a_email"
+    claim_plan.claim_type = ClaimType.EMAIL
+
+    mock_search = MagicMock()
+    mock_search.get_search_adapter.return_value = AsyncMock()
+
+    request = _make_mock_request(_pubsub_body(_make_event_data()))
+
+    with (
+        patch("src.main.MongoDBClient", return_value=mock_db),
+        patch("src.main.plan_claim", return_value=claim_plan),
+        patch("src.main.generate_email_draft") as mock_email,
+        patch("src.main.write_notification_event") as mock_write,
+        patch.dict(sys.modules, {"search": mock_search}),
+    ):
+        result = await handle_price_dropped(request)
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "degraded_purchase"
+    mock_email.assert_not_called()
     mock_write.assert_not_called()

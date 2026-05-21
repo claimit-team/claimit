@@ -59,7 +59,10 @@ const EMPTY_COPY: Record<ChipKey, { title: string; body: string }> = {
 
 // --- formatting helpers --------------------------------------------------
 
-function formatMoney(amount: number, currency: string): string {
+// Null-safe so a legacy claim with `claim_amount=null` (read-tolerant
+// surface, see PR #142) renders as "—" instead of crashing the page.
+function formatMoney(amount: number | null, currency: string | null): string {
+  if (amount === null || currency === null) return "—";
   try {
     return new Intl.NumberFormat(undefined, {
       style: "currency",
@@ -70,6 +73,13 @@ function formatMoney(amount: number, currency: string): string {
   } catch {
     return `${currency} ${amount}`;
   }
+}
+
+// `claim.platform` may be null on legacy data — render the same em-dash
+// rather than calling `.replace` on a nullish value.
+function platformLabel(platform: string | null): string {
+  if (platform === null || platform === "") return "—";
+  return platform.replace(/_/g, " ");
 }
 
 function formatDateShort(iso: string | null): string {
@@ -119,14 +129,17 @@ function windowOrResolvedCell(claim: ClaimListItem): string {
         : "Resolved";
     case "expired":
       return "Window expired";
-    default: {
-      const _exhaustive: never = claim.outcome;
-      return _exhaustive;
-    }
+    default:
+      // Unknown / null outcome (read-tolerant backend surfaces legacy
+      // values verbatim — see PR #142). Fall back to whichever date we
+      // have so the row still carries useful info.
+      if (claim.resolved_at !== null) return `Resolved ${formatDateShort(claim.resolved_at)}`;
+      if (claim.submitted_at !== null) return formatRelativeFromNow(claim.submitted_at);
+      return formatWindowRemaining(claim.window_expires);
   }
 }
 
-function amountClassName(outcome: ClaimOutcome): string {
+function amountClassName(outcome: ClaimOutcome | string | null | undefined): string {
   // approved -> green semantic. Everything else stays neutral so that
   // unresolved or denied claims never visually masquerade as money won.
   return outcome === "approved" ? "text-brand-accent-500" : "text-neutral-700";
@@ -201,7 +214,7 @@ function ClaimRow({ claim }: { claim: ClaimListItem }) {
               {claim.product_name ?? "Unlinked claim"}
             </span>
             <span className="text-xs text-neutral-500 capitalize">
-              {claim.platform.replace(/_/g, " ")}
+              {platformLabel(claim.platform)}
             </span>
           </div>
         </div>
@@ -242,7 +255,7 @@ function ClaimCard({ claim }: { claim: ClaimListItem }) {
               {claim.product_name ?? "Unlinked claim"}
             </span>
             <span className="text-xs text-neutral-500 capitalize">
-              {claim.platform.replace(/_/g, " ")} · {claimTypeLabel(claim.claim_type)}
+              {platformLabel(claim.platform)} · {claimTypeLabel(claim.claim_type)}
             </span>
           </div>
         </div>

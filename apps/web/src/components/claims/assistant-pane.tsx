@@ -128,6 +128,25 @@ export function AssistantPane({ claimId, onDoubleClickHeader }: AssistantPanePro
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // When the claimId changes (user navigates between claim details
+  // without unmounting the shell), wipe everything tied to the previous
+  // claim:
+  // - createError so a fresh attempt can be made for the new claim
+  // - activeId so the locate-or-create effect re-resolves against the
+  //   new claimId rather than streaming to the old conversation
+  // - the stream buffer so stale assistant text doesn't render over
+  //   the new claim's thread before hydrate() lands
+  //
+  // Effect ordering matters: this reset must run BEFORE the locate-or-create
+  // effect below so the create-or-locate decision uses cleared state.
+  // React runs effects in declaration order, so the reset registers first.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `claimId` is the intentional trigger for the reset effect; the body doesn't read it but its change is the whole point
+  useEffect(() => {
+    setCreateError(null);
+    setActiveId(null);
+    reset();
+  }, [claimId, reset]);
+
   // Locate (or lazily create) the claim_focused conversation for this claim.
   // The list is server-truth so we re-resolve on every conversations change;
   // selectedId tracks our active row across reloads.
@@ -164,21 +183,6 @@ export function AssistantPane({ claimId, onDoubleClickHeader }: AssistantPanePro
     })();
   }, [conversations, convLoading, claimId, creating, createError, createConversation, hydrate]);
 
-  // When the claimId changes (user navigates between claim details
-  // without unmounting the shell), wipe everything tied to the previous
-  // claim:
-  // - createError so a fresh attempt can be made for the new claim
-  // - activeId so the locate-or-create effect re-resolves against the
-  //   new claimId rather than streaming to the old conversation
-  // - the stream buffer so stale assistant text doesn't render over
-  //   the new claim's thread before hydrate() lands
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `claimId` is the intentional trigger for the reset effect; the body doesn't read it but its change is the whole point
-  useEffect(() => {
-    setCreateError(null);
-    setActiveId(null);
-    reset();
-  }, [claimId, reset]);
-
   // Unmount cleanup — also resets the stream so a dangling reader
   // doesn't write to setState after the component is gone.
   useEffect(() => {
@@ -213,6 +217,14 @@ export function AssistantPane({ claimId, onDoubleClickHeader }: AssistantPanePro
     }
   };
 
+  // Clearing createError lets the locate-or-create effect attempt again.
+  // The effect short-circuits while createError is non-null (prevents retry
+  // storms on a known-bad claim id), so this is the only way back in
+  // without remounting the component.
+  const handleRetryCreate = () => {
+    setCreateError(null);
+  };
+
   const inputDisabled = streaming || !activeId;
 
   return (
@@ -230,7 +242,12 @@ export function AssistantPane({ claimId, onDoubleClickHeader }: AssistantPanePro
         {createError ? (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{createError}</AlertDescription>
+            <AlertDescription className="flex items-center justify-between gap-3">
+              <span>{createError}</span>
+              <Button type="button" size="sm" variant="outline" onClick={handleRetryCreate}>
+                Retry
+              </Button>
+            </AlertDescription>
           </Alert>
         ) : null}
 

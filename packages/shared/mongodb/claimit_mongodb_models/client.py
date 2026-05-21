@@ -26,11 +26,13 @@ from pydantic import TypeAdapter, ValidationError
 
 from .base import BaseDocument
 from .claim import Claim
+from .claim_read_tolerant import ClaimReadTolerant
 from .conversation import Conversation
 from .notification_event import NotificationEvent
 from .policy import Policy
 from .price_history import PriceHistory
 from .purchase import Purchase
+from .purchase_read_tolerant import PurchaseReadTolerant
 from .user import User
 
 T = TypeVar("T", bound=BaseDocument)
@@ -41,6 +43,15 @@ logger = logging.getLogger(__name__)
 # validate dict inputs against the canonical schema before the write hits
 # the database — Pydantic instances are trusted (already validated at
 # construction) and bypass this lookup.
+#
+# IMPORTANT: This map is the WRITE gate. It must always point at the
+# STRICT models for `claims` and `purchases`, never at the read-tolerant
+# variants. The typed read helpers below (`get_claim`, `get_purchase`,
+# `find_claims`, `find_purchases`) deliberately return tolerant instances
+# so legacy/degraded docs don't 500 the read paths — but a write that
+# happens to round-trip a tolerant instance back through `upsert` would
+# still re-validate against the strict class here. That's the
+# strict-on-write guarantee.
 COLLECTION_MODELS: dict[str, type[BaseDocument]] = {
     "purchases": Purchase,
     "claims": Claim,
@@ -230,6 +241,116 @@ class MongoDBClient:
         result = await self._db[collection].update_one({"_id": uid}, {"$set": set_payload})
         return result.matched_count > 0
 
+    async def array_push(
+        self,
+        collection: str,
+        id: str | UUID,
+        field: str,
+        element: BaseDocument | Any,
+        element_model: type[Any],
+        set_fields: dict[str, Any] | None = None,
+        parent_model: type[T] | None = None,
+    ) -> bool:
+        """Append `element` to the array stored at `field` via Mongo `$push`.
+
+        Why this exists:
+            `partial_update` with a full-array `$set` re-validates every
+            historical entry against the parent's strict element model.
+            For an array of nested sub-models on a long-lived document
+            (e.g. `Claim.draft_versions`), a single legacy entry whose
+            field-level type drifted (`generated_by` value no longer in
+            the current `DraftGeneratedBy` enum) would then fail the
+            write — the same class of read-vs-write mismatch the §6
+            limitation flagged at top-level scalar granularity.
+
+            `array_push` enforces the principle locked in PR #144 (bot
+            fix round 2): "mutating a nested array validates ONLY the
+            new element strictly; historical entries are never
+            re-validated on write." The new element is validated
+            against `element_model` (so a bad new value is still
+            rejected — strict-on-new), and the existing array is
+            $push'd atomically without being read or rewritten.
+
+            `set_fields` (optional) lets callers atomically pair the
+            $push with a sibling-field $set in the same write — e.g.
+            keep `Claim.draft_content == draft_versions[-1].content`
+            by setting `draft_content` in the same operation. Sibling
+            fields are validated against the parent's strict
+            annotations via `parent_model` (same gate as
+            `partial_update`).
+
+        Returns True on match, False if the document does not exist.
+        """
+        if set_fields is not None and "_id" in set_fields:
+            raise ValueError("`set_fields` may not contain '_id'; identity is fixed by `id`.")
+
+        try:
+            # Trust ONLY when the caller already constructed an instance
+            # of the exact element_model — `BaseDocument` (or any other
+            # broader type) is too wide: an `array_push(field='draft_versions',
+            # element=Claim(...), element_model=DraftVersion)` would
+            # otherwise skip validation and $push a serialized Claim into
+            # the draft_versions array, breaking strict-on-new-data.
+            # Anything else (dict, mismatched-type instance, …) goes
+            # through `model_validate` so the wrong-type case raises a
+            # ValidationError before the DB call.
+            if isinstance(element, element_model):
+                validated_element = element
+            else:
+                validated_element = element_model.model_validate(element)
+        except ValidationError as exc:
+            sanitized = [
+                {"loc": e.get("loc"), "type": e.get("type"), "msg": e.get("msg")}
+                for e in exc.errors()
+            ]
+            logger.error(
+                "array_push element validation failed for collection=%s field=%s: %s",
+                collection,
+                field,
+                sanitized,
+            )
+            raise
+
+        if set_fields is not None and parent_model is not None:
+            for field_name, value in set_fields.items():
+                field_info = parent_model.model_fields.get(field_name)
+                if field_info is None:
+                    raise ValueError(
+                        f"Unknown field {field_name!r} for model {parent_model.__name__}."
+                    )
+                annotation = field_info.annotation
+                if field_info.metadata:
+                    annotation = Annotated[(annotation, *field_info.metadata)]
+                try:
+                    TypeAdapter(annotation).validate_python(value)
+                except ValidationError as exc:
+                    sanitized = [
+                        {"loc": (field_name,), "type": e.get("type"), "msg": e.get("msg")}
+                        for e in exc.errors()
+                    ]
+                    logger.error(
+                        "array_push set_fields validation failed for collection=%s field=%s: %s",
+                        collection,
+                        field_name,
+                        sanitized,
+                    )
+                    raise
+
+        if hasattr(validated_element, "model_dump"):
+            element_payload: Any = validated_element.model_dump(by_alias=True)
+        else:
+            element_payload = validated_element
+
+        update_doc: dict[str, Any] = {"$push": {field: element_payload}}
+        set_payload: dict[str, Any] = {"updated_at": datetime.now(UTC)}
+        if set_fields:
+            set_payload.update(set_fields)
+        update_doc["$set"] = set_payload
+
+        uid = _coerce_uuid(id)
+        result = await self._db[collection].update_one({"_id": uid}, update_doc)
+        return result.matched_count > 0
+
     async def update_many(
         self,
         collection: str,
@@ -317,23 +438,39 @@ class MongoDBClient:
     # thin wrapper around the generic helpers above so the caller can stay in
     # typed-Pydantic-land without remembering collection-name strings.
 
-    async def get_purchase(self, id: str | UUID) -> Purchase | None:
-        return await self.get("purchases", id, Purchase)
+    # ---------- Purchase + Claim typed READS return TOLERANT models ----------
+    # The §1 audit (PR #141 follow-up) found eight read sites that 500 when
+    # a legacy/degraded doc lives in the user's history. These typed
+    # shortcuts default to the read-tolerant variants so callers are
+    # auto-safe — the strict `Purchase` / `Claim` classes stay reserved
+    # for the WRITE path (the constructor calls in upload/ingest/agents
+    # plus `db.upsert("purchases"/"claims", …)` which validates against
+    # the strict `COLLECTION_MODELS` entries above).
+
+    async def get_purchase(self, id: str | UUID) -> PurchaseReadTolerant | None:
+        return await self.get("purchases", id, PurchaseReadTolerant)
 
     async def upsert_purchase(self, purchase: Purchase) -> str:
+        # Param annotation stays strict — only fully-validated Purchase
+        # instances should be written. Read-tolerant instances must NOT
+        # round-trip back through writes.
         return await self.upsert("purchases", purchase.id, purchase)
 
-    async def find_purchases(self, filter: dict[str, Any], limit: int = 100) -> list[Purchase]:
-        return await self.find_many("purchases", filter, Purchase, limit=limit)
+    async def find_purchases(
+        self, filter: dict[str, Any], limit: int = 100
+    ) -> list[PurchaseReadTolerant]:
+        return await self.find_many("purchases", filter, PurchaseReadTolerant, limit=limit)
 
-    async def get_claim(self, id: str | UUID) -> Claim | None:
-        return await self.get("claims", id, Claim)
+    async def get_claim(self, id: str | UUID) -> ClaimReadTolerant | None:
+        return await self.get("claims", id, ClaimReadTolerant)
 
     async def upsert_claim(self, claim: Claim) -> str:
         return await self.upsert("claims", claim.id, claim)
 
-    async def find_claims(self, filter: dict[str, Any], limit: int = 100) -> list[Claim]:
-        return await self.find_many("claims", filter, Claim, limit=limit)
+    async def find_claims(
+        self, filter: dict[str, Any], limit: int = 100
+    ) -> list[ClaimReadTolerant]:
+        return await self.find_many("claims", filter, ClaimReadTolerant, limit=limit)
 
     async def get_policy(self, platform: str) -> Policy | None:
         """Fetch the active policy for a given platform (find_one by platform)."""
