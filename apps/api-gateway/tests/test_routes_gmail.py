@@ -56,7 +56,13 @@ async def test_gmail_status_disconnected(client: AsyncClient) -> None:
             )
         assert response.status_code == 200
         payload = response.json()
-        assert payload == {"connected": False, "email": None, "scopes": []}
+        assert payload == {
+            "connected": False,
+            "email": None,
+            "scopes": [],
+            "watch_failed": False,
+            "watch_error_message": None,
+        }
     finally:
         app.dependency_overrides.pop(get_db, None)
 
@@ -98,6 +104,10 @@ async def test_gmail_status_connected(client: AsyncClient) -> None:
             "https://www.googleapis.com/auth/gmail.readonly",
             "https://www.googleapis.com/auth/gmail.send",
         }
+        # Ticket 4.15: a freshly-connected user with no watch-registration
+        # attempt yet should report both fields at their default state.
+        assert payload["watch_failed"] is False
+        assert payload["watch_error_message"] is None
     finally:
         app.dependency_overrides.pop(get_db, None)
 
@@ -211,6 +221,8 @@ async def test_disconnect_calls_partial_update_with_cleared_gmail_integration(
             "watch_history_id": None,
             "watch_expires_at": None,
             "last_processed_message_id": None,
+            "watch_failed": False,
+            "watch_error_message": None,
         }
         assert call.kwargs.get("model") is User
     finally:
