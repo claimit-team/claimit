@@ -1,14 +1,13 @@
 "use client";
 
 import { AlertCircle, CheckCircle2, Mail, Upload } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -26,8 +25,7 @@ import {
   disconnectGmail,
   GmailApiError,
 } from "@/lib/api/gmail";
-import { cn } from "@/lib/utils";
-import { useAuthStore } from "@/store";
+import { useAuthStore, useUIStore } from "@/store";
 
 /**
  * App-defined OAuth scopes — these are what we request, not what's been
@@ -67,6 +65,7 @@ export function GmailSettingsContent() {
   const user = useAuthStore((s) => s.user);
   const isAuthLoading = useAuthStore((s) => s.isLoading);
   const setUser = useAuthStore((s) => s.setUser);
+  const openUploadDialog = useUIStore((s) => s.setUploadDialogOpen);
 
   const [isConnecting, setIsConnecting] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
@@ -287,15 +286,17 @@ export function GmailSettingsContent() {
         <CardContent className="space-y-4">
           <p className="text-sm text-neutral-700">
             You can use ClaimIt with manual receipt upload. Upload PDF, PNG, or JPG receipts from
-            the dashboard or upload page.
+            anywhere in the app.
           </p>
-          <Link
-            href="/upload"
-            className={cn(buttonVariants({ variant: "outline" }), "inline-flex items-center gap-2")}
+          <Button
+            type="button"
+            variant="outline"
+            className="inline-flex items-center gap-2"
+            onClick={() => openUploadDialog(true)}
           >
             <Upload className="size-4" aria-hidden="true" />
             Upload receipt
-          </Link>
+          </Button>
         </CardContent>
       </Card>
 

@@ -3,8 +3,9 @@
 /**
  * /purchases — fleet-view list of the authenticated user's purchases.
  *
- * Real-ified in PR2 (was previously a mock client filter over
- * `lib/mock-purchases.ts`). Mirrors the 5.4 claims-list shape
+ * Real-ified in PR2 (was previously a mock client filter over a
+ * mock-purchases module that has since been deleted in ticket 5.14
+ * B10). Mirrors the 5.4 claims-list shape
  * (`/claims/page.tsx`) — sticky filter bar + desktop table + mobile
  * card stack, skeleton / empty / error states, debounced search,
  * cursor pagination. Differences vs claims list:
@@ -24,7 +25,7 @@ import Link from "next/link";
 import { PlatformLogo } from "@/components/claims/platform-logo";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -41,6 +42,7 @@ import type { PurchaseListItem } from "@/lib/api/purchases";
 import { formatWindowRemaining, snakeToTitleLabel } from "@/lib/claims-status";
 import { getListStatusBadge, isMonitoringDegraded } from "@/lib/purchase-status";
 import { cn } from "@/lib/utils";
+import { useUIStore } from "@/store";
 
 // --- chip group config ---------------------------------------------------
 
@@ -64,7 +66,6 @@ const CATEGORY_CHIPS: { key: CategoryChipKey; label: string }[] = [
 const EMPTY_ALL = {
   title: "Nothing being monitored",
   body: "Upload a receipt to start monitoring price drops, fare changes, or refund windows.",
-  ctaHref: "/upload",
   ctaLabel: "Upload a receipt",
 };
 
@@ -198,6 +199,7 @@ function LoadingSkeleton() {
 }
 
 function EmptyState({ isFiltered }: { isFiltered: boolean }) {
+  const openUploadDialog = useUIStore((s) => s.setUploadDialogOpen);
   if (isFiltered) {
     return (
       <Card className="mx-auto max-w-md">
@@ -215,12 +217,9 @@ function EmptyState({ isFiltered }: { isFiltered: boolean }) {
       <CardContent className="space-y-3 py-10 text-center">
         <h3 className="text-base font-medium text-neutral-900">{EMPTY_ALL.title}</h3>
         <p className="text-sm text-neutral-600">{EMPTY_ALL.body}</p>
-        <Link
-          href={EMPTY_ALL.ctaHref}
-          className={cn(buttonVariants({ size: "sm" }), "inline-flex")}
-        >
+        <Button size="sm" type="button" onClick={() => openUploadDialog(true)}>
           {EMPTY_ALL.ctaLabel}
-        </Link>
+        </Button>
       </CardContent>
     </Card>
   );

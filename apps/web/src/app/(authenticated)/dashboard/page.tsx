@@ -33,11 +33,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useDashboardSummary } from "@/hooks/useDashboardSummary";
 import { useMonitoredPurchases } from "@/hooks/useMonitoredPurchases";
+import { usePendingConfirmation } from "@/hooks/usePendingConfirmation";
 import type { PurchaseListItem, PurchasesApiError } from "@/lib/api/purchases";
 import { formatWindowRemaining, snakeToTitleLabel } from "@/lib/claims-status";
 import { getListStatusBadge, isMonitoringDegraded } from "@/lib/purchase-status";
@@ -51,6 +51,11 @@ import { useAuthStore, useUIStore } from "@/store";
 type UserState = "new" | "active" | "reclaim_experienced";
 
 const mockDashboardData = {
+  // Ticket 5.14 B8: `confirm_extraction` cards now come from the real
+  // `pending_confirmation` purchase list (see `usePendingConfirmation`
+  // + `buildConfirmExtractionItems`). The mock review_draft + update
+  // _needed entries below remain as PR2 placeholders — those have
+  // their own tickets and aren't in scope here.
   needsAttention: [
     {
       type: "review_draft" as const,
@@ -68,13 +73,6 @@ const mockDashboardData = {
       submittedDaysAgo: 6,
       claimType: "email",
       requestedAmount: 74,
-    },
-    {
-      type: "confirm_extraction" as const,
-      purchaseId: "purchase_delta_003",
-      platform: "Delta",
-      title: "MIA → LAX flight",
-      lowConfidenceFields: ["fare_class", "purchase_date"],
     },
   ],
   // monitoredPurchases removed in PR2 — the dashboard section now
@@ -190,6 +188,7 @@ function DevPulseTrigger() {
               { label: "Auto-file now", action: "approve_claim" },
             ],
           },
+          data: null,
         });
         toast.info("Proactive event queued — watch the assistant FAB pulse.");
       }}
@@ -464,7 +463,116 @@ function UpdateNeededCard({
   );
 }
 
-function NeedsAttentionSection({ items }: { items: typeof mockDashboardData.needsAttention }) {
+/**
+ * Confidence threshold mirroring B5 — kept inline (3 places, all FE)
+ * rather than promoting to a shared module. Renaming the constant
+ * later is a single rg-replace.
+ */
+const CONFIDENCE_THRESHOLD = 0.95;
+
+type ConfirmExtractionItem = {
+  type: "confirm_extraction";
+  purchaseId: string;
+  platform: string;
+  title: string;
+  lowConfidenceFields: string[];
+};
+
+type ReviewDraftItem = (typeof mockDashboardData.needsAttention)[number] & {
+  type: "review_draft";
+};
+type UpdateNeededItem = (typeof mockDashboardData.needsAttention)[number] & {
+  type: "update_needed";
+};
+type NeedsAttentionItem = ReviewDraftItem | UpdateNeededItem | ConfirmExtractionItem;
+
+/**
+ * Map a `pending_confirmation` purchase row to the
+ * `ConfirmExtractionCard` shape. The card surfaces the same low-
+ * confidence-field list the confirm-page banner renders (the
+ * threshold + field-set definition lives in
+ * `confirm-purchase-content.deriveLowConfidenceFields`) — but we
+ * derive it inline here rather than importing because the dashboard
+ * card is intentionally lossy (it doesn't need the price/price_paid
+ * collapse, doesn't need the mostly-failed/named-low split, just a
+ * short hint of what's wrong).
+ *
+ * Returns `null` for docs whose extraction hasn't landed yet (the
+ * sentinel `overall_min=0` shape). Surfacing a confirm card with
+ * "everything is low" before extraction completes would mislead the
+ * user; the confirm page itself shows the "Analyzing your receipt…"
+ * polling UX in that state.
+ */
+function buildConfirmExtractionItems(purchases: PurchaseListItem[]): ConfirmExtractionItem[] {
+  const out: ConfirmExtractionItem[] = [];
+  for (const p of purchases) {
+    const conf = p.extraction_confidence;
+    // Skip sentinel / pre-extraction shapes — the dashboard shouldn't
+    // surface "0 fields low" or "everything low" before Gemini
+    // returns.
+    if (!conf) continue;
+    const overall = conf.overall_min;
+    if (overall === null || overall === undefined || overall === 0) continue;
+
+    // Dedupe by human label rather than raw key. Multiple confidence
+    // keys can map to the same form field (e.g. `price` and
+    // `price_paid` both surface as "Purchase price" via
+    // `DASHBOARD_FIELD_LABEL`); without dedupe the card would list
+    // "Purchase price, Purchase price" on a doc whose price came in
+    // with low confidence on both keys.
+    const lowFields: string[] = [];
+    for (const [key, value] of Object.entries(conf)) {
+      if (key === "overall_min") continue;
+      if (value === null || value === undefined) continue;
+      if (value < CONFIDENCE_THRESHOLD) {
+        const label = humanizeField(key);
+        if (!lowFields.includes(label)) lowFields.push(label);
+      }
+    }
+
+    // Pending-confirmation rows reach this branch with overall_min <
+    // 0.95 (the backend's own threshold for keeping the doc in this
+    // status), so SOMETHING is low. But `lowFields` only carries
+    // fields whose per-field confidence is both non-null AND
+    // below the threshold — a doc whose only low-confidence signal
+    // came in as a null (read-tolerant doc shape, legacy seed, or a
+    // field the FE doesn't have a label for) could collapse to zero
+    // visible entries here. The card would then render the bare
+    // "Low confidence:" label with nothing after it. Surface a
+    // generic prompt so the row never reads as broken.
+    out.push({
+      type: "confirm_extraction",
+      purchaseId: p._id,
+      platform: snakeToTitleLabel(p.platform),
+      title: p.product_name ?? "Untitled purchase",
+      lowConfidenceFields: lowFields.length > 0 ? lowFields : ["Review extracted details"],
+    });
+  }
+  return out;
+}
+
+const DASHBOARD_FIELD_LABEL: Record<string, string> = {
+  platform: "Platform",
+  product_name: "Product name",
+  price: "Purchase price",
+  price_paid: "Purchase price",
+  member_price_at_purchase: "Member price",
+  non_member_price_at_purchase: "Non-member price",
+  purchase_date: "Purchase date",
+  order_id: "Order ID",
+  category: "Category",
+  member_tier_at_purchase: "Member tier",
+  variant: "Variant",
+  fare_class: "Fare class",
+  room_type: "Room type",
+  bed_type: "Bed type",
+  rate_type: "Rate type",
+};
+function humanizeField(field: string): string {
+  return DASHBOARD_FIELD_LABEL[field] ?? field.replace(/_/g, " ");
+}
+
+function NeedsAttentionSection({ items }: { items: NeedsAttentionItem[] }) {
   const [dismissedIds, setDismissedIds] = useState<string[]>([]);
   const getItemId = (item: (typeof items)[number]): string =>
     item.type === "confirm_extraction" ? item.purchaseId : item.claimId;
@@ -708,42 +816,11 @@ function MonitoredPurchasesSection({
 // ============================================================================
 
 function QuickUploadSection({ gmailConnected }: { gmailConnected: boolean }) {
-  const [isDragging, setIsDragging] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = () => setIsDragging(false);
-
-  const simulateUpload = () => {
-    setUploading(true);
-    setUploadProgress(0);
-
-    const interval = setInterval(() => {
-      setUploadProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setTimeout(() => {
-            setUploading(false);
-            setUploadProgress(0);
-            toast.success("Receipt uploaded. We'll extract the purchase details next.");
-          }, 300);
-          return 100;
-        }
-        return prev + 20;
-      });
-    }, 200);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    simulateUpload();
-  };
+  // Ticket 5.14 B2: the dashboard "quick upload" tile is now a
+  // shortcut into the global upload dialog. The previous
+  // simulate-progress mock is gone — real upload state lives inside
+  // the dialog so we don't paint a fake loader here.
+  const openUploadDialog = useUIStore((s) => s.setUploadDialogOpen);
 
   return (
     <section>
@@ -755,36 +832,15 @@ function QuickUploadSection({ gmailConnected }: { gmailConnected: boolean }) {
         <CardContent className="pt-0">
           <button
             type="button"
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onClick={!uploading ? simulateUpload : undefined}
-            disabled={uploading}
-            className={cn(
-              "w-full border-2 border-dashed rounded-lg p-6 text-center transition-colors",
-              uploading ? "cursor-default" : "cursor-pointer",
-              isDragging
-                ? "border-brand-primary-400 bg-brand-primary-50"
-                : "border-neutral-300 hover:border-neutral-400",
-            )}
+            onClick={() => openUploadDialog(true)}
+            className="w-full border-2 border-dashed border-neutral-300 hover:border-neutral-400 rounded-lg p-6 text-center transition-colors cursor-pointer"
           >
-            {uploading ? (
-              <div className="space-y-3">
-                <div className="text-sm text-neutral-600">Uploading...</div>
-                <Progress value={uploadProgress} className="h-2" />
-              </div>
-            ) : (
-              <>
-                <UploadCloud className="w-8 h-8 mx-auto text-neutral-400 mb-2" aria-hidden="true" />
-                <span className="inline-flex items-center justify-center px-3 py-1.5 rounded-md border border-neutral-300 bg-neutral-0 text-sm font-medium text-neutral-700 mb-2">
-                  Browse files
-                </span>
-                <p className="text-xs text-neutral-500">or drag and drop</p>
-              </>
-            )}
+            <UploadCloud className="w-8 h-8 mx-auto text-neutral-400 mb-2" aria-hidden="true" />
+            <span className="inline-flex items-center justify-center px-3 py-1.5 rounded-md border border-neutral-300 bg-neutral-0 text-sm font-medium text-neutral-700 mb-2">
+              Browse files
+            </span>
+            <p className="text-xs text-neutral-500">PDF, PNG, or JPG up to 10 MB</p>
           </button>
-
-          <p className="text-xs text-neutral-500 mt-3">PDF, PNG, or JPG up to 10 MB.</p>
 
           {!gmailConnected && (
             <Link
@@ -868,12 +924,18 @@ export default function DashboardPage() {
   // real backend state — accounts with gmail_integration.connected=true in
   // Mongo were rendering as "not connected" in the dashboard header.
   const gmailConnected = useAuthStore((s) => s.user?.gmail_integration?.connected ?? false);
-  const { needsAttention, recentActivity } = mockDashboardData;
+  const { needsAttention: mockNeedsAttention, recentActivity } = mockDashboardData;
   const {
     purchases: monitoredPurchases,
     isLoading: isMonitoredLoading,
     error: monitoredError,
   } = useMonitoredPurchases();
+  const { purchases: pendingPurchases } = usePendingConfirmation();
+
+  const needsAttention: NeedsAttentionItem[] = [
+    ...buildConfirmExtractionItems(pendingPurchases),
+    ...mockNeedsAttention,
+  ];
 
   // Auto-derive userState from real summary data:
   // - lifetime_savings > 0 → user has resolved claims → "reclaim_experienced"
@@ -889,13 +951,13 @@ export default function DashboardPage() {
 
   const userState: UserState = userStateOverride ?? computedUserState;
 
-  const handleUploadClick = () => {
-    toast.success("Receipt added to upload queue.");
-  };
-
-  const handleBrowseFiles = () => {
-    toast.success("Receipt added to upload queue.");
-  };
+  // Ticket 5.14 B2: dashboard upload CTAs now open the same global
+  // upload dialog the sidebar Upload button opens. The mock "queued"
+  // toasts are gone — the dialog itself surfaces real upload state +
+  // routes to /confirm/:id on success.
+  const openUploadDialog = useUIStore((s) => s.setUploadDialogOpen);
+  const handleUploadClick = () => openUploadDialog(true);
+  const handleBrowseFiles = () => openUploadDialog(true);
 
   return (
     <div className="max-w-7xl mx-auto px-4 lg:px-8 py-6 lg:py-8">
