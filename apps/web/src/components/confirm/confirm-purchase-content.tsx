@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { ActionBar } from "@/components/confirm/action-bar";
 import { ConfidenceBanner } from "@/components/confirm/confidence-banner";
 import { ExtractionReviewForm } from "@/components/confirm/extraction-review-form";
-import { ReceiptPreview } from "@/components/confirm/receipt-preview";
+import { MissingReceiptFallback, ReceiptPreview } from "@/components/confirm/receipt-preview";
 import type { PurchaseDetailDoc } from "@/lib/api/purchases";
 import { buildInitialFormState, type ConfirmFormState } from "@/lib/confirm-form-state";
 
@@ -107,11 +107,15 @@ export function ConfirmPurchaseContent({ purchase }: { purchase: PurchaseDetailD
   );
   const receiptFilename = deriveReceiptFilename(purchase);
   const overallConfidence = purchase.extraction_confidence?.overall_min ?? 0;
-  // No stored receipt → render the form full-width below the page
-  // header rather than reserving a 2/5 column for the "Original not
-  // available" fallback. The fallback still surfaces for upload-
-  // source docs whose blob 404s (degraded state); only the explicit
-  // null-url shape (e.g. the gmail seed row) goes full-width.
+  // We ALWAYS reserve the left column. Pre-fix, a `receipt_storage_url
+  // === null` doc (Gmail seed row, future no-screenshot path) collapsed
+  // the column entirely and stretched the form full-width — which
+  // silently omitted any "this purchase has no original" affordance.
+  // Now: when there's a stored receipt the column mounts ReceiptPreview
+  // (it owns the loading / authenticated-blob-fetch dance); when there
+  // isn't, we render the compact "Original receipt not available"
+  // fallback directly so the user still sees source context next to
+  // the form they're being asked to confirm.
   const hasReceipt = purchase.receipt_storage_url !== null;
 
   // Form state lives here (ticket 5.14 B4). The form is purely
@@ -136,17 +140,28 @@ export function ConfirmPurchaseContent({ purchase }: { purchase: PurchaseDetailD
         </div>
 
         <div className="flex flex-col gap-8 lg:flex-row">
-          {hasReceipt ? (
-            <div className="lg:w-2/5 shrink-0">
-              <div className="lg:sticky lg:top-20">
+          <div className="lg:w-2/5 shrink-0">
+            <div className="lg:sticky lg:top-20">
+              {hasReceipt ? (
                 <ReceiptPreview
                   purchaseId={purchase._id}
                   filename={receiptFilename}
                   ingestionSource={purchase.ingestion_source}
                 />
-              </div>
+              ) : (
+                // Same outer card chrome as ReceiptPreview so the
+                // column reads as "the receipt area" even when there
+                // isn't one — keeps the visual rhythm of the page
+                // consistent between the two states.
+                <div className="overflow-hidden rounded-lg border border-neutral-200 bg-neutral-0">
+                  <MissingReceiptFallback
+                    ingestionSource={purchase.ingestion_source}
+                    variant="compact"
+                  />
+                </div>
+              )}
             </div>
-          ) : null}
+          </div>
 
           <div className="flex-1 min-w-0">
             <div className="rounded-lg border border-neutral-200 bg-neutral-0 p-6">
