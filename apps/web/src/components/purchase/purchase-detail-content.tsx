@@ -31,6 +31,7 @@ export function PurchaseDetailContent({
     () => ({
       productTitle: initial.title,
       monitoringStatus,
+      monitoringDegraded: initial.monitoringDegraded,
       platform: initial.platform,
       platformRaw: initial.platformRaw,
       category: initial.category,

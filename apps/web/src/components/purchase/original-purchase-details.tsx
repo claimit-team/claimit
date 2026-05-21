@@ -24,7 +24,10 @@ export interface PurchaseOriginalDetailsModel {
   platform: string;
   productName: string;
   orderId: string;
-  purchaseDate: string;
+  /** `null` when the wire doc lacks both `purchase_date` and
+   * `ingested_at`. Rendered via `formatPurchaseDate` which falls back
+   * to a placeholder for null / malformed input. */
+  purchaseDate: string | null;
   pricePaid: number;
   currency: string;
   category: PurchaseCategory;

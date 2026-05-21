@@ -165,7 +165,7 @@ export function PriceHistoryChart({
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
           <div className="min-w-0 flex-1">
             {hasData ? (
-              <ResponsiveContainer width="100%" height={280} className="max-md:!h-[200px]">
+              <ResponsiveContainer width="100%" height={280} className="max-md:h-[200px]!">
                 <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                   <XAxis
                     dataKey="formattedDate"

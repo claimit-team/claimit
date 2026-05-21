@@ -29,7 +29,7 @@ import type {
   PurchaseDetailDoc,
   PurchaseDetailResponse,
 } from "@/lib/api/purchases";
-import { deriveMonitoringStatus } from "@/lib/purchase-status";
+import { deriveMonitoringStatus, isMonitoringDegraded } from "@/lib/purchase-status";
 
 // ---------------------------------------------------------------------------
 // View-model types
@@ -97,7 +97,11 @@ export interface PurchaseDetailViewModel {
   title: string;
   monitoringStatus: PurchaseDetailMonitoringStatus;
   monitoringDegraded: boolean;
-  purchaseDate: string;
+  /** `null` when BOTH `purchase_date` and `ingested_at` are missing on
+   * the wire doc. Consumers MUST short-circuit to a placeholder ("—")
+   * and NEVER fabricate a substitute date — fabricating "today" skews
+   * the refund-window math downstream. */
+  purchaseDate: string | null;
   orderId: string;
   pricePaid: number;
   currency: string;
@@ -109,8 +113,11 @@ export interface PurchaseDetailViewModel {
   lowestSeen: number | null;
   highestSeen: number | null;
   lastCheckedIso: string | null;
-  windowEndDate: string;
-  daysRemaining: number;
+  /** `null` when `window_expires` is missing. */
+  windowEndDate: string | null;
+  /** `null` when `window_expires` is missing — short-circuit the
+   * progress bar / "X days remaining" copy to "—". */
+  daysRemaining: number | null;
   policySummary: string;
   relatedClaims: RelatedClaimBrief[];
   /** The primary related claim's id — surfaced as the header CTA target
@@ -136,23 +143,47 @@ export function formatPurchaseCurrency(amount: number, currency = "USD"): string
   }).format(amount);
 }
 
-export function formatPurchaseDate(dateString: string): string {
-  return new Date(dateString).toLocaleDateString("en-US", {
+/**
+ * Read-tolerant date placeholder. Surfaced wherever a wire field is
+ * `null` / `""` / a malformed ISO string. Matches the master design
+ * doc's "—" convention for missing scalars.
+ */
+const DATE_PLACEHOLDER = "—";
+
+/**
+ * Parse `dateString` and return a valid `Date`, or `null` if the input
+ * is empty / null / produces NaN. The helpers below all funnel through
+ * this so a single rogue wire value can never render
+ * "Invalid Date" / "NaN days ago" in the UI.
+ */
+function parseValidDate(dateString: string | null | undefined): Date | null {
+  if (dateString === null || dateString === undefined || dateString === "") return null;
+  const date = new Date(dateString);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function formatPurchaseDate(dateString: string | null | undefined): string {
+  const date = parseValidDate(dateString);
+  if (date === null) return DATE_PLACEHOLDER;
+  return date.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
   });
 }
 
-export function formatPurchaseShortDate(dateString: string): string {
-  return new Date(dateString).toLocaleDateString("en-US", {
+export function formatPurchaseShortDate(dateString: string | null | undefined): string {
+  const date = parseValidDate(dateString);
+  if (date === null) return DATE_PLACEHOLDER;
+  return date.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
   });
 }
 
-export function getPurchaseRelativeTime(dateString: string): string {
-  const date = new Date(dateString);
+export function getPurchaseRelativeTime(dateString: string | null | undefined): string {
+  const date = parseValidDate(dateString);
+  if (date === null) return DATE_PLACEHOLDER;
   const diffMs = Date.now() - date.getTime();
   const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
 
@@ -208,7 +239,11 @@ function pickMatchingTierPrice(
   purchase: PurchaseDetailDoc,
 ): { date: string; price: number } | null {
   if (row.checked_at === null) return null;
-  const hasTier = purchase.member_tier_at_purchase !== null;
+  // Treat null, empty string, and whitespace-only strings as "no tier"
+  // — a legacy purchase with `member_tier_at_purchase=""` must fall
+  // back to `price_non_member` rather than reading the (always-null)
+  // `price_member` field and getting dropped from the chart entirely.
+  const hasTier = (purchase.member_tier_at_purchase ?? "").trim() !== "";
   const price = hasTier ? row.price_member : row.price_non_member;
   if (price === null) return null;
   return { date: row.checked_at, price };
@@ -235,12 +270,15 @@ function toRelatedClaimBrief(claim: PurchaseClaim): RelatedClaimBrief {
 /**
  * Compute "days remaining" until `window_expires`. Clamped at 0 so the
  * UI never shows a negative count (the header status surfaces "Window
- * expired" separately for that case).
+ * expired" separately for that case). Returns `null` when the wire
+ * value is missing / malformed — the refund-eligibility card MUST
+ * short-circuit to a placeholder rather than render "0 days remaining"
+ * (which would mis-signal an expired window).
  */
-function daysUntil(iso: string | null): number {
-  if (iso === null) return 0;
+function daysUntil(iso: string | null): number | null {
+  if (iso === null) return null;
   const ms = Date.parse(iso);
-  if (Number.isNaN(ms)) return 0;
+  if (Number.isNaN(ms)) return null;
   const diffDays = Math.ceil((ms - Date.now()) / (24 * 60 * 60 * 1000));
   return Math.max(0, diffDays);
 }
@@ -324,8 +362,17 @@ export function buildPurchaseDetailViewModel(
     categoryRaw: purchase.category,
     title: purchase.product_name ?? "—",
     monitoringStatus,
-    monitoringDegraded: purchase.status === "monitoring_degraded",
-    purchaseDate: purchase.purchase_date ?? purchase.ingested_at ?? new Date().toISOString(),
+    // Use the helper so a rogue/legacy status string (read-tolerant)
+    // still resolves to the right boolean — the inline equality check
+    // we used to do here would silently miss any future degraded
+    // sub-variant (e.g. `monitoring_degraded_rate_limited`).
+    monitoringDegraded: isMonitoringDegraded(purchase.status),
+    // CRITICAL: do NOT fall back to `new Date().toISOString()` — that
+    // makes a legacy purchase with no `purchase_date` AND no
+    // `ingested_at` look like it was bought today, which would skew
+    // the refund-window math in `RefundEligibilityCard`. Surface
+    // `null` and let the consumer short-circuit to a placeholder.
+    purchaseDate: purchase.purchase_date ?? purchase.ingested_at ?? null,
     orderId: purchase.order_id ?? "—",
     pricePaid,
     currency: purchase.currency ?? "USD",
@@ -341,7 +388,7 @@ export function buildPurchaseDetailViewModel(
       price_history.length > 0
         ? (price_history[price_history.length - 1].checked_at ?? purchase.last_checked_at)
         : purchase.last_checked_at,
-    windowEndDate: purchase.window_expires ?? "",
+    windowEndDate: purchase.window_expires ?? null,
     daysRemaining: daysUntil(purchase.window_expires),
     // Policy summary comes from the Policy collection (claim-detail uses
     // it). The detail page surfaces a short inline summary; if the

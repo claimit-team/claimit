@@ -387,11 +387,15 @@ async def list_claims_for_purchase(
     a separate guard. A purchase owned by another user simply yields zero
     rows — never leaks claim existence across users.
     """
+    # Defensive clamp: the default is _CLAIMS_PER_PURCHASE_CAP, but a
+    # future caller passing a larger value would bypass the hard cap.
+    # Clamp here so the $limit stage CAN'T exceed the contract.
+    safe_limit = max(0, min(int(limit), _CLAIMS_PER_PURCHASE_CAP))
     match: dict[str, Any] = {"user_id": user_id, "purchase_id": purchase_id}
     pipeline: list[dict[str, Any]] = [
         {"$match": match},
         {"$sort": {"updated_at": -1, "_id": -1}},
-        {"$limit": limit},
+        {"$limit": safe_limit},
         _CLAIMS_PURCHASE_LOOKUP_STAGE,
         _CLAIMS_PURCHASE_UNWIND_STAGE,
         _CLAIM_LIST_PROJECT_STAGE,

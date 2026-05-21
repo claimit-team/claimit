@@ -3,7 +3,7 @@
 import { ArrowLeft, StopCircle, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { useCallback } from "react";
 
 import { PlatformLogo } from "@/components/claims/platform-logo";
@@ -23,6 +23,10 @@ import { cn } from "@/lib/utils";
 export interface PurchasePageHeaderModel {
   productTitle: string;
   monitoringStatus: PurchaseDetailMonitoringStatus;
+  /** When true and `monitoringStatus === "monitoring"`, a small amber
+   * indicator + tooltip surfaces beside the badge. Maps to backend
+   * `status === "monitoring_degraded"` (v0 prompt §1). */
+  monitoringDegraded: boolean;
   /** Display label (e.g. "Best Buy"). */
   platform: string;
   /** Raw backend platform slug (e.g. "best_buy") — drives `PlatformLogo`'s
@@ -31,7 +35,9 @@ export interface PurchasePageHeaderModel {
   category: PurchaseCategory;
   /** Raw backend category — drives `PlatformLogo`'s fallback icon. */
   categoryRaw: string | null;
-  purchaseDate: string;
+  /** `null` when the wire doc has neither `purchase_date` nor
+   * `ingested_at`. Rendered as the `formatPurchaseDate` placeholder. */
+  purchaseDate: string | null;
   orderId: string;
   primaryRelatedClaimId?: string;
 }
@@ -68,15 +74,33 @@ export function PurchasePageHeader({ purchase }: PurchasePageHeaderProps) {
 
   const statusBadge = getMonitoringStatusBadge(purchase.monitoringStatus);
 
-  // Back-nav per decision 7 in the review: router.back() works in-app,
-  // but a direct URL / fresh tab has no history to pop. Fall back to
-  // the list page so the arrow is NEVER a no-op.
+  // Back-nav fallback (locked decision #7: arrow MUST never be a no-op).
   //
-  // `window.history.length` includes the current entry — a fresh tab
-  // starts at 1 (just this page), an in-app push has 2+. The
-  // boundary is `> 1` to detect "we have somewhere to go back to".
+  // Mechanism choice: we use `document.referrer` instead of
+  // `window.history.length` / `history.state?.idx`. Both alternatives
+  // are unreliable in Next 16's App Router — `history.length` is
+  // consistently 2 on a fresh tab (Next replaces state on every
+  // render), and `history.state.idx` is a Pages-Router-only field that
+  // Next 16 App Router NEVER writes (state shape is strictly
+  // `{__NA, __PRIVATE_NEXTJS_INTERNALS_TREE}`). Verified against
+  // `next/dist/esm/client/components/app-router.js` in this repo.
+  //
+  // Same-origin referrer ⇒ user came from inside the app this tab,
+  //   `router.back()` lands on a real Claimit page.
+  // Empty / cross-origin referrer ⇒ direct URL paste, email link, or
+  //   fresh tab. Push the list page so the arrow has somewhere to go.
   const handleBack = useCallback(() => {
-    if (typeof window !== "undefined" && window.history.length > 1) {
+    if (typeof window === "undefined") return;
+    let sameOrigin = false;
+    const referrer = document.referrer;
+    if (referrer !== "") {
+      try {
+        sameOrigin = new URL(referrer).origin === window.location.origin;
+      } catch {
+        sameOrigin = false;
+      }
+    }
+    if (sameOrigin) {
       router.back();
     } else {
       router.push("/purchases");
@@ -178,6 +202,16 @@ export function PurchasePageHeader({ purchase }: PurchasePageHeaderProps) {
               <h1 className="font-semibold text-2xl text-neutral-900">{purchase.productTitle}</h1>
               <Badge variant="outline" className={cn("shrink-0", statusBadge.className)}>
                 {statusBadge.label}
+                {/* Degraded indicator (v0 prompt §1): a single amber dot
+                    inside the "Monitoring" badge tells the user the
+                    monitor sweep is partially failing. Contained — no
+                    surrounding layout changes. Only surfaces when the
+                    backend signals `monitoring_degraded` AND the UI is
+                    in the "monitoring" state (any other state already
+                    encodes its own resolution). */}
+                {purchase.monitoringDegraded && purchase.monitoringStatus === "monitoring" ? (
+                  <DegradedIndicator />
+                ) : null}
               </Badge>
             </div>
             <p className="text-neutral-500 text-sm">
@@ -191,6 +225,28 @@ export function PurchasePageHeader({ purchase }: PurchasePageHeaderProps) {
         <div className="shrink-0">{renderActions()}</div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Minimal degraded indicator (v0 prompt §1): an amber dot inline with
+ * the "Monitoring" badge label, with a tooltip explaining what the dot
+ * means. Self-contained so it can be slotted into the Badge without
+ * altering surrounding layout.
+ */
+function DegradedIndicator() {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        type="button"
+        aria-label="Monitoring partially degraded"
+        className="-mr-0.5 ml-1 inline-flex size-2 shrink-0 items-center justify-center rounded-full bg-semantic-warning align-middle outline-none focus-visible:ring-2 focus-visible:ring-semantic-warning/40"
+      />
+      <TooltipContent>
+        Monitoring is partially degraded — the last price check didn't return data. ClaimIt will
+        retry automatically.
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -215,14 +271,34 @@ function DisabledTooltipButton({
   tooltip: string;
   variant: "ghost" | "outline";
 }) {
+  // Accessibility (review C3): a real `disabled` button is not
+  // tab-focusable, so keyboard users would never see the "coming soon"
+  // tooltip that explains why the action is unavailable. Render a
+  // focusable button with `aria-disabled` instead, and block click /
+  // Enter / Space activation manually so the control stays inert.
+  const blockMouse = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  const blockKeyboard = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
   return (
     <Tooltip>
       <TooltipTrigger
         type="button"
-        disabled
-        aria-disabled
+        aria-disabled="true"
+        tabIndex={0}
         aria-label={`${label} (coming soon)`}
-        className={cn(buttonVariants({ variant, size: "sm" }), "gap-1.5")}
+        onClick={blockMouse}
+        onKeyDown={blockKeyboard}
+        className={cn(
+          buttonVariants({ variant, size: "sm" }),
+          "cursor-not-allowed gap-1.5 opacity-50",
+        )}
       >
         {icon}
         {label}

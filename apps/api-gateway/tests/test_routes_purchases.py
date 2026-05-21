@@ -412,6 +412,27 @@ async def test_get_purchase_detail_tolerant_to_rogue_price_history_row(
 
 
 @pytest.mark.asyncio
+async def test_list_claims_for_purchase_clamps_limit_to_hard_cap() -> None:
+    """Defensive clamp (review finding C1): even when a caller passes a
+    `limit` larger than `_CLAIMS_PER_PURCHASE_CAP`, the emitted `$limit`
+    pipeline stage MUST equal the cap. Future callers can't bypass the
+    hard ceiling by widening the kwarg."""
+    from src.services.claims_service import _CLAIMS_PER_PURCHASE_CAP, list_claims_for_purchase
+
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.aggregate = AsyncMock(return_value=[])
+    await list_claims_for_purchase(
+        mock_db,
+        user_id=USER_ID,
+        purchase_id=PURCHASE_ID,
+        limit=_CLAIMS_PER_PURCHASE_CAP * 10,  # x10 the cap
+    )
+    pipeline = mock_db.aggregate.await_args.args[1]
+    limit_stage = next(s for s in pipeline if "$limit" in s)
+    assert limit_stage["$limit"] == _CLAIMS_PER_PURCHASE_CAP
+
+
+@pytest.mark.asyncio
 async def test_get_purchase_404_when_missing(client: AsyncClient) -> None:
     mock_db = AsyncMock(spec=MongoDBClient)
     mock_db.get_purchase = AsyncMock(return_value=None)
