@@ -424,12 +424,27 @@ def _purchase_status_from_outcome(outcome: ClaimOutcome) -> PurchaseStatus:
       NO_RESPONSE    → MONITORING  (merchant ghost; window still open
                                     per seed offset, so we keep
                                     watching)
+      USER_CANCELLED -> DISMISSED   (user pulled the claim from our
+                                    pipeline; we stop acting on it)
+      USER_SELF_SERV -> DISMISSED   (user resolved it themselves
+                                    outside our flow; same "user
+                                    took it out of pipeline" semantic
+                                    as USER_CANCELLED. NOT REFUNDED —
+                                    we didn't deliver the refund, so
+                                    crediting it to lifetime_savings
+                                    would be misleading.)
 
-    `monitoring_degraded`, `pending_confirmation`, `pending_user_edit`,
-    and `dismissed` are intentionally NOT covered here — they aren't
-    natural outcomes of the seeded claim outcomes, and forcing them
-    via this mapping would mis-represent the seed. They'll be
-    exercised separately if/when those states need a demo fixture.
+    `monitoring_degraded`, `pending_confirmation`, and
+    `pending_user_edit` are intentionally NOT produced by this
+    function — they aren't natural outcomes of any seeded claim, and
+    forcing them via this mapping would mis-represent the seed.
+    They'll be exercised separately if/when those states need a demo
+    fixture.
+
+    A `case _:` wildcard falls through to MONITORING ONLY as a
+    forward-compat guard for future enum additions — known outcomes
+    MUST stay explicit above (the wildcard is not a substitute for
+    mapping new known values).
     """
     match outcome:
         case ClaimOutcome.DRAFT_PENDING:
@@ -445,27 +460,35 @@ def _purchase_status_from_outcome(outcome: ClaimOutcome) -> PurchaseStatus:
         case ClaimOutcome.NO_RESPONSE:
             return PurchaseStatus.MONITORING
         case ClaimOutcome.USER_CANCELLED:
-            # User cancelled this claim. The PURCHASE itself may still
-            # have an open window, so we keep monitoring it (consistent
-            # with DENIED above). The /claims/[id] page maps this
-            # outcome to the "expired" workflow status, but that
-            # describes the CLAIM lifecycle, not the purchase one.
-            return PurchaseStatus.MONITORING
+            # User actively cancelled this claim — they pulled it out
+            # of the pipeline. The purchase is no longer being acted
+            # on by us, so DISMISSED is the right surface (matches the
+            # PR2 plan mapping table). MONITORING would falsely imply
+            # we're still watching for another drop on the user's
+            # behalf.
+            return PurchaseStatus.DISMISSED
         case ClaimOutcome.USER_SELF_SERVICE:
-            # User resolved the refund themselves (outside our flow).
-            # We stop tracking it for refund — match the APPROVED
-            # surface so the user sees "refund received" rather than
-            # an active monitoring state. Same UI signal as a
-            # platform-approved claim from the user's perspective.
-            return PurchaseStatus.REFUNDED
+            # User resolved the refund themselves outside our flow.
+            # Same "user took it out of our pipeline" semantic as
+            # USER_CANCELLED — DISMISSED. REFUNDED would imply WE
+            # delivered the refund (which would falsely credit our
+            # system in the dashboard's lifetime_savings rollup);
+            # DISMISSED accurately reflects that the user handled it
+            # themselves.
+            return PurchaseStatus.DISMISSED
         case _:
-            # Defensive: any future ClaimOutcome enum value added
+            # Defensive: any FUTURE ClaimOutcome enum value added
             # without updating this function falls through to a calm
             # default rather than silently returning None (which would
             # violate the `-> PurchaseStatus` annotation and pass an
-            # invalid value to the Pydantic Purchase model). Wildcard
-            # case makes the match exhaustive at runtime; the explicit
-            # member cases above stay for readability + grep-ability.
+            # invalid value to the Pydantic Purchase model). MONITORING
+            # is the safest default for an unknown outcome — keeps the
+            # purchase visible in the user's monitored list so they
+            # can decide what to do with it. The explicit member cases
+            # above stay for readability + grep-ability and MUST stay
+            # exhaustive over known outcomes (this wildcard is for
+            # forward-compat only, not a substitute for explicit
+            # mapping of new known values).
             return PurchaseStatus.MONITORING
 
 
