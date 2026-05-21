@@ -1,25 +1,33 @@
-"""Gmail watch registration (ticket 4.15).
+"""Gmail users.watch registration (ticket 4.15 extracted to shared package).
 
 Tells Gmail to publish new-message notifications to our `gmail-inbound`
-Pub/Sub topic. The actual ingestion pipeline (history.list → messages.get
-→ extractor) is the 4.17 follow-up; this module only registers the watch
-and persists the resulting watch_history_id + watch_expires_at so 4.17
-has a starting cursor.
+Pub/Sub topic, and records the resulting cursor (`watch_history_id`,
+`watch_expires_at`) on the user document so the 4.17 ingest pipeline has
+a starting point and the 4.16 renewal cron knows when to re-register.
 
-Invoked from `routes/gmail.py:gmail_callback` via `BackgroundTasks` so the
-OAuth callback can return its 302 redirect immediately. The watch call
-adds ~500ms latency to a happy path and an unknown amount on Google-side
-errors; running it inline would make the user wait through that.
+Two public entry points, same core logic, different error contracts:
 
-Failure modes:
-- 4xx from Gmail (revoked grant, missing scope, malformed topicName):
-  marked terminal on the user document (`watch_failed=True` +
-  `watch_error_message`). UI surfaces a "reconnect needed" prompt.
+- `register_watch_or_raise`: raises `WatchRegistrationError` (or other
+  unexpected exceptions) on failure. Use when the caller wants to count
+  outcomes itself (4.16 renewal sweep).
+
+- `register_watch_safe`: catches everything and persists the failure to
+  the user doc as `watch_failed=True` + `watch_error_message`. Never
+  raises. Use when the caller has no error channel — e.g., the api-gateway
+  OAuth callback's `BackgroundTask`, which silently drops exceptions.
+
+Splitting these out (rather than a single function with a `safe: bool`
+flag) keeps the type signature honest at each call site: callers that
+need exception-driven flow control get it without inspecting a return
+value, and callers that don't need it never see the noise.
+
+Failure modes covered:
+- 4xx from Gmail (revoked grant, missing scope, malformed topicName)
 - 5xx from Gmail or transient network: bounded retry with exponential
-  backoff (3 attempts). After the final attempt fails, marked terminal
-  the same way. Watch renewal (4.16) will eventually retry from cron.
-- Refresh token missing / Secret Manager unavailable: terminal failure,
-  same surface as 4xx — the user has to reconnect to recover.
+  backoff (3 attempts), then terminal.
+- Refresh token missing / Secret Manager unavailable.
+- Malformed response body (missing historyId / expiration).
+- Pre-flight user lookup failures (not found, no refresh_token_ref).
 """
 
 from __future__ import annotations
@@ -74,29 +82,51 @@ class WatchRegistrationError(Exception):
         self.terminal_message = terminal_message
 
 
-async def register_watch(
+async def register_watch_or_raise(
     user_id: str,
     db: MongoDBClient,
     sm_client: secretmanager.SecretManagerServiceClient,
 ) -> None:
-    """Register a Gmail watch for `user_id` and persist the result.
+    """Register a Gmail watch and persist the cursor on success.
+
+    Raises `WatchRegistrationError` on any terminal failure (4xx, exhausted
+    5xx retries, missing refresh token, malformed Gmail response, etc.).
+    Other exception types may also propagate — e.g., a Mongo blip during
+    the final `_persist_success` would surface as `pymongo.errors.PyMongoError`.
+    Callers that need a uniform success/failure surface should wrap this
+    with `register_watch_safe`.
 
     Idempotent at the Gmail side — Google replaces any existing watch on
-    repeat calls — so it's safe to invoke after every OAuth callback
-    even if a watch is already active.
+    repeat calls — so it's safe to invoke even when a watch is already
+    active. This is the contract the 4.16 renewal cron depends on.
+    """
+    user = await _load_user(db, user_id)
+    access_token = await _exchange_refresh_for_access(sm_client, user)
+    topic = _resolve_topic_name()
+    response_body = await _call_watch(access_token, topic)
+    await _persist_success(db, user_id, response_body)
+    _log.info("Gmail watch registered for user_id=%s", user_id)
 
-    Persists either (history_id + expires_at) on success, or
-    (watch_failed=True + watch_error_message) on terminal failure. Never
-    raises — the caller is a FastAPI BackgroundTask which has no error
-    surface beyond a logger.
+
+async def register_watch_safe(
+    user_id: str,
+    db: MongoDBClient,
+    sm_client: secretmanager.SecretManagerServiceClient,
+) -> None:
+    """Fire-and-forget watch registration; never raises.
+
+    Wraps `register_watch_or_raise`: a `WatchRegistrationError` writes
+    `watch_failed=True` + `watch_error_message` to the user doc, and any
+    other exception does the same with a generic message and a logged
+    traceback.
+
+    Intended for the api-gateway OAuth callback's `BackgroundTask`, where
+    there's no surface to report a thrown exception (FastAPI's
+    `BackgroundTasks` swallow them) and we'd rather see the failure on the
+    user doc + in logs than have it vanish entirely.
     """
     try:
-        user = await _load_user(db, user_id)
-        access_token = await _exchange_refresh_for_access(sm_client, user)
-        topic = _resolve_topic_name()
-        response_body = await _call_watch(access_token, topic)
-        await _persist_success(db, user_id, response_body)
-        _log.info("Gmail watch registered for user_id=%s", user_id)
+        await register_watch_or_raise(user_id, db, sm_client)
     except WatchRegistrationError as err:
         _log.warning("Gmail watch failed for user_id=%s: %s", user_id, err.terminal_message)
         await _persist_failure(db, user_id, err.terminal_message)
@@ -283,8 +313,8 @@ async def _persist_success(db: MongoDBClient, user_id: str, response_body: dict[
 
 
 async def _persist_failure(db: MongoDBClient, user_id: str, message: str) -> None:
-    """Best-effort: log and swallow any DB error so the BackgroundTask
-    can't propagate a Mongo blip upward."""
+    """Best-effort: log and swallow any DB error so the caller can't
+    propagate a Mongo blip upward."""
     try:
         uid = UUID(user_id)
         await db.partial_update(

@@ -166,6 +166,12 @@ module "ingest_agent" {
     # blobs out of this bucket. Same value as api-gateway's mount so the
     # gs:// URI written on upload is the URI ingest-agent fetches.
     RECEIPTS_BUCKET = google_storage_bucket.receipts.name
+    # Ticket 4.16: the /renew-watches handler calls Gmail users.watch,
+    # which needs the fully-qualified topic resource name in the body.
+    # Same .id-form path api-gateway already passes — keeping the two
+    # services in lockstep so a future topic rename only updates one
+    # var reference per service.
+    GMAIL_INBOUND_TOPIC = google_pubsub_topic.gmail_inbound.id
   }
   # Hackathon scope; flip to true once services handle real data.
   deletion_protection = false
