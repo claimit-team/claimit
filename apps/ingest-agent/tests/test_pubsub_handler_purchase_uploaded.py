@@ -1,4 +1,4 @@
-"""Tests for the /pubsub/purchase-uploaded handler (ticket 5.14).
+"""Tests for the /pubsub/purchase.uploaded handler (ticket 5.14).
 
 OIDC verification is bypassed via PUBSUB_AUTH_DISABLED=1 (same pattern as
 test_pubsub_handler.py); the auth path itself is exercised once in the
@@ -48,7 +48,7 @@ def _envelope(data: str, message_id: str = "msg-1") -> dict[str, object]:
             "publishTime": "2026-05-21T00:00:00Z",
             "attributes": {},
         },
-        "subscription": "projects/test-project/subscriptions/purchase-uploaded-to-ingest",
+        "subscription": "projects/test-project/subscriptions/purchase.uploaded-ingest-agent-sub",
     }
 
 
@@ -240,7 +240,7 @@ def test_handler_happy_path_extracts_and_finalizes(patch_extractor) -> None:
     try:
         with TestClient(app) as client:
             data = _encode_event(_event_payload())
-            resp = client.post("/pubsub/purchase-uploaded", json=_envelope(data))
+            resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
         assert resp.status_code == 200
         assert resp.json() == {"status": "ack"}
         reader.download.assert_awaited_once_with(blob_path="receipts/u/p/x.pdf")
@@ -252,7 +252,7 @@ def test_handler_returns_200_for_invalid_envelope() -> None:
     _setup_overrides(purchase=_purchase_doc())
     try:
         with TestClient(app) as client:
-            resp = client.post("/pubsub/purchase-uploaded", json={"not_envelope": True})
+            resp = client.post("/pubsub/purchase.uploaded", json={"not_envelope": True})
         assert resp.status_code == 200
         assert resp.json()["reason"] == "invalid_envelope"
     finally:
@@ -263,7 +263,7 @@ def test_handler_returns_200_for_invalid_base64() -> None:
     _setup_overrides(purchase=_purchase_doc())
     try:
         with TestClient(app) as client:
-            resp = client.post("/pubsub/purchase-uploaded", json=_envelope("!!!not-base64!!!"))
+            resp = client.post("/pubsub/purchase.uploaded", json=_envelope("!!!not-base64!!!"))
         assert resp.status_code == 200
         assert resp.json()["reason"] == "invalid_base64"
     finally:
@@ -275,7 +275,7 @@ def test_handler_returns_200_for_invalid_payload_shape() -> None:
     try:
         with TestClient(app) as client:
             data = _encode_event({"missing": "fields"})  # type: ignore[arg-type]
-            resp = client.post("/pubsub/purchase-uploaded", json=_envelope(data))
+            resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
         assert resp.status_code == 200
         assert resp.json()["reason"] == "invalid_payload"
     finally:
@@ -287,7 +287,7 @@ def test_handler_returns_200_for_invalid_purchase_id() -> None:
     try:
         with TestClient(app) as client:
             data = _encode_event(_event_payload() | {"purchase_id": "not-a-uuid"})
-            resp = client.post("/pubsub/purchase-uploaded", json=_envelope(data))
+            resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
         assert resp.status_code == 200
         assert resp.json()["reason"] == "invalid_purchase_id"
     finally:
@@ -299,7 +299,7 @@ def test_handler_returns_200_when_purchase_missing(patch_extractor) -> None:
     try:
         with TestClient(app) as client:
             data = _encode_event(_event_payload())
-            resp = client.post("/pubsub/purchase-uploaded", json=_envelope(data))
+            resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
         assert resp.status_code == 200
         assert resp.json()["reason"] == "purchase_not_found"
     finally:
@@ -312,7 +312,7 @@ def test_handler_acks_already_processed_purchase(patch_extractor) -> None:
     try:
         with TestClient(app) as client:
             data = _encode_event(_event_payload())
-            resp = client.post("/pubsub/purchase-uploaded", json=_envelope(data))
+            resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "ack"
@@ -332,7 +332,7 @@ def test_handler_returns_200_when_receipt_url_missing(patch_extractor) -> None:
     try:
         with TestClient(app) as client:
             data = _encode_event(_event_payload(receipt_storage_url=""))
-            resp = client.post("/pubsub/purchase-uploaded", json=_envelope(data))
+            resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
         assert resp.status_code == 200
         assert resp.json()["reason"] == "no_receipt_url"
         reader.download.assert_not_awaited()
@@ -346,7 +346,7 @@ def test_handler_rejects_bucket_mismatch(patch_extractor) -> None:
     try:
         with TestClient(app) as client:
             data = _encode_event(_event_payload())
-            resp = client.post("/pubsub/purchase-uploaded", json=_envelope(data))
+            resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
         assert resp.status_code == 200
         assert resp.json()["reason"] == "bucket_mismatch"
         reader.download.assert_not_awaited()
@@ -362,7 +362,7 @@ def test_handler_returns_200_when_blob_missing(patch_extractor) -> None:
     try:
         with TestClient(app) as client:
             data = _encode_event(_event_payload())
-            resp = client.post("/pubsub/purchase-uploaded", json=_envelope(data))
+            resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
         assert resp.status_code == 200
         assert resp.json()["reason"] == "receipt_blob_missing"
     finally:
@@ -380,7 +380,7 @@ def test_handler_returns_200_when_extractor_rejects_input(monkeypatch: pytest.Mo
     try:
         with TestClient(app) as client:
             data = _encode_event(_event_payload())
-            resp = client.post("/pubsub/purchase-uploaded", json=_envelope(data))
+            resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
         assert resp.status_code == 200
         assert resp.json()["reason"] == "extractor_rejected_input"
     finally:
@@ -398,7 +398,7 @@ def test_handler_returns_200_when_extractor_fails(monkeypatch: pytest.MonkeyPatc
     try:
         with TestClient(app) as client:
             data = _encode_event(_event_payload())
-            resp = client.post("/pubsub/purchase-uploaded", json=_envelope(data))
+            resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
         assert resp.status_code == 200
         assert resp.json()["reason"] == "extractor_failed"
     finally:
@@ -422,7 +422,7 @@ def test_handler_returns_200_when_finalize_fails(
     try:
         with TestClient(app) as client:
             data = _encode_event(_event_payload())
-            resp = client.post("/pubsub/purchase-uploaded", json=_envelope(data))
+            resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
         assert resp.status_code == 200
         assert resp.json()["reason"] == "finalize_failed"
     finally:
@@ -456,7 +456,7 @@ def test_handler_prefers_gcs_content_type_over_event_payload(
     try:
         with TestClient(app) as client:
             data = _encode_event(_event_payload(content_type="application/pdf"))
-            resp = client.post("/pubsub/purchase-uploaded", json=_envelope(data))
+            resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
         assert resp.status_code == 200
         assert captured["mime_type"] == "image/png"
     finally:

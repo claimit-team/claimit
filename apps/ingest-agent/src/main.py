@@ -3,7 +3,7 @@
 Currently handles:
 - /health (Cloud Run liveness)
 - /pubsub/gmail-inbound (ticket 4.15: Gmail watch notifications)
-- /pubsub/purchase-uploaded (ticket 5.14: receipt uploads → vision
+- /pubsub/purchase.uploaded (ticket 5.14: receipt uploads → vision
   extraction → finalize)
 
 Both Pub/Sub handlers always return 200 to ack. Pub/Sub's only
@@ -231,7 +231,7 @@ class _PurchaseUploadedPayload(BaseModel):
 
 
 @app.post(
-    "/pubsub/purchase-uploaded",
+    "/pubsub/purchase.uploaded",
     status_code=200,
     dependencies=[Depends(verify_pubsub_oidc)],
 )

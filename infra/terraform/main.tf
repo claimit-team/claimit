@@ -162,6 +162,10 @@ module "ingest_agent" {
   env_vars = {
     FRONTEND_BASE_URL = var.web_frontend_url
     GCP_PROJECT_ID    = var.project_id
+    # Ticket 5.14: the /pubsub/purchase.uploaded handler reads receipt
+    # blobs out of this bucket. Same value as api-gateway's mount so the
+    # gs:// URI written on upload is the URI ingest-agent fetches.
+    RECEIPTS_BUCKET = google_storage_bucket.receipts.name
   }
   # Hackathon scope; flip to true once services handle real data.
   deletion_protection = false
