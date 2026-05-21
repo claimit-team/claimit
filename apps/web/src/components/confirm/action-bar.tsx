@@ -80,12 +80,34 @@ export function ActionBar({ purchase, initialFormState, formState }: ActionBarPr
   const [submitting, setSubmitting] = useState(false);
   const [dismissOpen, setDismissOpen] = useState(false);
   const [dismissReason, setDismissReason] = useState<DismissReason>("not_an_order");
-  const [rememberSender, setRememberSender] = useState(false);
+  // `rememberSender` defaults to true for "Not an order" because the
+  // overwhelmingly common case is marketing / shipping notifications from
+  // senders the user does NOT want monitored ever again — making the user
+  // re-tick the box every time would be friction without UX benefit. For
+  // "Other" we default it to false because the bucket is open-ended and
+  // we shouldn't assume the user wants a permanent skiplist effect from
+  // a one-off ignore.
+  const [rememberSender, setRememberSender] = useState(true);
 
   const submitBlocker = getSubmitBlocker(formState);
 
   const hasSender = typeof purchase.sender === "string" && purchase.sender.trim().length > 0;
-  const showSkipSender = dismissReason === "not_an_order" && hasSender;
+
+  // Reason -> initial checkbox state. See the `rememberSender` initialiser
+  // for the why; this helper exists so the same defaulting fires both on
+  // reason flip inside the dialog AND on dialog re-open (the open path
+  // resets reason+checkbox via the close-reset branch below).
+  const defaultRememberForReason = (reason: DismissReason): boolean => reason === "not_an_order";
+
+  // Skip-sender checkbox surfaces for the two reasons that can semantically
+  // map to a per-sender skiplist write: "Not an order" (the dominant case —
+  // marketing / shipping notifications etc.) and "Other" (the user explicitly
+  // chose the open-ended bucket; if they tell us about the sender, honour it).
+  // Hidden for "Duplicate" — duplicates are doc-level, not sender-level; the
+  // backend already ignores `remember_sender` for that reason but the FE
+  // shouldn't display a control that would be discarded.
+  const showSkipSender =
+    (dismissReason === "not_an_order" || dismissReason === "other") && hasSender;
 
   const handleCancel = () => router.push("/dashboard");
 
@@ -168,10 +190,11 @@ export function ActionBar({ purchase, initialFormState, formState }: ActionBarPr
             open={dismissOpen}
             onOpenChange={(next) => {
               // Reset selections on close so re-opening shows the
-              // default (Not an order, unchecked) — matches v0.
+              // default (Not an order, with "skip future emails from this
+              // sender" pre-checked — see `defaultRememberForReason`).
               if (!next) {
                 setDismissReason("not_an_order");
-                setRememberSender(false);
+                setRememberSender(defaultRememberForReason("not_an_order"));
               }
               setDismissOpen(next);
             }}
@@ -199,7 +222,15 @@ export function ActionBar({ purchase, initialFormState, formState }: ActionBarPr
               <div className="flex flex-col gap-4 py-2">
                 <RadioGroup
                   value={dismissReason}
-                  onValueChange={(v) => setDismissReason((v ?? "not_an_order") as DismissReason)}
+                  onValueChange={(v) => {
+                    const next = (v ?? "not_an_order") as DismissReason;
+                    setDismissReason(next);
+                    // Apply the reason-aware default so the checkbox state
+                    // matches what the user would expect for each reason
+                    // every time they flip the selection — they can still
+                    // override before submitting.
+                    setRememberSender(defaultRememberForReason(next));
+                  }}
                   disabled={submitting}
                 >
                   <DismissReasonRow
@@ -280,13 +311,25 @@ function DismissReasonRow({
   description: string;
 }) {
   const id = `dismiss-${value}`;
+  // Grid keeps the radio control in a fixed-width column so the
+  // bold label aligns against the radio center even when the
+  // description below wraps to two lines. The pre-fix `flex
+  // items-start gap-2` layout let the radio drift up when the
+  // label text grew, leaving the radio visually orphaned from the
+  // first line of the label. Aligning to the label's first-line
+  // baseline (`pt-0.5` on the radio) makes the radio sit on the
+  // optical baseline of "Not an order" / "Duplicate" / "Other"
+  // rather than the geometric center of the entire two-line
+  // block — that's the alignment the visual review flagged.
   return (
-    <div className="flex items-start gap-2">
-      <RadioGroupItem value={value} id={id} className="mt-0.5" />
-      <Label htmlFor={id} className="flex flex-col gap-0.5 font-normal cursor-pointer">
+    <div className="grid grid-cols-[auto_1fr] items-start gap-x-3 gap-y-0">
+      <RadioGroupItem value={value} id={id} className="row-start-1 mt-0.5" />
+      <Label htmlFor={id} className="row-start-1 font-normal cursor-pointer leading-tight">
         <span className="text-sm font-medium text-neutral-700">{label}</span>
-        <span className="text-xs text-neutral-500">{description}</span>
       </Label>
+      <span className="col-start-2 row-start-2 text-xs text-neutral-500 leading-snug">
+        {description}
+      </span>
     </div>
   );
 }
