@@ -3,8 +3,9 @@
 /**
  * /purchases — fleet-view list of the authenticated user's purchases.
  *
- * Real-ified in PR2 (was previously a mock client filter over
- * `lib/mock-purchases.ts`). Mirrors the 5.4 claims-list shape
+ * Real-ified in PR2 (was previously a mock client filter over a
+ * mock-purchases module that has since been deleted in ticket 5.14
+ * B10). Mirrors the 5.4 claims-list shape
  * (`/claims/page.tsx`) — sticky filter bar + desktop table + mobile
  * card stack, skeleton / empty / error states, debounced search,
  * cursor pagination. Differences vs claims list:

@@ -12,10 +12,11 @@ import { buildInitialFormState, type ConfirmFormState } from "@/lib/confirm-form
 /**
  * Real-purchase confirm shell (ticket 5.14 B3).
  *
- * Now sources every field from the real `PurchaseDetailDoc` rather
- * than the mock `ConfirmExtractionPayload`. Children (form, banner,
- * receipt-preview) still consume their PR2-shape props here; B4–B6
- * each replace ONE child with a real-purchase-aware variant, so this
+ * Sources every field from the real `PurchaseDetailDoc` (mock
+ * `ConfirmExtractionPayload` was deleted in B10). Children (form,
+ * banner, receipt-preview) consume the real shape directly via the
+ * adapters below; each Bx commit (B4–B6) replaced ONE child with a
+ * real-purchase-aware variant, so this
  * file becomes a thin pass-through after B6 lands.
  *
  * The inline adapters below intentionally keep the bridging logic
