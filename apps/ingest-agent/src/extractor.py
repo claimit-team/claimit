@@ -25,9 +25,20 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from src.confidence import compute_overall_min
 from src.dedup import DuplicateReceiptError, check_duplicate, hash_receipt
+from src.genai_patches import apply_patches as _apply_genai_patches
 from src.notifier import maybe_send_confirmation_email
 
 logger = logging.getLogger(__name__)
+
+# Install the defensive `BaseApiClient.aclose` patch (workaround for
+# upstream PR googleapis/python-genai#2243). Reassigns a class
+# method, so calling at module import is sufficient — every Gemini
+# client constructed by an ADK Runner (lazily, inside `run_async`)
+# will dispatch through the patched bound method at teardown time.
+# Idempotent + logs once; the call is here (and not inside the
+# runner function bodies) so a Cloud Logging tail of a fresh
+# revision confirms the patch landed BEFORE any extraction runs.
+_apply_genai_patches()
 
 MODEL_NAME = "gemini-2.5-flash"
 APP_NAME = "claimit-ingest-extractor"
