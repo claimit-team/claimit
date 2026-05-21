@@ -12,7 +12,13 @@ from claimit_mongodb_models import Purchase
 from pydantic import ValidationError
 from src import extractor
 from src.confidence import compute_overall_min
-from src.extractor import EmailForExtraction, ExtractorError, extract
+from src.extractor import (
+    EmailForExtraction,
+    ExtractedPurchaseFields,
+    ExtractorError,
+    extract,
+    extract_from_blob,
+)
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "extraction_cases.json"
 
@@ -269,3 +275,103 @@ def test_run_extractor_agent_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(ExtractorError, match="timed out"):
         asyncio.run(extractor._run_extractor_agent(_sample_email()))
+
+
+# ---------------------------------------------------------------------------
+# extract_from_blob — vision adapter (ticket 5.14)
+# ---------------------------------------------------------------------------
+
+
+def test_extract_from_blob_returns_parsed_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mocked Gemini output round-trips through `_parse_extraction_output`."""
+    captured: dict[str, object] = {}
+
+    async def fake_run_blob(*, data: bytes, mime_type: str) -> str:
+        captured["data"] = data
+        captured["mime_type"] = mime_type
+        return json.dumps(_sample_extracted_payload())
+
+    monkeypatch.setattr(extractor, "_run_extractor_agent_blob", fake_run_blob)
+
+    result = asyncio.run(extract_from_blob(data=b"%PDF-1.4 fake", mime_type="application/pdf"))
+
+    assert isinstance(result, ExtractedPurchaseFields)
+    assert result.platform == "best_buy"
+    assert result.price_paid == 24.99
+    assert result.extraction_confidence.overall_min == 0.95
+    assert captured["data"] == b"%PDF-1.4 fake"
+    assert captured["mime_type"] == "application/pdf"
+
+
+@pytest.mark.parametrize("mime_type", ["application/pdf", "image/png", "image/jpeg"])
+def test_extract_from_blob_accepts_all_allowed_mime_types(
+    monkeypatch: pytest.MonkeyPatch, mime_type: str
+) -> None:
+    """Every mime type the upload validator accepts must run through extraction."""
+
+    async def fake_run_blob(*, data: bytes, mime_type: str) -> str:
+        return json.dumps(_sample_extracted_payload())
+
+    monkeypatch.setattr(extractor, "_run_extractor_agent_blob", fake_run_blob)
+    asyncio.run(extract_from_blob(data=b"raw", mime_type=mime_type))
+
+
+@pytest.mark.parametrize(
+    "mime_type",
+    ["application/octet-stream", "text/plain", "image/gif", ""],
+)
+def test_extract_from_blob_rejects_unsupported_mime_type(mime_type: str) -> None:
+    """Refuse upfront so a corrupt URI never burns a Gemini call."""
+    with pytest.raises(ValueError, match="Unsupported"):
+        asyncio.run(extract_from_blob(data=b"raw", mime_type=mime_type))
+
+
+def test_extract_from_blob_rejects_empty_bytes() -> None:
+    with pytest.raises(ValueError, match="empty"):
+        asyncio.run(extract_from_blob(data=b"", mime_type="application/pdf"))
+
+
+def test_extract_from_blob_raises_extractor_error_on_empty_model_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_run_blob(*, data: bytes, mime_type: str) -> str | None:
+        return None
+
+    monkeypatch.setattr(extractor, "_run_extractor_agent_blob", fake_run_blob)
+
+    with pytest.raises(ExtractorError, match="empty output"):
+        asyncio.run(extract_from_blob(data=b"raw", mime_type="application/pdf"))
+
+
+def test_extract_from_blob_propagates_validation_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Out-of-range confidence in the model output surfaces as ValidationError."""
+    payload = _sample_extracted_payload()
+    payload["extraction_confidence"]["platform"] = 1.5  # invalid: ge=0/le=1
+
+    async def fake_run_blob(*, data: bytes, mime_type: str) -> str:
+        return json.dumps(payload)
+
+    monkeypatch.setattr(extractor, "_run_extractor_agent_blob", fake_run_blob)
+
+    with pytest.raises(ValidationError):
+        asyncio.run(extract_from_blob(data=b"raw", mime_type="application/pdf"))
+
+
+def test_run_extractor_agent_blob_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same timeout taxonomy as the email path — error message identifies blob."""
+
+    class SlowRunner:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def run_async(self, **_kwargs: object):
+            await asyncio.sleep(1)
+            yield None
+
+    monkeypatch.setattr(extractor, "Runner", SlowRunner)
+    monkeypatch.setattr(extractor, "EXTRACTOR_TIMEOUT_SECONDS", 0.001)
+
+    with pytest.raises(ExtractorError, match="blob"):
+        asyncio.run(extractor._run_extractor_agent_blob(data=b"x", mime_type="application/pdf"))

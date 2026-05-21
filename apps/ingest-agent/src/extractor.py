@@ -262,6 +262,116 @@ async def _run_extractor_agent(email: EmailForExtraction) -> str | None:
     return final_text
 
 
+# Vision-extractor surface (ticket 5.14). Reuses the same Gemini Agent,
+# instruction, and ExtractedPurchaseFields schema as the email path —
+# only the user-message construction differs (a small vision hint +
+# a `types.Part.from_bytes` containing the receipt blob instead of a
+# JSON-stringified email body).
+#
+# We intentionally do NOT modify EXTRACTOR_SYSTEM_PROMPT — the system
+# prompt is shared with Raj's email path and gets locked behind any
+# accumulated regression evidence. The vision-only nudge lives in the
+# *user* message so a future text/email caller is unaffected.
+
+VISION_USER_INSTRUCTION = (
+    "The attached file is a customer-facing receipt (PDF or image). "
+    "Apply OCR / scan ambiguity rules conservatively — lower confidence "
+    "for blurry totals, partial line-items, or fields where the text "
+    "is hard to read. There is no sender, subject, snippet, or other "
+    "email metadata for this receipt; do not infer those values. "
+    "Use the same enums, JSON schema, and confidence rules from the "
+    "system prompt."
+)
+
+# Allowed receipt blob MIME types — matches the api-gateway upload
+# allow-list so a blob that survived upload validation will always
+# be runnable here. `application/octet-stream` and unknown types are
+# refused so a corrupt URI from a future code path doesn't silently
+# burn a Gemini call.
+ALLOWED_BLOB_MIME_TYPES: frozenset[str] = frozenset({"application/pdf", "image/png", "image/jpeg"})
+
+
+async def _run_extractor_agent_blob(*, data: bytes, mime_type: str) -> str | None:
+    """Multi-modal twin of `_run_extractor_agent`.
+
+    Same Agent / Runner / session-service shape; only difference is the
+    user message carries a `types.Part.from_bytes(...)` blob alongside
+    the minimal vision instruction. Identical timeout + error surface
+    so callers see one `ExtractorError` taxonomy regardless of input
+    modality.
+    """
+    session_service = InMemorySessionService()
+    session_id = f"extract-blob-{uuid4()}"
+    user_id = "ingest-extractor-blob"
+
+    await _maybe_await(
+        session_service.create_session(
+            app_name=APP_NAME,
+            user_id=user_id,
+            session_id=session_id,
+        )
+    )
+
+    runner = Runner(
+        app_name=APP_NAME,
+        agent=_build_extractor_agent(),
+        session_service=session_service,
+    )
+    message = types.Content(
+        role="user",
+        parts=[
+            types.Part.from_text(text=VISION_USER_INSTRUCTION),
+            types.Part.from_bytes(data=data, mime_type=mime_type),
+        ],
+    )
+
+    final_text: str | None = None
+    try:
+        async with asyncio.timeout(EXTRACTOR_TIMEOUT_SECONDS):
+            async for event in runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=message,
+            ):
+                if event.is_final_response():
+                    final_text = _extract_event_text(event)
+    except TimeoutError as exc:
+        raise ExtractorError(
+            f"Extractor (blob) timed out for user_id={user_id} session_id={session_id}"
+        ) from exc
+
+    return final_text
+
+
+async def extract_from_blob(
+    *,
+    data: bytes,
+    mime_type: str,
+) -> ExtractedPurchaseFields:
+    """Extract structured fields from a raw receipt blob (PDF / image).
+
+    Returns the same `ExtractedPurchaseFields` the email path produces.
+    The caller (A4 finalize) maps the result into a Purchase
+    `partial_update`. No Mongo write, no email send, no dedup hashing —
+    those are A4's responsibility so the helper stays a pure adapter.
+
+    Raises:
+        ValueError: when `mime_type` is not in `ALLOWED_BLOB_MIME_TYPES`.
+            Caller should ack the Pub/Sub message and log; reprocessing
+            won't help.
+        ExtractorError: when Gemini times out, returns empty/malformed
+            output, or otherwise fails. Caller may choose to retry.
+        pydantic.ValidationError: when Gemini's JSON doesn't match the
+            schema — same surface as the email path.
+    """
+    if mime_type not in ALLOWED_BLOB_MIME_TYPES:
+        raise ValueError(f"Unsupported blob mime_type: {mime_type!r}")
+    if not data:
+        raise ValueError("Cannot extract from empty blob")
+    raw_output = await _run_extractor_agent_blob(data=data, mime_type=mime_type)
+    return _parse_extraction_output(raw_output)
+
+
 def _merge_confidence_aggregate(payload: dict[str, float | None]) -> None:
     agg = compute_overall_min(payload)
     payload["overall_min"] = agg["overall_min"]
