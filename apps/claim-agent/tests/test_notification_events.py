@@ -91,8 +91,9 @@ async def test_write_notification_event_called_after_upsert_claim() -> None:
     claim_plan.claim_type = ClaimType.EMAIL
 
     draft = MagicMock()
-    draft.draft_content = "Generated email draft"
+    draft.draft_content = "Generated email draft for order ord-test-001"
     draft.policy_clause_cited = "Policy text"
+    draft.refund_amount = 20.0
 
     mock_search = MagicMock()
     mock_search.get_search_adapter.return_value = AsyncMock()
