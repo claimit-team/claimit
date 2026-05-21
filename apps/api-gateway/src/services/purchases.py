@@ -116,7 +116,7 @@ def parse_purchase_id(purchase_id: str) -> UUID:
 async def list_purchases(
     db: MongoDBClient,
     user_id: UUID,
-    status: PurchaseStatus | None,
+    status: list[PurchaseStatus] | None,
     category: Category | None,
     limit: int,
     cursor: str | None,
@@ -144,8 +144,13 @@ async def list_purchases(
       the same as the HTTP entry point.
     """
     base_filter: dict[str, Any] = {"user_id": user_id}
-    if status is not None:
-        base_filter["status"] = status.value
+    if status:
+        # `$in` whether status is a single-element list (backward-compat
+        # path for `?status=x`) or multi-element. A length-1 `$in` is
+        # semantically equivalent to equality and Mongo's planner uses
+        # the same index either way — no perf regression for the common
+        # single-value caller.
+        base_filter["status"] = {"$in": [s.value for s in status]}
     if category is not None:
         base_filter["category"] = category.value
 

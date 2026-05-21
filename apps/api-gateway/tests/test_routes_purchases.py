@@ -157,9 +157,13 @@ async def test_list_purchases_applies_filters(client: AsyncClient) -> None:
         assert response.status_code == 200
 
         count_filter = mock_db.count.await_args.args[1]
+        # `status` now uses `$in` even for a single value — semantically
+        # equivalent to the prior equality match. FastAPI parses a
+        # single `?status=monitoring` into a 1-element list which the
+        # service translates to `$in: [monitoring]`.
         assert count_filter == {
             "user_id": USER_ID,
-            "status": "monitoring",
+            "status": {"$in": ["monitoring"]},
             "category": "retail",
         }
         # find_many uses limit + 1 to detect has_more
@@ -265,7 +269,8 @@ async def test_list_purchases_q_combines_with_status_category(
 
         count_filter = mock_db.count.await_args.args[1]
         assert count_filter["user_id"] == USER_ID
-        assert count_filter["status"] == "monitoring"
+        # status is now always `$in`-shaped (single or multi-value).
+        assert count_filter["status"] == {"$in": ["monitoring"]}
         assert count_filter["category"] == "retail"
         assert "$or" in count_filter
         assert len(count_filter["$or"]) == 3
@@ -339,6 +344,35 @@ async def test_list_purchases_q_special_chars_escape(client: AsyncClient) -> Non
         assert count_filter["$or"][0]["platform"]["$regex"] == escaped
         assert count_filter["$or"][1]["product_name"]["$regex"] == escaped
         assert count_filter["$or"][2]["order_id"]["$regex"] == escaped
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_list_purchases_status_multi_value_uses_in_clause(
+    client: AsyncClient,
+) -> None:
+    """Repeated `?status=` query keys produce a `$in` over all values.
+
+    Real consumer: the dashboard's "Monitored purchases" hook needs
+    to surface BOTH `monitoring` and `monitoring_degraded` so the
+    section's row count matches the dashboard-summary
+    `monitoring_purchases_count` (which counts both via
+    `_MONITORING_STATUSES` in dashboard.py).
+    """
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.count = AsyncMock(return_value=0)
+    mock_db.find_many = AsyncMock(return_value=[])
+    _set_overrides(mock_db)
+    try:
+        response = await client.get(
+            "/api/v1/purchases?status=monitoring&status=monitoring_degraded",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+
+        count_filter = mock_db.count.await_args.args[1]
+        assert count_filter["status"] == {"$in": ["monitoring", "monitoring_degraded"]}
     finally:
         _clear_overrides()
 

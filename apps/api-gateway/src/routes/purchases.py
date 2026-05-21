@@ -50,7 +50,7 @@ class DismissPurchaseRequest(BaseModel):
 async def list_purchases(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[MongoDBClient, Depends(get_db)],
-    status: Annotated[PurchaseStatus | None, Query()] = None,
+    status: Annotated[list[PurchaseStatus] | None, Query()] = None,
     category: Annotated[Category | None, Query()] = None,
     q: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -59,7 +59,15 @@ async def list_purchases(
     """Paginated list scoped to the authenticated user.
 
     Filters:
-    - `status` / `category`: exact enum match (existing).
+    - `status`: zero-or-more `PurchaseStatus` enum values. Accepts
+      repeated query keys (`?status=monitoring&status=monitoring_degraded`).
+      Backward compatible — a single `?status=x` becomes a 1-element
+      list that the service translates to `$in: [x]`, semantically
+      equivalent to the previous equality match. Repeating the param
+      lets the dashboard's "Monitored purchases" hook surface both
+      `monitoring` AND `monitoring_degraded` rows so the section's
+      row count matches the dashboard-summary `monitoring_purchases_count`.
+    - `category`: exact enum match (existing).
     - `q`: case-insensitive substring search across `platform`,
       `product_name`, and `order_id`. `re.escape`d server-side, capped at
       `Q_MAX_LENGTH` characters. Combines with status/category via AND.

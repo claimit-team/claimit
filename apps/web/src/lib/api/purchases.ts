@@ -219,11 +219,16 @@ export type PurchaseListItem = PurchaseDetailDoc;
 
 export type ListPurchasesParams = {
   /**
-   * Backend `PurchaseStatus` enum value (e.g. "monitoring"). Typed as
-   * raw string here because the wire enum is the source of truth — a
-   * future status will be accepted without a frontend type bump.
+   * Zero-or-more backend `PurchaseStatus` enum values (e.g.
+   * "monitoring"). Accepts either a single string OR an array — both
+   * shapes get serialized as repeated `?status=` query keys, which
+   * the backend parses into a `$in` filter (a single value still
+   * works; the server treats single + multi the same way at the
+   * MongoDB layer). Typed as raw string here because the wire enum is
+   * the source of truth — a future status will be accepted without a
+   * frontend type bump.
    */
-  status?: string;
+  status?: string | string[];
   /** Backend `Category` enum value (retail / airline / hotel). */
   category?: string;
   /**
@@ -262,7 +267,17 @@ export async function listPurchases(
   params: ListPurchasesParams = {},
 ): Promise<ListPurchasesResponse> {
   const query = new URLSearchParams();
-  if (params.status !== undefined && params.status.length > 0) query.set("status", params.status);
+  // `status` accepts both `string` (single value) and `string[]`
+  // (multi). Both are serialized as repeated `status=...` query
+  // params so the backend always sees a list (FastAPI's
+  // `list[PurchaseStatus] | None` query type). Empty strings are
+  // skipped so an accidental empty filter doesn't reach the server.
+  if (params.status !== undefined) {
+    const values = Array.isArray(params.status) ? params.status : [params.status];
+    for (const value of values) {
+      if (value.length > 0) query.append("status", value);
+    }
+  }
   if (params.category !== undefined && params.category.length > 0) {
     query.set("category", params.category);
   }

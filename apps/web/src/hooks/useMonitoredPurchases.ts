@@ -5,7 +5,14 @@
  * NOT the same as `usePurchases` (which drives the full /purchases
  * list with debounced search, cursor pagination, generation-guarded
  * stale-while-error). The dashboard section is:
- *  - Always filtered to `status=monitoring` (the section's whole job).
+ *  - Filtered to BOTH `monitoring` AND `monitoring_degraded` — these
+ *    are the same two statuses the dashboard summary's
+ *    `monitoring_purchases_count` aggregates (see
+ *    `_MONITORING_STATUSES` in apps/api-gateway/src/services/dashboard.py).
+ *    Counting only `monitoring` would produce a visible inconsistency
+ *    where the summary card reports a higher number than the section
+ *    actually renders — and the degraded amber-dot rendering in
+ *    `MonitoredPurchasesSection` would be dead code.
  *  - Showing a small fixed slice (5 rows by default) — never paginated.
  *  - No search, no filter UI, no debounce.
  *
@@ -75,7 +82,9 @@ export function useMonitoredPurchases({
     setIsLoading(true);
     setError(null);
 
-    listPurchases({ status: "monitoring", limit })
+    // Mirror `_MONITORING_STATUSES` from the backend dashboard service
+    // so the section's row set matches the summary's count exactly.
+    listPurchases({ status: ["monitoring", "monitoring_degraded"], limit })
       .then((page) => {
         if (!mounted) return;
         setPurchases(page.purchases);
