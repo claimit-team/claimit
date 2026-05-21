@@ -162,6 +162,12 @@ module "ingest_agent" {
   env_vars = {
     FRONTEND_BASE_URL = var.web_frontend_url
     GCP_PROJECT_ID    = var.project_id
+    # Post-5.14 prod-verification fix: some libs (notably google-cloud-pubsub
+    # wrappers in api-gateway) only read GOOGLE_CLOUD_PROJECT. Cloud Run does
+    # NOT auto-inject this var, so codify both names — keeps ingest-agent and
+    # api-gateway in lockstep regardless of which env name a downstream
+    # publisher prefers. Same value for both; pulls from var.project_id.
+    GOOGLE_CLOUD_PROJECT = var.project_id
     # Ticket 5.14: the /pubsub/purchase.uploaded handler reads receipt
     # blobs out of this bucket. Same value as api-gateway's mount so the
     # gs:// URI written on upload is the URI ingest-agent fetches.
@@ -254,7 +260,12 @@ module "api_gateway" {
     GMAIL_OAUTH_REDIRECT_URI  = "https://claimit-api-gateway-i4zxjn67hq-ue.a.run.app/api/v1/gmail/callback"
     FRONTEND_BASE_URL         = var.web_frontend_url
     GCP_PROJECT_ID            = var.project_id
-    RECEIPTS_BUCKET           = google_storage_bucket.receipts.name
+    # Post-5.14 prod-verification fix: pubsub_publisher.py reads
+    # GOOGLE_CLOUD_PROJECT only — without this, POST /purchases/upload
+    # 503'd at the first publish call. Codify alongside GCP_PROJECT_ID so a
+    # future deploy doesn't wipe the temporary `gcloud run services update`.
+    GOOGLE_CLOUD_PROJECT = var.project_id
+    RECEIPTS_BUCKET      = google_storage_bucket.receipts.name
     # Ticket 4.15: the gmail-inbound topic api-gateway tells Gmail to
     # publish to during `users.watch`. The .id form yields the fully-
     # qualified `projects/<project>/topics/gmail-inbound` path Gmail
