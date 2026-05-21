@@ -79,12 +79,34 @@ export function buildInitialFormState(purchase: PurchaseDetailDoc): ConfirmFormS
       ? (rawPlatform as Platform)
       : "";
 
-  const purchaseDateMs = purchase.purchase_date ? Date.parse(purchase.purchase_date) : Number.NaN;
+  // Backend stores purchase_date as a tz-aware datetime at midnight
+  // UTC, treating it as a stable CALENDAR-DATE encoding (the time-of-
+  // day is meaningless for window arithmetic). The picker, by contrast,
+  // creates Date objects at midnight LOCAL on the user's selected day.
+  // Reading the backend date with local accessors (`getDate()` etc.)
+  // would roll the day BACKWARD for users in negative UTC offsets
+  // (e.g. UTC-8: midnight UTC is 4pm the previous local day, so
+  // `getDate()` returns the day before what the backend recorded).
+  // Normalize on the way in by reading the UTC calendar fields and
+  // constructing a fresh Date at LOCAL midnight on the same day —
+  // then `sameDay` and `toIsoMidnightUtc` (which both use local
+  // accessors) line up with the picker's output and with what the
+  // backend stored. Symmetric tz handling: read = UTC components,
+  // compare/write = local components, but only because the wire
+  // encoding is a calendar date dressed as a UTC instant.
+  let purchaseDate: Date | null = null;
+  if (purchase.purchase_date) {
+    const ms = Date.parse(purchase.purchase_date);
+    if (Number.isFinite(ms)) {
+      const dt = new Date(ms);
+      purchaseDate = new Date(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
+    }
+  }
   return {
     platform,
     productName: purchase.product_name ?? "",
     pricePaid: purchase.price_paid === null ? "" : String(purchase.price_paid),
-    purchaseDate: Number.isFinite(purchaseDateMs) ? new Date(purchaseDateMs) : null,
+    purchaseDate,
     orderId: purchase.order_id ?? "",
     category: coerceCategory(purchase.category),
     memberTier: purchase.member_tier_at_purchase ?? "",

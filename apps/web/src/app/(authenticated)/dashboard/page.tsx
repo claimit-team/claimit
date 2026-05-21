@@ -514,11 +514,20 @@ function buildConfirmExtractionItems(purchases: PurchaseListItem[]): ConfirmExtr
     const overall = conf.overall_min;
     if (overall === null || overall === undefined || overall === 0) continue;
 
+    // Dedupe by human label rather than raw key. Multiple confidence
+    // keys can map to the same form field (e.g. `price` and
+    // `price_paid` both surface as "Purchase price" via
+    // `DASHBOARD_FIELD_LABEL`); without dedupe the card would list
+    // "Purchase price, Purchase price" on a doc whose price came in
+    // with low confidence on both keys.
     const lowFields: string[] = [];
     for (const [key, value] of Object.entries(conf)) {
       if (key === "overall_min") continue;
       if (value === null || value === undefined) continue;
-      if (value < CONFIDENCE_THRESHOLD) lowFields.push(humanizeField(key));
+      if (value < CONFIDENCE_THRESHOLD) {
+        const label = humanizeField(key);
+        if (!lowFields.includes(label)) lowFields.push(label);
+      }
     }
 
     // Pending-confirmation rows reach this branch with overall_min <
