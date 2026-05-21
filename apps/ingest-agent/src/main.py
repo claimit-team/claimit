@@ -28,11 +28,13 @@ from uuid import UUID
 from claimit_mongodb_models import MongoDBClient, PurchaseStatus
 from claimit_observability import init_phoenix
 from fastapi import Depends, FastAPI, Request
+from google.cloud import secretmanager
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .auth import verify_pubsub_oidc
 from .extractor import ALLOWED_BLOB_MIME_TYPES, ExtractorError, extract_from_blob
 from .finalize import FinalizeError, finalize_purchase_extraction
+from .renewal import run_renewal_sweep
 from .storage import ReceiptObjectMissingError, ReceiptsReader, parse_gs_uri
 
 _log = logging.getLogger(__name__)
@@ -137,6 +139,7 @@ def _select_mime_type(
 # unit tests using FastAPI dependency_overrides cheap.
 _db: MongoDBClient | None = None
 _receipts_reader: ReceiptsReader | None = None
+_sm_client: secretmanager.SecretManagerServiceClient | None = None
 
 
 async def get_db() -> MongoDBClient:
@@ -151,9 +154,19 @@ async def get_receipts_reader() -> ReceiptsReader:
     return _receipts_reader
 
 
+async def get_sm_client() -> secretmanager.SecretManagerServiceClient:
+    """Secret Manager client used by the 4.16 renewal cron to load each
+    user's gmail-refresh-token secret. Cheap to construct (lazy gRPC
+    channel, ADC-resolved), but cheaper still to hold a single instance
+    across the sweep."""
+    if _sm_client is None:
+        raise RuntimeError("Secret Manager client not initialized")
+    return _sm_client
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    global _db, _receipts_reader
+    global _db, _receipts_reader, _sm_client
     init_phoenix("claimit-ingest-agent")
     # MongoDB + receipts reader are required for the purchase.uploaded
     # handler. They're soft-optional during local dev / test (overridable
@@ -164,6 +177,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         _db = MongoDBClient(mongo_url)
     if os.environ.get("RECEIPTS_BUCKET"):
         _receipts_reader = ReceiptsReader()
+    # Secret Manager client is unconditionally needed by the 4.16
+    # /renew-watches handler. Always construct (no env-var gate) — ADC
+    # is available in every Cloud Run + local-dev configuration, and
+    # the lazy gRPC channel means construction has no side effects we'd
+    # want to defer.
+    _sm_client = secretmanager.SecretManagerServiceClient()
     yield
     if _db is not None:
         await _db.close()
@@ -234,6 +253,27 @@ async def health() -> dict[str, str]:
 @app.get("/")
 async def root() -> dict[str, str]:
     return {"message": "ClaimIt ingest agent is running"}
+
+
+@app.post("/renew-watches")
+async def renew_watches(
+    db: MongoDBClient = Depends(get_db),
+    sm_client: secretmanager.SecretManagerServiceClient = Depends(get_sm_client),
+) -> dict[str, int]:
+    """Daily Gmail watch renewal sweep (ticket 4.16).
+
+    Invoked by Cloud Scheduler at 03:00 UTC. Auth is platform-level —
+    Cloud Run's `run.invoker` grant on the `pubsub-pusher` SA gates
+    the request; this handler has no app-level OIDC check (same posture
+    as monitor-agent's `/cron`). The Scheduler OIDC token's audience
+    is the bare service URL (`module.ingest_agent.service_url`) rather
+    than the full push endpoint, so the 4.15 Pub/Sub-push verifier
+    pattern wouldn't apply cleanly here even if we wanted it.
+
+    Returns the counters dict from `run_renewal_sweep` so the workflow
+    + Cloud Logging have visibility into what each run did.
+    """
+    return await run_renewal_sweep(db, sm_client)
 
 
 @app.post(
