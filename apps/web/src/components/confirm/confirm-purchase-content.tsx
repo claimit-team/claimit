@@ -166,7 +166,7 @@ export function ConfirmPurchaseContent({ purchase }: { purchase: PurchaseDetailD
         </div>
       </div>
 
-      <ActionBar purchaseId={purchase._id} initialFormState={initialState} formState={formState} />
+      <ActionBar purchase={purchase} initialFormState={initialState} formState={formState} />
     </div>
   );
 }
