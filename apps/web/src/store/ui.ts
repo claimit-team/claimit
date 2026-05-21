@@ -13,6 +13,16 @@ type ProactiveEntry = {
   output: ProactiveOutput;
   /** Original event_type — useful for telemetry / debug. */
   eventType: string;
+  /**
+   * The original NotificationEvent's raw `data` payload (ticket 5.14
+   * B9). Preserved end-to-end so quick-action handlers can route to a
+   * specific entity — most importantly `purchase_id` from a
+   * `low_confidence_extract` event, which the FAB uses to push to
+   * `/confirm/:purchase_id` instead of the generic /purchases list.
+   * Typed as `unknown` because the wire payload is producer-defined;
+   * consumers should narrow defensively before reading any field.
+   */
+  data: unknown;
 };
 
 type UIState = {

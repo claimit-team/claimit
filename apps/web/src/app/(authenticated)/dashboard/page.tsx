@@ -188,6 +188,7 @@ function DevPulseTrigger() {
               { label: "Auto-file now", action: "approve_claim" },
             ],
           },
+          data: null,
         });
         toast.info("Proactive event queued — watch the assistant FAB pulse.");
       }}

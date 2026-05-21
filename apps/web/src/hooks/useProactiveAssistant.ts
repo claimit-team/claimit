@@ -163,5 +163,6 @@ function handleNotificationFrame(
     notificationId,
     output,
     eventType,
+    data: frame.data,
   });
 }

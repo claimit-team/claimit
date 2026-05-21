@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { toast } from "sonner";
 
 import { ProactiveCard } from "@/components/assistant/proactive-card";
 import { Button } from "@/components/ui/button";
@@ -17,8 +18,22 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { useAssistantStream } from "@/hooks/useAssistantStream";
 import { useConversations } from "@/hooks/useConversations";
+import { acknowledgeProactiveEvent } from "@/lib/api/conversations";
+import { dismissPurchase, PurchasesApiError } from "@/lib/api/purchases";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store";
+
+/**
+ * Defensively pull `purchase_id` (string) out of the raw notification
+ * data payload. The payload is producer-defined wire JSON, so we
+ * narrow without trusting any field. Returns `null` for any
+ * malformed shape so the caller can pick a safe fallback.
+ */
+function extractPurchaseId(data: unknown): string | null {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
+  const id = (data as Record<string, unknown>).purchase_id;
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
 
 type FloatingAssistantProps = {
   /** On claim detail, FAB becomes a slim pill toggling embedded pane expansion (batch 6) */
@@ -81,15 +96,66 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
           clearProactiveEvent();
           return;
         case "confirm_purchase":
-        case "edit_purchase":
-        case "dismiss_purchase":
-          // Confirmation flow lives at /confirm/[purchaseId] — without
-          // the id in the payload we redirect to /purchases. The B9
-          // commit replaces this fallback with a real route based on
-          // the proactive payload's `purchase_id`.
-          router.push("/purchases");
+        case "edit_purchase": {
+          // Ticket 5.14 B9: route directly to /confirm/:purchase_id
+          // when the proactive payload carries one. The backend's
+          // `low_confidence_extract` NotificationEvent's `data.purchase
+          // _id` is the contract (see api-gateway finalize_purchase_
+          // extraction). Without an id we degrade to /purchases — the
+          // user can still find the purchase manually rather than
+          // landing on a 404'd confirm route.
+          const purchaseId = extractPurchaseId(proactiveEvent?.data);
+          if (purchaseId) {
+            router.push(`/confirm/${encodeURIComponent(purchaseId)}`);
+          } else {
+            router.push("/purchases");
+          }
           clearProactiveEvent();
           return;
+        }
+        case "dismiss_purchase": {
+          // In-place dismiss — fire `not_an_order` + remember_sender
+          // (the only configuration the proactive nudge offers; deeper
+          // configuration belongs on the full confirm page). Toast +
+          // ack notification + clear the proactive event. No redirect:
+          // the user is on whatever page they were, the assistant
+          // shouldn't yank them away just to dismiss a suggestion.
+          const purchaseId = extractPurchaseId(proactiveEvent?.data);
+          const notificationId = proactiveEvent?.notificationId;
+          if (!purchaseId) {
+            toast.error("We couldn't find the purchase to ignore.");
+            clearProactiveEvent();
+            return;
+          }
+          clearProactiveEvent();
+          void (async () => {
+            try {
+              const result = await dismissPurchase(purchaseId, {
+                reason: "not_an_order",
+                remember_sender: true,
+              });
+              if (result.skiplist_written) {
+                toast.success("Receipt ignored — we'll skip future emails from this sender too.");
+              } else {
+                toast.success("Receipt ignored.");
+              }
+              if (notificationId) {
+                try {
+                  await acknowledgeProactiveEvent(notificationId);
+                } catch {
+                  // Best-effort — the unread-count poll reconciles.
+                }
+              }
+            } catch (err) {
+              const message =
+                err instanceof PurchasesApiError
+                  ? err.message
+                  : "We couldn't ignore this receipt. Try again.";
+              toast.error(message);
+            }
+          })();
+          return;
+        }
         case "open_chat":
           router.push("/assistant");
           clearProactiveEvent();
@@ -104,7 +170,7 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
           clearProactiveEvent();
       }
     },
-    [router, clearProactiveEvent, openUploadDialog],
+    [router, clearProactiveEvent, openUploadDialog, proactiveEvent],
   );
 
   if (variant === "pill") {
