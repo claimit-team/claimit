@@ -44,6 +44,7 @@ COPY packages/shared/mongodb /build/packages/shared/mongodb
 COPY packages/shared/pubsub /build/packages/shared/pubsub
 COPY packages/shared/elastic /build/packages/shared/elastic
 COPY packages/shared/search /build/packages/shared/search
+COPY packages/shared/maps /build/packages/shared/maps
 
 # Install deps (../../packages/shared/... now resolves to /build/packages/shared/...).
 RUN uv sync --frozen --no-dev --no-install-project
