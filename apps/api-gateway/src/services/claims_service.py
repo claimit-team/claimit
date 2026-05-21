@@ -72,6 +72,73 @@ STATUS_GROUP_OUTCOMES: dict[str, list[ClaimOutcome]] = {
 Q_MAX_LENGTH = 100
 
 
+# ---------------------------------------------------------------------------
+# Shared aggregation building blocks for `claims` reads.
+#
+# `list_claims` (full /claims list) and `list_claims_for_purchase` (the
+# enriched purchase-detail bundle, ticket 5.6) BOTH need to emit the same
+# `ClaimListItem`-shaped row — Claim core fields plus the three joined
+# Purchase fields (`product_name`, `category`, `window_expires`). Defining
+# the lookup/unwind/project stages once here keeps the two endpoints in
+# lockstep: a future tweak to the projection (added/removed/renamed
+# field) lands in one place, not two.
+#
+# `_CLAIMS_PURCHASE_LOOKUP_STAGE` uses a sub-pipeline to project only the
+# three needed Purchase fields. Keeps the joined sub-doc small (purchases
+# carry receipt blobs and extraction metadata that the list view doesn't
+# render). `_CLAIMS_PURCHASE_UNWIND_STAGE` preserves orphan claims — when
+# the linked Purchase is missing/deleted, the joined fields project to
+# `None` rather than the claim disappearing from results.
+# ---------------------------------------------------------------------------
+
+_CLAIMS_PURCHASE_LOOKUP_STAGE: dict[str, Any] = {
+    "$lookup": {
+        "from": "purchases",
+        "localField": "purchase_id",
+        "foreignField": "_id",
+        "as": "purchase",
+        "pipeline": [
+            {
+                "$project": {
+                    "_id": 0,
+                    "product_name": 1,
+                    "category": 1,
+                    "window_expires": 1,
+                }
+            }
+        ],
+    }
+}
+
+_CLAIMS_PURCHASE_UNWIND_STAGE: dict[str, Any] = {
+    "$unwind": {"path": "$purchase", "preserveNullAndEmptyArrays": True}
+}
+
+# Final `$project` stage — whitelist projection whose output shape matches
+# `ClaimListItem`. Heavy fields (`draft_content`, `draft_versions`,
+# `policy_clause_cited`, `outcome_note`, etc.) are intentionally NOT in
+# this projection — the detail endpoint exposes them.
+_CLAIM_LIST_PROJECT_STAGE: dict[str, Any] = {
+    "$project": {
+        "_id": 1,
+        "updated_at": 1,
+        "purchase_id": 1,
+        "user_id": 1,
+        "platform": 1,
+        "claim_amount": 1,
+        "currency": 1,
+        "claim_type": 1,
+        "outcome": 1,
+        "submitted_at": 1,
+        "resolved_at": 1,
+        "redraft_count": 1,
+        "product_name": "$purchase.product_name",
+        "category": "$purchase.category",
+        "window_expires": "$purchase.window_expires",
+    }
+}
+
+
 class ClaimListItem(BaseModel):
     """Enriched list-row shape returned by GET /api/v1/claims.
 
@@ -218,61 +285,12 @@ async def list_claims(
             {"updated_at": sort_dt, "_id": {"$lt": cursor_uuid}},
         ]
 
-    # Stages reused by both branches. Pulled out so the two pipeline orderings
-    # below stay obviously identical except for the $sort/$limit placement.
-    lookup_stage: dict[str, Any] = {
-        "$lookup": {
-            "from": "purchases",
-            "localField": "purchase_id",
-            "foreignField": "_id",
-            "as": "purchase",
-            # Sub-pipeline projects only the fields the list view needs,
-            # keeping the joined sub-doc small (purchases carry receipt
-            # blobs and extraction metadata that the list never renders).
-            "pipeline": [
-                {
-                    "$project": {
-                        "_id": 0,
-                        "product_name": 1,
-                        "category": 1,
-                        "window_expires": 1,
-                    }
-                }
-            ],
-        }
-    }
-    # preserveNullAndEmptyArrays keeps orphan claims (claim whose
-    # Purchase is missing/deleted) in the result; their `purchase`
-    # field is null and the joined fields project to None.
-    unwind_stage: dict[str, Any] = {
-        "$unwind": {"path": "$purchase", "preserveNullAndEmptyArrays": True}
-    }
+    # Sort/limit stages are local to this call (limit depends on the
+    # caller's page size); the lookup/unwind/project stages are the
+    # shared module-level constants so `list_claims_for_purchase` emits
+    # an identically-shaped row without duplication.
     sort_stage: dict[str, Any] = {"$sort": {"updated_at": -1, "_id": -1}}
     limit_stage: dict[str, Any] = {"$limit": limit + 1}
-    project_stage: dict[str, Any] = {
-        # Whitelist projection — final shape matches ClaimListItem.
-        # Drops draft_content, draft_versions, policy_clause_cited,
-        # send_override, outcome_note, denial_reason_extracted,
-        # submitted_via, evidence_screenshot_url, trace_id from the
-        # list response. The detail endpoint exposes them.
-        "$project": {
-            "_id": 1,
-            "updated_at": 1,
-            "purchase_id": 1,
-            "user_id": 1,
-            "platform": 1,
-            "claim_amount": 1,
-            "currency": 1,
-            "claim_type": 1,
-            "outcome": 1,
-            "submitted_at": 1,
-            "resolved_at": 1,
-            "redraft_count": 1,
-            "product_name": "$purchase.product_name",
-            "category": "$purchase.category",
-            "window_expires": "$purchase.window_expires",
-        }
-    }
 
     q_clean = q.strip() if q is not None else None
     pipeline: list[dict[str, Any]]
@@ -295,12 +313,12 @@ async def list_claims(
         }
         pipeline = [
             {"$match": match},
-            lookup_stage,
-            unwind_stage,
+            _CLAIMS_PURCHASE_LOOKUP_STAGE,
+            _CLAIMS_PURCHASE_UNWIND_STAGE,
             q_match_stage,
             sort_stage,
             limit_stage,
-            project_stage,
+            _CLAIM_LIST_PROJECT_STAGE,
         ]
     else:
         # No-q path: sort+limit pre-$lookup so we only enrich the page
@@ -312,9 +330,9 @@ async def list_claims(
             {"$match": match},
             sort_stage,
             limit_stage,
-            lookup_stage,
-            unwind_stage,
-            project_stage,
+            _CLAIMS_PURCHASE_LOOKUP_STAGE,
+            _CLAIMS_PURCHASE_UNWIND_STAGE,
+            _CLAIM_LIST_PROJECT_STAGE,
         ]
 
     raw_docs = await db.aggregate("claims", pipeline)
@@ -336,6 +354,52 @@ async def list_claims(
         ClaimListItem.model_validate(d).model_dump(mode="json", by_alias=True) for d in visible
     ]
     return {"claims": items, "next_cursor": next_cursor}
+
+
+# Hard cap on per-purchase claims surfaced by the enriched detail bundle.
+# In normal operation a Purchase has 0-1 active claims; the cap is defensive
+# against a runaway redraft loop or a future feature that allows multiple
+# concurrent claims per purchase. Detail page just renders a card list - no
+# cursor pagination needed.
+_CLAIMS_PER_PURCHASE_CAP = 50
+
+
+async def list_claims_for_purchase(
+    db: MongoDBClient,
+    user_id: UUID,
+    purchase_id: UUID,
+    limit: int = _CLAIMS_PER_PURCHASE_CAP,
+) -> list[dict[str, object]]:
+    """Return the claims attached to a single purchase, owned by `user_id`.
+
+    Used by the enriched `GET /api/v1/purchases/:id` bundle (ticket 5.6) to
+    populate the "Claims on this purchase" card. Pipeline reuses the shared
+    `_CLAIMS_PURCHASE_LOOKUP_STAGE` / `_CLAIM_LIST_PROJECT_STAGE` constants
+    so each row is identically-shaped to a `/claims` list row — the
+    frontend can render via the same `ClaimListItem`-style helpers
+    (`ClaimOutcomeBadge`, `claimTypeLabel`, `formatMoney`).
+
+    Sort is `updated_at DESC, _id DESC` (same as `list_claims`) so newest
+    activity surfaces first. No cursor — `limit` is a hard cap and any
+    overflow is silently truncated. Heavy claim fields stay off-wire.
+
+    Ownership is enforced by including `user_id` in the `$match`, NOT via
+    a separate guard. A purchase owned by another user simply yields zero
+    rows — never leaks claim existence across users.
+    """
+    match: dict[str, Any] = {"user_id": user_id, "purchase_id": purchase_id}
+    pipeline: list[dict[str, Any]] = [
+        {"$match": match},
+        {"$sort": {"updated_at": -1, "_id": -1}},
+        {"$limit": limit},
+        _CLAIMS_PURCHASE_LOOKUP_STAGE,
+        _CLAIMS_PURCHASE_UNWIND_STAGE,
+        _CLAIM_LIST_PROJECT_STAGE,
+    ]
+    raw_docs = await db.aggregate("claims", pipeline)
+    return [
+        ClaimListItem.model_validate(d).model_dump(mode="json", by_alias=True) for d in raw_docs
+    ]
 
 
 async def get_claim_detail(
@@ -697,4 +761,5 @@ __all__ = [
     "edit_claim_draft",
     "get_claim_detail",
     "list_claims",
+    "list_claims_for_purchase",
 ]

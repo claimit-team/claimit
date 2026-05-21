@@ -7,7 +7,7 @@ dependency_overrides[get_db]/[get_current_user]/[get_receipts_uploader].
 from __future__ import annotations
 
 import copy
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from unittest.mock import AsyncMock
 from uuid import UUID
@@ -244,8 +244,13 @@ async def test_list_purchases_cursor_roundtrip(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_get_purchase_returns_owned_purchase(client: AsyncClient) -> None:
+    """Enriched detail (ticket 5.6): response carries `purchase`,
+    `price_history`, `claims`. Empty histories/claims surface as `[]`,
+    NOT missing keys — frontend renders a calm empty state."""
     mock_db = AsyncMock(spec=MongoDBClient)
     mock_db.get_purchase = AsyncMock(return_value=_purchase_fixture(status="monitoring"))
+    mock_db.find_price_history = AsyncMock(return_value=[])
+    mock_db.aggregate = AsyncMock(return_value=[])
     _set_overrides(mock_db)
     try:
         response = await client.get(
@@ -256,6 +261,152 @@ async def test_get_purchase_returns_owned_purchase(client: AsyncClient) -> None:
         payload = response.json()
         assert payload["purchase"]["_id"] == str(PURCHASE_ID)
         assert payload["purchase"]["status"] == "monitoring"
+        # Additive keys present, both `[]` on a freshly-monitored purchase.
+        assert payload["price_history"] == []
+        assert payload["claims"] == []
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_get_purchase_detail_enriches_with_price_history_and_claims(
+    client: AsyncClient,
+) -> None:
+    """Enriched bundle includes the purchase's price_history (ASC by
+    checked_at — the chart-friendly order) and the claims tied to this
+    purchase. Wire shape matches ClaimListItem (`_id`, `outcome`,
+    `claim_amount`, joined `product_name` from $lookup)."""
+    from claimit_mongodb_models import PriceHistoryReadTolerant
+
+    now = datetime.now(UTC)
+
+    price_rows = [
+        PriceHistoryReadTolerant.model_construct(
+            id=UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"),
+            purchase_id=PURCHASE_ID,
+            platform="best_buy",
+            product_id="BBY-987654",
+            price_member=None,
+            price_non_member=24.99,
+            member_tier_required=None,
+            currency="USD",
+            checked_at=now - timedelta(days=4),
+            source="scraperapi",
+            evidence_screenshot_url=None,
+            raw_response_hash="hash-a",
+        ),
+        PriceHistoryReadTolerant.model_construct(
+            id=UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2"),
+            purchase_id=PURCHASE_ID,
+            platform="best_buy",
+            product_id="BBY-987654",
+            price_member=None,
+            price_non_member=19.99,
+            member_tier_required=None,
+            currency="USD",
+            checked_at=now - timedelta(days=1),
+            source="scraperapi",
+            evidence_screenshot_url=None,
+            raw_response_hash="hash-b",
+        ),
+    ]
+    # Aggregate result shape matches a $project'd ClaimListItem row —
+    # claim core fields + the three joined Purchase fields. Mirrors the
+    # output of _CLAIM_LIST_PROJECT_STAGE.
+    claim_rows = [
+        {
+            "_id": UUID("20000000-0000-0000-0000-000000000001"),
+            "updated_at": now,
+            "purchase_id": PURCHASE_ID,
+            "user_id": USER_ID,
+            "platform": "best_buy",
+            "claim_amount": 5.0,
+            "currency": "USD",
+            "claim_type": "email",
+            "outcome": "draft_pending",
+            "submitted_at": None,
+            "resolved_at": None,
+            "redraft_count": 0,
+            "product_name": "Widget",
+            "category": "retail",
+            "window_expires": now + timedelta(days=11),
+        }
+    ]
+
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=_purchase_fixture(status="monitoring"))
+    mock_db.find_price_history = AsyncMock(return_value=price_rows)
+    mock_db.aggregate = AsyncMock(return_value=claim_rows)
+    _set_overrides(mock_db)
+    try:
+        response = await client.get(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["purchase"]["_id"] == str(PURCHASE_ID)
+        # price_history surfaces both rows; client trusts the service to
+        # ASC-sort by checked_at (verified by the find_price_history call args).
+        assert len(payload["price_history"]) == 2
+        assert payload["price_history"][0]["price_non_member"] == 24.99
+        assert payload["price_history"][1]["price_non_member"] == 19.99
+        # Verify the service requested ASC ordering on checked_at.
+        sort_kw = mock_db.find_price_history.call_args.kwargs.get("sort")
+        assert sort_kw == [("checked_at", 1)]
+        # claims surfaces ClaimListItem-shaped rows.
+        assert len(payload["claims"]) == 1
+        claim = payload["claims"][0]
+        assert claim["_id"] == "20000000-0000-0000-0000-000000000001"
+        assert claim["outcome"] == "draft_pending"
+        assert claim["product_name"] == "Widget"  # joined from purchase
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_get_purchase_detail_tolerant_to_rogue_price_history_row(
+    client: AsyncClient,
+) -> None:
+    """A single price_history row with a rogue `source` value (a legacy
+    value the current `PriceSource` enum no longer recognises) and a
+    null `platform` must NOT 500 the detail endpoint — that's the
+    tolerant-read contract from #142/#144 extended to price_history
+    (ticket 5.6)."""
+    from claimit_mongodb_models import PriceHistoryReadTolerant
+
+    now = datetime.now(UTC)
+    rogue = PriceHistoryReadTolerant.model_construct(
+        id=UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3"),
+        purchase_id=PURCHASE_ID,
+        platform=None,  # legacy doc with missing platform
+        product_id="BBY-987654",
+        price_member=None,
+        price_non_member=20.0,
+        member_tier_required=None,
+        currency="USD",
+        checked_at=now,
+        source="seeded",  # not in current PriceSource enum
+        evidence_screenshot_url=None,
+        raw_response_hash=None,
+    )
+
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=_purchase_fixture(status="monitoring"))
+    mock_db.find_price_history = AsyncMock(return_value=[rogue])
+    mock_db.aggregate = AsyncMock(return_value=[])
+    _set_overrides(mock_db)
+    try:
+        response = await client.get(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert len(payload["price_history"]) == 1
+        # Rogue source surfaces verbatim — no 500.
+        assert payload["price_history"][0]["source"] == "seeded"
+        assert payload["price_history"][0]["platform"] is None
     finally:
         _clear_overrides()
 
@@ -305,6 +456,8 @@ async def test_get_purchase_with_rogue_enum_does_not_500(client: AsyncClient) ->
     )
     mock_db = AsyncMock(spec=MongoDBClient)
     mock_db.get_purchase = AsyncMock(return_value=rogue)
+    mock_db.find_price_history = AsyncMock(return_value=[])
+    mock_db.aggregate = AsyncMock(return_value=[])
     _set_overrides(mock_db)
     try:
         response = await client.get(

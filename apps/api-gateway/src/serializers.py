@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from claimit_mongodb_models import (
     NotificationEvent,
+    PriceHistoryReadTolerant,
     Purchase,
     PurchaseReadTolerant,
     User,
@@ -54,3 +55,35 @@ def serialize_notification(notification: NotificationEvent) -> dict[str, object]
     serialize_user and to centralize any future exclusion rules.
     """
     return notification.model_dump(mode="json", by_alias=True)
+
+
+def serialize_purchase_detail(
+    purchase: Purchase | PurchaseReadTolerant,
+    price_history: list[PriceHistoryReadTolerant],
+    claims: list[dict[str, object]],
+) -> dict[str, object]:
+    """JSON-serialize the enriched `GET /api/v1/purchases/:id` bundle.
+
+    Wire shape (additive vs the prior `{purchase}`-only response so
+    existing consumers — confirm/dismiss flow — keep working):
+
+        {
+          "purchase":       Purchase JSON (model_dump by_alias),
+          "price_history":  list[PriceHistoryReadTolerant JSON],  # ASC by checked_at
+          "claims":         list[ClaimListItem-shaped dict],
+        }
+
+    `claims` is already a `list[dict]` from `list_claims_for_purchase`
+    (the aggregation projects to the same shape as `/claims` rows so the
+    frontend can render with the same `ClaimListItem` helpers); pass it
+    through verbatim.
+
+    Empty `price_history` and `claims` are returned as `[]` — the
+    frontend chart renders a calm "no snapshots yet" empty state rather
+    than crashing.
+    """
+    return {
+        "purchase": serialize_purchase(purchase),
+        "price_history": [p.model_dump(mode="json", by_alias=True) for p in price_history],
+        "claims": claims,
+    }

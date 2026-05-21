@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from ..deps import get_db, get_receipts_uploader
 from ..middleware.auth import get_current_user
-from ..serializers import serialize_purchase
+from ..serializers import serialize_purchase, serialize_purchase_detail
 from ..services import purchases as purchases_service
 from ..services.purchases import DismissReason
 from ..services.receipts_storage import ReceiptsUploader
@@ -105,9 +105,25 @@ async def get_purchase(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[MongoDBClient, Depends(get_db)],
 ) -> dict[str, object]:
+    """Return the enriched purchase-detail bundle (ticket 5.6).
+
+    Response shape (additive vs the prior `{purchase}`-only body; existing
+    consumers — confirm/dismiss flow — keep working):
+
+        {
+          "purchase":       Purchase JSON,
+          "price_history":  list of PriceHistoryReadTolerant JSON, ASC by checked_at,
+          "claims":         list of ClaimListItem-shaped dicts for this purchase.
+        }
+
+    All three reads run through the tolerant variants so a single
+    legacy/rogue row in any collection cannot 500 the page.
+    """
     uid: UUID = purchases_service.parse_purchase_id(purchase_id)
-    purchase = await purchases_service.get_purchase_for_user(db, user.id, uid)
-    return {"purchase": serialize_purchase(purchase)}
+    purchase, price_history, claims = await purchases_service.get_purchase_detail(
+        db=db, user_id=user.id, purchase_id=uid
+    )
+    return serialize_purchase_detail(purchase, price_history, claims)
 
 
 @router.post("/{purchase_id}/confirm")
