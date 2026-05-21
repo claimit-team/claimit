@@ -1,5 +1,5 @@
 /**
- * Thin client for /api/v1/purchases/* (detail endpoint, ticket 5.6).
+ * Thin client for /api/v1/purchases/* (list + detail endpoints).
  *
  * Mirrors lib/api/claims.ts:
  * - Pulls the Firebase ID token at call time so requests carry a fresh
@@ -8,14 +8,17 @@
  * - Translates the backend `{error: {code, message}}` envelope into a
  *   typed PurchasesApiError.
  *
- * The enriched response shape is the WIRE shape returned by
+ * The enriched detail response is the WIRE shape returned by
  * apps/api-gateway/src/serializers.py:serialize_purchase_detail — the
  * frontend view-model (lib/purchase-detail-view.ts) maps this into a
- * render-friendly bundle.
+ * render-friendly bundle. The list endpoint returns rows whose shape
+ * is identical to the detail wire doc (`PurchaseListItem` is aliased
+ * to `PurchaseDetailDoc`) — no enrichment / join, every backend field
+ * is surfaced verbatim.
  *
- * Read-tolerance (PR #142/#144/5.6): every enum-typed field on the wire
- * is widened to `Enum | string | null` so a legacy doc with a value the
- * current enum no longer recognises doesn't crash the client.
+ * Read-tolerance (PR #142/#144/5.6/PR2): every enum-typed field on
+ * the wire is widened to `Enum | string | null` so a legacy doc with a
+ * value the current enum no longer recognises doesn't crash the client.
  */
 
 import type {
@@ -193,4 +196,81 @@ export async function getPurchaseDetail(purchaseId: string): Promise<PurchaseDet
     { method: "GET" },
     "Purchase detail request failed",
   );
+}
+
+// ---------------------------------------------------------------------------
+// List endpoint — wire shapes for GET /api/v1/purchases
+// ---------------------------------------------------------------------------
+
+/**
+ * Row shape returned by `GET /api/v1/purchases`.
+ *
+ * The list service serializes each row via
+ * `PurchaseReadTolerant.model_dump(mode="json", by_alias=True)` — the
+ * same shape `serialize_purchase` produces and the detail page's
+ * `purchase` field carries. Aliasing the list-row type to the existing
+ * `PurchaseDetailDoc` keeps a single source of truth for the wire
+ * contract — if a backend field ever moves between detail and list,
+ * both consumers get the same change at once. NO enrichment, NO
+ * `$lookup` (decision 7 in PR2 plan) — purchase rows do NOT carry
+ * related-claim fields.
+ */
+export type PurchaseListItem = PurchaseDetailDoc;
+
+export type ListPurchasesParams = {
+  /**
+   * Backend `PurchaseStatus` enum value (e.g. "monitoring"). Typed as
+   * raw string here because the wire enum is the source of truth — a
+   * future status will be accepted without a frontend type bump.
+   */
+  status?: string;
+  /** Backend `Category` enum value (retail / airline / hotel). */
+  category?: string;
+  /**
+   * Substring search over platform / product_name / order_id. Empty
+   * strings are stripped client-side. Max 100 chars enforced
+   * server-side (matches the claims-list cap).
+   */
+  q?: string;
+  limit?: number;
+  cursor?: string;
+};
+
+export type ListPurchasesResponse = {
+  purchases: PurchaseListItem[];
+  next_cursor: string | null;
+  /**
+   * Server-computed total over the FILTERED set (status + category + q
+   * are honored). Not rendered today (v0 §4 forbids money totals) —
+   * kept on the type for parity with the wire shape so a future
+   * pagination footer / "X results" hint can read it without another
+   * round-trip.
+   */
+  total_count: number;
+};
+
+/**
+ * Fetch a page of purchases for the authenticated user.
+ *
+ * Empty / whitespace-only `q` is omitted from the query string entirely
+ * — the backend treats absent and empty-string identically, but
+ * omitting keeps URLs clean (no `?q=`) and avoids accidentally
+ * triggering the q-path on the server when the user clears the search
+ * input.
+ */
+export async function listPurchases(
+  params: ListPurchasesParams = {},
+): Promise<ListPurchasesResponse> {
+  const query = new URLSearchParams();
+  if (params.status !== undefined && params.status.length > 0) query.set("status", params.status);
+  if (params.category !== undefined && params.category.length > 0) {
+    query.set("category", params.category);
+  }
+  if (params.q !== undefined && params.q.trim().length > 0) query.set("q", params.q.trim());
+  if (params.limit !== undefined) query.set("limit", String(params.limit));
+  if (params.cursor !== undefined && params.cursor.length > 0) query.set("cursor", params.cursor);
+
+  const qs = query.toString();
+  const path = `/api/v1/purchases${qs ? `?${qs}` : ""}`;
+  return _request<ListPurchasesResponse>(path, { method: "GET" }, "Purchases list request failed");
 }
