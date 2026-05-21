@@ -1,21 +1,22 @@
 /**
- * Mock purchase fixtures for the /purchases LIST page.
+ * Mock purchase fixtures — confirm-flow only.
  *
- * Scope: this file ONLY supplies fixtures still consumed by the mock
- * /purchases list (ticket 5.6 PR 2 will real-ify the list and remove
- * this module entirely). The detail-page view-model types and
- * formatters that used to live here moved to:
+ * Scope (PR2 post-cleanup): this file now ONLY supplies fixtures
+ * consumed by the still-mocked /confirm/[purchaseId] extraction flow.
+ * The /purchases list real-ified in PR2 and the list export
+ * (`getPurchasesForListView`) has been removed. The detail-page
+ * view-model types + formatters live in:
  *
  *   - `lib/purchase-detail-view.ts`  (VM types + builder + formatters)
  *   - `lib/purchase-status.ts`       (PurchaseStatus -> badge mapping)
- *   - `lib/api/purchases.ts`         (wire types + client)
+ *   - `lib/api/purchases.ts`         (wire types + client, list + detail)
  *
  * Real (api-driven) components must NOT import from this file. The
- * separation makes `lib/mock-purchases.ts` safe to delete once PR 2
- * ships without any cross-import unwind.
- *
- * The /confirm flow still imports `ConfirmExtractionPayload` etc. for
- * its mock extraction step.
+ * remaining exports (`Purchase`, `getPurchaseById`,
+ * `ConfirmExtractionPayload`, `getConfirmExtractionForPurchase`,
+ * `ExtractionField`, `PurchaseCategory`) are kept solely for the
+ * confirm flow. They'll be removed when the confirm flow real-ifies
+ * in its own ticket.
  */
 
 export type PurchaseCategory = "retail" | "airline" | "hotel";
@@ -134,11 +135,6 @@ export const mockPurchases: Purchase[] = [
 
 export function getPurchaseById(purchaseId: string): Purchase | undefined {
   return mockPurchases.find((p) => p.purchaseId === purchaseId);
-}
-
-/** Rows shown on `/purchases` — hide purchases still on the mandatory confirm step. */
-export function getPurchasesForListView(): Purchase[] {
-  return mockPurchases.filter((p) => p.confirmationState !== "pending_confirmation");
 }
 
 export function purchaseShouldSkipConfirmRedirect(purchase: Purchase | undefined): boolean {
