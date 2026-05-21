@@ -8,24 +8,31 @@ fetch prices for any that are due. See `cadence.py` for the ladder.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from claimit_mongodb_models import (
     Category,
+    Claim,
+    ClaimOutcome,
+    ClaimType,
+    DraftGeneratedBy,
+    DraftVersion,
     MongoDBClient,
     Platform,
+    Policy,
     PriceHistory,
     PriceSource,
     Purchase,
     PurchaseReadTolerant,
 )
 from claimit_observability import get_tracer, span_with_attributes
+from claimit_pubsub import TOPIC_PRICE_DROPPED, PriceDroppedEvent, publish_event
 
 from .adapters.base import PriceFetchError, PriceSnapshot
 from .adapters.config import get_adapter
 from .cadence import compute_target_cadence_minutes, is_due
-from .comparison import compare_prices
+from .comparison import PriceComparison, compare_prices
 from .eligibility import validate_eligibility
 
 logger = logging.getLogger(__name__)
@@ -56,6 +63,8 @@ def _is_degraded(purchase: PurchaseReadTolerant) -> str | None:
     """
     if purchase.id is None:
         return "null _id (impossible from Mongo, but be defensive)"
+    if purchase.user_id is None:
+        return "null user_id"
     if purchase.window_expires is None:
         return "null window_expires"
     # Cadence must be > 0. With tolerant reads, a stored 0 / negative
@@ -88,6 +97,14 @@ def _is_degraded(purchase: PurchaseReadTolerant) -> str | None:
             return "null hotel purchase_date"
         if purchase.purchase_date_basis != "check_in_date":
             return f"invalid hotel purchase_date_basis {purchase.purchase_date_basis!r}"
+    if purchase.purchase_date is None:
+        return "null purchase_date"
+    if purchase.claim_type is None:
+        return "null claim_type"
+    try:
+        ClaimType(purchase.claim_type)
+    except ValueError:
+        return f"unknown claim_type {purchase.claim_type!r}"
     return None
 
 
@@ -97,6 +114,7 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
     scanned = due_count = fetched = errors = skipped_expired = skipped_source = 0
     skipped_degraded = 0
     eligible = ineligible = no_policy = 0
+    emitted = eligible_dedup = 0
 
     purchases = await db.find_purchases({"status": "monitoring"}, limit=_SCAN_LIMIT)
 
@@ -227,6 +245,15 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
                         comparison.drop_percentage,
                         comparison.drop_amount,
                     )
+                    outcome = await _handle_eligible_drop(
+                        db, purchase, policy, snap, comparison, now=now
+                    )
+                    if outcome == "emitted":
+                        emitted += 1
+                    elif outcome == "dedup":
+                        eligible_dedup += 1
+                    elif outcome == "publish_error":
+                        errors += 1
                 else:
                     ineligible += 1
                     logger.info(
@@ -265,11 +292,13 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
         "eligible": eligible,
         "ineligible": ineligible,
         "no_policy": no_policy,
+        "emitted": emitted,
+        "eligible_dedup": eligible_dedup,
     }
     logger.info(
         "cron.summary scanned=%d due=%d fetched=%d errors=%d "
         "skipped_expired=%d skipped_source=%d skipped_degraded=%d "
-        "eligible=%d ineligible=%d no_policy=%d",
+        "eligible=%d ineligible=%d no_policy=%d emitted=%d eligible_dedup=%d",
         scanned,
         due_count,
         fetched,
@@ -280,6 +309,8 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
         eligible,
         ineligible,
         no_policy,
+        emitted,
+        eligible_dedup,
     )
     return summary
 
@@ -318,3 +349,114 @@ async def _persist_price_history(
     )
     await db.insert_price_history(record)
     return True
+
+
+# Idempotency window for `price.dropped` emission per purchase. Cron runs
+# every 15 min and a sustained drop will be re-detected on each tick; the
+# Claim Agent only needs one event per drop event. AC §3.12 spec.
+_DEDUP_WINDOW = timedelta(hours=1)
+
+
+async def _handle_eligible_drop(
+    db: MongoDBClient,
+    purchase: PurchaseReadTolerant,
+    policy: Policy,
+    snap: PriceSnapshot,
+    comparison: PriceComparison,
+    *,
+    now: datetime,
+) -> str:
+    """Create a draft_pending Claim and publish `price.dropped`.
+
+    Returns one of:
+    - `"emitted"` — new Claim written and event published successfully
+    - `"dedup"` — recent Claim exists for this purchase within `_DEDUP_WINDOW`; skipped
+    - `"publish_error"` — Claim was written but the publish call raised; the
+      next cron tick's dedup gate will see the persisted Claim and skip,
+      preventing duplicate emission. Counted in the run's `errors`.
+    """
+    recent = await db.find_claims({"purchase_id": purchase.id}, limit=1, sort=[("updated_at", -1)])
+    if recent:
+        last_updated = recent[0].updated_at
+        if last_updated is not None and _as_utc_aware(last_updated) >= now - _DEDUP_WINDOW:
+            logger.info(
+                "cron.eligible_dedup purchase_id=%s last_claim_at=%s",
+                purchase.id,
+                last_updated.isoformat() if last_updated else None,
+            )
+            return "dedup"
+
+    # `comparison.current_price` is non-None on the eligible path (compare_prices
+    # rejects None up front), so the cast keeps the type-checker happy without
+    # a runtime branch.
+    assert comparison.current_price is not None
+    if not snap.evidence_screenshot_url:
+        logger.warning(
+            "cron.eligible_no_evidence purchase_id=%s — claim will land without screenshot",
+            purchase.id,
+        )
+
+    claim_id = uuid4()
+    draft_version = DraftVersion(
+        version=0,
+        content="",
+        generated_by=DraftGeneratedBy.AGENT,
+        at=now,
+    )
+    claim = Claim(
+        _id=claim_id,
+        purchase_id=purchase.id,
+        user_id=purchase.user_id,
+        platform=Platform(purchase.platform),
+        claim_amount=comparison.drop_amount,
+        currency="USD",
+        claim_type=ClaimType(purchase.claim_type),
+        draft_content="",
+        draft_versions=[draft_version],
+        redraft_count=0,
+        policy_clause_cited=policy.policy_text_relevant_clause,
+        evidence_screenshot_url=snap.evidence_screenshot_url,
+        send_override=None,
+        submitted_at=None,
+        submitted_via=None,
+        outcome=ClaimOutcome.DRAFT_PENDING,
+        outcome_note=None,
+        denial_reason_extracted=None,
+        resolved_at=None,
+        trace_id=None,
+    )
+    await db.upsert_claim(claim)
+
+    event = PriceDroppedEvent(
+        user_id=str(purchase.user_id),
+        purchase_id=str(purchase.id),
+        platform_id=purchase.platform,
+        claim_id=str(claim_id),
+        original_price=purchase.price_paid,
+        current_price=comparison.current_price,
+        price_drop_amount=comparison.drop_amount,
+        price_drop_pct=comparison.drop_percentage,
+        purchase_date=_as_utc_aware(purchase.purchase_date),
+        detected_at=now,
+    )
+    try:
+        await publish_event(TOPIC_PRICE_DROPPED, event)
+    except Exception:
+        # Persist-then-publish: the Claim is already saved, so the next tick's
+        # dedup gate (1h window on the Claim's updated_at) will skip re-emit.
+        # We surface the failure as an `errors` bump so it shows up in the
+        # cron summary; manual re-publish or a retry job can replay.
+        logger.exception(
+            "cron.publish_error purchase_id=%s claim_id=%s",
+            purchase.id,
+            claim_id,
+        )
+        return "publish_error"
+
+    logger.info(
+        "cron.price_dropped_emitted purchase_id=%s claim_id=%s refund_amount=%.2f",
+        purchase.id,
+        claim_id,
+        comparison.drop_amount,
+    )
+    return "emitted"
