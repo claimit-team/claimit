@@ -34,7 +34,7 @@ from .enums import (
 )
 from .notification_event import NotificationEvent
 from .notification_helpers import write_notification_event
-from .policy import Policy
+from .policy import DEFAULT_CLAIM_WINDOW_DAYS, Policy, compute_window_days
 from .price_history import PriceHistory
 from .price_history_read_tolerant import PriceHistoryReadTolerant
 from .purchase import ExtractionConfidence, Purchase
@@ -60,6 +60,7 @@ from .user import (
 )
 
 __all__ = [
+    "DEFAULT_CLAIM_WINDOW_DAYS",
     "FORMAT_HASH_BODY_PREFIX_CHARS",
     "INDEX_DEFINITIONS",
     "SKIPLIST_MAX_ENTRIES",
@@ -108,6 +109,7 @@ __all__ = [
     "ToolCall",
     "User",
     "compute_format_hash",
+    "compute_window_days",
     "create_indexes",
     "normalize_sender",
     "write_notification_event",

@@ -11,7 +11,7 @@ import asyncio
 import logging
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID
 
@@ -30,6 +30,7 @@ from claimit_mongodb_models import (
     PurchaseReadTolerant,
     PurchaseStatus,
     User,
+    compute_window_days,
     normalize_sender,
 )
 from pydantic import ValidationError
@@ -297,6 +298,43 @@ async def confirm_purchase(
                     status_code=400,
                 )
         updates.update(corrected_fields)
+
+    # Recompute `window_expires` server-side from the platform's Policy
+    # (ticket 5.14). Upload-created sentinels start with `window_expires=now`;
+    # the email-path extractor also sets it from the matching Policy now.
+    # Confirm is the authoritative seam — the user-corrected `purchase_date`
+    # / `platform` / `member_tier_at_purchase` flow into the computation so
+    # whatever the user just locked in drives the monitoring window.
+    #
+    # `window_expires` is NOT in _ALLOWED_CORRECTABLE_FIELDS: the server
+    # owns this number; a client trying to set it directly still 400s
+    # at the allow-list check above.
+    effective_platform = updates.get("platform") or purchase.platform
+    effective_purchase_date = updates.get("purchase_date") or purchase.purchase_date
+    effective_member_tier = updates.get("member_tier_at_purchase", purchase.member_tier_at_purchase)
+    if effective_platform and effective_purchase_date:
+        policy = await db.get_policy(effective_platform)
+        if policy is None:
+            # Latent data gap (e.g. extractor mapped to a platform not yet
+            # in the Policy collection). Log and leave the existing
+            # window_expires untouched — better than fabricating a 15-day
+            # window that could mislead the monitor cron about when the
+            # claim window closes.
+            _log.warning(
+                "Confirm window not recomputed: no Policy for platform=%s purchase_id=%s",
+                effective_platform,
+                purchase_id,
+            )
+        else:
+            days = compute_window_days(policy, member_tier_at_purchase=effective_member_tier)
+            # `purchase_date` may arrive as an ISO string when the user
+            # supplied it via corrected_fields; normalize before timedelta.
+            pd = (
+                effective_purchase_date
+                if isinstance(effective_purchase_date, datetime)
+                else datetime.fromisoformat(str(effective_purchase_date).replace("Z", "+00:00"))
+            )
+            updates["window_expires"] = pd + timedelta(days=days)
 
     try:
         matched = await db.partial_update("purchases", purchase_id, updates, model=Purchase)

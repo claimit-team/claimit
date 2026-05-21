@@ -820,6 +820,39 @@ async def test_get_purchase_invalid_uuid(client: AsyncClient) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _policy_fixture(
+    *,
+    platform: str = "best_buy",
+    window_days: int = 15,
+    window_days_member: int | None = None,
+) -> dict:
+    """Minimal Policy doc for confirm/finalize window-recompute tests."""
+    return {
+        "_id": "00000000-0000-4000-8000-aaaaaaaaaaaa",
+        "updated_at": datetime.now(UTC).isoformat(),
+        "platform": platform,
+        "category": "retail",
+        "window_days": window_days,
+        "window_days_member": window_days_member,
+        "pre_arrival_hours_required": None,
+        "covers_own_drops": True,
+        "covers_competitor_drops": False,
+        "claim_type": "self_service",
+        "claim_url": "https://example.com",
+        "claim_email": None,
+        "claim_phone": None,
+        "loyalty_required": False,
+        "award_ticket_eligible": None,
+        "bundle_exclusions": False,
+        "key_exclusions": [],
+        "policy_url": "https://example.com",
+        "policy_text_full": "f",
+        "policy_text_relevant_clause": "c",
+        "last_verified": datetime.now(UTC).isoformat(),
+        "active": True,
+    }
+
+
 @pytest.mark.asyncio
 async def test_confirm_purchase_sets_monitoring(client: AsyncClient) -> None:
     pending = _purchase_fixture()
@@ -828,6 +861,9 @@ async def test_confirm_purchase_sets_monitoring(client: AsyncClient) -> None:
     # get_purchase: 1st call for ownership check, 2nd for the post-update read.
     mock_db.get_purchase = AsyncMock(side_effect=[pending, monitoring])
     mock_db.partial_update = AsyncMock(return_value=True)
+    # No policy fixture → confirm logs a warning and leaves window_expires
+    # untouched (current behavior preserved for tests that don't care).
+    mock_db.get_policy = AsyncMock(return_value=None)
     _set_overrides(mock_db)
     try:
         response = await client.post(
@@ -840,6 +876,8 @@ async def test_confirm_purchase_sets_monitoring(client: AsyncClient) -> None:
         update_args = mock_db.partial_update.await_args
         assert update_args.args[2]["status"] == PurchaseStatus.MONITORING
         assert "_id" not in update_args.args[2]
+        # No Policy → server intentionally does not fabricate a window.
+        assert "window_expires" not in update_args.args[2]
     finally:
         _clear_overrides()
 
@@ -851,6 +889,7 @@ async def test_confirm_purchase_with_corrected_fields(client: AsyncClient) -> No
     mock_db = AsyncMock(spec=MongoDBClient)
     mock_db.get_purchase = AsyncMock(side_effect=[pending, monitoring])
     mock_db.partial_update = AsyncMock(return_value=True)
+    mock_db.get_policy = AsyncMock(return_value=None)
     _set_overrides(mock_db)
     try:
         response = await client.post(
@@ -877,12 +916,36 @@ async def test_confirm_purchase_rejects_disallowed_field(client: AsyncClient) ->
     pending = _purchase_fixture()
     mock_db = AsyncMock(spec=MongoDBClient)
     mock_db.get_purchase = AsyncMock(return_value=pending)
+    # window_expires is server-computed — confirm a client cannot smuggle
+    # it through corrected_fields even though the route would otherwise
+    # bail at the allow-list check.
     _set_overrides(mock_db)
     try:
         response = await client.post(
             f"/api/v1/purchases/{PURCHASE_ID}/confirm",
             headers={"Authorization": "Bearer valid-token"},
             json={"corrected_fields": {"user_id": str(OTHER_USER_ID)}},
+        )
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "invalid_field"
+        mock_db.partial_update.assert_not_awaited()
+        mock_db.get_policy.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_purchase_rejects_window_expires_correction(client: AsyncClient) -> None:
+    """Server owns window_expires — corrected_fields[window_expires] is 400."""
+    pending = _purchase_fixture()
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=pending)
+    _set_overrides(mock_db)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/confirm",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"corrected_fields": {"window_expires": "2099-01-01T00:00:00Z"}},
         )
         assert response.status_code == 400
         assert response.json()["error"]["code"] == "invalid_field"
@@ -897,6 +960,7 @@ async def test_confirm_purchase_invalid_corrected_value_returns_400(client: Asyn
     mock_db = AsyncMock(spec=MongoDBClient)
     mock_db.get_purchase = AsyncMock(return_value=pending)
     mock_db.partial_update = AsyncMock(side_effect=_positive_float_validation_error())
+    mock_db.get_policy = AsyncMock(return_value=None)
     _set_overrides(mock_db)
     try:
         response = await client.post(
@@ -908,6 +972,188 @@ async def test_confirm_purchase_invalid_corrected_value_returns_400(client: Asyn
         payload = response.json()
         assert payload["error"]["code"] == "invalid_field"
         assert payload["error"]["details"]["fields"][0]["type"] == "greater_than"
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_purchase_recomputes_window_from_policy(client: AsyncClient) -> None:
+    """Upload-created sentinel (window=now) confirms with a policy → window in future."""
+    purchase_date = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
+    # Sentinel doc: window_expires == purchase_date == now (upload default).
+    pending = _purchase_fixture().model_copy(
+        update={
+            "platform": "best_buy",
+            "purchase_date": purchase_date,
+            "window_expires": purchase_date,
+            "member_tier_at_purchase": None,
+        }
+    )
+    monitoring = _purchase_fixture(status="monitoring")
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(side_effect=[pending, monitoring])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    mock_db.get_policy = AsyncMock(
+        return_value=type("P", (), _policy_fixture(window_days=30))()  # not used; see line below
+    )
+    # Hand the real Policy to get_policy so compute_window_days walks the
+    # actual Policy attrs (model_validate avoids the duck-type trap above).
+    from claimit_mongodb_models import Policy
+
+    mock_db.get_policy = AsyncMock(
+        return_value=Policy.model_validate(_policy_fixture(window_days=30))
+    )
+    _set_overrides(mock_db)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/confirm",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+        updates = mock_db.partial_update.await_args.args[2]
+        # window_expires must move from purchase_date to purchase_date+30d.
+        assert updates["window_expires"] == purchase_date + timedelta(days=30)
+        mock_db.get_policy.assert_awaited_once_with("best_buy")
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_purchase_window_honors_corrected_purchase_date(
+    client: AsyncClient,
+) -> None:
+    """User-corrected purchase_date drives the recomputed window."""
+    original_date = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
+    corrected_date = datetime(2026, 5, 10, 12, 0, 0, tzinfo=UTC)
+    pending = _purchase_fixture().model_copy(
+        update={
+            "platform": "best_buy",
+            "purchase_date": original_date,
+            "window_expires": original_date,
+        }
+    )
+    monitoring = _purchase_fixture(status="monitoring")
+    from claimit_mongodb_models import Policy
+
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(side_effect=[pending, monitoring])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    mock_db.get_policy = AsyncMock(
+        return_value=Policy.model_validate(_policy_fixture(window_days=30))
+    )
+    _set_overrides(mock_db)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/confirm",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"corrected_fields": {"purchase_date": corrected_date.isoformat()}},
+        )
+        assert response.status_code == 200
+        updates = mock_db.partial_update.await_args.args[2]
+        # Corrected purchase_date wins; window_expires is corrected+30d.
+        assert updates["window_expires"] == corrected_date + timedelta(days=30)
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_purchase_window_uses_member_window_when_tier_set(
+    client: AsyncClient,
+) -> None:
+    """Member tier on purchase + policy.window_days_member → use the member-specific window."""
+    purchase_date = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
+    pending = _purchase_fixture().model_copy(
+        update={
+            "platform": "best_buy",
+            "purchase_date": purchase_date,
+            "window_expires": purchase_date,
+            "member_tier_at_purchase": "my_best_buy_total",
+        }
+    )
+    monitoring = _purchase_fixture(status="monitoring")
+    from claimit_mongodb_models import Policy
+
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(side_effect=[pending, monitoring])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    mock_db.get_policy = AsyncMock(
+        return_value=Policy.model_validate(_policy_fixture(window_days=15, window_days_member=60))
+    )
+    _set_overrides(mock_db)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/confirm",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+        updates = mock_db.partial_update.await_args.args[2]
+        # Tier present + member window present → 60d, not 15d.
+        assert updates["window_expires"] == purchase_date + timedelta(days=60)
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_purchase_window_zero_days_yields_purchase_date(
+    client: AsyncClient,
+) -> None:
+    """Amazon-style window_days=0 → window_expires == purchase_date (immediately past-window)."""
+    purchase_date = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
+    pending = _purchase_fixture().model_copy(
+        update={
+            "platform": "amazon",
+            "purchase_date": purchase_date,
+            "window_expires": purchase_date,
+        }
+    )
+    monitoring = _purchase_fixture(status="monitoring")
+    from claimit_mongodb_models import Policy
+
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(side_effect=[pending, monitoring])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    mock_db.get_policy = AsyncMock(
+        return_value=Policy.model_validate(_policy_fixture(platform="amazon", window_days=0))
+    )
+    _set_overrides(mock_db)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/confirm",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+        updates = mock_db.partial_update.await_args.args[2]
+        # window_expires must equal purchase_date — NOT a fabricated 15d fallback.
+        assert updates["window_expires"] == purchase_date
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_purchase_no_policy_leaves_window_untouched(client: AsyncClient) -> None:
+    """Unknown platform (no Policy doc) → confirm does not fabricate a window."""
+    purchase_date = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
+    pending = _purchase_fixture().model_copy(
+        update={
+            "platform": "best_buy",
+            "purchase_date": purchase_date,
+            "window_expires": purchase_date,
+        }
+    )
+    monitoring = _purchase_fixture(status="monitoring")
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(side_effect=[pending, monitoring])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    mock_db.get_policy = AsyncMock(return_value=None)
+    _set_overrides(mock_db)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/confirm",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+        updates = mock_db.partial_update.await_args.args[2]
+        assert "window_expires" not in updates
     finally:
         _clear_overrides()
 
