@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .draft.type_a_email import generate_email_draft
 from .draft.type_b_chat import generate_chat_script
+from .draft.type_c_in_store import generate_in_store_guide
 from .draft.type_d_self_service import generate_self_service_walkthrough
 from .plan import PriceDroppedEvent, plan_claim
 
@@ -159,6 +160,16 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
                 search_client,
                 user_name=user_name,
                 current_price=event.current_price,
+            )
+        elif claim_plan.draft_generator == "type_c_in_store":
+            draft = await generate_in_store_guide(
+                temp_claim,
+                purchase,
+                policy,
+                search_client,
+                user_name=user_name,
+                current_price=event.current_price,
+                user_location=user.default_location if user else None,
             )
         elif claim_plan.draft_generator == "type_d_self_service":
             draft = await generate_self_service_walkthrough(
