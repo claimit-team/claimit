@@ -90,7 +90,9 @@ async def send_message(
         conv = await append_message(db, conv, MessageRole.USER, body.content)
 
         collected_text = ""
-        agent_stream = stream_agent_response(user.id, conv, body.content)
+        # db is passed so the service can lazy-backfill agent_session_id
+        # via partial_update when a pre-feature conversation streams.
+        agent_stream = stream_agent_response(db, user.id, conv, body.content)
 
         while True:
             try:
