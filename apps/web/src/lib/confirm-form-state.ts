@@ -93,24 +93,42 @@ export function buildInitialFormState(purchase: PurchaseDetailDoc): ConfirmFormS
 
 /**
  * Best-effort YYYY-MM-DD formatter for the purchase_date payload.
- * The backend accepts an ISO datetime string (`TypeAdapter(datetime)
- * .validate_python`); a calendar date with no time-of-day is
- * surfaced as midnight UTC to match how `_purchase_payload` writes
- * the email-path date today.
+ *
+ * The Calendar picker returns Date objects at midnight LOCAL time
+ * (`new Date(year, month, day)` semantics). Using the UTC accessors
+ * here would round the day backward for any UTC+ timezone — a user
+ * in UTC+8 picking May 21 would serialize as May 20T16:00:00Z,
+ * which the backend then stores as the wrong calendar day.
+ *
+ * We extract the year/month/day from the local clock and emit a
+ * fixed-offset ISO that names the same calendar day. Backend stores
+ * a tz-aware datetime; the time-of-day is irrelevant for the window
+ * arithmetic (PR-A `confirm_purchase` uses purchase_date as a date,
+ * not a wall-clock instant).
  */
 function toIsoMidnightUtc(date: Date): string {
-  const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(date.getUTCDate()).padStart(2, "0");
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}T00:00:00+00:00`;
 }
 
+/**
+ * Compare two picker-source dates on the user's local calendar.
+ *
+ * Same timezone concern as `toIsoMidnightUtc` above: the form's
+ * pre-fill (parsed from a backend ISO via `Date.parse`) and the
+ * picker's "is this the same day the doc already had?" check must
+ * compare LOCAL year/month/day, otherwise a UTC+ user re-selecting
+ * the same prefilled date would falsely register as a change and
+ * also serialize one day earlier.
+ */
 function sameDay(a: Date | null, b: Date | null): boolean {
   if (a === null || b === null) return a === b;
   return (
-    a.getUTCFullYear() === b.getUTCFullYear() &&
-    a.getUTCMonth() === b.getUTCMonth() &&
-    a.getUTCDate() === b.getUTCDate()
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
   );
 }
 

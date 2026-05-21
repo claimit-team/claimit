@@ -100,6 +100,12 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
   const setClaimEmbeddedAssistantExpanded = useUIStore((s) => s.setClaimEmbeddedAssistantExpanded);
   const { unreadCount } = useUnreadCount();
 
+  // Mobile sidebar Sheet is controlled here so the embedded
+  // SidebarContent can close it when the user picks an action (Upload
+  // button or a nav Link) — otherwise the Sheet stays open behind the
+  // upload Dialog on small screens and traps focus.
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
   // Subscribe to the notifications SSE stream so proactive-eligible
   // events surface the Floating Assistant panel anywhere in the
   // authenticated shell. Mounted once at the layout level — multiple
@@ -154,7 +160,7 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
         <header className="sticky top-0 z-40 h-16 bg-neutral-0 border-b border-neutral-200 flex items-center justify-between px-4 lg:px-8">
           <div className="flex items-center gap-4">
             {/* Mobile sidebar trigger */}
-            <Sheet>
+            <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
               <SheetTrigger
                 className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "lg:hidden")}
                 aria-label="Toggle menu"
@@ -163,7 +169,7 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
               </SheetTrigger>
               <SheetContent side="left" className="w-64 p-0">
                 <SheetTitle className="sr-only">Navigation</SheetTitle>
-                <SidebarContent />
+                <SidebarContent onItemClick={() => setMobileSidebarOpen(false)} />
               </SheetContent>
             </Sheet>
 

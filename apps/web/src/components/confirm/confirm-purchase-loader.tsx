@@ -75,12 +75,22 @@ function isAwaitingExtraction(purchase: PurchaseDetailDoc): boolean {
 export function ConfirmPurchaseLoader({ purchaseId }: { purchaseId: string }) {
   const router = useRouter();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  // Manual refetch trigger. `router.refresh()` only re-runs server
+  // components / resets the route cache — it doesn't remount this
+  // client component or change `purchaseId`, so the effect below
+  // (whose dep list is `[purchaseId, retryTick]`) would never
+  // re-execute on its own and the retry button would silently hang
+  // the UI in the loading spinner. Incrementing `retryTick` is the
+  // only thing that actually restarts the fetch loop. Bumped by both
+  // the "Try again" (error) and "Refresh" (analyzing-timeout) buttons.
+  const [retryTick, setRetryTick] = useState(0);
 
   // Stable ref to the latest router so we can navigate inside the
   // effect without retriggering it on every router-instance change.
   const routerRef = useRef(router);
   routerRef.current = router;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `retryTick` is the manual refetch trigger; it isn't read inside the effect body but its state change must re-run the fetch.
   useEffect(() => {
     let cancelled = false;
     const startedAt = Date.now();
@@ -147,7 +157,7 @@ export function ConfirmPurchaseLoader({ purchaseId }: { purchaseId: string }) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [purchaseId]);
+  }, [purchaseId, retryTick]);
 
   if (state.kind === "loading") {
     return (
@@ -180,7 +190,10 @@ export function ConfirmPurchaseLoader({ purchaseId }: { purchaseId: string }) {
           type="button"
           variant="outline"
           className="mt-6"
-          onClick={() => routerRef.current.refresh()}
+          onClick={() => {
+            setState({ kind: "loading" });
+            setRetryTick((t) => t + 1);
+          }}
         >
           Refresh
         </Button>
@@ -202,10 +215,10 @@ export function ConfirmPurchaseLoader({ purchaseId }: { purchaseId: string }) {
               className="mt-4"
               onClick={() => {
                 setState({ kind: "loading" });
-                // Let the effect-cycle restart by toggling a tick —
-                // simplest reliable retry is `router.refresh()` which
-                // also resets the route's data cache.
-                routerRef.current.refresh();
+                // Bump the retry tick — its presence in the effect's
+                // dep list is what actually re-runs the fetch loop
+                // (purchaseId never changes for this mounted page).
+                setRetryTick((t) => t + 1);
               }}
             >
               Try again

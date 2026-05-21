@@ -120,6 +120,13 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
           // ack notification + clear the proactive event. No redirect:
           // the user is on whatever page they were, the assistant
           // shouldn't yank them away just to dismiss a suggestion.
+          //
+          // The proactive card stays mounted while the dismiss POST is
+          // in flight AND across a failed attempt — if the API returns
+          // an error the user gets a toast AND can retry from the same
+          // card. Only the successful path clears the event. The
+          // missing-id branch also clears immediately because there's
+          // nothing the user can retry without a purchase id.
           const purchaseId = extractPurchaseId(proactiveEvent?.data);
           const notificationId = proactiveEvent?.notificationId;
           if (!purchaseId) {
@@ -127,7 +134,6 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
             clearProactiveEvent();
             return;
           }
-          clearProactiveEvent();
           void (async () => {
             try {
               const result = await dismissPurchase(purchaseId, {
@@ -146,6 +152,7 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
                   // Best-effort — the unread-count poll reconciles.
                 }
               }
+              clearProactiveEvent();
             } catch (err) {
               const message =
                 err instanceof PurchasesApiError

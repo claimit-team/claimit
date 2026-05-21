@@ -220,7 +220,14 @@ async function _authedFetch(
   }
 
   if (!response.ok) {
-    let code = "request_failed";
+    // Default `code` is derived from the HTTP status so callers can
+    // reliably match `err.code === "not_found"` on a 404 regardless of
+    // whether the server attached a structured JSON error body. Without
+    // this, a plain-text 404 (or one with a non-JSON body — e.g. a
+    // load balancer returning HTML) would leave `code` as the generic
+    // `"request_failed"` and the receipt-blob "no receipt" detection
+    // would fall through to a hard error toast.
+    let code = response.status === 404 ? "not_found" : "request_failed";
     let message = `${failureMessage} (${response.status})`;
     try {
       const body = (await response.json()) as {
@@ -518,9 +525,14 @@ export async function fetchReceiptBlob(purchaseId: string): Promise<ReceiptBlob 
     const contentType = response.headers.get("Content-Type") ?? blob.type ?? "";
     return { blob, contentType };
   } catch (err) {
-    if (err instanceof PurchasesApiError && err.message.includes("(404)")) {
-      // Backend collapses every "no receipt" shape into 404; treat as
-      // an expected null instead of a hard error.
+    if (err instanceof PurchasesApiError && err.code === "not_found") {
+      // Backend collapses every "no receipt" shape into a 404 carrying
+      // `code = "not_found"` (see `_authedFetch`: when the body parses
+      // it overwrites both `code` and `message` from the server error;
+      // when it doesn't, we fall through to a synthetic 404 with the
+      // same `code` default below). Treat both shapes as an expected
+      // null instead of a hard error so the UI shows "Original not
+      // available" rather than a Retry surface.
       return null;
     }
     throw err;

@@ -521,12 +521,22 @@ function buildConfirmExtractionItems(purchases: PurchaseListItem[]): ConfirmExtr
       if (value < CONFIDENCE_THRESHOLD) lowFields.push(humanizeField(key));
     }
 
+    // Pending-confirmation rows reach this branch with overall_min <
+    // 0.95 (the backend's own threshold for keeping the doc in this
+    // status), so SOMETHING is low. But `lowFields` only carries
+    // fields whose per-field confidence is both non-null AND
+    // below the threshold — a doc whose only low-confidence signal
+    // came in as a null (read-tolerant doc shape, legacy seed, or a
+    // field the FE doesn't have a label for) could collapse to zero
+    // visible entries here. The card would then render the bare
+    // "Low confidence:" label with nothing after it. Surface a
+    // generic prompt so the row never reads as broken.
     out.push({
       type: "confirm_extraction",
       purchaseId: p._id,
       platform: snakeToTitleLabel(p.platform),
       title: p.product_name ?? "Untitled purchase",
-      lowConfidenceFields: lowFields,
+      lowConfidenceFields: lowFields.length > 0 ? lowFields : ["Review extracted details"],
     });
   }
   return out;
