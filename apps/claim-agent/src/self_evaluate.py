@@ -161,8 +161,7 @@ async def self_evaluate(
         total_score = scores.clarity + scores.tone + scores.accuracy + scores.completeness
 
         improvement_suggestions = {
-            dim: raw["improvement_suggestions"].get(dim, "")
-            for dim in failed_dimensions
+            dim: raw["improvement_suggestions"].get(dim, "") for dim in failed_dimensions
         }
 
         span.set_attribute("self_eval.passed", passed)

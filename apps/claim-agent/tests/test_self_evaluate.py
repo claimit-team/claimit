@@ -80,7 +80,9 @@ def _agent_response(clarity=8, tone=8, accuracy=8, completeness=8) -> dict:
             "clarity": "" if clarity >= PASS_THRESHOLD else f"Improve clarity (score {clarity}).",
             "tone": "" if tone >= PASS_THRESHOLD else f"Adjust tone (score {tone}).",
             "accuracy": "" if accuracy >= PASS_THRESHOLD else f"Fix accuracy (score {accuracy}).",
-            "completeness": "" if completeness >= PASS_THRESHOLD else f"Add missing info (score {completeness}).",
+            "completeness": ""
+            if completeness >= PASS_THRESHOLD
+            else f"Add missing info (score {completeness}).",
         },
     }
 
@@ -131,9 +133,7 @@ async def test_self_evaluate_passes_first_try() -> None:
     ):
         mock_run.return_value = _agent_response()
 
-        result = await self_evaluate(
-            _make_draft(), _make_claim(), _make_purchase(), _make_policy()
-        )
+        result = await self_evaluate(_make_draft(), _make_claim(), _make_purchase(), _make_policy())
 
     assert result.passed is True
     assert result.failed_dimensions == []
@@ -158,9 +158,7 @@ async def test_self_evaluate_fails_one_dimension() -> None:
     ):
         mock_run.return_value = _agent_response(clarity=5)
 
-        result = await self_evaluate(
-            _make_draft(), _make_claim(), _make_purchase(), _make_policy()
-        )
+        result = await self_evaluate(_make_draft(), _make_claim(), _make_purchase(), _make_policy())
 
     assert result.passed is False
     assert result.failed_dimensions == ["clarity"]
@@ -181,7 +179,10 @@ async def test_orchestrate_passes_first_attempt() -> None:
         mock_eval.return_value = _passing_result(draft)
 
         _final_draft, final_result, attempts = await evaluate_and_maybe_regenerate(
-            draft, _make_claim(), _make_purchase(), _make_policy(),
+            draft,
+            _make_claim(),
+            _make_purchase(),
+            _make_policy(),
             regenerate_fn=mock_regenerate,
         )
 
@@ -209,7 +210,10 @@ async def test_orchestrate_fails_then_passes() -> None:
         ]
 
         _final_draft, final_result, attempts = await evaluate_and_maybe_regenerate(
-            original_draft, _make_claim(), _make_purchase(), _make_policy(),
+            original_draft,
+            _make_claim(),
+            _make_purchase(),
+            _make_policy(),
             regenerate_fn=mock_regenerate,
         )
 

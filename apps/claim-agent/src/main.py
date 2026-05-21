@@ -204,29 +204,48 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         async def _dispatch_generator(c: Claim) -> ClaimDraft:
             if claim_plan.draft_generator == "type_a_email":
                 return await generate_email_draft(
-                    c, purchase, policy, search_client,
-                    user_name=user_name, current_price=event.current_price,
+                    c,
+                    purchase,
+                    policy,
+                    search_client,
+                    user_name=user_name,
+                    current_price=event.current_price,
                 )
             if claim_plan.draft_generator == "type_b_chat":
                 return await generate_chat_script(
-                    c, purchase, policy, search_client,
-                    user_name=user_name, current_price=event.current_price,
+                    c,
+                    purchase,
+                    policy,
+                    search_client,
+                    user_name=user_name,
+                    current_price=event.current_price,
                 )
             if claim_plan.draft_generator == "type_c_in_store":
                 return await generate_in_store_guide(
-                    c, purchase, policy, search_client,
-                    user_name=user_name, current_price=event.current_price,
+                    c,
+                    purchase,
+                    policy,
+                    search_client,
+                    user_name=user_name,
+                    current_price=event.current_price,
                     user_location=user.default_location if user else None,
                 )
             if claim_plan.draft_generator == "type_d_self_service":
                 return await generate_self_service_walkthrough(
-                    c, purchase, policy, search_client,
-                    user_name=user_name, current_price=event.current_price,
+                    c,
+                    purchase,
+                    policy,
+                    search_client,
+                    user_name=user_name,
+                    current_price=event.current_price,
                 )
             raise ValueError(f"Unknown generator: {claim_plan.draft_generator}")
 
         if claim_plan.draft_generator not in {
-            "type_a_email", "type_b_chat", "type_c_in_store", "type_d_self_service"
+            "type_a_email",
+            "type_b_chat",
+            "type_c_in_store",
+            "type_d_self_service",
         }:
             _log.info("Skipping unsupported generator %s", claim_plan.draft_generator)
             return {"status": "skipped", "reason": claim_plan.draft_generator}
