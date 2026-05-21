@@ -1,34 +1,49 @@
 "use client";
 
+/**
+ * /claims/[id] shell — viewer-only post-real-ification.
+ *
+ * Write actions are NOT wired here. Approve / Cancel / Edit draft /
+ * Send now / Mark submitted / Execute / Mark result render as
+ * disabled buttons with "coming soon" tooltips in `ClaimHeader`. A
+ * separate immediate follow-up PR will wire these to the real
+ * endpoints, avoiding fake-success local-state mutations on real
+ * production claims.
+ *
+ * TODO(claims-detail-write-actions): wire the disabled actions to:
+ *   - POST /api/v1/claims/:id/approve   (header "Approve and send")
+ *   - POST /api/v1/claims/:id/cancel    (header "Cancel claim" / "Cancel")
+ *   - PUT  /api/v1/claims/:id/edit      (header "Edit draft" / "Review")
+ *   - <no endpoint yet>                 (MarkResultSection — manual
+ *                                        outcome marking; not rendered
+ *                                        on real data until a backend
+ *                                        endpoint exists)
+ */
+
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
 
 import { AssistantPane } from "@/components/claims/assistant-pane";
 import { ClaimHeader } from "@/components/claims/claim-header";
 import { DraftPane } from "@/components/claims/draft-pane";
 import { EvidencePane } from "@/components/claims/evidence-pane";
-import { MarkResultSection } from "@/components/claims/mark-result-section";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import type { ClaimConversation, ClaimDetail, OutcomeStatus } from "@/lib/claim-detail-types";
-// ClaimConversation is still consumed for the page's mock-detail loader,
-// but AssistantPane now fetches its own claim_focused conversation via
-// the conversations API.
+import type { ClaimDetail } from "@/lib/claim-detail-types";
 import { useUIStore } from "@/store";
 
 interface ClaimDetailShellProps {
+  /**
+   * The view-model claim (built from `getClaimDetail` ->
+   * `buildClaimDetailViewModel`). Treated as a read-only snapshot;
+   * the shell never mutates it — write actions are disabled until
+   * the follow-up PR wires real endpoints (see top-of-file TODO).
+   */
   initialClaim: ClaimDetail;
-  initialConversation: ClaimConversation;
 }
 
-export function ClaimDetailShell({ initialClaim, initialConversation }: ClaimDetailShellProps) {
-  const [claim, setClaim] = useState<ClaimDetail>(initialClaim);
-  // initialConversation is no longer rendered — AssistantPane fetches a
-  // real claim_focused conversation via the API. Reference here keeps the
-  // prop in scope without an unused-variable warning, and leaves the
-  // parent page contract unchanged for now.
-  void initialConversation;
+export function ClaimDetailShell({ initialClaim }: ClaimDetailShellProps) {
+  const claim = initialClaim;
 
   const [paneMax, setPaneMax] = useState<"draft" | "evidence" | null>(null);
   const [mobileTab, setMobileTab] = useState<"draft" | "evidence" | "assistant">("draft");
@@ -41,6 +56,23 @@ export function ClaimDetailShell({ initialClaim, initialConversation }: ClaimDet
   const isDesktop = useMediaQuery("(min-width: 1024px)");
   const isTablet = useMediaQuery("(min-width: 768px)");
 
+  // Pane-layout sync (preserved from the pre-real-ification shell —
+  // this is NOT a write-action handler, do NOT delete alongside the
+  // approve/cancel/edit/mark callbacks).
+  //
+  // The global `claimEmbeddedAssistantExpanded` flag can be flipped to
+  // `true` from OUTSIDE this component — specifically the floating
+  // assistant pill in `components/layout/floating-assistant.tsx` which
+  // calls `toggleClaimEmbeddedAssistant` on the same UI store. When it
+  // flips while the user has evidence maximized, the desktop layout
+  // ternary below would otherwise pin the assistant to the 10% bottom
+  // row because `evidenceFull` wins:
+  //
+  //   const rightTop    = evidenceFull ? 90 : assistantExpanded ? 10 : 60;
+  //   const rightBottom = evidenceFull ? 10 : assistantExpanded ? 90 : 40;
+  //
+  // Releasing `paneMax` from `"evidence"` lets the assistantExpanded
+  // branch take effect so the pane actually grows.
   useEffect(() => {
     if (assistantExpanded) setPaneMax((prev) => (prev === "evidence" ? null : prev));
   }, [assistantExpanded]);
@@ -55,54 +87,6 @@ export function ClaimDetailShell({ initialClaim, initialConversation }: ClaimDet
       return next;
     });
     setEmbeddedExpanded(false);
-  };
-
-  const handleApproveAndSend = () => {
-    setClaim((prev) => ({ ...prev, status: "submitted" }));
-    toast.success("Claim approved and sent");
-  };
-
-  const handleCancelClaim = () => {
-    toast.info("Cancel claim — mock only");
-  };
-
-  const handleEditDraft = () => {
-    if (!isDesktop && !isTablet) {
-      setMobileTab("draft");
-    }
-    toast.info("Focused draft pane");
-  };
-
-  const handleSendNow = () => {
-    setClaim((prev) => ({ ...prev, status: "submitted" }));
-    toast.success("Claim sent immediately");
-  };
-
-  const handleMarkSubmitted = () => {
-    setClaim((prev) => ({ ...prev, status: "submitted" }));
-    toast.success("Claim marked as submitted");
-  };
-
-  const handleExecute = () => {
-    toast.info("Execute — mock only");
-  };
-
-  const handleMarkResult = (result: OutcomeStatus, amount?: number, reason?: string) => {
-    if (result === "approved") {
-      setClaim((prev) => ({
-        ...prev,
-        status: "approved",
-        outcome: "approved",
-        outcome_amount: amount,
-      }));
-    } else if (result === "denied") {
-      setClaim((prev) => ({
-        ...prev,
-        status: "denied",
-        outcome: "denied",
-        denial_reason: reason,
-      }));
-    }
   };
 
   const renderDesktopLayout = () => {
@@ -215,17 +199,17 @@ export function ClaimDetailShell({ initialClaim, initialConversation }: ClaimDet
 
   return (
     <div className="flex h-[calc(100dvh-4rem)] flex-col overflow-hidden">
-      <ClaimHeader
-        claim={claim}
-        onApproveAndSend={handleApproveAndSend}
-        onCancelClaim={handleCancelClaim}
-        onEditDraft={handleEditDraft}
-        onSendNow={handleSendNow}
-        onMarkSubmitted={handleMarkSubmitted}
-        onExecute={handleExecute}
-      />
+      <ClaimHeader claim={claim} />
 
-      {claim.status === "submitted" ? <MarkResultSection onMarkResult={handleMarkResult} /> : null}
+      {/*
+        FIXME(claims-detail-write-actions): MarkResultSection was
+        previously rendered when `claim.status === "submitted"`. It
+        accepted a manual outcome (approved/denied + amount/reason)
+        and mutated local state only — there is no backend endpoint
+        for "manually mark outcome" today, so on real data this
+        would have been a misleading fake action. Re-enable when a
+        real endpoint exists.
+      */}
 
       <div className="min-h-0 flex-1 overflow-hidden bg-neutral-50">
         {isDesktop ? renderDesktopLayout() : isTablet ? renderTabletLayout() : renderMobileLayout()}

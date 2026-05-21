@@ -1,7 +1,7 @@
 /**
- * Thin client for /api/v1/claims/* (list endpoint).
+ * Thin client for /api/v1/claims/* (list + detail endpoints).
  *
- * Mirrors lib/api/notifications.ts:
+ * Mirrors lib/api/notifications.ts and lib/api/purchases.ts:
  * - Pulls the Firebase ID token at call time so requests carry a fresh
  *   token (Firebase auto-refreshes hourly via getIdToken()).
  * - AbortController timeout protects against UI hangs.
@@ -12,6 +12,11 @@
  * imported from @claimit/mongodb-types because it represents the
  * server-derived projection — Claim core fields plus three Purchase
  * fields joined via $lookup — which is not a canonical document.
+ *
+ * Read-tolerance (PR #142/#144/5.6 + this PR): every enum-typed wire
+ * field is widened to `Enum | string | null` and every required scalar
+ * to `T | null`, so a legacy doc with a value the current enum no
+ * longer recognises doesn't crash the client.
  */
 
 import type { Category, ClaimOutcome, ClaimType, Platform } from "@claimit/mongodb-types";
@@ -160,4 +165,115 @@ export async function listClaims(params: ListClaimsParams = {}): Promise<ListCla
   const qs = query.toString();
   const path = `/api/v1/claims${qs ? `?${qs}` : ""}`;
   return _request<ListClaimsResponse>(path, { method: "GET" }, "Claims request failed");
+}
+
+// ---------------------------------------------------------------------------
+// Detail endpoint — wire shapes for GET /api/v1/claims/:id
+// ---------------------------------------------------------------------------
+
+/**
+ * Wire shape of a `DraftVersion` row inside the claim doc.
+ *
+ * Mirrors `DraftVersionReadTolerant` — every field nullable so a
+ * legacy/partial sub-document doesn't crash deserialization. Note the
+ * server-side field is `at` (the canonical Claim schema name); the UI
+ * view-model maps this to `created_at` to stay consistent with the
+ * existing `ClaimDetail` shape consumed by `DraftPane`.
+ */
+export type DraftVersionDoc = {
+  version: number | null;
+  content: string | null;
+  generated_by: string | null;
+  at: string | null;
+};
+
+/**
+ * Wire shape of the `claim` field in the detail bundle
+ * (`ClaimReadTolerant.model_dump(by_alias=True)`). Mirrors
+ * `claim_read_tolerant.py` 1:1 with all enums widened to
+ * `Enum | string | null` and all required scalars to `T | null`.
+ */
+export type ClaimDetailDoc = {
+  _id: string | null;
+  updated_at: string | null;
+  purchase_id: string | null;
+  user_id: string | null;
+  platform: Platform | string | null;
+  claim_amount: number | null;
+  currency: string | null;
+  claim_type: ClaimType | string | null;
+  draft_content: string | null;
+  draft_versions: DraftVersionDoc[];
+  redraft_count: number | null;
+  policy_clause_cited: string | null;
+  evidence_screenshot_url: string | null;
+  send_override: string | null;
+  submitted_at: string | null;
+  submitted_via: string | null;
+  outcome: ClaimOutcome | string | null;
+  outcome_note: string | null;
+  denial_reason_extracted: string | null;
+  resolved_at: string | null;
+  trace_id: string | null;
+};
+
+/**
+ * Wire shape of the `policy` field. Only the subset of `Policy` fields
+ * the detail page renders is typed here; everything else is dropped at
+ * deserialization (TypeScript structural typing — extra wire keys are
+ * ignored without runtime error).
+ */
+export type PolicyDoc = {
+  platform: Platform | string | null;
+  category: Category | string | null;
+  window_days: number | null;
+  policy_url: string | null;
+  policy_text_relevant_clause: string | null;
+  claim_url: string | null;
+  claim_email: string | null;
+  claim_phone: string | null;
+};
+
+/**
+ * Wire shape of the `purchase` field. Identical to
+ * `PurchaseDetailDoc` from `lib/api/purchases.ts` because both call
+ * sites consume the same `PurchaseReadTolerant.model_dump` — aliased
+ * here as a type-only re-export so consumers don't reach across the
+ * /purchases module.
+ */
+export type { PurchaseDetailDoc as ClaimPurchaseDoc } from "@/lib/api/purchases";
+
+/**
+ * Enriched detail bundle returned by `GET /api/v1/claims/:id`.
+ *
+ * Backend serializer: `serialize_claim_detail` in
+ * `apps/api-gateway/src/services/claims_service.py::get_claim_detail`.
+ * `purchase` / `policy` may legitimately be null (orphan claim or a
+ * policy lookup that returned nothing); `evidence_url` is a top-level
+ * convenience copy of `claim.evidence_screenshot_url`.
+ */
+export type ClaimDetailResponse = {
+  claim: ClaimDetailDoc;
+  // ClaimPurchaseDoc type re-exported above; reference by the runtime
+  // import to avoid duplicating the full doc shape.
+  purchase: import("@/lib/api/purchases").PurchaseDetailDoc | null;
+  policy: PolicyDoc | null;
+  evidence_url: string | null;
+};
+
+/**
+ * Fetch the enriched claim-detail bundle for `claimId`.
+ *
+ * Backend returns 404 (`claim_not_found`) for both "missing" and
+ * "owned by a different user" — never leaks existence across users.
+ * Page-level consumer uses `err.code === "claim_not_found"` to render
+ * the not-found UI; other failures (timeout, 5xx, network) get a
+ * retryable error message.
+ */
+export async function getClaimDetail(claimId: string): Promise<ClaimDetailResponse> {
+  return _request<ClaimDetailResponse>(
+    `/api/v1/claims/${encodeURIComponent(claimId)}`,
+    { method: "GET" },
+    "Claim detail request failed",
+  );
 }
