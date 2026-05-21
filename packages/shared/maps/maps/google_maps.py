@@ -18,6 +18,11 @@ class StoreInfo:
 async def geocode(city: str, state: str) -> tuple[float, float]:
     """Convert city + state to (lat, lon) using Google Maps Geocoding API.
 
+    Intended for use by the api-gateway (PUT /api/v1/settings/location) to
+    resolve a user's city/state into coordinates when they save their default
+    location. The claim-agent uses the pre-resolved lat/lon from the User
+    document directly and does not call this function.
+
     Raises ValueError if the address cannot be geocoded.
     """
     api_key = os.environ["GOOGLE_MAPS_API_KEY"]

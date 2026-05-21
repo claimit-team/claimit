@@ -257,6 +257,7 @@ async def test_generate_in_store_guide_no_location_fallback() -> None:
     _assert_clean_draft(draft, claim)
     assert draft.claim_type == "in_store"
     assert "{{" not in draft.draft_content
+    assert str(policy.claim_url) in draft.draft_content
     mock_places.assert_not_awaited()
 
 
@@ -291,4 +292,37 @@ async def test_generate_in_store_guide_places_api_failure_fallback() -> None:
     _assert_clean_draft(draft, claim)
     assert draft.claim_type == "in_store"
     assert "{{" not in draft.draft_content
+    assert str(policy.claim_url) in draft.draft_content
     mock_places.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_generate_in_store_guide_zero_coordinates_skips_places() -> None:
+    """find_nearest_store is skipped when user_location has lat=0 and lon=0."""
+    purchase = _make_purchase()
+    claim = _make_claim(purchase)
+    policy = _make_policy()
+    mock_search = _mock_search_client("Walmart matches any lower price within 30 days.")
+    zero_location = DefaultLocation(city="Unknown", state="XX", lat=0, lon=0)
+
+    with (
+        patch("src.draft.type_c_in_store._run_draft_agent", new_callable=AsyncMock) as mock_runner,
+        patch(
+            "src.draft.type_c_in_store.find_nearest_store", new_callable=AsyncMock
+        ) as mock_places,
+    ):
+        mock_runner.return_value = _MOCK_IN_STORE_OUTPUT
+
+        draft = await generate_in_store_guide(
+            claim,
+            purchase,
+            policy,
+            mock_search,
+            user_name="Test User",
+            current_price=219.99,
+            user_location=zero_location,
+        )
+
+    _assert_clean_draft(draft, claim)
+    assert "{{" not in draft.draft_content
+    mock_places.assert_not_awaited()

@@ -199,15 +199,18 @@ async def generate_in_store_guide(
 
     markdown_content = _format_in_store_guide(output)
 
+    resolved_current_price = (
+        current_price
+        if current_price is not None
+        else round(purchase.price_paid - claim.claim_amount, 2)
+    )
     claim_url = str(policy.claim_url) if policy.claim_url else str(policy.policy_url)
     filled_content = _fill_in_store_placeholders(
         markdown_content,
         user_name=user_name,
         product_name=purchase.product_name or "your product",
         original_price=f"${purchase.price_paid:.2f}",
-        current_price=f"${current_price:.2f}"
-        if current_price is not None
-        else "the current lower price",
+        current_price=f"${resolved_current_price:.2f}",
         refund_amount=f"${claim.claim_amount:.2f}",
         store_address=store_address,
         store_hours=store_hours,
@@ -228,6 +231,6 @@ async def generate_in_store_guide(
         refund_amount=claim.claim_amount,
         currency=claim.currency,
         model_used=MODEL_NAME,
-        draft_version=1,
+        draft_version=len(claim.draft_versions) + 1,
         generated_at=datetime.now(UTC),
     )
