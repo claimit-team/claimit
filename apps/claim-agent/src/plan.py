@@ -16,6 +16,7 @@ class PriceDroppedEvent(BaseModel):
     event_id: str
     purchase_id: str
     user_id: str
+    claim_id: str | None = None
     platform_id: str
     original_price: float
     current_price: float
