@@ -1200,6 +1200,54 @@ async def test_confirm_purchase_malformed_corrected_purchase_date_returns_400(
 
 
 @pytest.mark.asyncio
+async def test_confirm_purchase_falsy_corrected_platform_does_not_use_old_platform(
+    client: AsyncClient,
+) -> None:
+    """Parallel of the purchase_date case for `platform`. Closes the
+    falsy-handling parity set across all three `effective_*` resolvers
+    (platform / purchase_date / member_tier).
+
+    A falsy-but-present `platform` correction (`""`) must short-circuit
+    the window block — the policy lookup must NOT run on the OLD
+    `purchase.platform` and `window_expires` must NOT be set from a
+    value the user is trying to overwrite. `partial_update` then
+    produces the 400 from Pydantic's `platform` field validation.
+    """
+    purchase_date = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
+    pending = _purchase_fixture().model_copy(
+        update={
+            "platform": "best_buy",
+            "purchase_date": purchase_date,
+            "window_expires": purchase_date,
+        }
+    )
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=pending)
+    mock_db.partial_update = AsyncMock(side_effect=_positive_float_validation_error())
+    # Sentinel: this MUST NOT be awaited — falsy platform short-circuits
+    # the `if effective_platform and effective_purchase_date:` guard
+    # before any policy lookup runs.
+    mock_db.get_policy = AsyncMock(return_value=None)
+    _set_overrides(mock_db)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/confirm",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"corrected_fields": {"platform": ""}},
+        )
+        assert response.status_code == 400
+        mock_db.partial_update.assert_awaited_once()
+        updates_arg = mock_db.partial_update.await_args.args[2]
+        assert "window_expires" not in updates_arg, (
+            "window block must short-circuit on falsy platform instead of "
+            "computing from the OLD purchase.platform's policy"
+        )
+        mock_db.get_policy.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
 async def test_confirm_purchase_falsy_corrected_purchase_date_does_not_use_old_date(
     client: AsyncClient,
 ) -> None:

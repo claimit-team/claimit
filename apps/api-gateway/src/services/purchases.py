@@ -311,13 +311,19 @@ async def confirm_purchase(
     # `window_expires` is NOT in _ALLOWED_CORRECTABLE_FIELDS: the server
     # owns this number; a client trying to set it directly still 400s
     # at the allow-list check above.
-    effective_platform = updates.get("platform") or purchase.platform
-    # Use `dict.get(key, default)` (parity with `effective_member_tier`
-    # below) so a falsy-but-present corrected value (e.g. `""` or
-    # explicit `null`) flows into the `TypeAdapter` guard below and
-    # surfaces as a 400 with `details.fields` for purchase_date,
-    # instead of silently falling back to the OLD purchase.purchase_date
-    # for the window computation (then erroring later on the write).
+    # All three `effective_*` resolvers use `dict.get(key, default)`
+    # uniformly. With `or`, a falsy-but-present correction (e.g. `""`
+    # or explicit `null`) would silently fall back to the OLD value
+    # on the existing doc and feed that into the window computation;
+    # `partial_update` below would then reject the write, but the
+    # window number was already based on a value the user is trying
+    # to overwrite. `.get(default)` lets the falsy value short-circuit
+    # the `if effective_platform and effective_purchase_date:` guard,
+    # so the policy lookup and TypeAdapter validation don't run on
+    # a stale value and the 400 is produced from the partial_update
+    # path (whose Pydantic-supplied `loc` includes the correct field
+    # name).
+    effective_platform = updates.get("platform", purchase.platform)
     effective_purchase_date = updates.get("purchase_date", purchase.purchase_date)
     effective_member_tier = updates.get("member_tier_at_purchase", purchase.member_tier_at_purchase)
     if effective_platform and effective_purchase_date:
