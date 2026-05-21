@@ -11,6 +11,7 @@ from uuid import uuid4
 import pytest
 from claimit_mongodb_models import ClaimType
 from src.main import handle_price_dropped
+from src.validator import ValidationResult
 
 _USER_ID = "11111111-1111-4111-8111-111111111111"
 _PURCHASE_ID = "22222222-2222-4222-8222-222222222222"
@@ -91,7 +92,7 @@ async def test_write_notification_event_called_after_upsert_claim() -> None:
     claim_plan.claim_type = ClaimType.EMAIL
 
     draft = MagicMock()
-    draft.draft_content = "Generated email draft"
+    draft.draft_content = "Generated email draft for order ord-test-001"
     draft.policy_clause_cited = "Policy text"
 
     mock_search = MagicMock()
@@ -103,6 +104,7 @@ async def test_write_notification_event_called_after_upsert_claim() -> None:
         patch("src.main.MongoDBClient", return_value=mock_db),
         patch("src.main.plan_claim", return_value=claim_plan),
         patch("src.main.generate_email_draft", return_value=draft),
+        patch("src.main.validate", return_value=ValidationResult(valid=True)),
         patch("src.main.write_notification_event", return_value="notif-id") as mock_write,
         patch.dict(sys.modules, {"search": mock_search}),
     ):
