@@ -331,6 +331,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "claimit-elastic" },
+    { name = "claimit-gmail" },
     { name = "claimit-mongodb-models" },
     { name = "claimit-observability" },
     { name = "claimit-pubsub" },
@@ -362,6 +363,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "claimit-elastic", directory = "../../packages/shared/elastic" },
+    { name = "claimit-gmail", directory = "../../packages/shared/gmail" },
     { name = "claimit-mongodb-models", directory = "../../packages/shared/mongodb" },
     { name = "claimit-observability", directory = "../../packages/shared/observability" },
     { name = "claimit-pubsub", directory = "../../packages/shared/pubsub" },
@@ -403,6 +405,36 @@ dependencies = [
 requires-dist = [
     { name = "elasticsearch", extras = ["async"], specifier = ">=8.0.0" },
     { name = "motor", specifier = ">=3.6.0" },
+]
+
+[[package]]
+name = "claimit-gmail"
+version = "0.1.0"
+source = { directory = "../../packages/shared/gmail" }
+dependencies = [
+    { name = "claimit-mongodb-models" },
+    { name = "google-auth" },
+    { name = "google-cloud-secret-manager" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "starlette" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "claimit-mongodb-models", directory = "../../packages/shared/mongodb" },
+    { name = "google-auth", specifier = ">=2.29.0" },
+    { name = "google-cloud-secret-manager", specifier = ">=2.20.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "pydantic", specifier = ">=2.9.0" },
+    { name = "starlette", specifier = ">=0.40.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.24.0" },
+    { name = "ruff", specifier = ">=0.6.0" },
 ]
 
 [[package]]
