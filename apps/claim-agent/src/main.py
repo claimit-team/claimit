@@ -30,6 +30,7 @@ from .draft.type_b_chat import generate_chat_script
 from .draft.type_c_in_store import generate_in_store_guide
 from .draft.type_d_self_service import generate_self_service_walkthrough
 from .plan import PriceDroppedEvent, plan_claim
+from .validator import validate
 
 _log = logging.getLogger(__name__)
 
@@ -235,6 +236,46 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             _log.info("Skipping unsupported generator %s", claim_plan.draft_generator)
             return {"status": "skipped", "reason": claim_plan.draft_generator}
 
+        # --- Validate draft (task 3.18) ---
+        validation = validate(draft, temp_claim, purchase)
+        if not validation.valid:
+            _log.warning(
+                "claim_agent.validation_failed claim_id=%s issues=%s",
+                claim_id,
+                validation.issues,
+            )
+            # NOTE: redraft_count on temp_claim is always 0 for new claims.
+            # This branch becomes reachable in task 3.21 when redrafting from
+            # a persisted claim with redraft_count >= 1.
+            if temp_claim.redraft_count >= 1:
+                # Second consecutive failure — escalate to user
+                await write_notification_event(
+                    db=db,
+                    user_id=event.user_id,
+                    event_type=NotificationEventType.CLAIM_DRAFTED,
+                    entity_type=NotificationEntityType.CLAIM,
+                    entity_id=str(claim_id),
+                    data={
+                        "claim_id": str(claim_id),
+                        "claim_type": claim_plan.claim_type.value,
+                        "refund_amount": event.price_drop_amount,
+                        "platform": event.platform_id,
+                        "validation_failed": True,
+                        "validation_issues": validation.issues,
+                        "escalated": True,
+                    },
+                )
+                return {
+                    "status": "error",
+                    "reason": "validation_failed_escalated",
+                    "issues": validation.issues,
+                }
+            return {
+                "status": "error",
+                "reason": "validation_failed",
+                "issues": validation.issues,
+            }
+
         # Persist claim with real draft content
         generated_version = DraftVersion(
             version=1,
@@ -291,6 +332,3 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             },
         )
         return {"status": "error"}
-
-
-# trigger deploy
