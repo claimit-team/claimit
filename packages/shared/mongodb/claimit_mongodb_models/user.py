@@ -36,6 +36,12 @@ class GmailIntegration(BaseModel):
     watch_history_id: str | None
     watch_expires_at: datetime | None
     last_processed_message_id: str | None
+    # Ticket 4.15: surfaces the most recent watch-registration failure so
+    # the settings UI can show a "reconnect needed" prompt. Defaults so
+    # docs persisted before this field shipped validate without migration —
+    # same backward-compat treatment as connected_email.
+    watch_failed: bool = False
+    watch_error_message: str | None = None
 
 
 class SendPreference(BaseModel):
