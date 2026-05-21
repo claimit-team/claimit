@@ -101,6 +101,10 @@ resource "google_storage_bucket_iam_member" "api_gateway_receipts_reader" {
 }
 
 # ingest-agent SA reads uploaded receipts to extract purchase data.
+# Load-bearing for ticket 5.14: the /pubsub/purchase.uploaded handler
+# fetches the blob via ReceiptsReader.download — without this grant the
+# very first push would 403 on GCS read and the dead-letter would fill
+# up immediately.
 resource "google_storage_bucket_iam_member" "ingest_agent_receipts_reader" {
   bucket = google_storage_bucket.receipts.name
   role   = "roles/storage.objectViewer"

@@ -85,6 +85,14 @@ DEMO_EMAIL = "claimitbeta@gmail.com"
 SEED_MARKER = "5_4_demo"
 PROD_DB = "claimit"
 
+# Ticket 5.14: receipts-bucket env var. Same name api-gateway uses so a
+# single export (e.g. `RECEIPTS_BUCKET=claimit-beta-receipts`) drives
+# both code paths in dev. When unset, the seed inserts pending-
+# confirmation rows WITHOUT receipt_storage_url and skips the GCS
+# upload — useful for offline runs / CI where ADC isn't configured.
+RECEIPTS_BUCKET_ENV = "RECEIPTS_BUCKET"
+FIXTURES_DIR = ROOT / "scripts" / "fixtures"
+
 # SPECS tuple layout — POSITIONAL fields (12):
 # (group, outcome, platform, category, product_name,
 #  price_paid, claim_amount,
@@ -269,6 +277,121 @@ SPECS: list[
 ]
 
 EXPECTED_COUNTS = {"pending": 2, "in_progress": 2, "resolved": 5}
+
+# ---- Ticket 5.14: pending_confirmation seed rows ----
+# Three sentinel-shaped purchases that drive the /confirm/:id and
+# dashboard "Needs your attention" surfaces END-TO-END independent of
+# live Gemini extraction. Each row exercises a different confidence
+# banner state so PR-B's confidence-banner work can be eyeballed
+# against real data:
+#
+#   (a) "low-price-only" — only `price` < 0.95; banner names ONE field
+#   (b) "multi-field-low" — product_name AND order_id < 0.95; banner
+#       names BOTH fields
+#   (c) "mostly-failed"   — most fields below 0.5; banner falls back
+#       to the neutral "couldn't extract most details" copy
+#
+# All three carry future `window_expires` so the confirm form can
+# render the "we'll alert you if the price drops before <date>" toast
+# copy without contradicting an expired purchase. Two reference the
+# JPEG fixture (UPLOAD_IMAGE), one references the PDF
+# (UPLOAD_PDF) so the receipt-preview surface exercises both
+# branches and the gs:// proxy endpoint sees both content-types.
+#
+# Each spec carries the fixture FILENAME and a deterministic upload
+# slug; the GCS path is `{user_id}/seed/{slug}.{ext}`. Re-running the
+# seed overwrites the same blob and reinserts the same doc so the
+# state stays converged.
+#
+# Spec tuple layout (positional, 9 fields):
+#   (label, platform, category, product_name, price_paid, order_id,
+#    fixture_filename, ingestion_source, confidence)
+_PENDING_SPECS: list[
+    tuple[
+        str,
+        Platform,
+        Category,
+        str,
+        float,
+        str,
+        str,
+        IngestionSource,
+        dict[str, float | None],
+    ]
+] = [
+    (
+        "low-price-only",
+        Platform.BEST_BUY,
+        Category.RETAIL,
+        "Sony WH-1000XM5 Wireless Headphones",
+        399.99,
+        "BBY01-806748902-1234",
+        "sample-receipt.jpg",
+        IngestionSource.UPLOAD_IMAGE,
+        {
+            "platform": 0.98,
+            "price_paid": 0.82,  # < 0.95 — single low field
+            "price": 0.82,  # mirror so the FE confidence-key mapping works either way
+            "order_id": 0.97,
+            "product_name": 0.96,
+            "product_id": 0.96,
+            "purchase_date": 0.98,
+            "category": 0.99,
+            "member_tier_at_purchase": None,
+            "variant": None,
+            "member_price_at_purchase": None,
+            "overall_min": 0.82,
+        },
+    ),
+    (
+        "multi-field-low",
+        Platform.TARGET,
+        Category.RETAIL,
+        "Dyson V8 Cordless Vacuum",
+        399.99,
+        "102-7754410-5566778",
+        "sample-receipt.pdf",
+        IngestionSource.UPLOAD_PDF,
+        {
+            "platform": 0.99,
+            "price_paid": 0.96,
+            "price": 0.96,
+            "order_id": 0.62,  # < 0.95
+            "product_name": 0.71,  # < 0.95
+            "product_id": 0.70,
+            "purchase_date": 0.97,
+            "category": 0.99,
+            "member_tier_at_purchase": None,
+            "variant": None,
+            "member_price_at_purchase": None,
+            "overall_min": 0.62,
+        },
+    ),
+    (
+        "mostly-failed",
+        Platform.WALMART,
+        Category.RETAIL,
+        "Instant Pot Duo 6qt",
+        89.00,
+        "WMT-9982002-0011",
+        "sample-receipt.jpg",
+        IngestionSource.UPLOAD_IMAGE,
+        {
+            "platform": 0.41,
+            "price_paid": 0.38,
+            "price": 0.38,
+            "order_id": 0.31,
+            "product_name": 0.29,
+            "product_id": 0.29,
+            "purchase_date": 0.44,
+            "category": 0.55,
+            "member_tier_at_purchase": None,
+            "variant": None,
+            "member_price_at_purchase": None,
+            "overall_min": 0.29,
+        },
+    ),
+]
 
 
 def _confidence_one() -> ExtractionConfidence:
@@ -552,6 +675,147 @@ def _build_purchase(
     )
 
 
+_FIXTURE_CONTENT_TYPES: dict[str, str] = {
+    ".pdf": "application/pdf",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+}
+
+
+def _upload_fixture_to_gcs(
+    *,
+    bucket_name: str,
+    blob_path: str,
+    local_path: Path,
+    overwrite: bool,
+) -> None:
+    """Upload (and optionally overwrite) a fixture file into the receipts bucket.
+
+    Uses the google-cloud-storage client with Application Default
+    Credentials. Idempotent: re-uploads with the same `blob_path` so a
+    second seed run lands on the same gs:// URI. Skips the upload when
+    `overwrite=False` AND the blob already exists — gives the operator a
+    way to keep manually-uploaded receipts in place across seed runs.
+    """
+    from google.cloud import storage  # local import: optional dep at seed time
+
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+    if blob.exists() and not overwrite:
+        return
+    content_type = _FIXTURE_CONTENT_TYPES.get(local_path.suffix.lower(), "application/octet-stream")
+    blob.upload_from_filename(str(local_path), content_type=content_type)
+
+
+def _build_pending_confirmation_purchase(
+    *,
+    user_id: UUID,
+    spec: tuple[
+        str,
+        Platform,
+        Category,
+        str,
+        float,
+        str,
+        str,
+        IngestionSource,
+        dict[str, float | None],
+    ],
+    bucket_name: str | None,
+    now: datetime,
+    rank: int,
+) -> Purchase:
+    """Build a single pending_confirmation Purchase row from a spec tuple.
+
+    Differs from `_build_purchase` in three ways:
+
+      1. `status = PENDING_CONFIRMATION`. Drives the dashboard "Needs
+         your attention" entry + the /confirm/:id form.
+      2. `receipt_storage_url` is a real gs:// URI pointing at a blob the
+         seeder uploaded just before insert; the api-gateway receipt
+         proxy + PR-B receipt-preview can fetch this object to render
+         the original receipt in the confirm screen.
+      3. `extraction_confidence` is HONEST — varies across specs so the
+         confidence-banner work has a concrete fixture for each state.
+    """
+    (
+        label,
+        platform,
+        category,
+        product_name,
+        price_paid,
+        order_id,
+        fixture_filename,
+        ingestion_source,
+        confidence_data,
+    ) = spec
+    purchase_id = uuid4()
+    # Stagger ingested_at + window backwards so list ordering stays
+    # natural between pending-confirmation rows. window=30d for all
+    # three keeps them comfortably future-dated regardless of when the
+    # seed is run; the policy-aware recompute on confirm will adjust
+    # this to the platform's true window.
+    ingested_at = now - timedelta(minutes=rank)
+    purchase_date = ingested_at - timedelta(days=3)
+    window_expires = ingested_at + timedelta(days=30)
+
+    fixture_ext = Path(fixture_filename).suffix.lower()
+    if bucket_name is not None:
+        # `seed/` namespace under the user folder keeps these blobs
+        # discoverable + bulk-deletable (gsutil rm -r
+        # gs://bucket/{user_id}/seed/) if we ever need to scrub the
+        # fixtures without touching real user uploads.
+        #
+        # Use the spec `label` (low-price-only / multi-field-low /
+        # mostly-failed) instead of the run-scoped `purchase_id` so
+        # the blob path is STABLE across seed runs. With
+        # `overwrite=True` on _upload_fixture_to_gcs, this means
+        # rerunning the seed updates exactly three blobs in place
+        # rather than orphaning the previous run's uuid-keyed objects.
+        blob_path = f"{user_id}/seed/{label}{fixture_ext}"
+        receipt_storage_url: str | None = f"gs://{bucket_name}/{blob_path}"
+    else:
+        receipt_storage_url = None
+
+    return Purchase(
+        _id=purchase_id,
+        user_id=user_id,
+        platform=platform,
+        category=category,
+        product_name=product_name,
+        product_id=f"demo-pend-{purchase_id.hex[:8]}",
+        product_url=None,
+        variant=None,
+        fare_class=None,
+        room_type=None,
+        bed_type=None,
+        rate_type=None,
+        price_paid=price_paid,
+        member_price_at_purchase=None,
+        non_member_price_at_purchase=None,
+        currency="USD",
+        purchase_date=purchase_date,
+        purchase_date_basis=PurchaseDateBasis.ORDER_DATE,
+        window_expires=window_expires,
+        order_id=order_id,
+        member_tier_at_purchase=None,
+        status=PurchaseStatus.PENDING_CONFIRMATION,
+        claim_type=ClaimType.EMAIL,
+        monitoring_cadence_minutes=1440,
+        last_checked_at=None,
+        ingested_at=ingested_at,
+        ingestion_source=ingestion_source,
+        receipt_storage_url=receipt_storage_url,
+        receipt_hash=f"sha256:demo-{purchase_id.hex[:16]}",
+        format_hash="sha256:sentinel",
+        sender=None,
+        extraction_confidence=ExtractionConfidence.model_validate(confidence_data),
+        updated_at=ingested_at,
+    )
+
+
 def _build_claim(
     *,
     user_id: UUID,
@@ -754,10 +1018,89 @@ async def _run() -> int:
             )
             price_history_models.extend(series)
 
+        # Ticket 5.14: build the pending_confirmation rows alongside the
+        # claim-linked purchases above. These rows DO NOT have linked
+        # claims and DO NOT get price_history snapshots — they live in
+        # the "Needs your attention" bucket until the user confirms
+        # them. GCS upload happens separately below (after we know which
+        # bucket to target) so an insert-only / no-bucket run still
+        # produces meaningful Mongo state.
+        bucket_name = os.environ.get(RECEIPTS_BUCKET_ENV)
+        pending_purchase_models: list[Purchase] = []
+        for rank, pspec in enumerate(_PENDING_SPECS):
+            pending_purchase_models.append(
+                _build_pending_confirmation_purchase(
+                    user_id=user_id,
+                    spec=pspec,
+                    bucket_name=bucket_name,
+                    now=now,
+                    # Offset rank past the claim-linked purchases so updated_at
+                    # ordering stays unique across the whole demo set.
+                    rank=len(SPECS) + rank,
+                )
+            )
+
+        # Upload fixtures to GCS. Idempotent — the same
+        # {user_id}/seed/{label}.{ext} blob_path is overwritten on each
+        # run (see `_build_pending_confirmation_purchase`) so the gs://
+        # URI persists across seed runs without orphaning blobs.
+        #
+        # Failure policy:
+        #   - No bucket configured: NOT a failure. Seed inserts the
+        #     pending_confirmation rows without `receipt_storage_url`
+        #     and prints a warning so an operator running offline / in
+        #     CI without ADC still gets a usable Mongo state.
+        #   - Bucket configured but a fixture upload fails: HARD FAIL.
+        #     Continuing would leave Atlas with rows pointing at
+        #     non-existent gs:// objects, breaking the receipt proxy +
+        #     PR-B's receipt-preview surface while the script still
+        #     prints "SEED OK". Surface the error and abort before any
+        #     `insert_many` so a re-run on a fixed environment converges
+        #     cleanly instead of having to clean up half-seeded state.
+        if bucket_name is None:
+            print(
+                f"\nWarning: {RECEIPTS_BUCKET_ENV} not set — pending_confirmation rows "
+                "will be inserted without receipt_storage_url. Set "
+                "RECEIPTS_BUCKET=<project>-receipts to upload sample receipts."
+            )
+        else:
+            print(f"\nUploading fixtures to gs://{bucket_name}/{user_id}/seed/ ...")
+            for pspec, purchase in zip(_PENDING_SPECS, pending_purchase_models, strict=True):
+                fixture_filename = pspec[6]
+                local_path = FIXTURES_DIR / fixture_filename
+                if not local_path.exists():
+                    raise SystemExit(
+                        f"Seed fixture missing: {local_path} — "
+                        "run the fixture generator (see commit message for 5.14 A8)."
+                    )
+                # purchase.receipt_storage_url was built above as
+                # gs://{bucket_name}/{user_id}/seed/{label}{ext}. Strip
+                # the gs:// prefix + bucket to recover the blob_path.
+                assert purchase.receipt_storage_url is not None  # bucket set → URL set
+                blob_path = purchase.receipt_storage_url.split(f"gs://{bucket_name}/", 1)[1]
+                try:
+                    _upload_fixture_to_gcs(
+                        bucket_name=bucket_name,
+                        blob_path=blob_path,
+                        local_path=local_path,
+                        overwrite=True,
+                    )
+                except Exception as exc:
+                    raise SystemExit(
+                        f"ERROR: failed to upload {fixture_filename} to "
+                        f"gs://{bucket_name}/{blob_path} ({exc!r}). "
+                        f"Aborting seed — continuing would leave Atlas pointing at a "
+                        f"missing GCS object. Re-run with ADC configured "
+                        f"(`gcloud auth application-default login`) or unset "
+                        f"{RECEIPTS_BUCKET_ENV} for an offline run."
+                    ) from exc
+                print(f"  uploaded {fixture_filename} → gs://{bucket_name}/{blob_path}")
+
         # `mode="python"` keeps native UUID/datetime; StrEnum subclasses str
         # so pymongo serialises enum values as plain strings on the wire.
         purchase_docs = [
-            _stamp(p.model_dump(by_alias=True, mode="python"), SEED_MARKER) for p in purchase_models
+            _stamp(p.model_dump(by_alias=True, mode="python"), SEED_MARKER)
+            for p in purchase_models + pending_purchase_models
         ]
         claim_docs = [
             _stamp(c.model_dump(by_alias=True, mode="python"), SEED_MARKER) for _, c in claim_models
@@ -911,6 +1254,55 @@ async def _run() -> int:
             f"distinct_statuses={len(status_counts)} (expect ≥ 2)"
         )
         if not variety_ok:
+            all_ok = False
+
+        # ---- Verification (ticket 5.14) - pending_confirmation rows ----
+        # Three rows MUST land with status=pending_confirmation, a
+        # future window_expires, and distinct extraction_confidence
+        # profiles. When the bucket env var is set, each row's
+        # receipt_storage_url MUST be a `gs://` URL whose blob exists.
+        print("\nVerification - pending_confirmation seed rows:")
+        pending_count = await raw_db["purchases"].count_documents(
+            {
+                "user_id": user_id,
+                "_seed": SEED_MARKER,
+                "status": PurchaseStatus.PENDING_CONFIRMATION.value,
+            }
+        )
+        expected_pending = len(_PENDING_SPECS)
+        pending_status = "OK" if pending_count == expected_pending else "FAIL"
+        print(
+            f"  pending_confirmation rows seeded: {pending_count} "
+            f"(expect {expected_pending})  [{pending_status}]"
+        )
+        if pending_count != expected_pending:
+            all_ok = False
+
+        # Confidence profile variety: assert at least one row has
+        # overall_min < 0.5 (mostly-failed banner) AND at least one
+        # row has overall_min between 0.5 and 0.95 (named-fields
+        # banner). Catches a future spec edit that accidentally
+        # makes every row look the same.
+        overall_mins = [p.extraction_confidence.overall_min for p in pending_purchase_models]
+        has_mostly_failed = any(m < 0.5 for m in overall_mins)
+        has_named_low = any(0.5 <= m < 0.95 for m in overall_mins)
+        variety_status = "OK" if has_mostly_failed and has_named_low else "FAIL"
+        print(
+            f"  confidence variety: overall_mins={overall_mins}; "
+            f"mostly_failed={has_mostly_failed}, named_low={has_named_low}  "
+            f"[{variety_status}]"
+        )
+        if not (has_mostly_failed and has_named_low):
+            all_ok = False
+
+        # Ingestion-source variety: at least one upload_pdf AND at
+        # least one upload_image. Confirms the receipt-preview surface
+        # gets exercised against both content-types.
+        pending_sources = {p.ingestion_source.value for p in pending_purchase_models}
+        source_variety_ok = "upload_pdf" in pending_sources and "upload_image" in pending_sources
+        source_status = "OK" if source_variety_ok else "FAIL"
+        print(f"  pending sources: {sorted(pending_sources)}  [{source_status}]")
+        if not source_variety_ok:
             all_ok = False
 
         # ---- Stale-data probe ----

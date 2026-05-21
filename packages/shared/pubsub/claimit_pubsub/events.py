@@ -17,6 +17,13 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 TOPIC_PURCHASE_INGESTED = "purchase.ingested"
 TOPIC_PRICE_DROPPED = "price.dropped"
+# Ticket 5.14: api-gateway publishes `purchase.uploaded` after writing the
+# sentinel pending_confirmation Purchase + uploading the receipt blob to
+# GCS. The ingest-agent's purchase.uploaded Pub/Sub-push handler subscribes,
+# fetches the blob, runs `extract_from_blob`, and calls
+# `finalize_purchase_extraction` which then publishes `purchase.ingested`
+# (i.e. this is strictly an upstream event of the existing pipeline).
+TOPIC_PURCHASE_UPLOADED = "purchase.uploaded"
 
 
 def _new_event_id() -> str:
@@ -68,3 +75,21 @@ class PriceDroppedEvent(EventEnvelope):
     purchase_date: AwareDatetime
     detected_at: AwareDatetime
     currency: Literal["USD"] = "USD"
+
+
+class PurchaseUploadedEvent(EventEnvelope):
+    """Published by api-gateway after a user uploads a receipt (ticket 5.14).
+
+    The ingest-agent subscribes and runs vision extraction against the
+    referenced GCS blob. The payload deliberately carries ONLY identifiers
+    + the storage URL — the ingest-agent re-reads the purchase doc to pick
+    up the receipt metadata (content_type, ingestion_source) it stored on
+    upload, so the event stays small and immutable to schema-additive
+    changes in the Purchase model.
+    """
+
+    event_type: Literal["purchase.uploaded"] = "purchase.uploaded"
+    user_id: str
+    purchase_id: str
+    receipt_storage_url: str
+    content_type: Literal["application/pdf", "image/png", "image/jpeg"]

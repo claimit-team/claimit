@@ -11,7 +11,7 @@ import asyncio
 import logging
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID
 
@@ -30,14 +30,17 @@ from claimit_mongodb_models import (
     PurchaseReadTolerant,
     PurchaseStatus,
     User,
+    compute_window_days,
     normalize_sender,
 )
-from pydantic import ValidationError
+from claimit_pubsub import TOPIC_PURCHASE_UPLOADED, PurchaseUploadedEvent
+from pydantic import TypeAdapter, ValidationError
 
 from ..middleware.errors import ApiError
 from ..middleware.pagination import apply_cursor_to_query, encode_cursor
 from ..services import claims_service
-from ..services.receipts_storage import ReceiptsUploader
+from ..services.pubsub_publisher import PubSubPublisher
+from ..services.receipts_storage import ReceiptObjectMissingError, ReceiptsUploader
 
 _log = logging.getLogger(__name__)
 
@@ -298,6 +301,82 @@ async def confirm_purchase(
                 )
         updates.update(corrected_fields)
 
+    # Recompute `window_expires` server-side from the platform's Policy
+    # (ticket 5.14). Upload-created sentinels start with `window_expires=now`;
+    # the email-path extractor also sets it from the matching Policy now.
+    # Confirm is the authoritative seam — the user-corrected `purchase_date`
+    # / `platform` / `member_tier_at_purchase` flow into the computation so
+    # whatever the user just locked in drives the monitoring window.
+    #
+    # `window_expires` is NOT in _ALLOWED_CORRECTABLE_FIELDS: the server
+    # owns this number; a client trying to set it directly still 400s
+    # at the allow-list check above.
+    # All three `effective_*` resolvers use `dict.get(key, default)`
+    # uniformly. With `or`, a falsy-but-present correction (e.g. `""`
+    # or explicit `null`) would silently fall back to the OLD value
+    # on the existing doc and feed that into the window computation;
+    # `partial_update` below would then reject the write, but the
+    # window number was already based on a value the user is trying
+    # to overwrite. `.get(default)` lets the falsy value short-circuit
+    # the `if effective_platform and effective_purchase_date:` guard,
+    # so the policy lookup and TypeAdapter validation don't run on
+    # a stale value and the 400 is produced from the partial_update
+    # path (whose Pydantic-supplied `loc` includes the correct field
+    # name).
+    effective_platform = updates.get("platform", purchase.platform)
+    effective_purchase_date = updates.get("purchase_date", purchase.purchase_date)
+    effective_member_tier = updates.get("member_tier_at_purchase", purchase.member_tier_at_purchase)
+    if effective_platform and effective_purchase_date:
+        policy = await db.get_policy(effective_platform)
+        if policy is None:
+            # Latent data gap (e.g. extractor mapped to a platform not yet
+            # in the Policy collection). Log and leave the existing
+            # window_expires untouched — better than fabricating a 15-day
+            # window that could mislead the monitor cron about when the
+            # claim window closes.
+            _log.warning(
+                "Confirm window not recomputed: no Policy for platform=%s purchase_id=%s",
+                effective_platform,
+                purchase_id,
+            )
+        else:
+            days = compute_window_days(policy, member_tier_at_purchase=effective_member_tier)
+            # `purchase_date` may arrive as an ISO string when the user
+            # supplied it via corrected_fields; normalize before
+            # timedelta. A malformed string from the client (e.g.
+            # `"not-a-date"`) used to surface as a 400 via Pydantic's
+            # ValidationError inside `partial_update` below — now that
+            # we touch the value first to compute `window_expires`, an
+            # unhandled `datetime.fromisoformat` `ValueError` would
+            # leak as a 500. Preserve the 400 contract by mapping
+            # parse errors to the same `invalid_field` ApiError the
+            # downstream partial_update would have raised.
+            # Use Pydantic's `TypeAdapter(datetime)` so the error shape
+            # for a malformed `purchase_date` is identical to other
+            # corrected-field validation errors (which flow through
+            # `partial_update(..., model=Purchase)` → ValidationError
+            # → `_validation_error_details`). Without this, a hand-rolled
+            # `datetime.fromisoformat` would either leak a 500 (caller
+            # never wrapped ValueError) or produce a bare 400 without
+            # the `details.fields` payload the frontend's per-field
+            # error rendering consumes. `loc_prefix=("purchase_date",)`
+            # is required because `TypeAdapter(datetime)` validates a
+            # single bare value and returns `loc=()` — the field name
+            # has to be re-attached so PR-B's form can highlight the
+            # right input. The downstream `partial_update` path does
+            # not need this because the Purchase model itself supplies
+            # the field name in `loc` for the same kind of error.
+            try:
+                pd = TypeAdapter(datetime).validate_python(effective_purchase_date)
+            except ValidationError as err:
+                raise ApiError(
+                    "invalid_field",
+                    "One or more corrected fields failed validation",
+                    status_code=400,
+                    details=_validation_error_details(err, loc_prefix=("purchase_date",)),
+                ) from err
+            updates["window_expires"] = pd + timedelta(days=days)
+
     try:
         matched = await db.partial_update("purchases", purchase_id, updates, model=Purchase)
     except ValidationError as err:
@@ -449,10 +528,83 @@ async def _append_ingestion_skiplist(
     return True
 
 
+def _parse_gs_uri(uri: str) -> tuple[str, str]:
+    """Split a `gs://bucket/path/with/slashes` URI into `(bucket, path)`.
+
+    Raises `ValueError` for any malformed input. The caller maps that to
+    a 404 rather than a 500 so a stored bogus URI doesn't leak as an
+    internal-error surface to the client.
+    """
+    if not uri.startswith("gs://"):
+        raise ValueError(f"Not a gs:// URI: {uri!r}")
+    remainder = uri[len("gs://") :]
+    bucket, sep, path = remainder.partition("/")
+    if not bucket or not sep or not path:
+        raise ValueError(f"Malformed gs:// URI (missing bucket or path): {uri!r}")
+    return bucket, path
+
+
+async def fetch_receipt_for_user(
+    *,
+    db: MongoDBClient,
+    uploader: ReceiptsUploader,
+    user_id: UUID,
+    purchase_id: UUID,
+) -> tuple[bytes, str]:
+    """Fetch a receipt blob for the route layer, scoped to the owning user.
+
+    Mirrors `get_purchase_for_user`'s "404, never 403" surface — we don't
+    leak existence across users, and we don't leak "object exists but
+    inaccessible" semantics across receipt URLs.
+
+    404 surfaces (caller maps to ApiError):
+      - Purchase missing or owned by a different user.
+      - Purchase has no `receipt_storage_url` (Gmail ingest case).
+      - Stored URI is not under the configured RECEIPTS_BUCKET (corrupt
+        data; refuse to read from any other bucket even if SA happens
+        to have access — defence-in-depth against a bad write).
+      - Stored URI is malformed.
+      - Blob does not exist in GCS.
+    """
+    purchase = await get_purchase_for_user(db, user_id, purchase_id)
+    if not purchase.receipt_storage_url:
+        raise ApiError("not_found", "Receipt not found", status_code=404)
+
+    try:
+        bucket, blob_path = _parse_gs_uri(purchase.receipt_storage_url)
+    except ValueError:
+        _log.warning(
+            "Malformed receipt_storage_url purchase_id=%s url=%r",
+            purchase_id,
+            purchase.receipt_storage_url,
+        )
+        raise ApiError("not_found", "Receipt not found", status_code=404) from None
+
+    if bucket != uploader.bucket_name:
+        _log.warning(
+            "Receipt URI bucket mismatch purchase_id=%s uri_bucket=%s expected=%s",
+            purchase_id,
+            bucket,
+            uploader.bucket_name,
+        )
+        raise ApiError("not_found", "Receipt not found", status_code=404)
+
+    try:
+        return await uploader.download(blob_path=blob_path)
+    except ReceiptObjectMissingError:
+        _log.warning(
+            "Receipt blob missing in GCS purchase_id=%s blob_path=%s",
+            purchase_id,
+            blob_path,
+        )
+        raise ApiError("not_found", "Receipt not found", status_code=404) from None
+
+
 async def upload_receipt(
     *,
     db: MongoDBClient,
     uploader: ReceiptsUploader,
+    publisher: PubSubPublisher,
     user: User,
     file_bytes: bytes,
     content_type: str,
@@ -462,13 +614,28 @@ async def upload_receipt(
 
     The new Purchase carries sentinel field values (price_paid=0.01,
     empty strings for ids/names, etc.) because nothing has been
-    extracted yet — the ingest agent will overwrite these once it
-    picks up the upload. Status is `pending_confirmation` so consumers
-    know not to trust the field values yet.
+    extracted yet — the ingest agent will overwrite these once the
+    purchase.uploaded Pub/Sub event lands on its push handler. Status
+    is `pending_confirmation` so consumers know not to trust the field
+    values yet.
+
+    Three side effects, ordered for clean rollback (ticket 5.14):
+      1. GCS write — if this fails, nothing else has happened; raise.
+      2. Mongo upsert — if this fails, the GCS blob is orphaned but
+         no doc exists; the orphan costs storage cents at worst and
+         the cleanup script can sweep. Raise.
+      3. Pub/Sub publish — if this fails, the user thinks the upload
+         worked (we'd otherwise return 200 with a doc that will never
+         get extracted). Delete the purchase doc, log the orphan blob
+         for ops, and surface 503 so the client retries the whole
+         flow. This matches the claim-approval pattern in
+         services/claims_service.publish_claim_approval.
 
     Raises:
         ApiError(unsupported_media_type, 415) for non-PDF/PNG/JPEG.
         ApiError(file_too_large, 413) for files > 10 MB.
+        ApiError(publish_failed, 503) when the broker rejects the
+            purchase.uploaded message after the doc was written.
     """
     ingestion_source = validate_upload_content_type(content_type)
     validate_upload_size(len(file_bytes))
@@ -512,6 +679,46 @@ async def upload_receipt(
     )
     await db.upsert("purchases", purchase_id, purchase)
 
+    event = PurchaseUploadedEvent(
+        user_id=str(user.id),
+        purchase_id=str(purchase_id),
+        receipt_storage_url=storage_url,
+        content_type=content_type,
+    )
+    try:
+        await publisher.publish(TOPIC_PURCHASE_UPLOADED, event.model_dump(mode="json"))
+    except Exception:
+        _log.exception(
+            "Failed to publish purchase.uploaded for purchase_id=%s; rolling back doc",
+            purchase_id,
+        )
+        try:
+            await db.delete("purchases", purchase_id)
+        except Exception:
+            # Rollback itself failed — the doc is stranded as a sentinel
+            # pending_confirmation that no ingest event will fire for.
+            # Surface in logs so on-call can clean up; user still gets
+            # 503 below so retry is the right next action.
+            _log.exception(
+                "Rollback failed after publish failure for purchase %s; manual fix required",
+                purchase_id,
+            )
+        else:
+            # Doc deleted; the GCS object is now orphaned. Cheap to
+            # leave (10 MB cap, storage costs cents), and a future
+            # bucket-lifecycle sweep based on missing-doc lookup can
+            # clean it up. Log so the orphan is discoverable.
+            _log.warning(
+                "Orphaned receipt blob after publish-rollback purchase_id=%s blob=%s",
+                purchase_id,
+                storage_url,
+            )
+        raise ApiError(
+            "publish_failed",
+            "Upload failed; please retry.",
+            status_code=503,
+        ) from None
+
     _log.info(
         "Receipt uploaded purchase_id=%s user_id=%s content_type=%s bytes=%d",
         purchase_id,
@@ -542,10 +749,30 @@ def validate_upload_size(size_bytes: int) -> None:
         )
 
 
-def _validation_error_details(err: ValidationError) -> dict[str, object]:
+def _validation_error_details(
+    err: ValidationError,
+    *,
+    loc_prefix: tuple[str, ...] = (),
+) -> dict[str, object]:
+    """Serialise a Pydantic `ValidationError` for the ApiError `details` payload.
+
+    `loc_prefix` is prepended to each error item's `loc` tuple. Defaults
+    to `()` so existing callers that already validate via a Pydantic
+    model (e.g. `partial_update(..., model=Purchase)`) are unchanged —
+    the model already supplies the field name in `loc`. The kwarg is
+    used by call sites that validate a single value via
+    `TypeAdapter(SomeType).validate_python(...)`, where Pydantic
+    returns `loc=()` and the field name has to be added by the caller
+    so the frontend's per-field error rendering can attach the message
+    to the right input.
+    """
     return {
         "fields": [
-            {"loc": item.get("loc"), "type": item.get("type"), "msg": item.get("msg")}
+            {
+                "loc": loc_prefix + tuple(item.get("loc") or ()),
+                "type": item.get("type"),
+                "msg": item.get("msg"),
+            }
             for item in err.errors()
         ]
     }

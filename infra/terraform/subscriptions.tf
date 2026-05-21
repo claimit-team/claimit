@@ -64,6 +64,16 @@ resource "google_cloud_run_v2_service_iam_member" "pubsub_invoker_on_ingest" {
 # outputs (Cloud Run URLs) interpolate at plan time.
 locals {
   subscriptions = {
+    # Ticket 5.14 — api-gateway publishes purchase.uploaded after writing
+    # the sentinel Purchase doc + GCS blob; ingest-agent fetches the blob
+    # and runs Gemini vision extraction. The receipts-bucket IAM read
+    # binding for ingest-agent is asserted in storage.tf
+    # (`ingest_agent_receipts_reader`).
+    "purchase.uploaded-ingest-agent-sub" = {
+      topic    = "purchase.uploaded"
+      endpoint = module.ingest_agent.service_url
+      path     = "/pubsub/purchase.uploaded"
+    }
     "purchase.ingested-monitor-agent-sub" = {
       topic    = "purchase.ingested"
       endpoint = module.monitor_agent.service_url

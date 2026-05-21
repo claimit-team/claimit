@@ -1,10 +1,11 @@
 """Purchases endpoints (Attachment 2 §3.3).
 
-GET    /api/v1/purchases             list with filters + cursor pagination
-GET    /api/v1/purchases/{id}        single purchase (scoped to user)
-POST   /api/v1/purchases/{id}/confirm  apply optional corrections, → monitoring
-POST   /api/v1/purchases/{id}/dismiss  → dismissed, optionally update skiplist
-POST   /api/v1/purchases/upload      multipart receipt → pending_confirmation doc
+GET    /api/v1/purchases                 list with filters + cursor pagination
+GET    /api/v1/purchases/{id}            single purchase (scoped to user)
+GET    /api/v1/purchases/{id}/receipt    receipt-blob proxy (ticket 5.14)
+POST   /api/v1/purchases/{id}/confirm    apply optional corrections, → monitoring
+POST   /api/v1/purchases/{id}/dismiss    → dismissed, optionally update skiplist
+POST   /api/v1/purchases/upload          multipart receipt → pending_confirmation doc
 
 All routes are scoped to `user.id` from get_current_user — users cannot
 read or mutate another user's purchases (404, never 403, to avoid
@@ -17,15 +18,16 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from claimit_mongodb_models import Category, MongoDBClient, PurchaseStatus, User
-from fastapi import APIRouter, Depends, File, Path, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Path, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 
-from ..deps import get_db, get_receipts_uploader
+from ..deps import get_db, get_pubsub_publisher, get_receipts_uploader
 from ..middleware.auth import get_current_user
 from ..middleware.errors import ApiError
 from ..serializers import serialize_purchase, serialize_purchase_detail
 from ..services import claims_service
 from ..services import purchases as purchases_service
+from ..services.pubsub_publisher import PubSubPublisher
 from ..services.purchases import DismissReason
 from ..services.receipts_storage import ReceiptsUploader
 
@@ -105,6 +107,7 @@ async def upload_purchase_receipt(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[MongoDBClient, Depends(get_db)],
     uploader: Annotated[ReceiptsUploader, Depends(get_receipts_uploader)],
+    publisher: Annotated[PubSubPublisher, Depends(get_pubsub_publisher)],
     file: Annotated[UploadFile, File(description="Receipt file (PDF/PNG/JPEG, ≤10 MB).")],
 ) -> dict[str, object]:
     """Persist a manually-uploaded receipt and create a pending Purchase doc."""
@@ -114,6 +117,7 @@ async def upload_purchase_receipt(
     purchase = await purchases_service.upload_receipt(
         db=db,
         uploader=uploader,
+        publisher=publisher,
         user=user,
         file_bytes=file_bytes,
         content_type=content_type,
@@ -130,6 +134,44 @@ async def _read_limited_upload(file: UploadFile) -> bytes:
         purchases_service.validate_upload_size(total)
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+# The receipt route must precede the catch-all `/{purchase_id}` GET so
+# FastAPI's path-matching picks it up first — same pattern as the
+# `/upload` route above. Without this ordering, `:id/receipt` would be
+# parsed as `purchase_id == "{id}/receipt"` and 422 at the UUID coerce.
+@router.get("/{purchase_id}/receipt")
+async def get_purchase_receipt(
+    purchase_id: Annotated[str, Path()],
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[MongoDBClient, Depends(get_db)],
+    uploader: Annotated[ReceiptsUploader, Depends(get_receipts_uploader)],
+) -> Response:
+    """Stream a user's receipt blob from GCS through api-gateway.
+
+    Proxy (NOT a signed URL): the receipts bucket has
+    `public_access_prevention=enforced` per terraform/storage.tf so we
+    never mint signBlob credentials. api-gateway already holds
+    `roles/storage.objectViewer` on the bucket; we proxy the bytes back
+    to the authenticated browser with the original content-type.
+
+    404 covers every failure mode (missing purchase, non-owner, no
+    `receipt_storage_url`, malformed gs:// URI, blob missing in GCS,
+    bucket mismatch) — see `services.purchases.fetch_receipt_for_user`
+    for the matrix. We never 403 / never leak existence across users.
+
+    Receipts are bounded at MAX_UPLOAD_BYTES (10 MB) by the upload
+    validator, so a plain `Response(content=bytes)` is sufficient — no
+    streaming required.
+    """
+    uid: UUID = purchases_service.parse_purchase_id(purchase_id)
+    data, content_type = await purchases_service.fetch_receipt_for_user(
+        db=db,
+        uploader=uploader,
+        user_id=user.id,
+        purchase_id=uid,
+    )
+    return Response(content=data, media_type=content_type)
 
 
 @router.get("/{purchase_id}")
