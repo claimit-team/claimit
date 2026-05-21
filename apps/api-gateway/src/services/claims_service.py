@@ -387,10 +387,15 @@ async def list_claims_for_purchase(
     a separate guard. A purchase owned by another user simply yields zero
     rows — never leaks claim existence across users.
     """
-    # Defensive clamp: the default is _CLAIMS_PER_PURCHASE_CAP, but a
-    # future caller passing a larger value would bypass the hard cap.
-    # Clamp here so the $limit stage CAN'T exceed the contract.
-    safe_limit = max(0, min(int(limit), _CLAIMS_PER_PURCHASE_CAP))
+    # Defensive clamp:
+    #   - Cap on the top end: a future caller passing a value larger
+    #     than `_CLAIMS_PER_PURCHASE_CAP` must not bypass the hard cap.
+    #   - Floor on the bottom end: MongoDB's aggregation `$limit`
+    #     REQUIRES a strictly positive integer — `{"$limit": 0}` (or
+    #     negative) raises "$limit requires a positive number" at the
+    #     server. Floor at 1 so a 0/negative caller still gets a sane
+    #     (empty) result instead of a 500.
+    safe_limit = max(1, min(int(limit), _CLAIMS_PER_PURCHASE_CAP))
     match: dict[str, Any] = {"user_id": user_id, "purchase_id": purchase_id}
     pipeline: list[dict[str, Any]] = [
         {"$match": match},

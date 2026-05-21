@@ -85,10 +85,42 @@ DEMO_EMAIL = "claimitbeta@gmail.com"
 SEED_MARKER = "5_4_demo"
 PROD_DB = "claimit"
 
-# (group, outcome, platform, category, product_name, claim_amount,
-#  claim_type, window_offset_days, submitted_offset_days, resolved_offset_days)
-# All offsets are relative to the claim's `updated_at` timestamp; rank index
-# stretches updated_at backwards by minutes so the cursor sort is natural.
+# SPECS tuple layout — POSITIONAL fields (12):
+# (group, outcome, platform, category, product_name,
+#  price_paid, claim_amount,
+#  claim_type, member_tier_at_purchase,
+#  window_offset_days, submitted_offset_days, resolved_offset_days)
+#
+# Why `price_paid` and `claim_amount` are SEPARATE columns (Bugbot
+# NEW-2): the previous single column collapsed them, so each seeded
+# purchase had `claim_amount == price_paid`, and the chart's lowest
+# snapshot collapsed to `max(price_paid - claim_amount, 1.0) == 1.0`
+# — every seeded chart dropped to $1, regardless of product.
+# Splitting the column gives a realistic `low = price_paid -
+# claim_amount` per purchase (verified individually below):
+#
+#   Sony WH-1000XM5    $399.99 - $50   = $349.99
+#   Anker USB-C         $34.99 - $19   =  $15.99
+#   Delta DL482        $452.00 - $120  = $332.00
+#   Hilton NYC (HH)    $489.00 - $89   = $400.00  (member rate)
+#   Dyson V8           $399.99 - $75   = $324.99
+#   Instant Pot Duo     $89.00 - $22.5 =  $66.50
+#   United UA221       $310.00 - $60   = $250.00
+#   Marriott SF        $289.00 - $40   = $249.00
+#   Southwest WN1100   $189.00 - $30   = $159.00
+#
+# Member-tier data (`member_tier_at_purchase` populated): one HOTEL
+# purchase carries a tier so the detail page demonstrates the
+# matching-tier chart line + member/non-member price rows. Hilton NYC
+# qualifies because its linked claim is PENDING (neither denied nor
+# no_response). Its `price_paid` is the member rate at booking; the
+# adapter populates BOTH `price_member` and `price_non_member` on each
+# snapshot so the details list surfaces both prices and the chart plots
+# the member line.
+#
+# All offsets are relative to the claim's `updated_at` timestamp; rank
+# index stretches updated_at backwards by minutes so the cursor sort is
+# natural.
 SPECS: list[
     tuple[
         str,
@@ -96,8 +128,10 @@ SPECS: list[
         Platform,
         Category,
         str,
-        float,
+        float,  # price_paid
+        float,  # claim_amount
         ClaimType,
+        str | None,  # member_tier_at_purchase
         int,
         int | None,
         int | None,
@@ -110,8 +144,10 @@ SPECS: list[
         Platform.BEST_BUY,
         Category.RETAIL,
         "Sony WH-1000XM5 Headphones",
+        399.99,
         50.00,
         ClaimType.EMAIL,
+        None,
         11,
         None,
         None,
@@ -122,8 +158,10 @@ SPECS: list[
         Platform.AMAZON,
         Category.RETAIL,
         "Anker USB-C Charger",
+        34.99,
         18.99,
         ClaimType.CHAT_SCRIPT,
+        None,
         3,
         None,
         None,
@@ -135,8 +173,10 @@ SPECS: list[
         Platform.DELTA,
         Category.AIRLINE,
         "Delta DL482 fare adjustment",
+        452.00,
         120.00,
         ClaimType.EMAIL,
+        None,
         9,
         -2,
         None,
@@ -147,8 +187,10 @@ SPECS: list[
         Platform.HILTON,
         Category.HOTEL,
         "Hilton NYC 2-night stay",
+        489.00,
         89.00,
         ClaimType.EMAIL,
+        "Hilton Honors",  # ← member tier (only seeded entry with one)
         14,
         -4,
         None,
@@ -160,8 +202,10 @@ SPECS: list[
         Platform.TARGET,
         Category.RETAIL,
         "Dyson V8 Vacuum",
+        399.99,
         75.00,
         ClaimType.EMAIL,
+        None,
         30,
         -10,
         -6,
@@ -172,8 +216,10 @@ SPECS: list[
         Platform.WALMART,
         Category.RETAIL,
         "Instant Pot Duo 6qt",
+        89.00,
         22.50,
         ClaimType.CHAT_SCRIPT,
+        None,
         30,
         -7,
         -3,
@@ -184,8 +230,10 @@ SPECS: list[
         Platform.UNITED,
         Category.AIRLINE,
         "United UA221 fare",
+        310.00,
         60.00,
         ClaimType.EMAIL,
+        None,
         30,
         -8,
         -5,
@@ -196,8 +244,10 @@ SPECS: list[
         Platform.MARRIOTT,
         Category.HOTEL,
         "Marriott SF 1-night",
+        289.00,
         40.00,
         ClaimType.EMAIL,
+        None,
         -2,  # window_expires already in the past for EXPIRED
         None,
         None,
@@ -208,8 +258,10 @@ SPECS: list[
         Platform.SOUTHWEST,
         Category.AIRLINE,
         "Southwest WN1100 fare",
+        189.00,
         30.00,
         ClaimType.EMAIL,
+        None,
         30,
         -20,
         None,
@@ -311,8 +363,14 @@ def _build_price_history_series(
         price = round(paid - (paid - low) * progress, 2)
         checked_at = start + timedelta(seconds=span * progress)
         if member_tier:
+            # Member purchase: the matching-tier price (plotted on the
+            # chart) is the member rate; the standard rate sits ~10%
+            # above and surfaces in the detail page's tooltip/list.
+            # This matches the +10% non_member_price_at_purchase booked
+            # on the parent purchase so the chart and the details list
+            # tell a coherent story.
             price_member: float | None = price
-            price_non_member: float | None = round(price * 1.05, 2)
+            price_non_member: float | None = round(price * 1.10, 2)
             tier_label: str | None = member_tier
         else:
             price_member = None
@@ -350,7 +408,16 @@ def _build_purchase(
     window_expires: datetime,
     claim_type: ClaimType,
     ingested_at: datetime,
+    member_tier_at_purchase: str | None = None,
+    non_member_price_at_purchase: float | None = None,
 ) -> Purchase:
+    # When the purchase carries a member tier, `price_paid` IS the
+    # member rate (what the user actually paid as a tier member); the
+    # standard non-member rate (passed in explicitly) surfaces in the
+    # detail page's "Original purchase details" list. The frontend's
+    # matching-tier picker plots the member line because the snapshot
+    # populates `price_member`.
+    member_price = price if member_tier_at_purchase is not None else None
     purchase_id = uuid4()
     return Purchase(
         _id=purchase_id,
@@ -366,14 +433,14 @@ def _build_purchase(
         bed_type=None,
         rate_type=None,
         price_paid=price,
-        member_price_at_purchase=None,
-        non_member_price_at_purchase=None,
+        member_price_at_purchase=member_price,
+        non_member_price_at_purchase=non_member_price_at_purchase,
         currency="USD",
         purchase_date=ingested_at - timedelta(days=10),
         purchase_date_basis=_purchase_date_basis(category),
         window_expires=window_expires,
         order_id=f"demo-ord-{purchase_id.hex[:10]}",
-        member_tier_at_purchase=None,
+        member_tier_at_purchase=member_tier_at_purchase,
         status=PurchaseStatus.MONITORING,
         claim_type=claim_type,
         monitoring_cadence_minutes=1440,
@@ -508,8 +575,10 @@ async def _run() -> int:
                 platform,
                 category,
                 product_name,
-                price,
+                price_paid,
+                claim_amount,
                 claim_type,
+                member_tier,
                 window_offset_days,
                 submitted_off_days,
                 resolved_off_days,
@@ -517,15 +586,23 @@ async def _run() -> int:
             # Stagger updated_at by minutes — newest first (rank 0).
             ts = now - timedelta(minutes=rank)
             window_expires = now + timedelta(days=window_offset_days)
+            # When a purchase carries a member tier the "standard rate"
+            # at booking sits ~10% above the member rate — a believable
+            # member-vs-rack-rate gap that the detail page surfaces in
+            # the "Original purchase details" list. Non-tier purchases
+            # leave this None.
+            non_member_price = round(price_paid * 1.10, 2) if member_tier is not None else None
             purchase = _build_purchase(
                 user_id=user_id,
                 platform=platform,
                 category=category,
                 product_name=product_name,
-                price=price,
+                price=price_paid,
                 window_expires=window_expires,
                 claim_type=claim_type,
                 ingested_at=ts,
+                member_tier_at_purchase=member_tier,
+                non_member_price_at_purchase=non_member_price,
             )
             submitted_at = (
                 ts + timedelta(days=submitted_off_days) if submitted_off_days is not None else None
@@ -537,7 +614,7 @@ async def _run() -> int:
                 user_id=user_id,
                 purchase_id=purchase.id,
                 platform=platform,
-                claim_amount=price,
+                claim_amount=claim_amount,
                 claim_type=claim_type,
                 outcome=outcome,
                 updated_at=ts,
@@ -654,21 +731,39 @@ async def _run() -> int:
                 all_ok = False
 
         # ---- Verification (ticket 5.6) - price_history per purchase ----
-        # Confirm each seeded purchase has the expected snapshot count.
+        # Confirm each seeded purchase has the expected snapshot count
+        # AND that the price coherence holds:
+        #   low = price_paid - claim_amount   (Bugbot NEW-2 check)
+        # i.e. the chart's drop magnitude must equal the linked claim's
+        # claim_amount (modulo the $1 floor in _build_price_history_series).
         # Uses the live `find_price_history` helper so we also exercise
         # the (now read-tolerant) typed read path that the api-gateway
         # detail endpoint uses.
+        claim_amount_by_purchase: dict[UUID, float] = {
+            c.purchase_id: c.claim_amount for _, c in claim_models
+        }
         print("\nVerification - price_history snapshots per purchase:")
         for purchase in purchase_models:
             rows = await db.find_price_history(purchase.id, limit=200)
             expected = _PRICE_SNAPSHOTS_PER_PURCHASE
             row_status = "OK" if len(rows) == expected else "FAIL"
+            ca = claim_amount_by_purchase[purchase.id]
+            computed_low = max(purchase.price_paid - ca, 1.0)
+            tier = purchase.member_tier_at_purchase or "-"
+            # Pick the plotted price field per matching-tier rule so the
+            # printed low matches what the chart actually shows.
+            plotted = [r.price_member if tier != "-" else r.price_non_member for r in rows]
+            observed_low = min((p for p in plotted if p is not None), default=None)
+            low_match = observed_low is not None and abs(observed_low - computed_low) < 0.01
+            low_status = "OK" if low_match else "FAIL"
             print(
-                f"  purchase {purchase.product_name[:42]:<42} "
-                f"({purchase.platform.value}) - "
-                f"snapshots={len(rows)} (expect {expected})  [{row_status}]"
+                f"  {purchase.product_name[:38]:<38} "
+                f"({purchase.platform.value:<10}) "
+                f"paid=${purchase.price_paid:>7.2f}  claim=${ca:>6.2f}  "
+                f"low=${computed_low:>7.2f}  tier={tier:<14}  "
+                f"snapshots={len(rows)}  [{row_status}/{low_status}]"
             )
-            if len(rows) != expected:
+            if len(rows) != expected or not low_match:
                 all_ok = False
 
         # ---- Stale-data probe ----

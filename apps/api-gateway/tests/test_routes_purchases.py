@@ -412,12 +412,30 @@ async def test_get_purchase_detail_tolerant_to_rogue_price_history_row(
 
 
 @pytest.mark.asyncio
-async def test_list_claims_for_purchase_clamps_limit_to_hard_cap() -> None:
-    """Defensive clamp (review finding C1): even when a caller passes a
-    `limit` larger than `_CLAIMS_PER_PURCHASE_CAP`, the emitted `$limit`
-    pipeline stage MUST equal the cap. Future callers can't bypass the
-    hard ceiling by widening the kwarg."""
-    from src.services.claims_service import _CLAIMS_PER_PURCHASE_CAP, list_claims_for_purchase
+@pytest.mark.parametrize(
+    "input_limit, expected_limit",
+    [
+        # Floor at 1: $limit: 0 raises "$limit requires a positive number"
+        # at MongoDB, so a 0/negative caller must still emit a positive
+        # value (empty result is the right shape; a 500 is not).
+        pytest.param(0, 1, id="zero-floors-to-one"),
+        pytest.param(-5, 1, id="negative-floors-to-one"),
+        # Cap at _CLAIMS_PER_PURCHASE_CAP: no caller can bypass the
+        # hard ceiling by widening the kwarg.
+        pytest.param(500, 50, id="overshoot-caps-at-50"),
+        pytest.param(10000, 50, id="x200-still-caps-at-50"),
+        # Identity inside the band — no clamping when the value is sane.
+        pytest.param(10, 10, id="passthrough-within-band"),
+    ],
+)
+async def test_list_claims_for_purchase_clamps_limit_to_hard_cap(
+    input_limit: int, expected_limit: int
+) -> None:
+    """Defensive clamp (review findings C1 + Bugbot NEW-1): the emitted
+    `$limit` MUST floor at 1 (so MongoDB never sees a non-positive
+    value) and cap at `_CLAIMS_PER_PURCHASE_CAP` (so a future caller
+    can't bypass the hard ceiling)."""
+    from src.services.claims_service import list_claims_for_purchase
 
     mock_db = AsyncMock(spec=MongoDBClient)
     mock_db.aggregate = AsyncMock(return_value=[])
@@ -425,11 +443,11 @@ async def test_list_claims_for_purchase_clamps_limit_to_hard_cap() -> None:
         mock_db,
         user_id=USER_ID,
         purchase_id=PURCHASE_ID,
-        limit=_CLAIMS_PER_PURCHASE_CAP * 10,  # x10 the cap
+        limit=input_limit,
     )
     pipeline = mock_db.aggregate.await_args.args[1]
     limit_stage = next(s for s in pipeline if "$limit" in s)
-    assert limit_stage["$limit"] == _CLAIMS_PER_PURCHASE_CAP
+    assert limit_stage["$limit"] == expected_limit
 
 
 @pytest.mark.asyncio
