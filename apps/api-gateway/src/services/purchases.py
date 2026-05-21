@@ -7,6 +7,7 @@ shapes; all DB and storage work lives here.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import uuid
@@ -23,6 +24,7 @@ from claimit_mongodb_models import (
     IngestionSource,
     MongoDBClient,
     Platform,
+    PriceHistoryReadTolerant,
     Purchase,
     PurchaseDateBasis,
     PurchaseReadTolerant,
@@ -34,6 +36,7 @@ from pydantic import ValidationError
 
 from ..middleware.errors import ApiError
 from ..middleware.pagination import apply_cursor_to_query, encode_cursor
+from ..services import claims_service
 from ..services.receipts_storage import ReceiptsUploader
 
 _log = logging.getLogger(__name__)
@@ -172,6 +175,60 @@ async def get_purchase_for_user(
     if purchase is None or purchase.user_id != user_id:
         raise ApiError("not_found", "Purchase not found", status_code=404)
     return purchase
+
+
+# Hard cap on price_history snapshots returned by the enriched detail
+# bundle. Matches `find_price_history`'s default; production retention is
+# capped by the 90-day TTL on `checked_at` (see create_indexes.py), so the
+# practical worst case is the cadence-of-15-min sweep x 90 days ~ 8.6k
+# rows. The detail page only plots a sparse timeline; 200 rows is
+# generous headroom for visual fidelity without bloating the response.
+_PRICE_HISTORY_DETAIL_CAP = 200
+
+
+async def get_purchase_detail(
+    db: MongoDBClient,
+    user_id: UUID,
+    purchase_id: UUID,
+) -> tuple[PurchaseReadTolerant, list[PriceHistoryReadTolerant], list[dict[str, object]]]:
+    """Assemble the enriched purchase-detail bundle in a single round-trip.
+
+    Reads (in parallel via `asyncio.gather`):
+      1. The owned Purchase (PurchaseReadTolerant). 404 if missing or
+         owned by a different user.
+      2. The purchase's price-history snapshots, sorted ASC by
+         `checked_at` so the consumer (chart) gets a left-to-right
+         timeline without re-sorting. Capped at `_PRICE_HISTORY_DETAIL_CAP`
+         — anything older than the TTL is gone already.
+      3. The claims tied to the purchase, owned by `user_id`. Reuses the
+         shared `_CLAIM_LIST_PROJECT_STAGE` aggregation so each row is
+         identical to a `/claims` list row.
+
+    Returns:
+        (purchase, price_history, claims) — caller serialises.
+
+    Three tolerant reads on the hot detail path: a single legacy/rogue row
+    in any of the three collections cannot 500 the page. Strict-on-write
+    remains intact via `COLLECTION_MODELS`.
+    """
+    purchase = await get_purchase_for_user(db, user_id, purchase_id)
+
+    # Run the price-history and claims reads in parallel. The purchase
+    # read above is sequential because the ownership check gates whether
+    # we read anything else at all — issuing those reads before the 404
+    # would leak existence (and waste a round-trip on miss).
+    price_history_task = db.find_price_history(
+        purchase_id,
+        limit=_PRICE_HISTORY_DETAIL_CAP,
+        sort=[("checked_at", 1)],
+    )
+    claims_task = claims_service.list_claims_for_purchase(
+        db=db,
+        user_id=user_id,
+        purchase_id=purchase_id,
+    )
+    price_history, claims = await asyncio.gather(price_history_task, claims_task)
+    return purchase, price_history, claims
 
 
 async def confirm_purchase(
