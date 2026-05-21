@@ -84,41 +84,34 @@ function deriveLowConfidenceFields(confidence: PurchaseDetailDoc["extraction_con
 }
 
 /**
- * Adapter: derive the receipt-preview props from the doc. The real
- * blob fetch lives in B6 — this adapter only provides the filename
- * (display only) and the FE's best guess at "is this a PDF or image"
- * derived from `ingestion_source`. B6 will replace the URL plumbing
- * with the authenticated proxy fetch.
+ * Best-effort filename for the receipt header (display only).
+ * Parses the gs:// URI when present (the upload route encodes
+ * `<purchaseId>.<ext>` after the user folder); otherwise falls back
+ * to a generic name keyed off ingestion_source.
  */
-function adaptReceiptProps(purchase: PurchaseDetailDoc): {
-  filename: string;
-  receiptType: "pdf" | "image";
-  receiptUrl: string;
-} {
-  const ingestion = purchase.ingestion_source ?? "upload_pdf";
-  const receiptType: "pdf" | "image" = ingestion === "upload_pdf" ? "pdf" : "image";
-  const fallbackName =
-    receiptType === "pdf"
-      ? "receipt.pdf"
-      : ingestion === "upload_image"
-        ? "receipt.jpg"
-        : "receipt";
-  // For now we surface the gs:// URL or empty string. The B6
-  // receipt-preview rewrite owns turning this into a Blob via
-  // `fetchReceiptBlob` and rendering with createObjectURL.
-  return {
-    filename: fallbackName,
-    receiptType,
-    receiptUrl: purchase.receipt_storage_url ?? "",
-  };
+function deriveReceiptFilename(purchase: PurchaseDetailDoc): string | null {
+  const url = purchase.receipt_storage_url;
+  if (url) {
+    const tail = url.split("/").pop();
+    if (tail) return tail;
+  }
+  if (purchase.ingestion_source === "upload_pdf") return "receipt.pdf";
+  if (purchase.ingestion_source === "upload_image") return "receipt.jpg";
+  return null;
 }
 
 export function ConfirmPurchaseContent({ purchase }: { purchase: PurchaseDetailDoc }) {
   const { fields: lowConfidenceFields, isMostlyFailed } = deriveLowConfidenceFields(
     purchase.extraction_confidence,
   );
-  const receiptProps = adaptReceiptProps(purchase);
+  const receiptFilename = deriveReceiptFilename(purchase);
   const overallConfidence = purchase.extraction_confidence?.overall_min ?? 0;
+  // No stored receipt → render the form full-width below the page
+  // header rather than reserving a 2/5 column for the "Original not
+  // available" fallback. The fallback still surfaces for upload-
+  // source docs whose blob 404s (degraded state); only the explicit
+  // null-url shape (e.g. the gmail seed row) goes full-width.
+  const hasReceipt = purchase.receipt_storage_url !== null;
 
   // Form state lives here (ticket 5.14 B4). The form is purely
   // controlled and ActionBar reads the same state object to compute
@@ -142,15 +135,17 @@ export function ConfirmPurchaseContent({ purchase }: { purchase: PurchaseDetailD
         </div>
 
         <div className="flex flex-col gap-8 lg:flex-row">
-          <div className="lg:w-2/5 shrink-0">
-            <div className="lg:sticky lg:top-20">
-              <ReceiptPreview
-                filename={receiptProps.filename}
-                receiptType={receiptProps.receiptType}
-                receiptUrl={receiptProps.receiptUrl}
-              />
+          {hasReceipt ? (
+            <div className="lg:w-2/5 shrink-0">
+              <div className="lg:sticky lg:top-20">
+                <ReceiptPreview
+                  purchaseId={purchase._id}
+                  filename={receiptFilename}
+                  ingestionSource={purchase.ingestion_source}
+                />
+              </div>
             </div>
-          </div>
+          ) : null}
 
           <div className="flex-1 min-w-0">
             <div className="rounded-lg border border-neutral-200 bg-neutral-0 p-6">
