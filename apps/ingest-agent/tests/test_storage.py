@@ -66,6 +66,39 @@ def test_download_raises_object_missing_for_404(monkeypatch: pytest.MonkeyPatch)
         asyncio.run(reader.download(blob_path="gone.pdf"))
 
 
+def test_download_raises_object_missing_for_403_and_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """403 surfaces as a distinct ERROR log before collapsing to "missing".
+
+    The Pub/Sub handler ack-and-logs either way (no DLQ amplification on
+    an IAM bug we can't fix by retrying), but the ERROR line with the
+    bucket + blob_path is what lets ops notice that
+    `ingest_agent_receipts_reader` got removed from Terraform.
+    """
+    monkeypatch.delenv("RECEIPTS_BUCKET", raising=False)
+    reader = ReceiptsReader(bucket_name="rec-bucket")
+
+    fake_blob = MagicMock()
+    fake_blob.download_as_bytes.side_effect = gcs_exceptions.Forbidden("403 denied")
+    fake_bucket = MagicMock()
+    fake_bucket.blob.return_value = fake_blob
+    fake_client = MagicMock()
+    fake_client.bucket.return_value = fake_bucket
+
+    with (
+        patch.object(reader, "_get_client", return_value=fake_client),
+        caplog.at_level("ERROR", logger="src.storage"),
+        pytest.raises(ReceiptObjectMissingError),
+    ):
+        asyncio.run(reader.download(blob_path="denied.pdf"))
+
+    assert any("IAM regression" in record.message for record in caplog.records)
+    assert any("rec-bucket" in record.message for record in caplog.records)
+    assert any("denied.pdf" in record.message for record in caplog.records)
+
+
 @pytest.mark.parametrize(
     ("uri", "expected"),
     [

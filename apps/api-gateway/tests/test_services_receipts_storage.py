@@ -90,3 +90,35 @@ def test_download_raises_receipt_object_missing_for_404(monkeypatch: pytest.Monk
         pytest.raises(ReceiptObjectMissingError),
     ):
         asyncio.run(uploader.download(blob_path="gone.pdf"))
+
+
+def test_download_raises_receipt_object_missing_for_403_and_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """403 (IAM regression) collapses to ReceiptObjectMissing but logs distinctly.
+
+    Same external surface as a 404 (route maps to 404 so we never leak
+    "object exists but you can't read it"), but the logs MUST carry the
+    bucket + blob path so an alert can fire on an IAM regression.
+    """
+    monkeypatch.delenv("RECEIPTS_BUCKET", raising=False)
+    uploader = ReceiptsUploader(bucket_name="receipts-bucket")
+
+    fake_blob = MagicMock()
+    fake_blob.download_as_bytes.side_effect = gcs_exceptions.Forbidden("denied")
+    fake_bucket = MagicMock()
+    fake_bucket.blob.return_value = fake_blob
+    fake_client = MagicMock()
+    fake_client.bucket.return_value = fake_bucket
+
+    with (
+        patch.object(uploader, "_get_client", return_value=fake_client),
+        caplog.at_level("ERROR", logger="src.services.receipts_storage"),
+        pytest.raises(ReceiptObjectMissingError),
+    ):
+        asyncio.run(uploader.download(blob_path="denied.pdf"))
+
+    assert any("IAM regression" in record.message for record in caplog.records)
+    assert any("receipts-bucket" in record.message for record in caplog.records)
+    assert any("denied.pdf" in record.message for record in caplog.records)

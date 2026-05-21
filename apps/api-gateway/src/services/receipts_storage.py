@@ -66,11 +66,20 @@ class ReceiptsUploader:
         """Download an object by its path within the configured bucket.
 
         Returns `(data, content_type)`. Raises `ReceiptObjectMissingError`
-        when the object is not found in GCS — the route maps that to a 404
-        so we don't leak "object exists but you can't read it" semantics
-        (storage.objectViewer is granted at the bucket level, so a missing
-        object and an unauthorized one are distinguished by 404 vs 403 at
-        the GCS layer; we collapse both to "missing" here on purpose).
+        when the object is not found OR cannot be read due to GCS 403 —
+        the route maps that to a 404 so we don't leak "object exists but
+        you can't read it" semantics (storage.objectViewer is granted at
+        the bucket level, so a missing object and an unauthorized one are
+        distinguished by 404 vs 403 at the GCS layer; we collapse both to
+        "missing" here on purpose).
+
+        A 403 is logged at ERROR (with the blob path) BEFORE collapsing to
+        `ReceiptObjectMissingError`. We never want an IAM regression
+        (e.g. a stale Terraform apply that drops
+        `api_gateway_receipts_reader`) to silently degrade to a generic
+        404 in the logs — every Forbidden surfaces as a distinct line so
+        an alert can fire even though the user-facing surface stays the
+        same.
         """
         return await asyncio.to_thread(self._download_sync, blob_path)
 
@@ -80,6 +89,14 @@ class ReceiptsUploader:
         try:
             data = blob.download_as_bytes()
         except gcs_exceptions.NotFound as err:
+            raise ReceiptObjectMissingError(blob_path) from err
+        except gcs_exceptions.Forbidden as err:
+            logger.error(
+                "GCS 403 on receipt blob — possible IAM regression: bucket=%s blob_path=%s err=%s",
+                self._bucket_name,
+                blob_path,
+                err,
+            )
             raise ReceiptObjectMissingError(blob_path) from err
         # `download_as_bytes` populates blob metadata lazily — pull
         # content_type after the fetch so we report what GCS actually

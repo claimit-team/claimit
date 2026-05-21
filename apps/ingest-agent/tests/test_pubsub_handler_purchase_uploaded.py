@@ -31,6 +31,106 @@ PURCHASE_ID = UUID("22222222-2222-4222-8222-222222222222")
 USER_ID = UUID("11111111-1111-4111-8111-111111111111")
 
 
+# ---------- _select_mime_type unit tests --------------------------------
+# Direct coverage of the helper so the priority chain is documented
+# field-level, independent of FastAPI plumbing. The end-to-end handler
+# tests below assert the same chain through the public Pub/Sub surface.
+
+
+class TestSelectMimeType:
+    def test_uses_gcs_when_known(self) -> None:
+        assert (
+            main_module._select_mime_type(
+                blob_content_type="image/png",
+                event_content_type="application/pdf",
+                data=b"\x89PNG\r\n",
+                purchase_id=PURCHASE_ID,
+            )
+            == "image/png"
+        )
+
+    def test_strips_parameters_from_gcs_value(self) -> None:
+        # `image/jpeg; charset=binary` should still route to image/jpeg.
+        assert (
+            main_module._select_mime_type(
+                blob_content_type="image/jpeg; charset=binary",
+                event_content_type="application/octet-stream",
+                data=b"\xff\xd8\xff\xe0",
+                purchase_id=PURCHASE_ID,
+            )
+            == "image/jpeg"
+        )
+
+    def test_falls_back_to_event_when_gcs_octet_stream(self) -> None:
+        assert (
+            main_module._select_mime_type(
+                blob_content_type="application/octet-stream",
+                event_content_type="application/pdf",
+                data=b"%PDF-1.4",
+                purchase_id=PURCHASE_ID,
+            )
+            == "application/pdf"
+        )
+
+    def test_falls_back_to_event_when_gcs_missing(self) -> None:
+        assert (
+            main_module._select_mime_type(
+                blob_content_type=None,
+                event_content_type="image/png",
+                data=b"\x89PNG\r\n",
+                purchase_id=PURCHASE_ID,
+            )
+            == "image/png"
+        )
+
+    def test_sniffs_pdf_when_both_unknown(self) -> None:
+        assert (
+            main_module._select_mime_type(
+                blob_content_type="application/octet-stream",
+                event_content_type="application/octet-stream",
+                data=b"%PDF-1.7 leading bytes",
+                purchase_id=PURCHASE_ID,
+            )
+            == "application/pdf"
+        )
+
+    def test_sniffs_jpeg_when_both_unknown(self) -> None:
+        assert (
+            main_module._select_mime_type(
+                blob_content_type=None,
+                event_content_type=None,
+                data=b"\xff\xd8\xff\xe0jpeg-bytes",
+                purchase_id=PURCHASE_ID,
+            )
+            == "image/jpeg"
+        )
+
+    def test_sniffs_png_when_both_unknown(self) -> None:
+        assert (
+            main_module._select_mime_type(
+                blob_content_type="application/octet-stream",
+                event_content_type=None,
+                data=b"\x89PNG\r\n\x1a\nthe-rest",
+                purchase_id=PURCHASE_ID,
+            )
+            == "image/png"
+        )
+
+    def test_returns_octet_stream_when_nothing_matches(self) -> None:
+        # `extract_from_blob` will then ValueError — that's the right
+        # surface (`extractor_rejected_input`, ack + log) for genuinely
+        # unrecognised bytes.
+        assert (
+            main_module._select_mime_type(
+                blob_content_type=None,
+                event_content_type="application/octet-stream",
+                data=b"random unrecognised payload",
+                purchase_id=PURCHASE_ID,
+            )
+            == "application/octet-stream"
+        )
+
+
 @pytest.fixture(autouse=True)
 def _disable_oidc(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PUBSUB_AUTH_DISABLED", "1")
@@ -459,5 +559,108 @@ def test_handler_prefers_gcs_content_type_over_event_payload(
             resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
         assert resp.status_code == 200
         assert captured["mime_type"] == "image/png"
+    finally:
+        _clear_overrides()
+
+
+def test_handler_falls_back_to_event_content_type_when_gcs_octet_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GCS metadata "application/octet-stream" must NOT drop the message.
+
+    `ReceiptsReader.download()` defaults to "application/octet-stream"
+    when blob metadata is missing, which would otherwise dominate the
+    `blob_content_type or payload.content_type` fallback and make
+    `extract_from_blob` reject the input. The handler now treats
+    octet-stream as "unknown" and falls through to the
+    upload-validated payload content_type.
+    """
+    captured: dict[str, object] = {}
+
+    async def fake_extract(*, data: bytes, mime_type: str) -> ExtractedPurchaseFields:
+        captured["mime_type"] = mime_type
+        return _extracted()
+
+    monkeypatch.setattr(main_module, "extract_from_blob", fake_extract)
+    monkeypatch.setattr("src.finalize.publish_event", AsyncMock(return_value="msg-finalize"))
+
+    _setup_overrides(
+        purchase=_purchase_doc(),
+        blob=(b"%PDF-1.4 fake", "application/octet-stream"),
+    )
+    try:
+        with TestClient(app) as client:
+            data = _encode_event(_event_payload(content_type="application/pdf"))
+            resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
+        assert resp.status_code == 200
+        assert captured["mime_type"] == "application/pdf"
+    finally:
+        _clear_overrides()
+
+
+def test_handler_sniffs_mime_when_both_metadata_sources_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Both metadata sources unusable → magic-byte sniff carries the message.
+
+    Last-resort fallback so a metadata-corruption regression in either
+    GCS or the upload event doesn't permanently drop otherwise valid
+    PDF/JPEG uploads. Also asserts the WARNING is emitted so this path
+    is visible in logs.
+    """
+    captured: dict[str, object] = {}
+
+    async def fake_extract(*, data: bytes, mime_type: str) -> ExtractedPurchaseFields:
+        captured["mime_type"] = mime_type
+        return _extracted()
+
+    monkeypatch.setattr(main_module, "extract_from_blob", fake_extract)
+    monkeypatch.setattr("src.finalize.publish_event", AsyncMock(return_value="msg-finalize"))
+
+    _setup_overrides(
+        purchase=_purchase_doc(),
+        blob=(b"\xff\xd8\xff\xe0and-then-some-jpeg-bytes", "application/octet-stream"),
+    )
+    try:
+        with TestClient(app) as client:
+            data = _encode_event(_event_payload(content_type="application/octet-stream"))
+            with caplog.at_level("WARNING", logger="src.main"):
+                resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
+        assert resp.status_code == 200
+        assert captured["mime_type"] == "image/jpeg"
+        assert any("magic-byte sniff" in r.message for r in caplog.records)
+    finally:
+        _clear_overrides()
+
+
+def test_handler_returns_extractor_rejected_when_all_signals_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unknown blob bytes + unknown metadata → handler logs + acks.
+
+    With the new content-type selection we still want to land in
+    `extractor_rejected_input` (rather than 5xx-loop) when bytes really
+    don't match any allowed format. Asserts the priority chain bottoms
+    out at the existing rejection path.
+    """
+
+    async def fake_extract(*, data: bytes, mime_type: str) -> ExtractedPurchaseFields:
+        if mime_type == "application/octet-stream":
+            raise ValueError("Unsupported blob mime_type")
+        return _extracted()
+
+    monkeypatch.setattr(main_module, "extract_from_blob", fake_extract)
+
+    _setup_overrides(
+        purchase=_purchase_doc(),
+        blob=(b"random unrecognised bytes", "application/octet-stream"),
+    )
+    try:
+        with TestClient(app) as client:
+            data = _encode_event(_event_payload(content_type="application/octet-stream"))
+            resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
+        assert resp.status_code == 200
+        assert resp.json()["reason"] == "extractor_rejected_input"
     finally:
         _clear_overrides()

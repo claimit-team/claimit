@@ -31,11 +31,105 @@ from fastapi import Depends, FastAPI, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .auth import verify_pubsub_oidc
-from .extractor import ExtractorError, extract_from_blob
+from .extractor import ALLOWED_BLOB_MIME_TYPES, ExtractorError, extract_from_blob
 from .finalize import FinalizeError, finalize_purchase_extraction
 from .storage import ReceiptObjectMissingError, ReceiptsReader, parse_gs_uri
 
 _log = logging.getLogger(__name__)
+
+# Magic-byte prefixes for the three mime types `extract_from_blob`
+# accepts (`ALLOWED_BLOB_MIME_TYPES`). Used as a last-resort sniff in
+# `_select_mime_type` when neither GCS metadata nor the event payload
+# carry a usable content-type — that combination is a data-quality
+# signal worth surfacing but should not silently drop an otherwise
+# well-formed upload.
+_MIME_MAGIC_PREFIXES: tuple[tuple[bytes, str], ...] = (
+    (b"%PDF-", "application/pdf"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+)
+
+
+def _normalize_mime(value: str | None) -> str | None:
+    """Strip parameters + whitespace, lowercase, and drop octet-stream.
+
+    GCS returns the bytes' content_type as stored. Upload code normally
+    writes a known mime, but a future client SDK quirk could land
+    `application/octet-stream` (or a `; charset=` suffix) here. Treat
+    octet-stream as "unknown" so the caller can fall through to other
+    signals; preserve the bare type so a stray `application/pdf;
+    charset=binary` still routes to the pdf branch.
+    """
+    if not value:
+        return None
+    bare = value.split(";", 1)[0].strip().lower()
+    if not bare or bare == "application/octet-stream":
+        return None
+    return bare
+
+
+def _sniff_mime(data: bytes) -> str | None:
+    """Detect mime from leading magic bytes. Returns None when no match.
+
+    Limited to the three types extraction can handle so we never paper
+    over genuinely unsupported uploads.
+    """
+    for prefix, mime in _MIME_MAGIC_PREFIXES:
+        if data.startswith(prefix):
+            return mime
+    return None
+
+
+def _select_mime_type(
+    *,
+    blob_content_type: str | None,
+    event_content_type: str | None,
+    data: bytes,
+    purchase_id: UUID,
+) -> str:
+    """Pick the most authoritative mime type for `extract_from_blob`.
+
+    Priority order:
+      1. GCS-reported content-type when it's a known (non-octet-stream)
+         mime. Whatever GCS actually serves is what Gemini will read.
+      2. Event-payload content-type — the api-gateway upload route
+         validates this against the same PDF/PNG/JPG allow-list before
+         publishing, so it's a strong second signal.
+      3. Magic-byte sniff on the first bytes of the blob — covers the
+         rare case where both metadata sources have been corrupted to
+         octet-stream but the bytes are still a valid receipt.
+
+    Logs a WARNING when sniffing is the only signal (so a slow
+    metadata regression is visible in logs without spamming the
+    happy path), and returns `application/octet-stream` only when
+    every signal fails — `extract_from_blob` will then reject the
+    message via `ValueError`, the handler logs + acks, and the
+    dead-letter / DLQ subscription is the right surface for those.
+    """
+    blob_normalized = _normalize_mime(blob_content_type)
+    if blob_normalized in ALLOWED_BLOB_MIME_TYPES:
+        return blob_normalized
+    event_normalized = _normalize_mime(event_content_type)
+    if event_normalized in ALLOWED_BLOB_MIME_TYPES:
+        return event_normalized
+    sniffed = _sniff_mime(data)
+    if sniffed is not None:
+        _log.warning(
+            "purchase.uploaded push: GCS + event content-type unusable; "
+            "recovered via magic-byte sniff purchase_id=%s sniffed=%s "
+            "blob_content_type=%r event_content_type=%r",
+            purchase_id,
+            sniffed,
+            blob_content_type,
+            event_content_type,
+        )
+        return sniffed
+    # Truly unknown bytes: hand octet-stream to `extract_from_blob`,
+    # which raises ValueError → handler returns
+    # `extractor_rejected_input`. Dropping with a log is the right
+    # outcome; retries cannot help.
+    return "application/octet-stream"
+
 
 # Module-global singletons (set in lifespan, read by handler).
 # Pattern mirrors api-gateway/src/deps.py — startup wiring lives in
@@ -364,11 +458,18 @@ async def handle_purchase_uploaded(
         )
         return {"status": "error", "reason": "receipt_blob_missing"}
 
-    # Prefer the content-type stored in GCS metadata (set on upload)
-    # over the event-payload value. They should match, but if a future
-    # api-gateway change tweaks the event without updating storage, the
-    # bytes that GCS actually serves are authoritative.
-    mime_type = blob_content_type or payload.content_type
+    # Pick the strongest signal of what these bytes actually are. See
+    # `_select_mime_type` for the exact priority chain — the short
+    # version is: GCS metadata > event payload > magic-byte sniff >
+    # octet-stream (which `extract_from_blob` will reject). Reusing the
+    # helper keeps the priority + warning behaviour testable in
+    # isolation without spinning up the whole FastAPI app.
+    mime_type = _select_mime_type(
+        blob_content_type=blob_content_type,
+        event_content_type=payload.content_type,
+        data=blob_data,
+        purchase_id=purchase_id,
+    )
 
     try:
         extracted = await extract_from_blob(data=blob_data, mime_type=mime_type)

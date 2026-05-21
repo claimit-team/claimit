@@ -61,14 +61,20 @@ def _mime_type_for(path: Path) -> str:
         return "image/jpeg"
     if suffix == ".png":
         return "image/png"
-    raise SystemExit(f"Unsupported file extension {suffix!r} — expected .pdf / .jpg / .jpeg / .png")
+    # Use a plain exception so the per-file `except Exception` in
+    # `_main` records this in `failures[]` and still prints the JSON
+    # summary. SystemExit would short-circuit the whole run, hiding
+    # the (possibly green) other file's result.
+    raise ValueError(f"Unsupported file extension {suffix!r} — expected .pdf / .jpg / .jpeg / .png")
 
 
 async def _run_one(path: Path) -> dict[str, object]:
     mime = _mime_type_for(path)
     data = path.read_bytes()
     if not data:
-        raise SystemExit(f"{path} is empty")
+        # Same reasoning as above — keep it as a regular exception so the
+        # other file still completes and the summary JSON still renders.
+        raise ValueError(f"{path} is empty")
     print(f"\n=== Extracting {path.name} ({mime}, {len(data)} bytes) ===", flush=True)
     result = await extract_from_blob(data=data, mime_type=mime)
     return result.model_dump(mode="json")

@@ -50,8 +50,12 @@ class ReceiptsReader:
     async def download(self, *, blob_path: str) -> tuple[bytes, str]:
         """Fetch `(data, content_type)` for a blob path within the bucket.
 
-        Raises `ReceiptObjectMissingError` when the blob is absent so the
-        Pub/Sub handler can log + ack rather than 5xx-loop forever.
+        Raises `ReceiptObjectMissingError` when the blob is absent (GCS
+        404) OR when it can't be read because of GCS 403 — the handler
+        ack-and-logs in both cases. A 403 is logged at ERROR with bucket
+        + path BEFORE the collapse so an IAM regression on
+        `ingest_agent_receipts_reader` doesn't silently masquerade as a
+        normal "missing object" line.
         """
         return await asyncio.to_thread(self._download_sync, blob_path)
 
@@ -61,6 +65,14 @@ class ReceiptsReader:
         try:
             data = blob.download_as_bytes()
         except gcs_exceptions.NotFound as err:
+            raise ReceiptObjectMissingError(blob_path) from err
+        except gcs_exceptions.Forbidden as err:
+            logger.error(
+                "GCS 403 on receipt blob — possible IAM regression: bucket=%s blob_path=%s err=%s",
+                self._bucket_name,
+                blob_path,
+                err,
+            )
             raise ReceiptObjectMissingError(blob_path) from err
         content_type = blob.content_type or "application/octet-stream"
         return data, content_type

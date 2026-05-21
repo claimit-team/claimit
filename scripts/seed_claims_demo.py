@@ -741,7 +741,7 @@ def _build_pending_confirmation_purchase(
          confidence-banner work has a concrete fixture for each state.
     """
     (
-        _label,
+        label,
         platform,
         category,
         product_name,
@@ -767,7 +767,14 @@ def _build_pending_confirmation_purchase(
         # discoverable + bulk-deletable (gsutil rm -r
         # gs://bucket/{user_id}/seed/) if we ever need to scrub the
         # fixtures without touching real user uploads.
-        blob_path = f"{user_id}/seed/{purchase_id}{fixture_ext}"
+        #
+        # Use the spec `label` (low-price-only / multi-field-low /
+        # mostly-failed) instead of the run-scoped `purchase_id` so
+        # the blob path is STABLE across seed runs. With
+        # `overwrite=True` on _upload_fixture_to_gcs, this means
+        # rerunning the seed updates exactly three blobs in place
+        # rather than orphaning the previous run's uuid-keyed objects.
+        blob_path = f"{user_id}/seed/{label}{fixture_ext}"
         receipt_storage_url: str | None = f"gs://{bucket_name}/{blob_path}"
     else:
         receipt_storage_url = None
@@ -1033,10 +1040,23 @@ async def _run() -> int:
                 )
             )
 
-        # Upload fixtures to GCS (or skip with a warning). Idempotent —
-        # the same {user_id}/seed/{purchase_id}.{ext} blob_path is
-        # overwritten on each run so the gs:// URI persists across seed
-        # runs without orphaning blobs.
+        # Upload fixtures to GCS. Idempotent — the same
+        # {user_id}/seed/{label}.{ext} blob_path is overwritten on each
+        # run (see `_build_pending_confirmation_purchase`) so the gs://
+        # URI persists across seed runs without orphaning blobs.
+        #
+        # Failure policy:
+        #   - No bucket configured: NOT a failure. Seed inserts the
+        #     pending_confirmation rows without `receipt_storage_url`
+        #     and prints a warning so an operator running offline / in
+        #     CI without ADC still gets a usable Mongo state.
+        #   - Bucket configured but a fixture upload fails: HARD FAIL.
+        #     Continuing would leave Atlas with rows pointing at
+        #     non-existent gs:// objects, breaking the receipt proxy +
+        #     PR-B's receipt-preview surface while the script still
+        #     prints "SEED OK". Surface the error and abort before any
+        #     `insert_many` so a re-run on a fixed environment converges
+        #     cleanly instead of having to clean up half-seeded state.
         if bucket_name is None:
             print(
                 f"\nWarning: {RECEIPTS_BUCKET_ENV} not set — pending_confirmation rows "
@@ -1045,35 +1065,36 @@ async def _run() -> int:
             )
         else:
             print(f"\nUploading fixtures to gs://{bucket_name}/{user_id}/seed/ ...")
-            try:
-                for pspec, purchase in zip(_PENDING_SPECS, pending_purchase_models, strict=True):
-                    fixture_filename = pspec[6]
-                    local_path = FIXTURES_DIR / fixture_filename
-                    if not local_path.exists():
-                        raise SystemExit(
-                            f"Seed fixture missing: {local_path} — "
-                            "run the fixture generator (see commit message for 5.14 A8)."
-                        )
-                    # purchase.receipt_storage_url was built above as
-                    # gs://{bucket_name}/{user_id}/seed/{purchase_id}.{ext}.
-                    # Strip the gs:// prefix + bucket to recover the blob_path.
-                    assert purchase.receipt_storage_url is not None  # bucket set → URL set
-                    blob_path = purchase.receipt_storage_url.split(f"gs://{bucket_name}/", 1)[1]
+            for pspec, purchase in zip(_PENDING_SPECS, pending_purchase_models, strict=True):
+                fixture_filename = pspec[6]
+                local_path = FIXTURES_DIR / fixture_filename
+                if not local_path.exists():
+                    raise SystemExit(
+                        f"Seed fixture missing: {local_path} — "
+                        "run the fixture generator (see commit message for 5.14 A8)."
+                    )
+                # purchase.receipt_storage_url was built above as
+                # gs://{bucket_name}/{user_id}/seed/{label}{ext}. Strip
+                # the gs:// prefix + bucket to recover the blob_path.
+                assert purchase.receipt_storage_url is not None  # bucket set → URL set
+                blob_path = purchase.receipt_storage_url.split(f"gs://{bucket_name}/", 1)[1]
+                try:
                     _upload_fixture_to_gcs(
                         bucket_name=bucket_name,
                         blob_path=blob_path,
                         local_path=local_path,
                         overwrite=True,
                     )
-                    print(f"  uploaded {fixture_filename} → gs://{bucket_name}/{blob_path}")
-            except Exception as exc:
-                print(
-                    f"\nWarning: failed to upload fixtures to GCS ({exc!r}). "
-                    "Pending_confirmation rows will be inserted with gs:// URLs "
-                    "pointing at missing objects — the api-gateway proxy will 404 "
-                    "on them. Re-run with ADC configured to fix.",
-                    file=sys.stderr,
-                )
+                except Exception as exc:
+                    raise SystemExit(
+                        f"ERROR: failed to upload {fixture_filename} to "
+                        f"gs://{bucket_name}/{blob_path} ({exc!r}). "
+                        f"Aborting seed — continuing would leave Atlas pointing at a "
+                        f"missing GCS object. Re-run with ADC configured "
+                        f"(`gcloud auth application-default login`) or unset "
+                        f"{RECEIPTS_BUCKET_ENV} for an offline run."
+                    ) from exc
+                print(f"  uploaded {fixture_filename} → gs://{bucket_name}/{blob_path}")
 
         # `mode="python"` keeps native UUID/datetime; StrEnum subclasses str
         # so pymongo serialises enum values as plain strings on the wire.
