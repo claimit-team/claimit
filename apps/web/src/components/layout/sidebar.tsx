@@ -15,6 +15,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { useUIStore } from "@/store";
 
 type SidebarLink = {
   href: string;
@@ -46,11 +47,6 @@ const sidebarGroups: ReadonlyArray<SidebarGroup> = [
       { href: "/notifications", label: "Notifications", icon: Bell },
     ],
   },
-  {
-    id: "actions",
-    label: "Actions",
-    links: [{ href: "/upload", label: "Upload receipt", icon: Receipt }],
-  },
 ];
 
 const bottomLinks: ReadonlyArray<SidebarLink> = [
@@ -65,12 +61,21 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function SidebarLinkItem({ link, pathname }: { link: SidebarLink; pathname: string }) {
+function SidebarLinkItem({
+  link,
+  pathname,
+  onClick,
+}: {
+  link: SidebarLink;
+  pathname: string;
+  onClick?: () => void;
+}) {
   const active = isActive(pathname, link.href);
   return (
     <li>
       <Link
         href={link.href}
+        onClick={onClick}
         className={cn(
           "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
           active
@@ -85,8 +90,23 @@ function SidebarLinkItem({ link, pathname }: { link: SidebarLink; pathname: stri
   );
 }
 
-export function SidebarContent() {
+/**
+ * Props:
+ *  - `onItemClick`: optional callback fired after the user activates
+ *    ANY action inside the sidebar (Upload button or a nav Link).
+ *    The mobile shell (`(authenticated)/layout.tsx`) passes a setter
+ *    that closes its Sheet so the user isn't left with the sidebar
+ *    open behind the upload Dialog (focus-trap on small screens).
+ *    Desktop usage doesn't pass it — the sidebar is permanent there.
+ */
+export function SidebarContent({ onItemClick }: { onItemClick?: () => void } = {}) {
   const pathname = usePathname();
+  // Per ticket 5.14 B2 the Upload entry is a button that opens the
+  // global upload Dialog (mounted in the authenticated layout) rather
+  // than a Link to a separate page. Keeping it inside the same
+  // grouped layout as the navigation links keeps the visual rhythm
+  // intact.
+  const openUploadDialog = useUIStore((s) => s.setUploadDialogOpen);
 
   return (
     <div className="flex flex-col h-full bg-neutral-0">
@@ -110,18 +130,54 @@ export function SidebarContent() {
             </h2>
             <ul className="space-y-1">
               {group.links.map((link) => (
-                <SidebarLinkItem key={link.href} link={link} pathname={pathname} />
+                <SidebarLinkItem
+                  key={link.href}
+                  link={link}
+                  pathname={pathname}
+                  onClick={onItemClick}
+                />
               ))}
             </ul>
           </div>
         ))}
+
+        <div>
+          <h2 className="px-3 mb-2 text-xs font-semibold uppercase tracking-wider text-neutral-500">
+            Actions
+          </h2>
+          <ul className="space-y-1">
+            <li>
+              <button
+                type="button"
+                onClick={() => {
+                  // Close the mobile Sheet (if mounted inside one) BEFORE
+                  // opening the upload Dialog — otherwise the sidebar
+                  // stays open behind the dialog on small screens and
+                  // traps focus. Desktop usage doesn't pass onItemClick
+                  // so this is a no-op there.
+                  onItemClick?.();
+                  openUploadDialog(true);
+                }}
+                className="flex w-full items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 transition-colors text-left"
+              >
+                <Receipt className="w-5 h-5" aria-hidden="true" />
+                Upload receipt
+              </button>
+            </li>
+          </ul>
+        </div>
       </nav>
 
       <div className="px-4 pb-4">
         <Separator className="my-3 bg-neutral-200" />
         <ul className="space-y-1">
           {bottomLinks.map((link) => (
-            <SidebarLinkItem key={link.href} link={link} pathname={pathname} />
+            <SidebarLinkItem
+              key={link.href}
+              link={link}
+              pathname={pathname}
+              onClick={onItemClick}
+            />
           ))}
         </ul>
       </div>

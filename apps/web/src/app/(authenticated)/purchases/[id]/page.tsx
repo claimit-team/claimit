@@ -8,9 +8,8 @@
  * into a `PurchaseDetailViewModel` by `buildPurchaseDetailViewModel`
  * (see `lib/purchase-detail-view.ts`).
  *
- * The mock view-model (lib/mock-purchases.ts) is intentionally NOT
- * imported here - that file is now strictly the /purchases LIST mock
- * data, kept around for PR 2 to remove.
+ * The mock view-model (lib/mock-purchases.ts) was deleted in ticket
+ * 5.14 B10 once the confirm flow real-ified.
  */
 
 import { use, useEffect, useState } from "react";

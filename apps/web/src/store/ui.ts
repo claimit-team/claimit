@@ -13,6 +13,16 @@ type ProactiveEntry = {
   output: ProactiveOutput;
   /** Original event_type — useful for telemetry / debug. */
   eventType: string;
+  /**
+   * The original NotificationEvent's raw `data` payload (ticket 5.14
+   * B9). Preserved end-to-end so quick-action handlers can route to a
+   * specific entity — most importantly `purchase_id` from a
+   * `low_confidence_extract` event, which the FAB uses to push to
+   * `/confirm/:purchase_id` instead of the generic /purchases list.
+   * Typed as `unknown` because the wire payload is producer-defined;
+   * consumers should narrow defensively before reading any field.
+   */
+  data: unknown;
 };
 
 type UIState = {
@@ -42,6 +52,18 @@ type UIState = {
   proactiveEvent: ProactiveEntry | null;
   setProactiveEvent: (event: ProactiveEntry) => void;
   clearProactiveEvent: () => void;
+
+  /**
+   * Receipt-upload dialog open flag. Lives on the UI store (instead
+   * of a per-component `useState`) so any control on any
+   * authenticated page — sidebar entry, dashboard CTA, /purchases
+   * empty-state, gmail-settings shortcut, proactive `navigate_upload`
+   * action — can open the SAME dialog. The dialog itself is mounted
+   * once at the authenticated layout level (see
+   * `apps/web/src/app/(authenticated)/layout.tsx`).
+   */
+  uploadDialogOpen: boolean;
+  setUploadDialogOpen: (open: boolean) => void;
 };
 
 export const useUIStore = create<UIState>((set) => ({
@@ -72,4 +94,7 @@ export const useUIStore = create<UIState>((set) => ({
   proactiveEvent: null,
   setProactiveEvent: (event) => set({ proactiveEvent: event }),
   clearProactiveEvent: () => set({ proactiveEvent: null }),
+
+  uploadDialogOpen: false,
+  setUploadDialogOpen: (uploadDialogOpen) => set({ uploadDialogOpen }),
 }));

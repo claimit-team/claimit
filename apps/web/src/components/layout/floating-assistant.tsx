@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { toast } from "sonner";
 
 import { ProactiveCard } from "@/components/assistant/proactive-card";
 import { Button } from "@/components/ui/button";
@@ -17,8 +18,22 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { useAssistantStream } from "@/hooks/useAssistantStream";
 import { useConversations } from "@/hooks/useConversations";
+import { acknowledgeProactiveEvent } from "@/lib/api/conversations";
+import { dismissPurchase, PurchasesApiError } from "@/lib/api/purchases";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store";
+
+/**
+ * Defensively pull `purchase_id` (string) out of the raw notification
+ * data payload. The payload is producer-defined wire JSON, so we
+ * narrow without trusting any field. Returns `null` for any
+ * malformed shape so the caller can pick a safe fallback.
+ */
+function extractPurchaseId(data: unknown): string | null {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
+  const id = (data as Record<string, unknown>).purchase_id;
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
 
 type FloatingAssistantProps = {
   /** On claim detail, FAB becomes a slim pill toggling embedded pane expansion (batch 6) */
@@ -44,9 +59,25 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
   const toggle = useUIStore((s) => s.toggleAssistantPane);
   const proactiveEvent = useUIStore((s) => s.proactiveEvent);
   const clearProactiveEvent = useUIStore((s) => s.clearProactiveEvent);
+  const openUploadDialog = useUIStore((s) => s.setUploadDialogOpen);
 
   const embeddedExpanded = useUIStore((s) => s.claimEmbeddedAssistantExpanded);
   const toggleEmbedded = useUIStore((s) => s.toggleClaimEmbeddedAssistant);
+
+  // In-flight guard for the proactive `dismiss_purchase` quick-action.
+  // The ProactiveCard's quick-action buttons don't carry their own
+  // pending state, so a rapid double-click on "Not an order" would
+  // previously fire two `dismissPurchase` calls — first returns success
+  // toast, second returns 4xx (already dismissed) toast, leaving the
+  // user with contradictory feedback. A ref-based guard prevents the
+  // second async invocation from firing while the first is in flight
+  // without needing to thread a pending-action state down through the
+  // panel/card prop chain (the card stays route-agnostic). Refs over
+  // state intentionally: no re-render is needed, the guard is purely
+  // behavioral. The other quick actions are sync router pushes and
+  // don't need this — clicking them twice just redirects twice
+  // harmlessly to the same destination.
+  const dismissingPurchaseRef = useRef(false);
 
   // All hooks must be unconditional — declare handleAction before the
   // `variant === "pill"` early return below.
@@ -74,17 +105,90 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
           clearProactiveEvent();
           return;
         case "navigate_upload":
-          router.push("/upload");
+          // Ticket 5.14 B2 replaced the /upload route with a global
+          // dialog. Open it without leaving the current page.
+          openUploadDialog(true);
           clearProactiveEvent();
           return;
         case "confirm_purchase":
-        case "edit_purchase":
-        case "dismiss_purchase":
-          // Confirmation flow lives at /confirm/[purchaseId] — without
-          // the id in the payload we redirect to /purchases.
-          router.push("/purchases");
+        case "edit_purchase": {
+          // Ticket 5.14 B9: route directly to /confirm/:purchase_id
+          // when the proactive payload carries one. The backend's
+          // `low_confidence_extract` NotificationEvent's `data.purchase
+          // _id` is the contract (see api-gateway finalize_purchase_
+          // extraction). Without an id we degrade to /purchases — the
+          // user can still find the purchase manually rather than
+          // landing on a 404'd confirm route.
+          const purchaseId = extractPurchaseId(proactiveEvent?.data);
+          if (purchaseId) {
+            router.push(`/confirm/${encodeURIComponent(purchaseId)}`);
+          } else {
+            router.push("/purchases");
+          }
           clearProactiveEvent();
           return;
+        }
+        case "dismiss_purchase": {
+          // In-place dismiss — fire `not_an_order` + remember_sender
+          // (the only configuration the proactive nudge offers; deeper
+          // configuration belongs on the full confirm page). Toast +
+          // ack notification + clear the proactive event. No redirect:
+          // the user is on whatever page they were, the assistant
+          // shouldn't yank them away just to dismiss a suggestion.
+          //
+          // The proactive card stays mounted while the dismiss POST is
+          // in flight AND across a failed attempt — if the API returns
+          // an error the user gets a toast AND can retry from the same
+          // card. Only the successful path clears the event. The
+          // missing-id branch also clears immediately because there's
+          // nothing the user can retry without a purchase id.
+          const purchaseId = extractPurchaseId(proactiveEvent?.data);
+          const notificationId = proactiveEvent?.notificationId;
+          if (!purchaseId) {
+            toast.error("We couldn't find the purchase to ignore.");
+            clearProactiveEvent();
+            return;
+          }
+          // Drop the second click if a dismiss is already in flight —
+          // see `dismissingPurchaseRef` comment above. The user gets
+          // exactly one toast (success or failure) per real user
+          // intent, not one per click.
+          if (dismissingPurchaseRef.current) return;
+          dismissingPurchaseRef.current = true;
+          void (async () => {
+            try {
+              const result = await dismissPurchase(purchaseId, {
+                reason: "not_an_order",
+                remember_sender: true,
+              });
+              if (result.skiplist_written) {
+                toast.success("Receipt ignored — we'll skip future emails from this sender too.");
+              } else {
+                toast.success("Receipt ignored.");
+              }
+              if (notificationId) {
+                try {
+                  await acknowledgeProactiveEvent(notificationId);
+                } catch {
+                  // Best-effort — the unread-count poll reconciles.
+                }
+              }
+              clearProactiveEvent();
+            } catch (err) {
+              const message =
+                err instanceof PurchasesApiError
+                  ? err.message
+                  : "We couldn't ignore this receipt. Try again.";
+              toast.error(message);
+            } finally {
+              // Release the guard on every exit path so a failed first
+              // attempt doesn't permanently disable the button — the
+              // user must be able to retry from the still-mounted card.
+              dismissingPurchaseRef.current = false;
+            }
+          })();
+          return;
+        }
         case "open_chat":
           router.push("/assistant");
           clearProactiveEvent();
@@ -99,7 +203,7 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
           clearProactiveEvent();
       }
     },
-    [router, clearProactiveEvent],
+    [router, clearProactiveEvent, openUploadDialog, proactiveEvent],
   );
 
   if (variant === "pill") {

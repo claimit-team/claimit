@@ -11,9 +11,9 @@
  *
  * The types LIVED in `lib/mock-purchases.ts` until ticket 5.6. They
  * were moved out so real (api-driven) components don't import their
- * shared type contracts from a mock file — `lib/mock-purchases.ts`
- * is now strictly the list-page mock data (which is the only consumer
- * still pending real-ification until ticket 5.6 PR 2).
+ * shared type contracts from a mock file. `lib/mock-purchases.ts`
+ * itself was deleted in ticket 5.14 B10 once the confirm flow real-
+ * ified.
  *
  * Read-tolerance: the builder treats every enum-typed and required-
  * scalar wire field as nullable (PR #142/#144) and falls back to safe

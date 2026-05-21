@@ -314,7 +314,13 @@ _PENDING_SPECS: list[
         str,
         float,
         str,
-        str,
+        # `fixture_filename` is None for rows that intentionally have NO
+        # backing receipt blob (e.g. the gmail-no-receipt row added for
+        # PR-B B5 — exercises the "Original not available" fallback in
+        # `receipt-preview.tsx`). For all upload-source rows it points
+        # at a fixture under `scripts/fixtures/` that the seeder uploads
+        # to GCS under `{user_id}/seed/{label}{ext}`.
+        str | None,
         IngestionSource,
         dict[str, float | None],
     ]
@@ -389,6 +395,69 @@ _PENDING_SPECS: list[
             "variant": None,
             "member_price_at_purchase": None,
             "overall_min": 0.29,
+        },
+    ),
+    # ----------------- PR-B B0 additions -----------------
+    # The three rows above all carry a real receipt blob — every PR-B
+    # surface that depends on receipt absence (B5 fallback) or on the
+    # "no banner / all-high-confidence" form state (B4) was untested.
+    # The two rows below close those gaps without changing any of the
+    # existing fixtures.
+    (
+        # Gmail extraction with NO uploaded receipt — exercises the
+        # `receipt_storage_url is null` path in B5's receipt-preview:
+        # tasteful "Original not available" fallback + source context,
+        # NEVER a broken-image icon. Picks the named-low confidence
+        # profile so the row also exercises the amber banner state.
+        "gmail-no-receipt",
+        Platform.AMAZON,
+        Category.RETAIL,
+        "AirPods Pro (2nd gen)",
+        249.00,
+        "112-3344556-7788990",
+        None,  # no fixture — seeder skips GCS upload + leaves receipt_storage_url null
+        IngestionSource.GMAIL,
+        {
+            "platform": 0.97,
+            "price_paid": 0.94,
+            "price": 0.94,
+            "order_id": 0.78,  # < 0.95
+            "product_name": 0.99,
+            "product_id": 0.96,
+            "purchase_date": 0.97,
+            "category": 0.99,
+            "member_tier_at_purchase": None,
+            "variant": None,
+            "member_price_at_purchase": None,
+            "overall_min": 0.78,
+        },
+    ),
+    (
+        # ALL extraction_confidence fields ≥ 0.95 — exercises B5's
+        # "no banner" form state (the existing three rows are 2 amber +
+        # 1 neutral; this is the third state). Real receipt attached
+        # so B6's receipt-preview still has a happy-path render here.
+        "all-high-confidence",
+        Platform.DELTA,
+        Category.AIRLINE,
+        "Delta DL1455 NYC → MIA",
+        289.00,
+        "DL-AB12CD",
+        "sample-receipt.pdf",
+        IngestionSource.UPLOAD_PDF,
+        {
+            "platform": 0.99,
+            "price_paid": 0.98,
+            "price": 0.98,
+            "order_id": 0.97,
+            "product_name": 0.98,
+            "product_id": 0.96,
+            "purchase_date": 0.99,
+            "category": 0.99,
+            "member_tier_at_purchase": None,
+            "variant": None,
+            "member_price_at_purchase": None,
+            "overall_min": 0.96,
         },
     ),
 ]
@@ -719,7 +788,7 @@ def _build_pending_confirmation_purchase(
         str,
         float,
         str,
-        str,
+        str | None,
         IngestionSource,
         dict[str, float | None],
     ],
@@ -761,19 +830,23 @@ def _build_pending_confirmation_purchase(
     purchase_date = ingested_at - timedelta(days=3)
     window_expires = ingested_at + timedelta(days=30)
 
-    fixture_ext = Path(fixture_filename).suffix.lower()
-    if bucket_name is not None:
+    # `fixture_filename is None` is the explicit "no receipt blob"
+    # signal — used by the gmail-no-receipt PR-B B0 row to exercise
+    # the FE's "Original not available" fallback. Treat it like
+    # `bucket_name is None`: leave `receipt_storage_url` null and skip
+    # the GCS upload entirely (the seeder's upload loop also checks).
+    if bucket_name is not None and fixture_filename is not None:
         # `seed/` namespace under the user folder keeps these blobs
         # discoverable + bulk-deletable (gsutil rm -r
         # gs://bucket/{user_id}/seed/) if we ever need to scrub the
         # fixtures without touching real user uploads.
         #
-        # Use the spec `label` (low-price-only / multi-field-low /
-        # mostly-failed) instead of the run-scoped `purchase_id` so
-        # the blob path is STABLE across seed runs. With
+        # Use the spec `label` instead of the run-scoped `purchase_id`
+        # so the blob path is STABLE across seed runs. With
         # `overwrite=True` on _upload_fixture_to_gcs, this means
-        # rerunning the seed updates exactly three blobs in place
-        # rather than orphaning the previous run's uuid-keyed objects.
+        # rerunning the seed updates the same blobs in place rather
+        # than orphaning previous runs' uuid-keyed objects.
+        fixture_ext = Path(fixture_filename).suffix.lower()
         blob_path = f"{user_id}/seed/{label}{fixture_ext}"
         receipt_storage_url: str | None = f"gs://{bucket_name}/{blob_path}"
     else:
@@ -1067,6 +1140,13 @@ async def _run() -> int:
             print(f"\nUploading fixtures to gs://{bucket_name}/{user_id}/seed/ ...")
             for pspec, purchase in zip(_PENDING_SPECS, pending_purchase_models, strict=True):
                 fixture_filename = pspec[6]
+                if fixture_filename is None:
+                    # Intentionally-receiptless row (PR-B B0 gmail row) —
+                    # `_build_pending_confirmation_purchase` already left
+                    # receipt_storage_url null; nothing to upload.
+                    assert purchase.receipt_storage_url is None
+                    print(f"  skipped (no fixture): {pspec[0]}")
+                    continue
                 local_path = FIXTURES_DIR / fixture_filename
                 if not local_path.exists():
                     raise SystemExit(
@@ -1278,31 +1358,56 @@ async def _run() -> int:
         if pending_count != expected_pending:
             all_ok = False
 
-        # Confidence profile variety: assert at least one row has
-        # overall_min < 0.5 (mostly-failed banner) AND at least one
-        # row has overall_min between 0.5 and 0.95 (named-fields
-        # banner). Catches a future spec edit that accidentally
-        # makes every row look the same.
+        # Confidence profile variety: assert all three banner states
+        # are represented — mostly-failed (overall_min < 0.5),
+        # named-low (0.5 ≤ overall_min < 0.95), and all-high
+        # (overall_min ≥ 0.95, no-banner state added in PR-B B0).
+        # Catches a future spec edit that accidentally collapses the
+        # variety the FE confidence-banner work depends on.
         overall_mins = [p.extraction_confidence.overall_min for p in pending_purchase_models]
         has_mostly_failed = any(m < 0.5 for m in overall_mins)
         has_named_low = any(0.5 <= m < 0.95 for m in overall_mins)
-        variety_status = "OK" if has_mostly_failed and has_named_low else "FAIL"
+        has_all_high = any(m >= 0.95 for m in overall_mins)
+        variety_ok_pending = has_mostly_failed and has_named_low and has_all_high
+        variety_status = "OK" if variety_ok_pending else "FAIL"
         print(
             f"  confidence variety: overall_mins={overall_mins}; "
-            f"mostly_failed={has_mostly_failed}, named_low={has_named_low}  "
-            f"[{variety_status}]"
+            f"mostly_failed={has_mostly_failed}, named_low={has_named_low}, "
+            f"all_high={has_all_high}  [{variety_status}]"
         )
-        if not (has_mostly_failed and has_named_low):
+        if not variety_ok_pending:
             all_ok = False
 
         # Ingestion-source variety: at least one upload_pdf AND at
-        # least one upload_image. Confirms the receipt-preview surface
-        # gets exercised against both content-types.
+        # least one upload_image (both content-types exercise the
+        # receipt-preview surface) AND at least one gmail row (PR-B
+        # B0 added a gmail row to exercise the receipt-null fallback
+        # — receipt_storage_url is None even when the bucket env is
+        # set).
         pending_sources = {p.ingestion_source.value for p in pending_purchase_models}
-        source_variety_ok = "upload_pdf" in pending_sources and "upload_image" in pending_sources
+        source_variety_ok = (
+            "upload_pdf" in pending_sources
+            and "upload_image" in pending_sources
+            and "gmail" in pending_sources
+        )
         source_status = "OK" if source_variety_ok else "FAIL"
         print(f"  pending sources: {sorted(pending_sources)}  [{source_status}]")
         if not source_variety_ok:
+            all_ok = False
+
+        # Receipt-null variety: at least ONE pending_confirmation row
+        # MUST have receipt_storage_url=None (the gmail-no-receipt row
+        # added in PR-B B0). Exercises the FE's "Original not
+        # available" fallback in receipt-preview.tsx. This holds
+        # regardless of whether the bucket env was set during seed.
+        has_null_receipt = any(p.receipt_storage_url is None for p in pending_purchase_models)
+        null_receipt_status = "OK" if has_null_receipt else "FAIL"
+        print(
+            f"  rows with receipt_storage_url=None: "
+            f"{sum(1 for p in pending_purchase_models if p.receipt_storage_url is None)} "
+            f"(expect ≥ 1)  [{null_receipt_status}]"
+        )
+        if not has_null_receipt:
             all_ok = False
 
         # ---- Stale-data probe ----
