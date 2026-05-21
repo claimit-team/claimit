@@ -208,9 +208,20 @@ async def test_verify_pubsub_oidc_accepts_valid_token(
             "email_verified": True,
             "aud": "http://test/pubsub/gmail-inbound",
         },
-    ):
+    ) as mock_verify:
         # Should not raise.
         await auth.verify_pubsub_oidc(req)
+
+    # Pin the call shape so a future refactor that drops the audience kwarg
+    # (and silently accepts any token from any service) fails loudly here.
+    mock_verify.assert_called_once()
+    call_args = mock_verify.call_args
+    assert call_args.args[0] == "faketoken"
+    # `audience` is derived from request.url — proves the runtime-derived
+    # audience logic actually wires through, not just that the function
+    # was called. Scheme is https because _make_request's scope sets
+    # "scheme": "https" (matching what Cloud Run / Pub/Sub use in prod).
+    assert call_args.kwargs["audience"] == "https://test/pubsub/gmail-inbound"
 
 
 @pytest.mark.asyncio

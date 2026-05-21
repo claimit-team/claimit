@@ -37,6 +37,7 @@ from claimit_mongodb_models import MongoDBClient, User
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.cloud import secretmanager
 from google.oauth2.credentials import Credentials
+from starlette.concurrency import run_in_threadpool
 
 _log = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ async def register_watch(
     """
     try:
         user = await _load_user(db, user_id)
-        access_token = _exchange_refresh_for_access(sm_client, user)
+        access_token = await _exchange_refresh_for_access(sm_client, user)
         topic = _resolve_topic_name()
         response_body = await _call_watch(access_token, topic)
         await _persist_success(db, user_id, response_body)
@@ -126,7 +127,7 @@ async def _load_user(db: MongoDBClient, user_id: str) -> User:
     return user
 
 
-def _exchange_refresh_for_access(
+async def _exchange_refresh_for_access(
     sm_client: secretmanager.SecretManagerServiceClient, user: User
 ) -> str:
     """Load refresh token from Secret Manager, exchange for an access token.
@@ -156,7 +157,11 @@ def _exchange_refresh_for_access(
         scopes=[_GMAIL_WATCH_SCOPE],
     )
     try:
-        creds.refresh(GoogleAuthRequest())
+        # creds.refresh is sync and hits Google's token endpoint over the
+        # network — running it inline blocks the ASGI loop, which matters
+        # here because this function is invoked from a BackgroundTask
+        # sharing that loop with all in-flight HTTP requests.
+        await run_in_threadpool(creds.refresh, GoogleAuthRequest())
     except Exception as err:
         raise WatchRegistrationError("Failed to refresh Gmail access token") from err
     if not creds.token:

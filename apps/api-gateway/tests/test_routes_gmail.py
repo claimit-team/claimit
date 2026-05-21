@@ -104,6 +104,10 @@ async def test_gmail_status_connected(client: AsyncClient) -> None:
             "https://www.googleapis.com/auth/gmail.readonly",
             "https://www.googleapis.com/auth/gmail.send",
         }
+        # Ticket 4.15: a freshly-connected user with no watch-registration
+        # attempt yet should report both fields at their default state.
+        assert payload["watch_failed"] is False
+        assert payload["watch_error_message"] is None
     finally:
         app.dependency_overrides.pop(get_db, None)
 

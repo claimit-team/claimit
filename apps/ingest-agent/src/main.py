@@ -75,6 +75,20 @@ class _GmailNotification(BaseModel):
     historyId: str  # noqa: N815
 
 
+def _mask_email(email: str) -> str:
+    """Log-safe: 'user@example.com' -> 'u***@example.com'.
+
+    Keeping the first local-part char + the full domain is enough to
+    correlate log lines from the same user during oncall while stripping
+    enough of the PII that we're not piping inbox addresses into log
+    sinks indexed by anyone with project Viewer.
+    """
+    if "@" not in email:
+        return "***"
+    local, _, domain = email.partition("@")
+    return f"{local[:1]}***@{domain}" if local else f"***@{domain}"
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     """Liveness probe used by Cloud Run + smoke tests."""
@@ -123,6 +137,11 @@ async def handle_gmail_inbound(request: Request) -> dict[str, str]:
     try:
         payload = _GmailNotification.model_validate(json.loads(raw_data))
     except Exception as err:
+        # raw_data[:200] is intentional here — this branch fires only on
+        # a parse failure, so we need to see what Gmail actually sent to
+        # debug. By contract the payload contains only `emailAddress` +
+        # `historyId`; the 200-char cap bounds blast radius if a future
+        # schema change adds a larger field.
         _log.error(
             "Gmail inbound push: payload parse failed (message_id=%s, data=%r): %s",
             body.message.message_id,
@@ -131,10 +150,16 @@ async def handle_gmail_inbound(request: Request) -> dict[str, str]:
         )
         return {"status": "error", "reason": "invalid_payload"}
 
+    # Mask the email on the happy path so we don't write user inbox
+    # addresses into Cloud Logging at info-level on every Gmail
+    # notification (one log line per inbound message, indexed by anyone
+    # with project Viewer). The error branch above kept the full
+    # payload because debugging a parse bug needs the raw bytes; here
+    # the masked form is enough to correlate.
     _log.info(
         "Gmail inbound: message_id=%s email=%s history_id=%s",
         body.message.message_id,
-        payload.emailAddress,
+        _mask_email(payload.emailAddress),
         payload.historyId,
     )
 

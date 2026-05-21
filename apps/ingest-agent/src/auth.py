@@ -27,6 +27,7 @@ from typing import Final
 from fastapi import HTTPException, Request, status
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import id_token
+from starlette.concurrency import run_in_threadpool
 
 _log = logging.getLogger(__name__)
 
@@ -98,7 +99,13 @@ async def verify_pubsub_oidc(request: Request) -> None:
     expected_email = _expected_pusher_email()
 
     try:
-        claims = id_token.verify_oauth2_token(
+        # id_token.verify_oauth2_token is sync and does blocking I/O
+        # (it fetches Google's signing certs the first time it's called
+        # and on every cache-miss). Running it inline would block the
+        # ASGI event loop. run_in_threadpool offloads to Starlette's
+        # default thread pool so other in-flight requests keep flowing.
+        claims = await run_in_threadpool(
+            id_token.verify_oauth2_token,
             token,
             GoogleAuthRequest(),
             audience=expected_audience,
