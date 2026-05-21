@@ -9,8 +9,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from claimit_mongodb_models import ClaimType
+from claimit_mongodb_models import ClaimType, SelfEvalScore
 from src.main import handle_price_dropped
+from src.self_evaluate import SelfEvalResult
 from src.validator import ValidationResult
 
 _USER_ID = "11111111-1111-4111-8111-111111111111"
@@ -101,11 +102,26 @@ async def test_write_notification_event_called_after_upsert_claim() -> None:
 
     request = _make_mock_request(_pubsub_body(_make_event_data(claim_id=str(claim_id))))
 
+    _eval_result = SelfEvalResult(
+        passed=True,
+        total_score=32,
+        scores=SelfEvalScore(clarity=8, tone=8, accuracy=8, completeness=8),
+        failed_dimensions=[],
+        dimension_feedback={},
+        improvement_suggestions={},
+        draft_version="1",
+        model_used="gemini-2.5-flash",
+    )
+
     with (
         patch("src.main.MongoDBClient", return_value=mock_db),
         patch("src.main.plan_claim", return_value=claim_plan),
         patch("src.main.generate_email_draft", return_value=draft),
         patch("src.main.validate", return_value=ValidationResult(valid=True)),
+        patch(
+            "src.main.evaluate_and_maybe_regenerate",
+            new=AsyncMock(return_value=(draft, _eval_result, 1)),
+        ),
         patch("src.main.write_notification_event", return_value="notif-id") as mock_write,
         patch.dict(sys.modules, {"search": mock_search}),
     ):

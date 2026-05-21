@@ -6,7 +6,7 @@ ISODateString in TypeScript), `_id` field) is identical across both languages by
 """
 
 from .base import BaseDocument
-from .claim import Claim, DraftVersion
+from .claim import Claim, DraftVersion, SelfEvalScore
 from .claim_read_tolerant import ClaimReadTolerant, DraftVersionReadTolerant
 from .client import MongoDBClient
 from .conversation import Conversation, ConversationMessage, ToolCall
@@ -101,6 +101,7 @@ __all__ = [
     "PurchaseDateBasis",
     "PurchaseReadTolerant",
     "PurchaseStatus",
+    "SelfEvalScore",
     "SendMode",
     "SendPreference",
     "SubmittedVia",
