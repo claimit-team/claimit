@@ -15,6 +15,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { useUIStore } from "@/store";
 
 type SidebarLink = {
   href: string;
@@ -45,11 +46,6 @@ const sidebarGroups: ReadonlyArray<SidebarGroup> = [
       { href: "/assistant", label: "Assistant", icon: BotMessageSquare },
       { href: "/notifications", label: "Notifications", icon: Bell },
     ],
-  },
-  {
-    id: "actions",
-    label: "Actions",
-    links: [{ href: "/upload", label: "Upload receipt", icon: Receipt }],
   },
 ];
 
@@ -87,6 +83,12 @@ function SidebarLinkItem({ link, pathname }: { link: SidebarLink; pathname: stri
 
 export function SidebarContent() {
   const pathname = usePathname();
+  // Per ticket 5.14 B2 the Upload entry is a button that opens the
+  // global upload Dialog (mounted in the authenticated layout) rather
+  // than a Link to a separate page. Keeping it inside the same
+  // grouped layout as the navigation links keeps the visual rhythm
+  // intact.
+  const openUploadDialog = useUIStore((s) => s.setUploadDialogOpen);
 
   return (
     <div className="flex flex-col h-full bg-neutral-0">
@@ -115,6 +117,24 @@ export function SidebarContent() {
             </ul>
           </div>
         ))}
+
+        <div>
+          <h2 className="px-3 mb-2 text-xs font-semibold uppercase tracking-wider text-neutral-500">
+            Actions
+          </h2>
+          <ul className="space-y-1">
+            <li>
+              <button
+                type="button"
+                onClick={() => openUploadDialog(true)}
+                className="flex w-full items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 transition-colors text-left"
+              >
+                <Receipt className="w-5 h-5" aria-hidden="true" />
+                Upload receipt
+              </button>
+            </li>
+          </ul>
+        </div>
       </nav>
 
       <div className="px-4 pb-4">

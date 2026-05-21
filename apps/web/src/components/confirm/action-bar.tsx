@@ -21,11 +21,15 @@ interface ActionBarProps {
 export function ActionBar({ purchaseId }: ActionBarProps) {
   const router = useRouter();
 
-  const handleCancel = () => router.push("/upload");
+  // Interim routing — the B7 commit replaces both of these with
+  // origin-aware exits + the real dismiss API. Default to /dashboard
+  // because the global upload dialog (B2) replaced the standalone
+  // /upload page that this used to bounce back to.
+  const handleCancel = () => router.push("/dashboard");
 
   const handleIgnore = () => {
     toast.success("Receipt ignored in this mock flow.");
-    router.push("/upload");
+    router.push("/dashboard");
   };
 
   const handleConfirm = () => {

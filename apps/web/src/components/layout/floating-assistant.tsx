@@ -44,6 +44,7 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
   const toggle = useUIStore((s) => s.toggleAssistantPane);
   const proactiveEvent = useUIStore((s) => s.proactiveEvent);
   const clearProactiveEvent = useUIStore((s) => s.clearProactiveEvent);
+  const openUploadDialog = useUIStore((s) => s.setUploadDialogOpen);
 
   const embeddedExpanded = useUIStore((s) => s.claimEmbeddedAssistantExpanded);
   const toggleEmbedded = useUIStore((s) => s.toggleClaimEmbeddedAssistant);
@@ -74,14 +75,18 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
           clearProactiveEvent();
           return;
         case "navigate_upload":
-          router.push("/upload");
+          // Ticket 5.14 B2 replaced the /upload route with a global
+          // dialog. Open it without leaving the current page.
+          openUploadDialog(true);
           clearProactiveEvent();
           return;
         case "confirm_purchase":
         case "edit_purchase":
         case "dismiss_purchase":
           // Confirmation flow lives at /confirm/[purchaseId] — without
-          // the id in the payload we redirect to /purchases.
+          // the id in the payload we redirect to /purchases. The B9
+          // commit replaces this fallback with a real route based on
+          // the proactive payload's `purchase_id`.
           router.push("/purchases");
           clearProactiveEvent();
           return;
@@ -99,7 +104,7 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
           clearProactiveEvent();
       }
     },
-    [router, clearProactiveEvent],
+    [router, clearProactiveEvent, openUploadDialog],
   );
 
   if (variant === "pill") {

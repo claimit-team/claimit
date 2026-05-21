@@ -33,7 +33,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useDashboardSummary } from "@/hooks/useDashboardSummary";
@@ -708,42 +707,11 @@ function MonitoredPurchasesSection({
 // ============================================================================
 
 function QuickUploadSection({ gmailConnected }: { gmailConnected: boolean }) {
-  const [isDragging, setIsDragging] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = () => setIsDragging(false);
-
-  const simulateUpload = () => {
-    setUploading(true);
-    setUploadProgress(0);
-
-    const interval = setInterval(() => {
-      setUploadProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setTimeout(() => {
-            setUploading(false);
-            setUploadProgress(0);
-            toast.success("Receipt uploaded. We'll extract the purchase details next.");
-          }, 300);
-          return 100;
-        }
-        return prev + 20;
-      });
-    }, 200);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    simulateUpload();
-  };
+  // Ticket 5.14 B2: the dashboard "quick upload" tile is now a
+  // shortcut into the global upload dialog. The previous
+  // simulate-progress mock is gone — real upload state lives inside
+  // the dialog so we don't paint a fake loader here.
+  const openUploadDialog = useUIStore((s) => s.setUploadDialogOpen);
 
   return (
     <section>
@@ -755,36 +723,15 @@ function QuickUploadSection({ gmailConnected }: { gmailConnected: boolean }) {
         <CardContent className="pt-0">
           <button
             type="button"
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onClick={!uploading ? simulateUpload : undefined}
-            disabled={uploading}
-            className={cn(
-              "w-full border-2 border-dashed rounded-lg p-6 text-center transition-colors",
-              uploading ? "cursor-default" : "cursor-pointer",
-              isDragging
-                ? "border-brand-primary-400 bg-brand-primary-50"
-                : "border-neutral-300 hover:border-neutral-400",
-            )}
+            onClick={() => openUploadDialog(true)}
+            className="w-full border-2 border-dashed border-neutral-300 hover:border-neutral-400 rounded-lg p-6 text-center transition-colors cursor-pointer"
           >
-            {uploading ? (
-              <div className="space-y-3">
-                <div className="text-sm text-neutral-600">Uploading...</div>
-                <Progress value={uploadProgress} className="h-2" />
-              </div>
-            ) : (
-              <>
-                <UploadCloud className="w-8 h-8 mx-auto text-neutral-400 mb-2" aria-hidden="true" />
-                <span className="inline-flex items-center justify-center px-3 py-1.5 rounded-md border border-neutral-300 bg-neutral-0 text-sm font-medium text-neutral-700 mb-2">
-                  Browse files
-                </span>
-                <p className="text-xs text-neutral-500">or drag and drop</p>
-              </>
-            )}
+            <UploadCloud className="w-8 h-8 mx-auto text-neutral-400 mb-2" aria-hidden="true" />
+            <span className="inline-flex items-center justify-center px-3 py-1.5 rounded-md border border-neutral-300 bg-neutral-0 text-sm font-medium text-neutral-700 mb-2">
+              Browse files
+            </span>
+            <p className="text-xs text-neutral-500">PDF, PNG, or JPG up to 10 MB</p>
           </button>
-
-          <p className="text-xs text-neutral-500 mt-3">PDF, PNG, or JPG up to 10 MB.</p>
 
           {!gmailConnected && (
             <Link
@@ -889,13 +836,13 @@ export default function DashboardPage() {
 
   const userState: UserState = userStateOverride ?? computedUserState;
 
-  const handleUploadClick = () => {
-    toast.success("Receipt added to upload queue.");
-  };
-
-  const handleBrowseFiles = () => {
-    toast.success("Receipt added to upload queue.");
-  };
+  // Ticket 5.14 B2: dashboard upload CTAs now open the same global
+  // upload dialog the sidebar Upload button opens. The mock "queued"
+  // toasts are gone — the dialog itself surfaces real upload state +
+  // routes to /confirm/:id on success.
+  const openUploadDialog = useUIStore((s) => s.setUploadDialogOpen);
+  const handleUploadClick = () => openUploadDialog(true);
+  const handleBrowseFiles = () => openUploadDialog(true);
 
   return (
     <div className="max-w-7xl mx-auto px-4 lg:px-8 py-6 lg:py-8">

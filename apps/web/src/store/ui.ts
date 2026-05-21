@@ -42,6 +42,18 @@ type UIState = {
   proactiveEvent: ProactiveEntry | null;
   setProactiveEvent: (event: ProactiveEntry) => void;
   clearProactiveEvent: () => void;
+
+  /**
+   * Receipt-upload dialog open flag. Lives on the UI store (instead
+   * of a per-component `useState`) so any control on any
+   * authenticated page — sidebar entry, dashboard CTA, /purchases
+   * empty-state, gmail-settings shortcut, proactive `navigate_upload`
+   * action — can open the SAME dialog. The dialog itself is mounted
+   * once at the authenticated layout level (see
+   * `apps/web/src/app/(authenticated)/layout.tsx`).
+   */
+  uploadDialogOpen: boolean;
+  setUploadDialogOpen: (open: boolean) => void;
 };
 
 export const useUIStore = create<UIState>((set) => ({
@@ -72,4 +84,7 @@ export const useUIStore = create<UIState>((set) => ({
   proactiveEvent: null,
   setProactiveEvent: (event) => set({ proactiveEvent: event }),
   clearProactiveEvent: () => set({ proactiveEvent: null }),
+
+  uploadDialogOpen: false,
+  setUploadDialogOpen: (uploadDialogOpen) => set({ uploadDialogOpen }),
 }));

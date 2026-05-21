@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { UploadDialog } from "@/components/upload/upload-dialog";
 import { useProactiveAssistant } from "@/hooks/useProactiveAssistant";
 import { useUnreadCount } from "@/hooks/useUnreadCount";
 import { signOutUser } from "@/lib/auth-actions";
@@ -271,6 +272,12 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
       </div>
 
       {!isAssistant ? <FloatingAssistant variant={floatingAssistantVariant} /> : null}
+
+      {/* Single global mount of the receipt upload dialog (ticket 5.14
+          B2). Driven by `useUIStore(s => s.uploadDialogOpen)` so any
+          control on any authenticated page can open it without lifting
+          dialog state per call-site. */}
+      <UploadDialog />
     </div>
   );
 }
