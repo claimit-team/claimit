@@ -330,12 +330,26 @@ async def confirm_purchase(
         else:
             days = compute_window_days(policy, member_tier_at_purchase=effective_member_tier)
             # `purchase_date` may arrive as an ISO string when the user
-            # supplied it via corrected_fields; normalize before timedelta.
-            pd = (
-                effective_purchase_date
-                if isinstance(effective_purchase_date, datetime)
-                else datetime.fromisoformat(str(effective_purchase_date).replace("Z", "+00:00"))
-            )
+            # supplied it via corrected_fields; normalize before
+            # timedelta. A malformed string from the client (e.g.
+            # `"not-a-date"`) used to surface as a 400 via Pydantic's
+            # ValidationError inside `partial_update` below — now that
+            # we touch the value first to compute `window_expires`, an
+            # unhandled `datetime.fromisoformat` `ValueError` would
+            # leak as a 500. Preserve the 400 contract by mapping
+            # parse errors to the same `invalid_field` ApiError the
+            # downstream partial_update would have raised.
+            if isinstance(effective_purchase_date, datetime):
+                pd = effective_purchase_date
+            else:
+                try:
+                    pd = datetime.fromisoformat(str(effective_purchase_date).replace("Z", "+00:00"))
+                except ValueError as err:
+                    raise ApiError(
+                        "invalid_field",
+                        f"purchase_date is not a valid ISO datetime: {effective_purchase_date!r}",
+                        status_code=400,
+                    ) from err
             updates["window_expires"] = pd + timedelta(days=days)
 
     try:

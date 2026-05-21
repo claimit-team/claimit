@@ -1142,6 +1142,53 @@ async def test_confirm_purchase_window_zero_days_yields_purchase_date(
 
 
 @pytest.mark.asyncio
+async def test_confirm_purchase_malformed_corrected_purchase_date_returns_400(
+    client: AsyncClient,
+) -> None:
+    """Bugbot regression: malformed ISO string in corrected_fields must 400, not 500.
+
+    The 5.14 A2 commit added a server-side `window_expires` recompute
+    that touches `corrected_fields["purchase_date"]` BEFORE Pydantic
+    validates it inside `partial_update`. A direct
+    `datetime.fromisoformat("not-a-date")` used to leak as a 500.
+    Confirm restores the original 400 contract.
+    """
+    purchase_date = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
+    pending = _purchase_fixture().model_copy(
+        update={
+            "platform": "best_buy",
+            "purchase_date": purchase_date,
+            "window_expires": purchase_date,
+        }
+    )
+    from claimit_mongodb_models import Policy
+
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=pending)
+    # partial_update is never reached — the 400 fires earlier in the
+    # window-recompute block. Stub it just to satisfy AsyncMock.
+    mock_db.partial_update = AsyncMock(return_value=True)
+    mock_db.get_policy = AsyncMock(
+        return_value=Policy.model_validate(_policy_fixture(window_days=30))
+    )
+    _set_overrides(mock_db)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/confirm",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"corrected_fields": {"purchase_date": "not-a-date"}},
+        )
+        assert response.status_code == 400
+        payload = response.json()
+        assert payload["error"]["code"] == "invalid_field"
+        assert "purchase_date" in payload["error"]["message"]
+        # Must NOT have proceeded to write — window block aborts first.
+        mock_db.partial_update.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
 async def test_confirm_purchase_no_policy_leaves_window_untouched(client: AsyncClient) -> None:
     """Unknown platform (no Policy doc) → confirm does not fabricate a window."""
     purchase_date = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
