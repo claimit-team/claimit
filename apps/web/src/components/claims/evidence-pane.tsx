@@ -51,22 +51,38 @@ function PaneHeader({
   );
 }
 
-function formatEvidenceDate(dateString: string): string {
+// Read-tolerant formatters: with real (sometimes-null) view-model data
+// the input can be `""` (no `updated_at`/`purchase_date` on the wire
+// doc) or a malformed ISO string. `new Date("")` produces an "Invalid
+// Date" with NaN timestamp — formatting that would render literally
+// "Invalid Date" in the UI. Guarding here keeps the rest of the pane
+// crash-free without per-call-site null checks.
+//
+// `formatEvidenceDate` returns `null` (caller hides the Clock pill);
+// `formatDateShort` returns `"—"` (caller shows the dash in place of
+// a date).
+function formatEvidenceDate(dateString: string): string | null {
+  if (dateString === "") return null;
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return null;
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  }).format(new Date(dateString));
+  }).format(date);
 }
 
 function formatDateShort(dateString: string): string {
+  if (dateString === "") return "—";
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "—";
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
-  }).format(new Date(dateString));
+  }).format(date);
 }
 
 function ScreenshotPlaceholder() {
@@ -138,10 +154,16 @@ export function EvidencePane({ claim, onDoubleClickHeader }: EvidencePaneProps) 
 
               <div className="flex items-center justify-between text-neutral-500 text-xs">
                 <span>Source: {claim.platform}</span>
-                <span className="flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  {formatEvidenceDate(evidence.captured_at)}
-                </span>
+                {(() => {
+                  const captured = formatEvidenceDate(evidence.captured_at);
+                  if (captured === null) return null;
+                  return (
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      {captured}
+                    </span>
+                  );
+                })()}
               </div>
             </CardContent>
           </Card>
