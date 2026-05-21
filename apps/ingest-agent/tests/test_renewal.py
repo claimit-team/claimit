@@ -98,7 +98,14 @@ async def test_run_renewal_sweep_happy_path_renews_every_candidate() -> None:
     filter_ = find_call.args[1]
     assert collection == "users"
     assert filter_["gmail_integration.connected"] is True
-    assert filter_["gmail_integration.refresh_token_ref"] == {"$ne": None}
+    # Filter must require the field exists AND is non-null/non-empty —
+    # not just `$ne: null`, which MongoDB also matches against missing
+    # fields. A regression here would silently widen the sweep to docs
+    # that can't be renewed.
+    assert filter_["gmail_integration.refresh_token_ref"] == {
+        "$exists": True,
+        "$nin": [None, ""],
+    }
     assert "$lt" in filter_["gmail_integration.watch_expires_at"]
     assert isinstance(filter_["gmail_integration.watch_expires_at"]["$lt"], datetime)
 

@@ -66,7 +66,17 @@ async def run_renewal_sweep(
         "users",
         {
             "gmail_integration.connected": True,
-            "gmail_integration.refresh_token_ref": {"$ne": None},
+            # MongoDB's `$ne: null` matches BOTH non-null AND missing fields,
+            # per https://www.mongodb.com/docs/manual/reference/operator/query/ne/.
+            # A legacy user doc missing `refresh_token_ref` entirely would
+            # slip through and waste a sweep slot on a user who can't
+            # actually be renewed. `$exists: true` is the load-bearing
+            # guard; `$nin: [null, ""]` is defense-in-depth against a
+            # manual DB edit that ever lands an empty string here.
+            "gmail_integration.refresh_token_ref": {
+                "$exists": True,
+                "$nin": [None, ""],
+            },
             "gmail_integration.watch_expires_at": {"$lt": threshold},
         },
         User,
