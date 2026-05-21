@@ -34,7 +34,7 @@ from claimit_mongodb_models import (
     normalize_sender,
 )
 from claimit_pubsub import TOPIC_PURCHASE_UPLOADED, PurchaseUploadedEvent
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from ..middleware.errors import ApiError
 from ..middleware.pagination import apply_cursor_to_query, encode_cursor
@@ -339,17 +339,24 @@ async def confirm_purchase(
             # leak as a 500. Preserve the 400 contract by mapping
             # parse errors to the same `invalid_field` ApiError the
             # downstream partial_update would have raised.
-            if isinstance(effective_purchase_date, datetime):
-                pd = effective_purchase_date
-            else:
-                try:
-                    pd = datetime.fromisoformat(str(effective_purchase_date).replace("Z", "+00:00"))
-                except ValueError as err:
-                    raise ApiError(
-                        "invalid_field",
-                        f"purchase_date is not a valid ISO datetime: {effective_purchase_date!r}",
-                        status_code=400,
-                    ) from err
+            # Use Pydantic's `TypeAdapter(datetime)` so the error shape
+            # for a malformed `purchase_date` is identical to other
+            # corrected-field validation errors (which flow through
+            # `partial_update(..., model=Purchase)` → ValidationError
+            # → `_validation_error_details`). Without this, a hand-rolled
+            # `datetime.fromisoformat` would either leak a 500 (caller
+            # never wrapped ValueError) or produce a bare 400 without
+            # the `details.fields` payload the frontend's per-field
+            # error rendering consumes.
+            try:
+                pd = TypeAdapter(datetime).validate_python(effective_purchase_date)
+            except ValidationError as err:
+                raise ApiError(
+                    "invalid_field",
+                    "One or more corrected fields failed validation",
+                    status_code=400,
+                    details=_validation_error_details(err),
+                ) from err
             updates["window_expires"] = pd + timedelta(days=days)
 
     try:

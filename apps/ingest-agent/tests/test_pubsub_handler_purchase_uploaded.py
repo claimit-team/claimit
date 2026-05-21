@@ -529,6 +529,46 @@ def test_handler_returns_200_when_finalize_fails(
         _clear_overrides()
 
 
+def test_handler_returns_200_when_finalize_raises_unexpected_exception(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Bugbot regression: anything from finalize that isn't a FinalizeError
+    must still ack-200 (with a distinct reason + ERROR traceback in logs).
+
+    `finalize_purchase_extraction` calls `publish_event` (Pub/Sub
+    broker) and constructs Pydantic event models from a Mongo doc.
+    Either path can raise `ValidationError` / network exceptions that
+    are NOT `FinalizeError`. Without the broad-except, those would
+    leak as a 5xx and Pub/Sub would redeliver until DLQ — but
+    upstream idempotency (status check) makes a redelivery a no-op,
+    so 200 is the right surface here.
+    """
+    _setup_overrides(purchase=_purchase_doc())
+
+    async def fake_extract(*, data: bytes, mime_type: str) -> ExtractedPurchaseFields:
+        return _extracted()
+
+    async def fake_finalize(**_kwargs) -> object:
+        raise RuntimeError("publish_event upstream broker outage")
+
+    monkeypatch.setattr(main_module, "extract_from_blob", fake_extract)
+    monkeypatch.setattr(main_module, "finalize_purchase_extraction", fake_finalize)
+
+    try:
+        with TestClient(app) as client:
+            data = _encode_event(_event_payload())
+            with caplog.at_level("ERROR", logger="src.main"):
+                resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "error"
+        assert resp.json()["reason"] == "finalize_unexpected_exception"
+        # Traceback must be captured for triage.
+        assert any("finalize raised unexpected exception" in r.message for r in caplog.records)
+    finally:
+        _clear_overrides()
+
+
 def test_handler_prefers_gcs_content_type_over_event_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

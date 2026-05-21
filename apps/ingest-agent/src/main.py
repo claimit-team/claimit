@@ -503,6 +503,26 @@ async def handle_purchase_uploaded(
             err,
         )
         return {"status": "error", "reason": "finalize_failed"}
+    except Exception:
+        # Defence-in-depth: `finalize_purchase_extraction` also calls
+        # `publish_event` (network/Pub/Sub) and constructs Pydantic
+        # event models from a doc loaded out of Mongo. A transient
+        # broker outage, a legacy doc with an `ingestion_source` value
+        # that doesn't round-trip through `PurchaseIngestedEvent`, or
+        # any other unexpected exception would otherwise leak as a 5xx
+        # and break the module-level "always returns 200 to ack"
+        # contract (see file docstring) — Pub/Sub would then
+        # redeliver until the DLQ fills with messages we cannot
+        # actually progress on. Idempotency upstream (the
+        # `status != PENDING_CONFIRMATION` short-circuit) makes a
+        # redelivery a no-op anyway, so 200 here is the right surface.
+        # `exc_info=True` keeps the full traceback in Cloud Logging
+        # for triage.
+        _log.exception(
+            "purchase.uploaded push: finalize raised unexpected exception purchase_id=%s",
+            purchase_id,
+        )
+        return {"status": "error", "reason": "finalize_unexpected_exception"}
 
     _log.info(
         "purchase.uploaded push: extraction applied purchase_id=%s message_id=%s",

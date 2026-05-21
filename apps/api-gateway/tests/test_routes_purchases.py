@@ -1181,7 +1181,12 @@ async def test_confirm_purchase_malformed_corrected_purchase_date_returns_400(
         assert response.status_code == 400
         payload = response.json()
         assert payload["error"]["code"] == "invalid_field"
-        assert "purchase_date" in payload["error"]["message"]
+        # Must produce the SAME `details.fields` payload as other
+        # corrected-field validation errors (price_paid, etc.). The
+        # frontend's per-field error rendering reads this — a bare
+        # ApiError without `details` would skip the inline highlight.
+        details = payload["error"].get("details", {})
+        assert isinstance(details.get("fields"), list) and details["fields"]
         # Must NOT have proceeded to write — window block aborts first.
         mock_db.partial_update.assert_not_awaited()
     finally:
