@@ -195,3 +195,13 @@ dist/
 .terraform/
 .vercel
 test_results.txt
+
+# Claude Code per-clone workspace settings.
+.claude/
+
+# Local "live" smoke-test scripts and their captured output. Files matching
+# these patterns (e.g. apps/assistant-agent/_test_live_agent.py) are dev
+# scratch — kept locally for one-off Vertex/Gemini integration checks but
+# never committed.
+**/_test_live_*.py
+**/_live_test_*.txt
