@@ -37,6 +37,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useDashboardSummary } from "@/hooks/useDashboardSummary";
 import { useMonitoredPurchases } from "@/hooks/useMonitoredPurchases";
+import { usePendingConfirmation } from "@/hooks/usePendingConfirmation";
 import type { PurchaseListItem, PurchasesApiError } from "@/lib/api/purchases";
 import { formatWindowRemaining, snakeToTitleLabel } from "@/lib/claims-status";
 import { getListStatusBadge, isMonitoringDegraded } from "@/lib/purchase-status";
@@ -50,6 +51,11 @@ import { useAuthStore, useUIStore } from "@/store";
 type UserState = "new" | "active" | "reclaim_experienced";
 
 const mockDashboardData = {
+  // Ticket 5.14 B8: `confirm_extraction` cards now come from the real
+  // `pending_confirmation` purchase list (see `usePendingConfirmation`
+  // + `buildConfirmExtractionItems`). The mock review_draft + update
+  // _needed entries below remain as PR2 placeholders — those have
+  // their own tickets and aren't in scope here.
   needsAttention: [
     {
       type: "review_draft" as const,
@@ -67,13 +73,6 @@ const mockDashboardData = {
       submittedDaysAgo: 6,
       claimType: "email",
       requestedAmount: 74,
-    },
-    {
-      type: "confirm_extraction" as const,
-      purchaseId: "purchase_delta_003",
-      platform: "Delta",
-      title: "MIA → LAX flight",
-      lowConfidenceFields: ["fare_class", "purchase_date"],
     },
   ],
   // monitoredPurchases removed in PR2 — the dashboard section now
@@ -463,7 +462,97 @@ function UpdateNeededCard({
   );
 }
 
-function NeedsAttentionSection({ items }: { items: typeof mockDashboardData.needsAttention }) {
+/**
+ * Confidence threshold mirroring B5 — kept inline (3 places, all FE)
+ * rather than promoting to a shared module. Renaming the constant
+ * later is a single rg-replace.
+ */
+const CONFIDENCE_THRESHOLD = 0.95;
+
+type ConfirmExtractionItem = {
+  type: "confirm_extraction";
+  purchaseId: string;
+  platform: string;
+  title: string;
+  lowConfidenceFields: string[];
+};
+
+type ReviewDraftItem = (typeof mockDashboardData.needsAttention)[number] & {
+  type: "review_draft";
+};
+type UpdateNeededItem = (typeof mockDashboardData.needsAttention)[number] & {
+  type: "update_needed";
+};
+type NeedsAttentionItem = ReviewDraftItem | UpdateNeededItem | ConfirmExtractionItem;
+
+/**
+ * Map a `pending_confirmation` purchase row to the
+ * `ConfirmExtractionCard` shape. The card surfaces the same low-
+ * confidence-field list the confirm-page banner renders (the
+ * threshold + field-set definition lives in
+ * `confirm-purchase-content.deriveLowConfidenceFields`) — but we
+ * derive it inline here rather than importing because the dashboard
+ * card is intentionally lossy (it doesn't need the price/price_paid
+ * collapse, doesn't need the mostly-failed/named-low split, just a
+ * short hint of what's wrong).
+ *
+ * Returns `null` for docs whose extraction hasn't landed yet (the
+ * sentinel `overall_min=0` shape). Surfacing a confirm card with
+ * "everything is low" before extraction completes would mislead the
+ * user; the confirm page itself shows the "Analyzing your receipt…"
+ * polling UX in that state.
+ */
+function buildConfirmExtractionItems(purchases: PurchaseListItem[]): ConfirmExtractionItem[] {
+  const out: ConfirmExtractionItem[] = [];
+  for (const p of purchases) {
+    const conf = p.extraction_confidence;
+    // Skip sentinel / pre-extraction shapes — the dashboard shouldn't
+    // surface "0 fields low" or "everything low" before Gemini
+    // returns.
+    if (!conf) continue;
+    const overall = conf.overall_min;
+    if (overall === null || overall === undefined || overall === 0) continue;
+
+    const lowFields: string[] = [];
+    for (const [key, value] of Object.entries(conf)) {
+      if (key === "overall_min") continue;
+      if (value === null || value === undefined) continue;
+      if (value < CONFIDENCE_THRESHOLD) lowFields.push(humanizeField(key));
+    }
+
+    out.push({
+      type: "confirm_extraction",
+      purchaseId: p._id,
+      platform: snakeToTitleLabel(p.platform),
+      title: p.product_name ?? "Untitled purchase",
+      lowConfidenceFields: lowFields,
+    });
+  }
+  return out;
+}
+
+const DASHBOARD_FIELD_LABEL: Record<string, string> = {
+  platform: "Platform",
+  product_name: "Product name",
+  price: "Purchase price",
+  price_paid: "Purchase price",
+  member_price_at_purchase: "Member price",
+  non_member_price_at_purchase: "Non-member price",
+  purchase_date: "Purchase date",
+  order_id: "Order ID",
+  category: "Category",
+  member_tier_at_purchase: "Member tier",
+  variant: "Variant",
+  fare_class: "Fare class",
+  room_type: "Room type",
+  bed_type: "Bed type",
+  rate_type: "Rate type",
+};
+function humanizeField(field: string): string {
+  return DASHBOARD_FIELD_LABEL[field] ?? field.replace(/_/g, " ");
+}
+
+function NeedsAttentionSection({ items }: { items: NeedsAttentionItem[] }) {
   const [dismissedIds, setDismissedIds] = useState<string[]>([]);
   const getItemId = (item: (typeof items)[number]): string =>
     item.type === "confirm_extraction" ? item.purchaseId : item.claimId;
@@ -815,12 +904,18 @@ export default function DashboardPage() {
   // real backend state — accounts with gmail_integration.connected=true in
   // Mongo were rendering as "not connected" in the dashboard header.
   const gmailConnected = useAuthStore((s) => s.user?.gmail_integration?.connected ?? false);
-  const { needsAttention, recentActivity } = mockDashboardData;
+  const { needsAttention: mockNeedsAttention, recentActivity } = mockDashboardData;
   const {
     purchases: monitoredPurchases,
     isLoading: isMonitoredLoading,
     error: monitoredError,
   } = useMonitoredPurchases();
+  const { purchases: pendingPurchases } = usePendingConfirmation();
+
+  const needsAttention: NeedsAttentionItem[] = [
+    ...buildConfirmExtractionItems(pendingPurchases),
+    ...mockNeedsAttention,
+  ];
 
   // Auto-derive userState from real summary data:
   // - lifetime_savings > 0 → user has resolved claims → "reclaim_experienced"
