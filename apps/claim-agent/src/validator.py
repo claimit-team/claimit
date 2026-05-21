@@ -13,6 +13,11 @@ from .draft.models import ClaimDraft
 
 _log = logging.getLogger(__name__)
 
+# Maximum tolerated ratio between draft refund amount and claim amount.
+# Drafts where either side exceeds the other by this factor are flagged
+# as implausible Gemini hallucinations.
+_REFUND_TOLERANCE_FACTOR = 10
+
 PROHIBITED_PHRASES = [
     "sue you",
     "take legal action",
@@ -70,8 +75,8 @@ def validate(draft: ClaimDraft, claim: Claim, purchase: Purchase) -> ValidationR
             draft.refund_amount != 0
             and claim.claim_amount != 0
             and (
-                draft.refund_amount > claim.claim_amount * 10
-                or claim.claim_amount > draft.refund_amount * 10
+                draft.refund_amount > claim.claim_amount * _REFUND_TOLERANCE_FACTOR
+                or claim.claim_amount > draft.refund_amount * _REFUND_TOLERANCE_FACTOR
             )
         ):
             issues.append(
