@@ -295,33 +295,51 @@ function ConfirmExtractionCard({
   title: string;
   lowConfidenceFields: string[];
 }) {
+  // Wrap the WHOLE card in <Link> (whole-card hit target) so a user
+  // who taps the platform name / low-confidence summary lands on
+  // /confirm/:id same as if they clicked the trailing call-to-action.
+  // Pre-fix, only the small button was clickable — the visual
+  // affordance of the entire card was misleading because nothing else
+  // navigated. The trailing CTA is demoted to a styled <span> instead
+  // of a nested <Link>/<button> because nested interactive elements
+  // are invalid HTML and screen readers can't disambiguate the two
+  // targets. The visual treatment is preserved via buttonVariants().
   return (
-    <Card className="border-neutral-200">
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <Badge
-              variant="secondary"
-              className="mb-2 bg-semantic-warning-bg text-semantic-warning border-0"
+    <Link
+      href={`/confirm/${purchaseId}`}
+      aria-label={`Confirm purchase: ${platform} · ${title}`}
+      className="block rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    >
+      <Card className="border-neutral-200 transition-colors hover:bg-neutral-50">
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <Badge
+                variant="secondary"
+                className="mb-2 bg-semantic-warning-bg text-semantic-warning border-0"
+              >
+                Confirm details
+              </Badge>
+              <div className="font-medium text-neutral-900 truncate">
+                {platform} · {title}
+              </div>
+              <div className="text-sm text-neutral-600 mt-1">
+                Low confidence: {lowConfidenceFields.join(", ")}
+              </div>
+            </div>
+            <span
+              aria-hidden="true"
+              className={cn(
+                buttonVariants({ size: "sm", variant: "outline" }),
+                "pointer-events-none",
+              )}
             >
-              Confirm details
-            </Badge>
-            <div className="font-medium text-neutral-900 truncate">
-              {platform} · {title}
-            </div>
-            <div className="text-sm text-neutral-600 mt-1">
-              Low confidence: {lowConfidenceFields.join(", ")}
-            </div>
+              Confirm purchase
+            </span>
           </div>
-          <Link
-            href={`/confirm/${purchaseId}`}
-            className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
-          >
-            Confirm purchase
-          </Link>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </Link>
   );
 }
 

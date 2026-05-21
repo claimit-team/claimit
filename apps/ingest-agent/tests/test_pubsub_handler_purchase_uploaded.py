@@ -475,7 +475,13 @@ def test_handler_returns_200_when_extractor_rejects_input(monkeypatch: pytest.Mo
     async def fake_extract(*, data: bytes, mime_type: str) -> ExtractedPurchaseFields:
         raise ValueError("Unsupported blob mime_type")
 
+    rescue_calls: list[UUID] = []
+
+    async def fake_rescue(*, db: object, purchase_id: UUID) -> None:
+        rescue_calls.append(purchase_id)
+
     monkeypatch.setattr(main_module, "extract_from_blob", fake_extract)
+    monkeypatch.setattr(main_module, "finalize_purchase_extraction_failure", fake_rescue)
 
     try:
         with TestClient(app) as client:
@@ -483,17 +489,30 @@ def test_handler_returns_200_when_extractor_rejects_input(monkeypatch: pytest.Mo
             resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
         assert resp.status_code == 200
         assert resp.json()["reason"] == "extractor_rejected_input"
+        # Rescue MUST fire on this branch — without it the FE confirm
+        # loader would poll forever on a doc whose extractor branched
+        # to the unsupported-mime path.
+        assert rescue_calls == [PURCHASE_ID]
     finally:
         _clear_overrides()
 
 
-def test_handler_returns_200_when_extractor_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_handler_returns_200_when_extractor_fails(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     _setup_overrides(purchase=_purchase_doc())
 
     async def fake_extract(*, data: bytes, mime_type: str) -> ExtractedPurchaseFields:
         raise ExtractorError("Gemini timed out")
 
+    rescue_calls: list[UUID] = []
+
+    async def fake_rescue(*, db: object, purchase_id: UUID) -> None:
+        rescue_calls.append(purchase_id)
+
     monkeypatch.setattr(main_module, "extract_from_blob", fake_extract)
+    monkeypatch.setattr(main_module, "finalize_purchase_extraction_failure", fake_rescue)
+    caplog.set_level("WARNING", logger="src.main")
 
     try:
         with TestClient(app) as client:
@@ -501,6 +520,51 @@ def test_handler_returns_200_when_extractor_fails(monkeypatch: pytest.MonkeyPatc
             resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
         assert resp.status_code == 200
         assert resp.json()["reason"] == "extractor_failed"
+        # Rescue helper must be called from the ExtractorError branch
+        # so the doc transitions to `overall_min=0.01` and the FE form
+        # opens to manual-fill instead of spinning forever.
+        assert rescue_calls == [PURCHASE_ID]
+        # The `handler.extraction_failed_doc_rescued` log fingerprint
+        # is the regression-alarm primitive — assert it lands so a
+        # future refactor can't silently drop the structured log.
+        assert any("handler.extraction_failed_doc_rescued" in rec.message for rec in caplog.records)
+    finally:
+        _clear_overrides()
+
+
+def test_handler_swallows_rescue_helper_exceptions(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Rescue is best-effort — a Mongo blip during rescue must not 5xx the handler.
+
+    A 5xx leaks redelivery; the redelivered message would hit the same
+    extractor failure (deterministic) and the same rescue failure
+    (likely transient), and we'd burn the DLQ on a doc the user can
+    still confirm manually via the existing sentinel state. Logging
+    the rescue-raise is sufficient — operator alerts pick it up out of
+    band.
+    """
+    _setup_overrides(purchase=_purchase_doc())
+
+    async def fake_extract(*, data: bytes, mime_type: str) -> ExtractedPurchaseFields:
+        raise ExtractorError("Gemini timed out")
+
+    async def boom_rescue(*, db: object, purchase_id: UUID) -> None:
+        raise RuntimeError("mongo blip during rescue")
+
+    monkeypatch.setattr(main_module, "extract_from_blob", fake_extract)
+    monkeypatch.setattr(main_module, "finalize_purchase_extraction_failure", boom_rescue)
+    caplog.set_level("ERROR", logger="src.main")
+
+    try:
+        with TestClient(app) as client:
+            data = _encode_event(_event_payload())
+            resp = client.post("/pubsub/purchase.uploaded", json=_envelope(data))
+        assert resp.status_code == 200
+        assert resp.json()["reason"] == "extractor_failed"
+        assert any(
+            "handler.extraction_failed_doc_rescue_raised" in rec.message for rec in caplog.records
+        )
     finally:
         _clear_overrides()
 

@@ -235,15 +235,55 @@ export function ReceiptPreview({ purchaseId, filename, ingestionSource }: Receip
   );
 }
 
-function MissingReceiptFallback({ ingestionSource }: { ingestionSource: string | null }) {
+/**
+ * "Original receipt not available" surface. Exported so the
+ * confirm-page parent can render it directly when
+ * `purchase.receipt_storage_url` is null — in that case mounting
+ * the full ReceiptPreview just to fetch a known-404 endpoint
+ * would waste a round trip and briefly flash the "Loading…"
+ * shell.
+ *
+ * Two variants:
+ *  - `panel`   (default) — same vertical footprint as the loaded
+ *    receipt iframe / image so the left column doesn't collapse
+ *    when a non-receipt blob 404s mid-load. This is the variant
+ *    ReceiptPreview itself uses for its in-flow `missing` state.
+ *  - `compact` — fits inside the same bordered card as a sized
+ *    receipt but stays smaller (max ~280px height). Used by the
+ *    confirm-purchase content shell when the doc explicitly has
+ *    no `receipt_storage_url` — there's no pending fetch to fall
+ *    back to, so we want a quieter surface that doesn't dominate
+ *    the column.
+ */
+export function MissingReceiptFallback({
+  ingestionSource,
+  variant = "panel",
+}: {
+  ingestionSource: string | null;
+  variant?: "panel" | "compact";
+}) {
   const body =
     ingestionSource === "gmail"
       ? "This purchase came in through Gmail. We don't store the original email attachment, but we did capture every detail you see on the right."
       : "We don't have a stored receipt for this purchase. Everything we extracted is on the right.";
+  const sizeClass =
+    variant === "panel"
+      ? "h-[400px] lg:h-[500px]"
+      : // Compact: short enough that the form column is the visual
+        // focus, tall enough to feel intentional rather than
+        // accidental margin.
+        "min-h-[180px] py-8";
   return (
-    <div className="flex h-[400px] flex-col items-center justify-center gap-3 bg-neutral-50 p-6 text-center lg:h-[500px]">
-      <FileText className="size-12 text-neutral-300" aria-hidden />
-      <p className="max-w-xs text-sm font-medium text-neutral-700">Original not available</p>
+    <div
+      className={`flex ${sizeClass} flex-col items-center justify-center gap-3 bg-neutral-50 p-6 text-center`}
+    >
+      <FileText
+        className={variant === "compact" ? "size-8 text-neutral-300" : "size-12 text-neutral-300"}
+        aria-hidden
+      />
+      <p className="max-w-xs text-sm font-medium text-neutral-700">
+        Original receipt not available
+      </p>
       <p className="max-w-xs text-sm text-neutral-500">{body}</p>
     </div>
   );

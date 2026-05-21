@@ -375,3 +375,201 @@ def test_run_extractor_agent_blob_times_out(monkeypatch: pytest.MonkeyPatch) -> 
 
     with pytest.raises(ExtractorError, match="blob"):
         asyncio.run(extractor._run_extractor_agent_blob(data=b"x", mime_type="application/pdf"))
+
+
+# ---------------------------------------------------------------------------
+# genai teardown AttributeError safety net (post-5.14 prod-verification fix).
+#
+# Pre-fix, an AttributeError raised by `BaseApiClient.aclose()` (Vertex
+# async-auth path leaves `_async_httpx_client = None`) bubbled out of
+# `runner.run_async(...)` and aborted extraction — the doc stayed at the
+# upload sentinel `overall_min=0.0` and the FE confirm page polled forever.
+# These tests pin the two-mode recovery: Scenario A (result captured
+# before teardown -> recover) vs Scenario B (no result yet -> raise
+# ExtractorError so the handler's rescue path fires).
+# ---------------------------------------------------------------------------
+
+
+class _FakeFinalEvent:
+    """Minimal event shape that satisfies `event.is_final_response()` and
+    `_extract_event_text(event)` — mirrors the parts the real ADK event
+    carries via `event.content.parts[*].text`."""
+
+    class _Part:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    class _Content:
+        def __init__(self, text: str) -> None:
+            self.parts = [_FakeFinalEvent._Part(text)]
+
+    def __init__(self, text: str) -> None:
+        self.content = _FakeFinalEvent._Content(text)
+
+    def is_final_response(self) -> bool:
+        return True
+
+
+def _install_runner_emitting(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    yield_final: bool,
+    raise_at: str,
+) -> None:
+    """Patch `extractor.Runner` with a fake whose `run_async` yields a
+    final event then optionally raises `AttributeError`.
+
+    `raise_at`:
+      - "none"        -> never raise (happy path).
+      - "after_final" -> emit final event, then raise on the next loop iteration
+        (Scenario A: real result captured, teardown subsequently errored).
+      - "before_any"  -> raise before yielding anything (Scenario B: async
+        transport never produced a response).
+    """
+    payload_text = json.dumps(_sample_extracted_payload())
+
+    class FakeRunner:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def run_async(self, **_kwargs: object):
+            if raise_at == "before_any":
+                raise AttributeError(
+                    "'BaseApiClient' object has no attribute '_async_httpx_client'"
+                )
+            if yield_final:
+                yield _FakeFinalEvent(payload_text)
+            if raise_at == "after_final":
+                raise AttributeError(
+                    "'BaseApiClient' object has no attribute '_async_httpx_client'"
+                )
+
+    monkeypatch.setattr(extractor, "Runner", FakeRunner)
+
+
+@pytest.mark.parametrize("path", ["email", "blob"])
+def test_attribute_error_after_final_response_returns_text(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, path: str
+) -> None:
+    """Scenario A — teardown errors AFTER we captured a real response.
+
+    The guard must swallow the AttributeError, log the recovery, and
+    return the captured text so `extract_from_blob` / `extract` still
+    produce real fields. Without this, every Vertex async-auth call
+    on Cloud Run would fall through to the rescue-finalize path even
+    though the model actually returned a valid extraction.
+    """
+    _install_runner_emitting(monkeypatch, yield_final=True, raise_at="after_final")
+    caplog.set_level("WARNING", logger="src.extractor")
+
+    if path == "email":
+        result = asyncio.run(extractor._run_extractor_agent(_sample_email()))
+    else:
+        result = asyncio.run(
+            extractor._run_extractor_agent_blob(data=b"x", mime_type="application/pdf")
+        )
+
+    assert result is not None
+    # Round-trips through the JSON parser cleanly — proves we returned
+    # the actual model output not a placeholder string.
+    parsed = json.loads(result)
+    assert parsed["platform"] == "best_buy"
+    # Both diagnostic logs fire on the Scenario A path so prod can grep
+    # for the recovery + know which scenario we're in.
+    assert any("extractor.attribute_error_caught" in rec.message for rec in caplog.records)
+    assert any("extractor.recovered_after_teardown_error" in rec.message for rec in caplog.records)
+    # No `runner_loop_exit` because the exception path returns early; the
+    # `attribute_error_caught` log carries the same `final_text_captured`
+    # signal so observability is preserved.
+
+
+@pytest.mark.parametrize("path", ["email", "blob"])
+def test_attribute_error_with_no_final_response_raises(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, path: str
+) -> None:
+    """Scenario B — teardown errors BEFORE the model produced any result.
+
+    Nothing to recover. The guard must raise `ExtractorError` (with the
+    AttributeError chained) so the upload handler's rescue path fires
+    and the doc transitions to `overall_min=0.01` instead of staying
+    stuck at the sentinel. This is the failure mode that the 2b
+    root-cause fix must eliminate from the steady state — the guard
+    here is the safety net, NOT the acceptable resting state.
+    """
+    _install_runner_emitting(monkeypatch, yield_final=False, raise_at="before_any")
+    caplog.set_level("ERROR", logger="src.extractor")
+
+    runner_callable = (
+        extractor._run_extractor_agent
+        if path == "email"
+        else (lambda: extractor._run_extractor_agent_blob(data=b"x", mime_type="application/pdf"))
+    )
+
+    with pytest.raises(ExtractorError, match="teardown error with no result captured"):
+        if path == "email":
+            asyncio.run(extractor._run_extractor_agent(_sample_email()))
+        else:
+            asyncio.run(runner_callable())
+
+    assert any("extractor.unrecoverable_attribute_error" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.parametrize("path", ["email", "blob"])
+def test_unrelated_attribute_error_is_reraised_not_rescued(
+    monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    """An AttributeError that ISN'T the genai teardown bug must NOT be rescued.
+
+    Pre-narrowing the predicate, any `AttributeError` raised inside the
+    runner loop would be treated as the genai teardown bug. A typo in
+    `event.is_final_response()` or an ADK API shape change would then
+    be silently swallowed and the function would either return None
+    (Scenario B) or a stale final_text — both worse than just crashing.
+    Pin the re-raise behavior so the narrowing predicate can't regress.
+    """
+
+    class UnrelatedAttributeErrorRunner:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def run_async(self, **_kwargs: object):
+            raise AttributeError("'SomethingElse' object has no attribute 'totally_unrelated'")
+            yield  # never reached — keeps the runtime happy that this is an async generator
+
+    monkeypatch.setattr(extractor, "Runner", UnrelatedAttributeErrorRunner)
+
+    with pytest.raises(AttributeError, match="totally_unrelated"):
+        if path == "email":
+            asyncio.run(extractor._run_extractor_agent(_sample_email()))
+        else:
+            asyncio.run(extractor._run_extractor_agent_blob(data=b"x", mime_type="application/pdf"))
+
+
+@pytest.mark.parametrize("path", ["email", "blob"])
+def test_runner_loop_exit_log_fires_with_captured_text(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, path: str
+) -> None:
+    """Happy path — instrumentation log lands with `final_text_captured=True`.
+
+    This is the single load-bearing log line for disambiguating
+    Scenario A vs B in prod: a tail of `extractor.runner_loop_exit`
+    with `final_text_captured: true` on every upload is what proves
+    the 2b root-cause fix worked. Asserting it fires here gives
+    confidence the log line wasn't removed by a future refactor.
+    """
+    _install_runner_emitting(monkeypatch, yield_final=True, raise_at="none")
+    caplog.set_level("INFO", logger="src.extractor")
+
+    if path == "email":
+        asyncio.run(extractor._run_extractor_agent(_sample_email()))
+    else:
+        asyncio.run(extractor._run_extractor_agent_blob(data=b"x", mime_type="application/pdf"))
+
+    exit_logs = [rec for rec in caplog.records if "extractor.runner_loop_exit" in rec.message]
+    assert len(exit_logs) == 1
+    # `extra={...}` lands on the LogRecord as direct attributes; both
+    # the boolean and the length are needed for Cloud Logging filters.
+    rec = exit_logs[0]
+    assert rec.final_text_captured is True
+    assert rec.final_text_len > 0
+    assert rec.path == path

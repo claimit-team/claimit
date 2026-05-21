@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID, uuid4
@@ -24,7 +25,38 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from src.confidence import compute_overall_min
 from src.dedup import DuplicateReceiptError, check_duplicate, hash_receipt
+from src.genai_patches import apply_patches as _apply_genai_patches
 from src.notifier import maybe_send_confirmation_email
+
+logger = logging.getLogger(__name__)
+
+
+def _is_genai_teardown_attribute_error(exc: AttributeError) -> bool:
+    """True iff `exc` matches the known google-genai teardown bug signature.
+
+    The bug surfaces as `AttributeError: 'BaseApiClient' object has no
+    attribute '_async_httpx_client'` (or, post-2b patch, an attribute
+    error referencing the `aclose` cleanup path). Narrowing to this
+    signature prevents a bug somewhere else in the runner loop (a
+    typo in `event.is_final_response()`, an ADK shape change, …) from
+    being silently treated as a "successful extraction with broken
+    teardown" — which would have us returning a possibly-stale
+    `final_text` from a half-broken loop. Anything outside this
+    signature is re-raised so it bubbles up as a real ExtractorError.
+    """
+    message = repr(exc)
+    return "_async_httpx_client" in message or "aclose" in message
+
+
+# Install the defensive `BaseApiClient.aclose` patch (workaround for
+# upstream PR googleapis/python-genai#2243). Reassigns a class
+# method, so calling at module import is sufficient — every Gemini
+# client constructed by an ADK Runner (lazily, inside `run_async`)
+# will dispatch through the patched bound method at teardown time.
+# Idempotent + logs once; the call is here (and not inside the
+# runner function bodies) so a Cloud Logging tail of a fresh
+# revision confirms the patch landed BEFORE any extraction runs.
+_apply_genai_patches()
 
 MODEL_NAME = "gemini-2.5-flash"
 APP_NAME = "claimit-ingest-extractor"
@@ -263,7 +295,79 @@ async def _run_extractor_agent(email: EmailForExtraction) -> str | None:
         raise ExtractorError(
             f"Extractor timed out for user_id={user_id} session_id={session_id}"
         ) from exc
+    except AttributeError as exc:
+        # google-genai teardown bug surface: BaseApiClient.__del__ schedules
+        # `aclose()` which dereferences `_async_httpx_client`; on the Vertex
+        # async-auth path that attribute is None, so the cleanup raises
+        # AttributeError. The error can propagate out of `runner.run_async`
+        # because ADK keeps a reference to the cached Gemini client across
+        # the async-for loop.
+        #
+        # NARROW the rescue to ONLY this signature — see
+        # `_is_genai_teardown_attribute_error`. A bare `except AttributeError`
+        # would silently mislabel an unrelated bug (typo in
+        # `event.is_final_response()`, ADK API shape change, …) as a
+        # successful-but-untorn-down extraction and return the
+        # possibly-stale `final_text`. That class of false-recovery is
+        # worse than the original problem.
+        if not _is_genai_teardown_attribute_error(exc):
+            raise
+        # Two-mode recovery, decided by whether the Gemini call actually
+        # completed BEFORE teardown ran:
+        #   - Scenario A (final_text captured): the model returned a real
+        #     response; only cleanup failed. Recover by returning the
+        #     captured text. This is the expected case once the root cause
+        #     is fixed in 2b — the guard keeps a stale revision usable.
+        #   - Scenario B (no final_text): the async transport itself never
+        #     completed; we have nothing to return. Raise ExtractorError so
+        #     the handler's rescue-finalize path fires.
+        # Both paths log structured fields so prod logs disambiguate the
+        # scenario without needing to attach a debugger.
+        logger.warning(
+            "extractor.attribute_error_caught",
+            extra={
+                "path": "email",
+                "session_id": session_id,
+                "final_text_captured": final_text is not None,
+                "final_text_len": len(final_text) if final_text else 0,
+                "error_repr": repr(exc),
+            },
+        )
+        if final_text:
+            logger.warning(
+                "extractor.recovered_after_teardown_error",
+                extra={"path": "email", "session_id": session_id},
+            )
+            return final_text
+        logger.error(
+            "extractor.unrecoverable_attribute_error",
+            extra={"path": "email", "session_id": session_id, "error_repr": repr(exc)},
+        )
+        raise ExtractorError("genai async client teardown error with no result captured") from exc
 
+    # Structured log RIGHT after the runner loop exits cleanly. Fires
+    # BEFORE any garbage-collection teardown (which is when the genai
+    # __del__ aclose error fires) so the value of `final_text_captured`
+    # here is the load-bearing Scenario A vs B signal in prod logs:
+    #   - True  + no AttributeError later => Scenario A (clean path)
+    #   - True  + AttributeError caught   => Scenario A (recovered)
+    #   - False + AttributeError caught   => Scenario B (root cause needs fixing)
+    # See commit 2a / 2b plan notes for the decision tree.
+    #
+    # Deliberately NO `final_text_preview` field — the model output is
+    # purchase content (product names, order IDs, prices, etc.) and we
+    # do not want any of it landing in Cloud Logging. The boolean +
+    # length carry every diagnostic signal we need to disambiguate
+    # Scenario A vs B without leaking extraction payload.
+    logger.info(
+        "extractor.runner_loop_exit",
+        extra={
+            "path": "email",
+            "session_id": session_id,
+            "final_text_captured": final_text is not None,
+            "final_text_len": len(final_text) if final_text else 0,
+        },
+    )
     return final_text
 
 
@@ -344,7 +448,49 @@ async def _run_extractor_agent_blob(*, data: bytes, mime_type: str) -> str | Non
         raise ExtractorError(
             f"Extractor (blob) timed out for user_id={user_id} session_id={session_id}"
         ) from exc
+    except AttributeError as exc:
+        # Same google-genai teardown bug as `_run_extractor_agent`; see
+        # that function's matching block for the full Scenario A vs B
+        # explanation. Twin guard required because vision and email
+        # paths both go through their own ADK Runner instance with its
+        # own genai client lifecycle. The narrowing predicate is the
+        # same: only rescue the known teardown signature, re-raise
+        # everything else so unrelated bugs surface as real errors.
+        if not _is_genai_teardown_attribute_error(exc):
+            raise
+        logger.warning(
+            "extractor.attribute_error_caught",
+            extra={
+                "path": "blob",
+                "session_id": session_id,
+                "final_text_captured": final_text is not None,
+                "final_text_len": len(final_text) if final_text else 0,
+                "error_repr": repr(exc),
+            },
+        )
+        if final_text:
+            logger.warning(
+                "extractor.recovered_after_teardown_error",
+                extra={"path": "blob", "session_id": session_id},
+            )
+            return final_text
+        logger.error(
+            "extractor.unrecoverable_attribute_error",
+            extra={"path": "blob", "session_id": session_id, "error_repr": repr(exc)},
+        )
+        raise ExtractorError("genai async client teardown error with no result captured") from exc
 
+    # See email path for the rationale on the dropped `final_text_preview`
+    # field — same PII concern, same boolean+length diagnostic surface.
+    logger.info(
+        "extractor.runner_loop_exit",
+        extra={
+            "path": "blob",
+            "session_id": session_id,
+            "final_text_captured": final_text is not None,
+            "final_text_len": len(final_text) if final_text else 0,
+        },
+    )
     return final_text
 
 

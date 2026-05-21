@@ -33,7 +33,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .auth import verify_pubsub_oidc
 from .extractor import ALLOWED_BLOB_MIME_TYPES, ExtractorError, extract_from_blob
-from .finalize import FinalizeError, finalize_purchase_extraction
+from .finalize import (
+    FinalizeError,
+    finalize_purchase_extraction,
+    finalize_purchase_extraction_failure,
+)
 from .renewal import run_renewal_sweep
 from .storage import ReceiptObjectMissingError, ReceiptsReader, parse_gs_uri
 
@@ -364,6 +368,39 @@ class _PurchaseUploadedPayload(BaseModel):
     content_type: str
 
 
+async def _rescue_extraction_failure(db: MongoDBClient, purchase_id: UUID, *, reason: str) -> None:
+    """Wrap `finalize_purchase_extraction_failure` with structured logging.
+
+    The rescue path is best-effort: if writing the partial_update itself
+    raises (Mongo blip, transient connection error, …), we LOG and let
+    the handler ack so the Pub/Sub message doesn't get redelivered into
+    the same failure mode. The doc stays in its sentinel state on a
+    rescue failure — which is the SAME state it would have been in
+    before this code existed, so we're not making anything worse on
+    the second-failure path.
+
+    `handler.extraction_failed_doc_rescued` is the load-bearing log
+    fingerprint: a Cloud Logging filter on this string + a counter
+    derived from it is the regression-alarm primitive — any non-zero
+    rate on this counter under normal traffic means the genai root
+    cause has regressed and we are silently degrading every upload to
+    manual-fill.
+    """
+    try:
+        await finalize_purchase_extraction_failure(db=db, purchase_id=purchase_id)
+        _log.warning(
+            "handler.extraction_failed_doc_rescued purchase_id=%s reason=%s",
+            purchase_id,
+            reason,
+        )
+    except Exception:
+        _log.exception(
+            "handler.extraction_failed_doc_rescue_raised purchase_id=%s reason=%s",
+            purchase_id,
+            reason,
+        )
+
+
 @app.post(
     "/pubsub/purchase.uploaded",
     status_code=200,
@@ -515,23 +552,29 @@ async def handle_purchase_uploaded(
         extracted = await extract_from_blob(data=blob_data, mime_type=mime_type)
     except ValueError as err:
         # Unsupported mime type or empty blob — these can't succeed on
-        # retry. Log + ack.
+        # retry. Log + ack. Also nudge the doc's overall_min off zero so
+        # the FE confirm form opens to manual-fill instead of spinning
+        # forever on "Analyzing…" — same rescue posture as the
+        # ExtractorError branch below.
         _log.error(
             "purchase.uploaded push: extract_from_blob rejected input purchase_id=%s err=%s",
             purchase_id,
             err,
         )
+        await _rescue_extraction_failure(db, purchase_id, reason="extractor_rejected_input")
         return {"status": "error", "reason": "extractor_rejected_input"}
     except ExtractorError as err:
         # Timeout / malformed model output / empty model output. Retryable
         # in principle, but a non-200 here would just retry the entire
         # GCS read + Gemini call; the dead-letter (5 attempts) covers
         # the rare transient case better than a synchronous 5xx loop.
+        # Rescue the doc so the user reaches the manual-fill form.
         _log.error(
             "purchase.uploaded push: extractor failed purchase_id=%s err=%s",
             purchase_id,
             err,
         )
+        await _rescue_extraction_failure(db, purchase_id, reason="extractor_failed")
         return {"status": "error", "reason": "extractor_failed"}
 
     try:
