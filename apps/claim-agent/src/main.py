@@ -291,3 +291,6 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             },
         )
         return {"status": "error"}
+
+
+# trigger deploy
