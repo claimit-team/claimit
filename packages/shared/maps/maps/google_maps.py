@@ -49,7 +49,7 @@ async def find_nearest_store(
 
     Returns None if no results found or the API call fails.
     """
-    location_key = str(round(lat, 2)) + str(round(lon, 2))
+    location_key = f"{round(lat, 2)},{round(lon, 2)}"
     cache_key = (platform_name, location_key)
     if cache_key in _cache:
         return _cache[cache_key]

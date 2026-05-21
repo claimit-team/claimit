@@ -161,14 +161,14 @@ async def generate_in_store_guide(
         _log.warning("Policy search failed, using fallback clause", exc_info=True)
         results = []
     if results:
-        policy_clause = results[0].get(
-            "policy_text_relevant_clause", policy.policy_text_relevant_clause
+        policy_clause = (
+            results[0].get("policy_text_relevant_clause") or policy.policy_text_relevant_clause
         )
     else:
         policy_clause = policy.policy_text_relevant_clause
 
     store_info: StoreInfo | None = None
-    if user_location is not None and user_location.lat != 0 and user_location.lon != 0:
+    if user_location is not None and not (user_location.lat == 0 and user_location.lon == 0):
         store_info = await find_nearest_store(
             user_location.lat, user_location.lon, str(purchase.platform)
         )

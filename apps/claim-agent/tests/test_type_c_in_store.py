@@ -326,3 +326,39 @@ async def test_generate_in_store_guide_zero_coordinates_skips_places() -> None:
     _assert_clean_draft(draft, claim)
     assert "{{" not in draft.draft_content
     mock_places.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_generate_in_store_guide_valid_zero_lon() -> None:
+    """find_nearest_store IS called when lat is non-zero but lon=0 (e.g. London area)."""
+    purchase = _make_purchase()
+    claim = _make_claim(purchase)
+    policy = _make_policy()
+    mock_search = _mock_search_client("Walmart matches any lower price within 30 days.")
+    london_location = DefaultLocation(city="London", state="ENG", lat=51.5, lon=0)
+    store = StoreInfo(address="1 Oxford St, London", hours=[], phone="")
+
+    with (
+        patch("src.draft.type_c_in_store._run_draft_agent", new_callable=AsyncMock) as mock_runner,
+        patch(
+            "src.draft.type_c_in_store.find_nearest_store", new_callable=AsyncMock
+        ) as mock_places,
+    ):
+        mock_runner.return_value = _MOCK_IN_STORE_OUTPUT
+        mock_places.return_value = store
+
+        draft = await generate_in_store_guide(
+            claim,
+            purchase,
+            policy,
+            mock_search,
+            user_name="Test User",
+            current_price=219.99,
+            user_location=london_location,
+        )
+
+    _assert_clean_draft(draft, claim)
+    assert "{{" not in draft.draft_content
+    mock_places.assert_awaited_once_with(
+        london_location.lat, london_location.lon, str(purchase.platform)
+    )
