@@ -1,11 +1,13 @@
 "use client";
 
+import { useMemo, useState } from "react";
+
 import { ActionBar } from "@/components/confirm/action-bar";
 import { ConfidenceBanner } from "@/components/confirm/confidence-banner";
 import { ExtractionReviewForm } from "@/components/confirm/extraction-review-form";
 import { ReceiptPreview } from "@/components/confirm/receipt-preview";
 import type { PurchaseDetailDoc } from "@/lib/api/purchases";
-import type { ExtractionField, PurchaseCategory } from "@/lib/mock-purchases";
+import { buildInitialFormState, type ConfirmFormState } from "@/lib/confirm-form-state";
 
 /**
  * Real-purchase confirm shell (ticket 5.14 B3).
@@ -69,39 +71,6 @@ function deriveLowConfidenceFields(confidence: PurchaseDetailDoc["extraction_con
 }
 
 /**
- * Adapter: shape a real `PurchaseDetailDoc` into the old
- * `initialData` prop the B4 form will eventually own directly.
- *
- * `confidence ?? 0` is used because the form's mock contract carried
- * a number; once B4 lifts state up + replaces the prop shape the
- * confidence value on each field disappears entirely (the banner is
- * the single source of truth for low-confidence highlighting).
- */
-function adaptFormInitialData(purchase: PurchaseDetailDoc): {
-  platform: ExtractionField<string>;
-  product_name: ExtractionField<string>;
-  price_paid: ExtractionField<number>;
-  purchase_date: ExtractionField<string>;
-  order_id: ExtractionField<string>;
-  category: PurchaseCategory;
-} {
-  const conf = purchase.extraction_confidence;
-  const category: PurchaseCategory =
-    purchase.category === "airline" || purchase.category === "hotel" ? purchase.category : "retail";
-  return {
-    platform: { value: purchase.platform ?? "", confidence: conf?.platform ?? 0 },
-    product_name: { value: purchase.product_name ?? "", confidence: conf?.product_name ?? 0 },
-    price_paid: { value: purchase.price_paid ?? 0, confidence: conf?.price_paid ?? 0 },
-    purchase_date: {
-      value: purchase.purchase_date ? purchase.purchase_date.slice(0, 10) : "",
-      confidence: conf?.purchase_date ?? 0,
-    },
-    order_id: { value: purchase.order_id ?? "", confidence: conf?.order_id ?? 0 },
-    category,
-  };
-}
-
-/**
  * Adapter: derive the receipt-preview props from the doc. The real
  * blob fetch lives in B6 — this adapter only provides the filename
  * (display only) and the FE's best guess at "is this a PDF or image"
@@ -135,9 +104,19 @@ export function ConfirmPurchaseContent({ purchase }: { purchase: PurchaseDetailD
   const { fields: lowConfidenceFields, isMostlyFailed } = deriveLowConfidenceFields(
     purchase.extraction_confidence,
   );
-  const initialData = adaptFormInitialData(purchase);
   const receiptProps = adaptReceiptProps(purchase);
   const overallConfidence = purchase.extraction_confidence?.overall_min ?? 0;
+
+  // Form state lives here (ticket 5.14 B4). The form is purely
+  // controlled and ActionBar reads the same state object to compute
+  // the `corrected_fields` diff at submit time.
+  //
+  // `initialState` is the snapshot we diff against — it stays
+  // stable for the lifetime of the page. `purchase._id` is keyed
+  // into the useMemo dep so a route-level remount with a new id
+  // rebuilds the snapshot from the new doc.
+  const initialState = useMemo<ConfirmFormState>(() => buildInitialFormState(purchase), [purchase]);
+  const [formState, setFormState] = useState<ConfirmFormState>(initialState);
 
   return (
     <div className="flex min-h-[calc(100dvh-4rem)] flex-col">
@@ -170,7 +149,8 @@ export function ConfirmPurchaseContent({ purchase }: { purchase: PurchaseDetailD
                 />
               </div>
               <ExtractionReviewForm
-                initialData={initialData}
+                state={formState}
+                onChange={setFormState}
                 lowConfidenceFields={lowConfidenceFields}
               />
             </div>
@@ -178,7 +158,7 @@ export function ConfirmPurchaseContent({ purchase }: { purchase: PurchaseDetailD
         </div>
       </div>
 
-      <ActionBar purchaseId={purchase._id} />
+      <ActionBar purchaseId={purchase._id} initialFormState={initialState} formState={formState} />
     </div>
   );
 }

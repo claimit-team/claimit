@@ -1,8 +1,10 @@
 "use client";
 
+import type { Platform } from "@claimit/mongodb-types";
 import { format } from "date-fns";
 import { CalendarIcon, ChevronDown } from "lucide-react";
 import { useState } from "react";
+
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -17,89 +19,74 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { ExtractionField, PurchaseCategory } from "@/lib/mock-purchases";
+import type { ConfirmCategory, ConfirmFormState } from "@/lib/confirm-form-state";
 import { cn } from "@/lib/utils";
 
-const SUPPORTED_PLATFORMS = [
-  "Amazon",
-  "Best Buy",
-  "Costco",
-  "Dell",
-  "Target",
-  "Walmart",
-  "Home Depot",
-  "Lowes",
-  "Apple",
-  "Microsoft",
-  "Samsung",
-  "Hilton",
-  "Marriott",
-  "Hyatt",
-  "IHG",
-  "Southwest",
-  "Delta",
-  "United",
-  "American Airlines",
-  "JetBlue",
-  "Alaska Airlines",
-  "Expedia",
-  "Booking.com",
-  "Airbnb",
-  "Vrbo",
-  "Kayak",
-  "Other",
-] as const;
+/**
+ * Editable form for the /confirm page (ticket 5.14 B4).
+ *
+ * State is LIFTED — every input is a controlled component driven by
+ * `state`/`onChange` from `ConfirmPurchaseContent`. The ActionBar
+ * reads the same state to build the `corrected_fields` patch on
+ * submit; we don't keep a second copy here.
+ *
+ * Platform Select is now driven by the actual backend `Platform`
+ * enum from `@claimit/mongodb-types` rather than the previous
+ * hardcoded 27-label list. This guarantees every submittable value
+ * passes the backend's `_ALLOWED_CORRECTABLE_FIELDS` →
+ * `Platform.model_validate` step on /confirm.
+ *
+ * LATENT DATA MISMATCH (flagged, not fixed in 5.14): the Platform
+ * enum carries 10 values but 26 platforms have seeded policies
+ * (e.g. costco, hyatt, jetblue, home_depot). Until the enum is
+ * widened in a follow-up ticket, users uploading a Costco receipt
+ * arrive on this page with platform="" and must pick one of the
+ * available 10 — typically "Other" once that's added, but for now
+ * the closest match. Widening the enum will surface the additional
+ * options here automatically (no FE change required).
+ */
 
-interface FormShape {
-  platform: string;
-  productName: string;
-  pricePaid: number | string;
-  purchaseDate: Date | undefined;
-  orderId: string;
-  category: PurchaseCategory;
-  memberTier: string;
-  roomTypeOrCabin: string;
-  bookingDates: string;
-  rateTypeOrPromo: string;
-}
+const PLATFORM_LABELS: Record<Platform, string> = {
+  best_buy: "Best Buy",
+  amazon: "Amazon",
+  target: "Target",
+  walmart: "Walmart",
+  marriott: "Marriott",
+  hilton: "Hilton",
+  delta: "Delta",
+  united: "United Airlines",
+  american: "American Airlines",
+  southwest: "Southwest",
+};
+
+const PLATFORM_OPTIONS: ReadonlyArray<{ value: Platform; label: string }> = (
+  Object.entries(PLATFORM_LABELS) as Array<[Platform, string]>
+).map(([value, label]) => ({ value, label }));
 
 export interface ExtractionReviewFormProps {
-  initialData: {
-    platform: ExtractionField<string>;
-    product_name: ExtractionField<string>;
-    price_paid: ExtractionField<number>;
-    purchase_date: ExtractionField<string>;
-    order_id: ExtractionField<string>;
-    category: PurchaseCategory;
-  };
-  lowConfidenceFields: string[];
+  state: ConfirmFormState;
+  onChange: (next: ConfirmFormState) => void;
+  /**
+   * Form-field names (NOT confidence keys) the banner flagged as
+   * low-confidence. We apply an italic "Verify this — we weren't
+   * sure" placeholder on those inputs.
+   */
+  lowConfidenceFields: ReadonlyArray<string>;
+  /** Disable every input while a confirm is in flight. */
+  disabled?: boolean;
 }
 
 export function ExtractionReviewForm({
-  initialData,
+  state,
+  onChange,
   lowConfidenceFields,
+  disabled = false,
 }: ExtractionReviewFormProps) {
-  const [formData, setFormData] = useState<FormShape>({
-    platform: initialData.platform.value || "Other",
-    productName: initialData.product_name.value,
-    pricePaid: initialData.price_paid.value,
-    purchaseDate: initialData.purchase_date.value
-      ? new Date(initialData.purchase_date.value)
-      : undefined,
-    orderId: initialData.order_id.value,
-    category: initialData.category,
-    memberTier: "",
-    roomTypeOrCabin: "",
-    bookingDates: "",
-    rateTypeOrPromo: "",
-  });
-
   const [isAdditionalOpen, setIsAdditionalOpen] = useState(false);
-
-  const isLowConfidence = (field: string) => lowConfidenceFields.includes(field);
-
-  const getLowConfidencePlaceholder = (field: string, defaultPlaceholder: string) =>
-    isLowConfidence(field) ? "Verify this — we weren't sure" : defaultPlaceholder;
+  const isLow = (field: string) => lowConfidenceFields.includes(field);
+  const lowPlaceholder = (field: string, base: string) =>
+    isLow(field) ? "Verify this — we weren't sure" : base;
+  const update = (patch: Partial<ConfirmFormState>) => onChange({ ...state, ...patch });
 
   return (
     <div className="space-y-6">
@@ -108,18 +95,19 @@ export function ExtractionReviewForm({
           Platform
         </Label>
         <Select
-          value={formData.platform}
+          value={state.platform === "" ? undefined : state.platform}
           onValueChange={(value: string | null) =>
-            setFormData((prev) => ({ ...prev, platform: value ?? "Other" }))
+            update({ platform: value === null ? "" : (value as Platform) })
           }
+          disabled={disabled}
         >
           <SelectTrigger id="platform" className="w-full min-w-0">
             <SelectValue placeholder="Select platform" />
           </SelectTrigger>
           <SelectContent className="max-h-[min(320px,var(--spacing)*80)] overflow-y-auto">
-            {SUPPORTED_PLATFORMS.map((platform) => (
-              <SelectItem key={platform} value={platform}>
-                {platform}
+            {PLATFORM_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
               </SelectItem>
             ))}
           </SelectContent>
@@ -132,14 +120,11 @@ export function ExtractionReviewForm({
         </Label>
         <Input
           id="productName"
-          value={formData.productName}
-          onChange={(e) => setFormData((prev) => ({ ...prev, productName: e.target.value }))}
-          placeholder={getLowConfidencePlaceholder("product_name", "Enter product name")}
-          className={
-            isLowConfidence("product_name")
-              ? "placeholder:italic placeholder:text-neutral-400"
-              : undefined
-          }
+          value={state.productName}
+          onChange={(e) => update({ productName: e.target.value })}
+          placeholder={lowPlaceholder("product_name", "Enter product name")}
+          className={cn(isLow("product_name") && "placeholder:italic placeholder:text-neutral-400")}
+          disabled={disabled}
         />
       </div>
 
@@ -156,15 +141,14 @@ export function ExtractionReviewForm({
             type="number"
             step="0.01"
             min={0}
-            value={formData.pricePaid}
-            onChange={(e) => setFormData((prev) => ({ ...prev, pricePaid: e.target.value }))}
-            placeholder={getLowConfidencePlaceholder("price_paid", "0.00")}
+            value={state.pricePaid}
+            onChange={(e) => update({ pricePaid: e.target.value })}
+            placeholder={lowPlaceholder("price_paid", "0.00")}
             className={cn(
               "pl-7",
-              isLowConfidence("price_paid")
-                ? "placeholder:italic placeholder:text-neutral-400"
-                : "",
+              isLow("price_paid") && "placeholder:italic placeholder:text-neutral-400",
             )}
+            disabled={disabled}
           />
         </div>
       </div>
@@ -177,19 +161,20 @@ export function ExtractionReviewForm({
               <Button
                 type="button"
                 variant="outline"
+                disabled={disabled}
                 className={cn(
                   "w-full justify-start text-left font-normal",
-                  !formData.purchaseDate && "text-muted-foreground",
+                  !state.purchaseDate && "text-muted-foreground",
                 )}
               />
             }
           >
             <CalendarIcon className="mr-2 size-4" aria-hidden />
-            {formData.purchaseDate ? (
-              format(formData.purchaseDate, "PPP")
+            {state.purchaseDate ? (
+              format(state.purchaseDate, "PPP")
             ) : (
-              <span className={isLowConfidence("purchase_date") ? "italic" : ""}>
-                {isLowConfidence("purchase_date") ? "Verify this — we weren't sure" : "Pick a date"}
+              <span className={isLow("purchase_date") ? "italic" : ""}>
+                {isLow("purchase_date") ? "Verify this — we weren't sure" : "Pick a date"}
               </span>
             )}
           </PopoverTrigger>
@@ -199,10 +184,8 @@ export function ExtractionReviewForm({
           >
             <Calendar
               mode="single"
-              selected={formData.purchaseDate}
-              onSelect={(date) =>
-                setFormData((prev) => ({ ...prev, purchaseDate: date ?? undefined }))
-              }
+              selected={state.purchaseDate ?? undefined}
+              onSelect={(date) => update({ purchaseDate: date ?? null })}
             />
           </PopoverContent>
         </Popover>
@@ -214,25 +197,20 @@ export function ExtractionReviewForm({
         </Label>
         <Input
           id="orderId"
-          value={formData.orderId}
-          onChange={(e) => setFormData((prev) => ({ ...prev, orderId: e.target.value }))}
-          placeholder={getLowConfidencePlaceholder("order_id", "Enter order ID")}
-          className={
-            isLowConfidence("order_id") ? "placeholder:italic placeholder:text-neutral-400" : ""
-          }
+          value={state.orderId}
+          onChange={(e) => update({ orderId: e.target.value })}
+          placeholder={lowPlaceholder("order_id", "Enter order ID")}
+          className={cn(isLow("order_id") && "placeholder:italic placeholder:text-neutral-400")}
+          disabled={disabled}
         />
       </div>
 
       <div className="space-y-3">
         <Label className="text-sm font-medium text-neutral-700">Category</Label>
         <RadioGroup
-          value={formData.category}
-          onValueChange={(v) =>
-            setFormData((prev) => ({
-              ...prev,
-              category: (v ?? "retail") as PurchaseCategory,
-            }))
-          }
+          value={state.category}
+          onValueChange={(v) => update({ category: (v ?? "retail") as ConfirmCategory })}
+          disabled={disabled}
           className="flex flex-wrap gap-4"
         >
           {(["retail", "airline", "hotel"] as const).map((cat) => (
@@ -275,55 +253,10 @@ export function ExtractionReviewForm({
             </Label>
             <Input
               id="memberTier"
-              value={formData.memberTier}
-              onChange={(e) => setFormData((prev) => ({ ...prev, memberTier: e.target.value }))}
+              value={state.memberTier}
+              onChange={(e) => update({ memberTier: e.target.value })}
               placeholder="e.g., Gold, Platinum"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="roomTypeOrCabin" className="text-sm font-medium text-neutral-700">
-              {formData.category === "hotel"
-                ? "Room type"
-                : formData.category === "airline"
-                  ? "Cabin class"
-                  : "Room type / Cabin class"}
-            </Label>
-            <Input
-              id="roomTypeOrCabin"
-              value={formData.roomTypeOrCabin}
-              onChange={(e) =>
-                setFormData((prev) => ({ ...prev, roomTypeOrCabin: e.target.value }))
-              }
-              placeholder={
-                formData.category === "hotel" ? "e.g., Deluxe King" : "e.g., Economy, Business"
-              }
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="bookingDates" className="text-sm font-medium text-neutral-700">
-              Booking dates
-            </Label>
-            <Input
-              id="bookingDates"
-              value={formData.bookingDates}
-              onChange={(e) => setFormData((prev) => ({ ...prev, bookingDates: e.target.value }))}
-              placeholder="e.g., May 15-18, 2026"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="rateTypeOrPromo" className="text-sm font-medium text-neutral-700">
-              Rate type / promotional code
-            </Label>
-            <Input
-              id="rateTypeOrPromo"
-              value={formData.rateTypeOrPromo}
-              onChange={(e) =>
-                setFormData((prev) => ({ ...prev, rateTypeOrPromo: e.target.value }))
-              }
-              placeholder="e.g., AAA Rate, SUMMER20"
+              disabled={disabled}
             />
           </div>
         </CollapsibleContent>
