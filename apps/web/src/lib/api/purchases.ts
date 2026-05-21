@@ -38,14 +38,40 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 const PURCHASES_TIMEOUT_MS = 10000;
 
 /**
+ * Wire shape of the `extraction_confidence` sub-object on a Purchase
+ * document. Mirrors `ExtractionConfidenceReadTolerant` on the backend
+ * (apps/api-gateway/src/middleware/.../purchase_read_tolerant.py): every
+ * field is optional + nullable so a legacy/degraded doc never breaks
+ * the FE confidence-banner derivation.
+ *
+ * `null` on a per-field score means "not applicable to this purchase"
+ * (e.g. a retail purchase has no fare_class confidence) — the FE must
+ * EXCLUDE nulls when computing the "low-confidence set" rather than
+ * treat them as 0. `overall_min` and `price` are the two aggregates
+ * intentionally NOT surfaced in the banner's low-field list (see the
+ * `excluded` set in apps/ingest-agent/src/finalize.py); the FE
+ * mirrors that exclusion when displaying field names.
+ */
+export type ExtractionConfidenceDoc = {
+  platform: number | null;
+  price: number | null;
+  overall_min: number | null;
+  order_id: number | null;
+  product_name: number | null;
+  product_id: number | null;
+  price_paid: number | null;
+  member_price_at_purchase: number | null;
+  purchase_date: number | null;
+  member_tier_at_purchase: number | null;
+  variant: number | null;
+  category: number | null;
+};
+
+/**
  * Wire shape of a Purchase document as returned by
  * serialize_purchase (model_dump by_alias on PurchaseReadTolerant).
  * Every enum-typed field is widened to `Enum | string | null` per the
  * read-tolerance contract.
- *
- * Heavy fields kept off the type:
- *   - ExtractionConfidence: detail page doesn't render it; if needed
- *     later, add a typed sub-object.
  */
 export type PurchaseDetailDoc = {
   _id: string;
@@ -80,6 +106,15 @@ export type PurchaseDetailDoc = {
   receipt_hash: string | null;
   format_hash: string | null;
   sender: string | null;
+  /**
+   * Per-field extraction confidence scores written by the ingest-agent
+   * finalize step (apps/ingest-agent/src/finalize.py). Null only for
+   * legacy docs that pre-date the 5.14 contract — newly-created docs
+   * always carry at least the platform/price/overall_min triple
+   * (uploads land with sentinel zeros; finalize overwrites them with
+   * real scores once Gemini returns).
+   */
+  extraction_confidence: ExtractionConfidenceDoc | null;
 };
 
 /**
@@ -126,7 +161,25 @@ export class PurchasesApiError extends Error {
   }
 }
 
-async function _request<T>(path: string, init: RequestInit, failureMessage: string): Promise<T> {
+/**
+ * Authenticated fetch helper used by every typed wrapper below.
+ *
+ * Centralises: API_BASE_URL guard, Firebase ID-token attachment,
+ * AbortController timeout, and `{error: {code, message}}` envelope
+ * translation. Returns the raw `Response` on success so callers can
+ * read JSON OR a binary blob (the receipt-proxy endpoint streams
+ * PDF/image bytes — `.json()` would crash there).
+ *
+ * Timeout is overridable per-call because uploads of receipts up to
+ * MAX_UPLOAD_BYTES (10 MB) on a slow connection can exceed the 10s
+ * default that's fine for JSON-only reads.
+ */
+async function _authedFetch(
+  path: string,
+  init: RequestInit,
+  failureMessage: string,
+  options: { timeoutMs?: number } = {},
+): Promise<Response> {
   if (!API_BASE_URL) {
     throw new PurchasesApiError(
       "missing_api_base_url",
@@ -141,7 +194,8 @@ async function _request<T>(path: string, init: RequestInit, failureMessage: stri
   const token = await currentUser.getIdToken();
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), PURCHASES_TIMEOUT_MS);
+  const timeoutMs = options.timeoutMs ?? PURCHASES_TIMEOUT_MS;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   let response: Response;
   try {
@@ -175,11 +229,21 @@ async function _request<T>(path: string, init: RequestInit, failureMessage: stri
       code = body.error?.code ?? code;
       message = body.error?.message ?? message;
     } catch {
-      // Non-JSON body; keep defaults.
+      // Non-JSON body (e.g. binary receipt with non-200) — keep defaults.
     }
     throw new PurchasesApiError(code, message);
   }
 
+  return response;
+}
+
+async function _request<T>(
+  path: string,
+  init: RequestInit,
+  failureMessage: string,
+  options: { timeoutMs?: number } = {},
+): Promise<T> {
+  const response = await _authedFetch(path, init, failureMessage, options);
   return (await response.json()) as T;
 }
 
@@ -288,4 +352,177 @@ export async function listPurchases(
   const qs = query.toString();
   const path = `/api/v1/purchases${qs ? `?${qs}` : ""}`;
   return _request<ListPurchasesResponse>(path, { method: "GET" }, "Purchases list request failed");
+}
+
+// ---------------------------------------------------------------------------
+// Write endpoints — upload / confirm / dismiss
+// ---------------------------------------------------------------------------
+
+/** Single-purchase write response — every write returns `{purchase: ...}`. */
+export type PurchaseWriteResponse = {
+  purchase: PurchaseDetailDoc;
+};
+
+/**
+ * POST /api/v1/purchases/upload — multipart receipt upload.
+ *
+ * The api-gateway validates content-type (PDF / PNG / JPEG only) and
+ * file size (≤ MAX_UPLOAD_BYTES = 10 MB), writes a sentinel
+ * `pending_confirmation` Purchase row, uploads the bytes to GCS, and
+ * publishes `purchase.uploaded` so the ingest-agent extracts the
+ * fields asynchronously. Returns the freshly-created purchase doc;
+ * the FE then routes the user to `/confirm/:id` where the analyzing
+ * poll waits for extraction to finalize (B3).
+ *
+ * Upload timeout is widened to 60s — a slow upstream + a 10 MB PDF
+ * comfortably exceeds the 10s JSON-default in `PURCHASES_TIMEOUT_MS`.
+ * Error envelope uses the same `code` discriminator as JSON 4xx
+ * responses: `file_too_large` (413), `unsupported_media_type` (415),
+ * everything else surfaces with `failureMessage` + the HTTP status.
+ *
+ * The `Content-Type` header is intentionally NOT set here — the
+ * browser must build the `multipart/form-data; boundary=…` value
+ * itself from the FormData object.
+ */
+const UPLOAD_TIMEOUT_MS = 60_000;
+
+export async function uploadPurchase(file: File): Promise<PurchaseWriteResponse> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  return _request<PurchaseWriteResponse>(
+    "/api/v1/purchases/upload",
+    { method: "POST", body: form },
+    "Receipt upload failed",
+    { timeoutMs: UPLOAD_TIMEOUT_MS },
+  );
+}
+
+/**
+ * POST /api/v1/purchases/:id/confirm — apply user corrections and
+ * flip the purchase to `monitoring`.
+ *
+ * `corrected_fields` is omitted entirely when the user accepted the
+ * extraction verbatim — the backend's `_ALLOWED_CORRECTABLE_FIELDS`
+ * allow-list will 400 on any unknown key, so the FE must send ONLY
+ * fields the user actually edited (see B4's diff builder).
+ */
+export type ConfirmPurchaseRequest = {
+  corrected_fields?: Record<string, unknown>;
+};
+
+export async function confirmPurchase(
+  purchaseId: string,
+  body: ConfirmPurchaseRequest = {},
+): Promise<PurchaseWriteResponse> {
+  return _request<PurchaseWriteResponse>(
+    `/api/v1/purchases/${encodeURIComponent(purchaseId)}/confirm`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    "Confirm purchase failed",
+  );
+}
+
+/**
+ * Dismiss reasons mirror the backend's
+ * `DismissReason = Literal["not_an_order", "duplicate", "other"]`.
+ * Only `not_an_order` may set `remember_sender=true` — `duplicate`
+ * and `other` ignore the flag server-side; the FE additionally hides
+ * the skip-sender checkbox for those two so the UI doesn't lie about
+ * what dismiss will do.
+ */
+export type DismissReason = "not_an_order" | "duplicate" | "other";
+
+export type DismissPurchaseRequest = {
+  reason: DismissReason;
+  remember_sender?: boolean;
+  /**
+   * Backward-compat shim for the still-open frontend issue #103:
+   * when Purchase carries the original email sender, this field will
+   * be dropped and the service will read it from the doc. Until then
+   * the FE must pass `sender` for the gmail-source dismiss path so
+   * `remember_sender=true` can actually write a skiplist entry.
+   */
+  sender?: string;
+};
+
+/**
+ * Dismiss returns a status envelope (NOT a `{purchase}` object) — the
+ * dismiss path may or may not write a skiplist entry depending on
+ * reason + remember_sender + sender, and the FE renders the toast
+ * differently based on `skiplist_written`.
+ */
+export type DismissPurchaseResponse = {
+  success: boolean;
+  status: string;
+  reason: DismissReason;
+  skiplist_written: boolean;
+};
+
+export async function dismissPurchase(
+  purchaseId: string,
+  body: DismissPurchaseRequest,
+): Promise<DismissPurchaseResponse> {
+  return _request<DismissPurchaseResponse>(
+    `/api/v1/purchases/${encodeURIComponent(purchaseId)}/dismiss`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    "Dismiss purchase failed",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Receipt proxy — binary blob
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of a successful receipt-proxy fetch. The caller is
+ * responsible for `URL.createObjectURL(blob)` + revoking the URL on
+ * unmount (B6's receipt-preview does both). `contentType` is the
+ * server-asserted MIME — used to decide between `<img>` and `<iframe>`
+ * rendering rather than trusting the URL extension.
+ */
+export type ReceiptBlob = {
+  blob: Blob;
+  contentType: string;
+};
+
+/**
+ * GET /api/v1/purchases/:id/receipt — fetch the receipt bytes through
+ * the authenticated proxy. Returns `null` when the purchase has no
+ * receipt (gmail rows, in-app dismissals, or a degraded doc where
+ * `receipt_storage_url` is missing) — the FE renders the "Original
+ * not available" fallback instead of an error.
+ *
+ * Maps 404 → `null` because the backend collapses every "no receipt"
+ * shape (missing url, non-owner, blob gone, malformed gs://) into a
+ * single 404 — never 403 — to avoid existence leaks across users.
+ * Any other non-2xx surfaces as a PurchasesApiError.
+ */
+export async function fetchReceiptBlob(purchaseId: string): Promise<ReceiptBlob | null> {
+  try {
+    const response = await _authedFetch(
+      `/api/v1/purchases/${encodeURIComponent(purchaseId)}/receipt`,
+      { method: "GET" },
+      "Receipt fetch failed",
+    );
+    const blob = await response.blob();
+    // Some servers report a default `application/octet-stream` here;
+    // the receipt-preview component falls back to a generic icon when
+    // that's the case rather than guessing from the URL extension.
+    const contentType = response.headers.get("Content-Type") ?? blob.type ?? "";
+    return { blob, contentType };
+  } catch (err) {
+    if (err instanceof PurchasesApiError && err.message.includes("(404)")) {
+      // Backend collapses every "no receipt" shape into 404; treat as
+      // an expected null instead of a hard error.
+      return null;
+    }
+    throw err;
+  }
 }
