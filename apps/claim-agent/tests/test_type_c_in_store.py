@@ -1,4 +1,4 @@
-"""Tests for Type C (in-store guide) draft generator — Walmart, Walmart, Staples scenarios."""
+"""Tests for Type C (in-store guide) draft generator — Walmart in-store scenario."""
 
 from __future__ import annotations
 
