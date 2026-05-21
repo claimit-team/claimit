@@ -16,6 +16,7 @@ from uuid import uuid4
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 TOPIC_PURCHASE_INGESTED = "purchase.ingested"
+TOPIC_PRICE_DROPPED = "price.dropped"
 
 
 def _new_event_id() -> str:
@@ -47,3 +48,23 @@ class PurchaseIngestedEvent(EventEnvelope):
     status: Literal["monitoring", "pending_confirmation"]
     ingestion_source: Literal["gmail", "upload_pdf", "upload_image"]
     overall_confidence: float = Field(ge=0.0, le=1.0)
+
+
+class PriceDroppedEvent(EventEnvelope):
+    """Published by the monitor-agent when an eligible drop is detected.
+
+    Mirrors Attachment 2 §2.2. Subscribers: Claim Agent (draft generation).
+    """
+
+    event_type: Literal["price.dropped"] = "price.dropped"
+    user_id: str
+    purchase_id: str
+    platform_id: str
+    claim_id: str
+    original_price: float = Field(gt=0)
+    current_price: float = Field(ge=0)
+    price_drop_amount: float = Field(gt=0)
+    price_drop_pct: float = Field(gt=0)
+    purchase_date: AwareDatetime
+    detected_at: AwareDatetime
+    currency: Literal["USD"] = "USD"
