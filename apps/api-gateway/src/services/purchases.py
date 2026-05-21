@@ -37,7 +37,7 @@ from pydantic import ValidationError
 from ..middleware.errors import ApiError
 from ..middleware.pagination import apply_cursor_to_query, encode_cursor
 from ..services import claims_service
-from ..services.receipts_storage import ReceiptsUploader
+from ..services.receipts_storage import ReceiptObjectMissingError, ReceiptsUploader
 
 _log = logging.getLogger(__name__)
 
@@ -447,6 +447,78 @@ async def _append_ingestion_skiplist(
     user.updated_at = now
     await db.upsert("users", user.id, user)
     return True
+
+
+def _parse_gs_uri(uri: str) -> tuple[str, str]:
+    """Split a `gs://bucket/path/with/slashes` URI into `(bucket, path)`.
+
+    Raises `ValueError` for any malformed input. The caller maps that to
+    a 404 rather than a 500 so a stored bogus URI doesn't leak as an
+    internal-error surface to the client.
+    """
+    if not uri.startswith("gs://"):
+        raise ValueError(f"Not a gs:// URI: {uri!r}")
+    remainder = uri[len("gs://") :]
+    bucket, sep, path = remainder.partition("/")
+    if not bucket or not sep or not path:
+        raise ValueError(f"Malformed gs:// URI (missing bucket or path): {uri!r}")
+    return bucket, path
+
+
+async def fetch_receipt_for_user(
+    *,
+    db: MongoDBClient,
+    uploader: ReceiptsUploader,
+    user_id: UUID,
+    purchase_id: UUID,
+) -> tuple[bytes, str]:
+    """Fetch a receipt blob for the route layer, scoped to the owning user.
+
+    Mirrors `get_purchase_for_user`'s "404, never 403" surface — we don't
+    leak existence across users, and we don't leak "object exists but
+    inaccessible" semantics across receipt URLs.
+
+    404 surfaces (caller maps to ApiError):
+      - Purchase missing or owned by a different user.
+      - Purchase has no `receipt_storage_url` (Gmail ingest case).
+      - Stored URI is not under the configured RECEIPTS_BUCKET (corrupt
+        data; refuse to read from any other bucket even if SA happens
+        to have access — defence-in-depth against a bad write).
+      - Stored URI is malformed.
+      - Blob does not exist in GCS.
+    """
+    purchase = await get_purchase_for_user(db, user_id, purchase_id)
+    if not purchase.receipt_storage_url:
+        raise ApiError("not_found", "Receipt not found", status_code=404)
+
+    try:
+        bucket, blob_path = _parse_gs_uri(purchase.receipt_storage_url)
+    except ValueError:
+        _log.warning(
+            "Malformed receipt_storage_url purchase_id=%s url=%r",
+            purchase_id,
+            purchase.receipt_storage_url,
+        )
+        raise ApiError("not_found", "Receipt not found", status_code=404) from None
+
+    if bucket != uploader.bucket_name:
+        _log.warning(
+            "Receipt URI bucket mismatch purchase_id=%s uri_bucket=%s expected=%s",
+            purchase_id,
+            bucket,
+            uploader.bucket_name,
+        )
+        raise ApiError("not_found", "Receipt not found", status_code=404)
+
+    try:
+        return await uploader.download(blob_path=blob_path)
+    except ReceiptObjectMissingError:
+        _log.warning(
+            "Receipt blob missing in GCS purchase_id=%s blob_path=%s",
+            purchase_id,
+            blob_path,
+        )
+        raise ApiError("not_found", "Receipt not found", status_code=404) from None
 
 
 async def upload_receipt(

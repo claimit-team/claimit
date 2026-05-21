@@ -1360,3 +1360,176 @@ class _InfiniteChunkUpload:
         self.read_calls += 1
         assert size == purchases_route._UPLOAD_READ_CHUNK_BYTES
         return self._chunk
+
+
+# ---------------------------------------------------------------------------
+# GET /purchases/:id/receipt — proxy (ticket 5.14)
+# ---------------------------------------------------------------------------
+
+
+def _purchase_with_receipt(
+    *,
+    purchase_id: UUID = PURCHASE_ID,
+    user_id: UUID = USER_ID,
+    receipt_storage_url: str | None = "gs://test-bucket/receipts/u/p/x.pdf",
+) -> Purchase:
+    purchase = _purchase_fixture(purchase_id=purchase_id, user_id=user_id)
+    # Mutate via model_copy so we don't rebuild every field.
+    return purchase.model_copy(
+        update={
+            "receipt_storage_url": receipt_storage_url,
+            "ingestion_source": "upload_pdf" if receipt_storage_url else "gmail",
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_receipt_proxy_streams_owner_blob(client: AsyncClient) -> None:
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=_purchase_with_receipt())
+    mock_uploader = AsyncMock(spec=ReceiptsUploader)
+    # The downloaded blob has the canonical PDF magic prefix; mime
+    # comes back from GCS metadata, not sniffed.
+    mock_uploader.bucket_name = "test-bucket"
+    mock_uploader.download = AsyncMock(return_value=(b"%PDF-1.4 ...", "application/pdf"))
+    _set_overrides(mock_db, mock_uploader)
+    try:
+        response = await client.get(
+            f"/api/v1/purchases/{PURCHASE_ID}/receipt",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("application/pdf")
+        assert response.content == b"%PDF-1.4 ..."
+        # Service parses gs://test-bucket/receipts/u/p/x.pdf → blob_path
+        # is everything after the bucket.
+        mock_uploader.download.assert_awaited_once_with(blob_path="receipts/u/p/x.pdf")
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_receipt_proxy_returns_image_content_type(client: AsyncClient) -> None:
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(
+        return_value=_purchase_with_receipt(
+            receipt_storage_url="gs://test-bucket/receipts/u/p/x.jpg",
+        )
+    )
+    mock_uploader = AsyncMock(spec=ReceiptsUploader)
+    mock_uploader.bucket_name = "test-bucket"
+    mock_uploader.download = AsyncMock(return_value=(b"\xff\xd8\xff\xe0jpeg", "image/jpeg"))
+    _set_overrides(mock_db, mock_uploader)
+    try:
+        response = await client.get(
+            f"/api/v1/purchases/{PURCHASE_ID}/receipt",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("image/jpeg")
+        assert response.content == b"\xff\xd8\xff\xe0jpeg"
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_receipt_proxy_returns_404_for_non_owner(client: AsyncClient) -> None:
+    other = _purchase_with_receipt(user_id=OTHER_USER_ID)
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=other)
+    mock_uploader = AsyncMock(spec=ReceiptsUploader)
+    mock_uploader.bucket_name = "test-bucket"
+    _set_overrides(mock_db, mock_uploader)
+    try:
+        response = await client.get(
+            f"/api/v1/purchases/{PURCHASE_ID}/receipt",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 404
+        # Never reach GCS for a doc we don't own — would leak existence
+        # via a download-latency side channel otherwise.
+        mock_uploader.download.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_receipt_proxy_returns_404_when_no_receipt_url(client: AsyncClient) -> None:
+    purchase = _purchase_with_receipt(receipt_storage_url=None)
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=purchase)
+    mock_uploader = AsyncMock(spec=ReceiptsUploader)
+    mock_uploader.bucket_name = "test-bucket"
+    _set_overrides(mock_db, mock_uploader)
+    try:
+        response = await client.get(
+            f"/api/v1/purchases/{PURCHASE_ID}/receipt",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 404
+        mock_uploader.download.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_receipt_proxy_returns_404_when_blob_missing(client: AsyncClient) -> None:
+    from src.services.receipts_storage import ReceiptObjectMissingError
+
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=_purchase_with_receipt())
+    mock_uploader = AsyncMock(spec=ReceiptsUploader)
+    mock_uploader.bucket_name = "test-bucket"
+    mock_uploader.download = AsyncMock(side_effect=ReceiptObjectMissingError("missing"))
+    _set_overrides(mock_db, mock_uploader)
+    try:
+        response = await client.get(
+            f"/api/v1/purchases/{PURCHASE_ID}/receipt",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 404
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_receipt_proxy_returns_404_on_bucket_mismatch(client: AsyncClient) -> None:
+    # Stored URI points at a bucket we don't manage — refuse the read
+    # even though the SA might happen to have access. Defence-in-depth
+    # against a bad write that aimed at another bucket.
+    purchase = _purchase_with_receipt(
+        receipt_storage_url="gs://other-bucket/some/object.pdf",
+    )
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=purchase)
+    mock_uploader = AsyncMock(spec=ReceiptsUploader)
+    mock_uploader.bucket_name = "test-bucket"
+    _set_overrides(mock_db, mock_uploader)
+    try:
+        response = await client.get(
+            f"/api/v1/purchases/{PURCHASE_ID}/receipt",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 404
+        mock_uploader.download.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_receipt_proxy_returns_404_on_malformed_gs_uri(client: AsyncClient) -> None:
+    purchase = _purchase_with_receipt(receipt_storage_url="not-a-gs-uri")
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=purchase)
+    mock_uploader = AsyncMock(spec=ReceiptsUploader)
+    mock_uploader.bucket_name = "test-bucket"
+    _set_overrides(mock_db, mock_uploader)
+    try:
+        response = await client.get(
+            f"/api/v1/purchases/{PURCHASE_ID}/receipt",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 404
+        mock_uploader.download.assert_not_awaited()
+    finally:
+        _clear_overrides()
