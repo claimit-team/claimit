@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -566,6 +567,75 @@ async def test_stream_agent_get_failure_yields_connectivity_error(
     assert len(done) == 1
     err = json.loads(done[0]["data"])["error"]
     assert "trouble connecting" in err.lower()
+
+
+@pytest.mark.asyncio
+async def test_stream_session_persist_failure_still_uses_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Mongo write blip on agent_session_id must NOT throw away the
+    session we just successfully created — the current request should
+    still stream with memory enabled."""
+    monkeypatch.setenv("CLAIMIT_ASSISTANT_AGENT_ID", "fake-resource-name")
+    db = _make_db()
+    db.partial_update = AsyncMock(side_effect=RuntimeError("mongo blip"))
+    conv = _make_conversation(agent_session_id=None)  # triggers lazy backfill
+
+    captured: dict[str, Any] = {}
+
+    async def _fake_stream(**kwargs):
+        captured.update(kwargs)
+        yield {"content": {"parts": [{"text": "ok"}]}}
+
+    mock_agent = _mock_agent(stream_fn=_fake_stream, create_session_id="created-but-not-persisted")
+    with patch("vertexai.agent_engines.get", return_value=mock_agent):
+        events = [e async for e in stream_agent_response(db, USER_ID, conv, "hi")]
+
+    # Session id was passed to the stream despite the persist failure.
+    assert captured.get("session_id") == "created-but-not-persisted"
+    # And the in-memory conversation has been mutated so the current
+    # request's recursive paths (if any) see the new id.
+    assert conv.agent_session_id == "created-but-not-persisted"
+    # Stream still produced a real response — no error frame.
+    text_chunks = [e for e in events if e["event"] == "text_chunk"]
+    assert len(text_chunks) == 1
+    assert json.loads(text_chunks[0]["data"])["text"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_stream_total_timeout_aborts_stalled_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stream that never yields an event must be terminated by the
+    wall-clock ceiling, not left to Cloud Run's 300s request timeout."""
+    monkeypatch.setenv("CLAIMIT_ASSISTANT_AGENT_ID", "fake-resource-name")
+    db = _make_db()
+    conv = _make_conversation(agent_session_id="sess")
+
+    async def _hanging_stream(**kwargs):
+        # Sleep much longer than the patched ceiling — wait_for must
+        # fire before this resolves. If wait_for isn't doing its job
+        # the test would hang for 5s + pytest's own timeout.
+        await asyncio.sleep(5)
+        yield  # never reached
+
+    mock_agent = _mock_agent(stream_fn=_hanging_stream)
+
+    with (
+        patch("vertexai.agent_engines.get", return_value=mock_agent),
+        patch("src.services.conversation_service._MAX_STREAM_SECONDS", 0.1),
+    ):
+        start = asyncio.get_running_loop().time()
+        events = [e async for e in stream_agent_response(db, USER_ID, conv, "hi")]
+        elapsed = asyncio.get_running_loop().time() - start
+
+    # Must complete in well under the 5s mock-sleep — the timeout is the
+    # only thing that can release us in time.
+    assert elapsed < 2.0, f"stream did not abort in time (elapsed={elapsed:.2f}s)"
+    done = [e for e in events if e["event"] == "done"]
+    assert len(done) == 1
+    err = json.loads(done[0]["data"])["error"]
+    assert "too long" in err.lower()
 
 
 @pytest.mark.asyncio

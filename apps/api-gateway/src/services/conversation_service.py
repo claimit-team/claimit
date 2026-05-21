@@ -1,5 +1,6 @@
 """Business logic for conversation management and Assistant Agent streaming."""
 
+import asyncio
 import json
 import logging
 import os
@@ -184,20 +185,38 @@ async def _ensure_agent_and_session(
 
     session_id = conversation.agent_session_id
     if session_id is None:
+        # Two independent failure modes — keep them in separate try blocks
+        # so a transient Mongo write blip doesn't throw away a session we
+        # just successfully created on Vertex's side (we'd then proceed
+        # without memory and leak a server-side session).
         try:
             session = remote_agent.create_session(user_id=str(user_id))
             session_id = session["id"]
-            await db.partial_update(
-                "conversations",
-                conversation.id,
-                {"agent_session_id": session_id},
-            )
-            # Mirror onto the in-memory model so a same-request recursive
-            # retry path sees the new id without an extra read.
+            # Mirror onto the in-memory model FIRST so the current request
+            # uses the new id regardless of whether persistence succeeds.
             conversation.agent_session_id = session_id
         except Exception:
-            logger.warning("Failed to create agent session, proceeding without", exc_info=True)
+            logger.warning(
+                "Failed to create agent session, proceeding without memory", exc_info=True
+            )
             session_id = None
+
+        if session_id is not None:
+            try:
+                await db.partial_update(
+                    "conversations",
+                    conversation.id,
+                    {"agent_session_id": session_id},
+                )
+            except Exception:
+                # Persistence failed but we still have a valid session_id
+                # in memory — use it for this request. Next turn will
+                # see agent_session_id=None on disk and re-create, which
+                # is wasteful but correct. Don't null out session_id.
+                logger.warning(
+                    "Failed to persist new agent_session_id (using in-memory only)",
+                    exc_info=True,
+                )
 
     return remote_agent, session_id
 
@@ -308,14 +327,34 @@ async def stream_agent_response(
     stream_started_at = time.monotonic()
 
     # -------- Phase 3: stream --------
+    # Active wall-clock timeout via asyncio.wait_for on each __anext__()
+    # — a passive elapsed-check inside `async for` only fires when events
+    # arrive, leaving stalled streams (no events at all) to hang until
+    # Cloud Run's 300s request timeout. The wait_for bound is recomputed
+    # each iteration so total wall-clock time across the stream is
+    # bounded by _MAX_STREAM_SECONDS regardless of event arrival pattern.
     try:
-        async for event in remote_agent.async_stream_query(**stream_kwargs):
-            # Wall-clock cap. Per-event check is good enough — once an event
-            # arrives, we check elapsed and bail if we're past the ceiling.
-            # A fully stuck stream (no events) is bounded by Cloud Run's
-            # 300s request timeout instead.
-            if time.monotonic() - stream_started_at > _MAX_STREAM_SECONDS:
+        stream_iter = remote_agent.async_stream_query(**stream_kwargs).__aiter__()
+        while True:
+            elapsed = time.monotonic() - stream_started_at
+            remaining = _MAX_STREAM_SECONDS - elapsed
+            if remaining <= 0:
                 logger.warning("Stream exceeded %ds ceiling", _MAX_STREAM_SECONDS)
+                yield {
+                    "event": "done",
+                    "data": json.dumps(
+                        {"error": "I'm taking too long to respond. Please try again."}
+                    ),
+                }
+                return
+
+            try:
+                event = await asyncio.wait_for(stream_iter.__anext__(), timeout=remaining)
+            except StopAsyncIteration:
+                # Iterator exhausted — normal completion path.
+                break
+            except TimeoutError:
+                logger.warning("Stream stalled past %ds ceiling", _MAX_STREAM_SECONDS)
                 yield {
                     "event": "done",
                     "data": json.dumps(
@@ -395,24 +434,16 @@ async def stream_agent_response(
             logger.warning(
                 "Session %s stale for conversation %s; recreating", session_id, conversation.id
             )
+
+            # Separate create vs persist so a Mongo blip doesn't throw
+            # away a recreated session and force us to surface a generic
+            # "lost my train of thought" — recovery should be possible
+            # whenever Vertex side is healthy.
+            new_sid: str | None = None
             try:
                 new_session = remote_agent.create_session(user_id=str(user_id))
                 new_sid = new_session["id"]
-                await db.partial_update(
-                    "conversations",
-                    conversation.id,
-                    {"agent_session_id": new_sid},
-                )
                 conversation.agent_session_id = new_sid
-                async for frame in stream_agent_response(
-                    db,
-                    user_id,
-                    conversation,
-                    user_message,
-                    _retry_count=_retry_count + 1,
-                ):
-                    yield frame
-                return
             except Exception:
                 logger.exception("Failed to recreate stale session")
                 yield {
@@ -422,6 +453,28 @@ async def stream_agent_response(
                     ),
                 }
                 return
+
+            try:
+                await db.partial_update(
+                    "conversations",
+                    conversation.id,
+                    {"agent_session_id": new_sid},
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to persist recreated session id (using in-memory only)",
+                    exc_info=True,
+                )
+
+            async for frame in stream_agent_response(
+                db,
+                user_id,
+                conversation,
+                user_message,
+                _retry_count=_retry_count + 1,
+            ):
+                yield frame
+            return
         yield {
             "event": "done",
             "data": json.dumps(
