@@ -105,7 +105,13 @@ export function buildInitialFormState(purchase: PurchaseDetailDoc): ConfirmFormS
   return {
     platform,
     productName: purchase.product_name ?? "",
-    pricePaid: purchase.price_paid === null ? "" : String(purchase.price_paid),
+    // `== null` (loose) is intentional — catches BOTH null and undefined
+    // so a wire payload that omits `price_paid` entirely doesn't
+    // String-coerce `undefined` into the literal "undefined" inside the
+    // price input (CodeRabbit defense-in-depth). The current backend
+    // always emits the key, but the field is structurally optional and
+    // the cost of guarding here is one extra `=`.
+    pricePaid: purchase.price_paid == null ? "" : String(purchase.price_paid),
     purchaseDate,
     orderId: purchase.order_id ?? "",
     category: coerceCategory(purchase.category),

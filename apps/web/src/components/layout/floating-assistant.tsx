@@ -64,6 +64,21 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
   const embeddedExpanded = useUIStore((s) => s.claimEmbeddedAssistantExpanded);
   const toggleEmbedded = useUIStore((s) => s.toggleClaimEmbeddedAssistant);
 
+  // In-flight guard for the proactive `dismiss_purchase` quick-action.
+  // The ProactiveCard's quick-action buttons don't carry their own
+  // pending state, so a rapid double-click on "Not an order" would
+  // previously fire two `dismissPurchase` calls — first returns success
+  // toast, second returns 4xx (already dismissed) toast, leaving the
+  // user with contradictory feedback. A ref-based guard prevents the
+  // second async invocation from firing while the first is in flight
+  // without needing to thread a pending-action state down through the
+  // panel/card prop chain (the card stays route-agnostic). Refs over
+  // state intentionally: no re-render is needed, the guard is purely
+  // behavioral. The other quick actions are sync router pushes and
+  // don't need this — clicking them twice just redirects twice
+  // harmlessly to the same destination.
+  const dismissingPurchaseRef = useRef(false);
+
   // All hooks must be unconditional — declare handleAction before the
   // `variant === "pill"` early return below.
   const handleAction = useCallback(
@@ -134,6 +149,12 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
             clearProactiveEvent();
             return;
           }
+          // Drop the second click if a dismiss is already in flight —
+          // see `dismissingPurchaseRef` comment above. The user gets
+          // exactly one toast (success or failure) per real user
+          // intent, not one per click.
+          if (dismissingPurchaseRef.current) return;
+          dismissingPurchaseRef.current = true;
           void (async () => {
             try {
               const result = await dismissPurchase(purchaseId, {
@@ -159,6 +180,11 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
                   ? err.message
                   : "We couldn't ignore this receipt. Try again.";
               toast.error(message);
+            } finally {
+              // Release the guard on every exit path so a failed first
+              // attempt doesn't permanently disable the button — the
+              // user must be able to retry from the still-mounted card.
+              dismissingPurchaseRef.current = false;
             }
           })();
           return;
