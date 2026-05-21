@@ -19,7 +19,11 @@ from claimit_mongodb_models import (
 from claimit_pubsub import PurchaseIngestedEvent
 from src import finalize
 from src.extractor import ExtractedPurchaseFields
-from src.finalize import FinalizeError, finalize_purchase_extraction
+from src.finalize import (
+    FinalizeError,
+    finalize_purchase_extraction,
+    finalize_purchase_extraction_failure,
+)
 
 PURCHASE_ID = UUID("22222222-2222-4222-8222-222222222222")
 USER_ID = UUID("11111111-1111-4111-8111-111111111111")
@@ -369,3 +373,119 @@ async def test_finalize_returns_strict_purchase(monkeypatch: pytest.MonkeyPatch)
         db=db, purchase_id=PURCHASE_ID, extracted=_extracted()
     )
     assert isinstance(result, Purchase)
+
+
+# ---------------------------------------------------------------------------
+# Extraction-failure rescue path (post-5.14 prod-verification fix).
+#
+# `finalize_purchase_extraction_failure` is the SAFETY NET, not the steady
+# state — these tests pin its observable behavior so a future refactor
+# can't silently drop the partial_update or the notification write that
+# the FE confirm loader depends on to exit its "Analyzing…" poll.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_finalize_failure_writes_partial_update_with_low_conf_and_notification() -> None:
+    purchase = _purchase_doc()
+    db = AsyncMock(spec=MongoDBClient)
+    db.get_purchase = AsyncMock(return_value=purchase)
+    db.partial_update = AsyncMock(return_value=True)
+    # `write_notification_event` (in claimit_mongodb_models) does a
+    # `find_one` dedup check before upserting; return None so the path
+    # actually inserts on this test invocation rather than hitting the
+    # short-circuit branch.
+    db.find_one = AsyncMock(return_value=None)
+    db.upsert_notification_event = AsyncMock(return_value="event-id")
+
+    await finalize_purchase_extraction_failure(db=db, purchase_id=PURCHASE_ID)
+
+    # Partial update must (a) nudge overall_min off zero so the FE's
+    # "still analyzing" poll exits, (b) keep platform/price confidence
+    # at 0.0 (matches the upload sentinel — no claim of measurement),
+    # (c) NOT touch status or any extracted field (the doc keeps the
+    # `""` / 0.01 sentinel values until the user confirms).
+    db.partial_update.assert_awaited_once()
+    args = db.partial_update.await_args.args
+    assert args[0] == "purchases"
+    assert args[1] == PURCHASE_ID
+    update_dict = args[2]
+    assert update_dict["extraction_confidence"] == {
+        "platform": 0.0,
+        "price": 0.0,
+        "overall_min": 0.01,
+    }
+    assert "status" not in update_dict
+    assert "platform" not in update_dict
+    assert "product_name" not in update_dict
+    assert "price_paid" not in update_dict
+
+    # Notification must carry every field the FE confirm form lights
+    # up as low-confidence — without this, the proactive Mode C nudge
+    # would silently not fire on rescued docs even though the form
+    # opens to fully manual fill.
+    db.upsert_notification_event.assert_awaited_once()
+    notif_doc = db.upsert_notification_event.await_args.args[0]
+    assert notif_doc.event_type == NotificationEventType.LOW_CONFIDENCE_EXTRACT
+    assert notif_doc.entity_type == NotificationEntityType.PURCHASE
+    assert notif_doc.entity_id == PURCHASE_ID
+    assert notif_doc.data["purchase_id"] == str(PURCHASE_ID)
+    assert set(notif_doc.data["low_confidence_fields"]) == {
+        "product_name",
+        "price_paid",
+        "purchase_date",
+        "order_id",
+        "platform",
+        "category",
+    }
+    assert notif_doc.data["overall_min"] == 0.01
+
+
+@pytest.mark.asyncio
+async def test_finalize_failure_does_not_publish_purchase_ingested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rescue must NOT publish purchase.ingested.
+
+    No real extraction happened — downstream subscribers (monitor-agent,
+    claim-agent) have nothing to do with a sentinel doc. Publishing
+    would pollute the event stream and could trigger spurious workflow
+    runs against a doc with `price_paid=0.01` and empty `product_name`.
+    """
+    purchase = _purchase_doc()
+    db = AsyncMock(spec=MongoDBClient)
+    db.get_purchase = AsyncMock(return_value=purchase)
+    db.partial_update = AsyncMock(return_value=True)
+    db.find_one = AsyncMock(return_value=None)
+    db.upsert_notification_event = AsyncMock(return_value="event-id")
+    publish = AsyncMock(return_value="msg-1")
+    monkeypatch.setattr(finalize, "publish_event", publish)
+
+    await finalize_purchase_extraction_failure(db=db, purchase_id=PURCHASE_ID)
+
+    publish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_finalize_failure_handles_missing_purchase_without_raising(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A delete-race between extractor failure and rescue must not raise.
+
+    The handler is already in an error branch logging the original
+    extractor failure; making the rescue path raise here would leak a
+    5xx from the Pub/Sub handler and cause redelivery into the same
+    failure mode. Rescue is best-effort — log and return.
+    """
+    db = AsyncMock(spec=MongoDBClient)
+    db.get_purchase = AsyncMock(return_value=None)
+    db.partial_update = AsyncMock(return_value=True)
+    db.upsert_notification_event = AsyncMock(return_value="event-id")
+    caplog.set_level("WARNING", logger="src.finalize")
+
+    # No exception — silent return is the contract.
+    await finalize_purchase_extraction_failure(db=db, purchase_id=PURCHASE_ID)
+
+    db.partial_update.assert_not_awaited()
+    db.upsert_notification_event.assert_not_awaited()
+    assert any("purchase missing" in rec.message for rec in caplog.records)

@@ -256,3 +256,121 @@ async def finalize_purchase_extraction(
     # Purchase for the return value because finalize ran a strict write
     # (`partial_update(..., model=Purchase)`).
     return Purchase.model_validate(refreshed.model_dump(by_alias=True))
+
+
+# Safety net for extraction failures. NOT the steady state — every prod
+# upload should reach `finalize_purchase_extraction` above with real
+# extracted fields. This helper exists so a transient Gemini failure
+# (timeout, genai teardown bug, malformed model output, …) does not
+# leave the sentinel doc stuck at `overall_min=0.0` forever, which is
+# what the FE confirm loader treats as "still analyzing" — without it
+# the page would spin indefinitely instead of opening the manual-fill
+# form. Watch the `handler.extraction_failed_doc_rescued` counter in
+# prod: any non-zero value is a regression alarm even if no user
+# complains.
+
+# Field list driving the rescue notification's `low_confidence_fields`.
+# These are the fields the FE confirm form lights up with the italic
+# "Verify this" placeholder, mirroring the keys the confidence-banner
+# inspects. Kept as a module-level constant so the FE / BE field name
+# choice has exactly one source of truth on the BE side.
+_RESCUE_LOW_CONFIDENCE_FIELDS: list[str] = [
+    "product_name",
+    "price_paid",
+    "purchase_date",
+    "order_id",
+    "platform",
+    "category",
+]
+
+
+async def finalize_purchase_extraction_failure(
+    *,
+    db: MongoDBClient,
+    purchase_id: UUID,
+    now: datetime | None = None,
+) -> None:
+    """Rescue an extraction failure so the FE form opens to manual fill.
+
+    Why this exists as a SEPARATE helper from `finalize_purchase_extraction`:
+    finalize takes an `ExtractedPurchaseFields` instance, which the
+    Pydantic model rejects unless `product_name` is non-empty,
+    `price_paid > 0`, etc. — i.e. a failed extraction CANNOT be funneled
+    through finalize because there's no valid `ExtractedPurchaseFields`
+    to construct. Rather than weakening the strict model contract, the
+    rescue path writes the minimum viable partial_update directly:
+
+      - `extraction_confidence.overall_min = 0.01` (nonzero so the FE
+        loader's `overall_min == 0` "still analyzing" guard at
+        `confirm-purchase-loader.tsx` exits to the form; below the
+        0.95 banner threshold so the "couldn't extract most details"
+        copy is accurate).
+      - `extraction_confidence.platform = price = 0.0` (these two are
+        required `float` fields on `ExtractionConfidence`; setting
+        them to zero matches the sentinel value the upload writes).
+      - status stays `pending_confirmation` — exactly what the upload
+        sentinel already had. No `partial_update` to status. The
+        ON-disk doc still has the empty `product_name` / `""` /
+        `0.01` sentinel field values the upload wrote.
+      - NO `purchase.ingested` Pub/Sub publish. Nothing was actually
+        extracted; downstream subscribers (monitor-agent) would have
+        nothing to do with this doc — the user must confirm first.
+      - DO write the `low_confidence_extract` notification so the FE
+        Mode C proactive surface still nudges the user. entity_id =
+        purchase_id keeps the dashboard quick-action wired the same
+        way as the happy path.
+
+    Returns None — there is no "rescued purchase" worth returning to
+    the caller; the handler logs the rescue and acks.
+    """
+    timestamp = now or datetime.now(UTC)
+
+    purchase = await db.get_purchase(purchase_id)
+    if purchase is None:
+        # Same surface as finalize's missing-doc case. Caller (the
+        # purchase.uploaded handler) is already in an error branch
+        # logging the original extractor failure; a missing doc here
+        # means upstream cleanup or a delete-race — log and bail
+        # without raising so the rescue path never blocks the handler
+        # ack contract.
+        logger.warning(
+            "finalize_purchase_extraction_failure: purchase missing purchase_id=%s",
+            purchase_id,
+        )
+        return
+
+    # Minimal confidence payload: keep `price` / `platform` aligned with
+    # the upload sentinel (0.0) and only nudge `overall_min` off zero so
+    # the FE's "still analyzing" poll exits. Every other confidence key
+    # (order_id, product_name, …) is omitted — the model's optional
+    # fields default to None, which is the correct "we didn't measure
+    # this" semantic and matches what the banner's null-exclusion logic
+    # expects.
+    updates: dict[str, Any] = {
+        "updated_at": timestamp,
+        "extraction_confidence": {
+            "platform": 0.0,
+            "price": 0.0,
+            "overall_min": 0.01,
+        },
+    }
+    matched = await db.partial_update("purchases", purchase_id, updates, model=Purchase)
+    if not matched:
+        logger.warning(
+            "finalize_purchase_extraction_failure: partial_update returned no match purchase_id=%s",
+            purchase_id,
+        )
+        return
+
+    await write_notification_event(
+        db,
+        user_id=str(purchase.user_id),
+        event_type=NotificationEventType.LOW_CONFIDENCE_EXTRACT,
+        entity_type=NotificationEntityType.PURCHASE,
+        entity_id=str(purchase_id),
+        data={
+            "purchase_id": str(purchase_id),
+            "low_confidence_fields": list(_RESCUE_LOW_CONFIDENCE_FIELDS),
+            "overall_min": 0.01,
+        },
+    )
