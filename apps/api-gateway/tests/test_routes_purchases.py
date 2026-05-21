@@ -22,11 +22,12 @@ from claimit_mongodb_models import (
 )
 from httpx import AsyncClient
 from pydantic import Field, TypeAdapter, ValidationError
-from src.deps import get_db, get_receipts_uploader
+from src.deps import get_db, get_pubsub_publisher, get_receipts_uploader
 from src.main import app
 from src.middleware.auth import get_current_user
 from src.middleware.errors import ApiError
 from src.routes import purchases as purchases_route
+from src.services.pubsub_publisher import PubSubPublisher
 from src.services.receipts_storage import ReceiptsUploader
 
 from ._fixtures import USER_FIXTURE
@@ -90,7 +91,11 @@ def _purchase_fixture(
     )
 
 
-def _set_overrides(db: AsyncMock, uploader: AsyncMock | None = None) -> None:
+def _set_overrides(
+    db: AsyncMock,
+    uploader: AsyncMock | None = None,
+    publisher: AsyncMock | None = None,
+) -> None:
     async def _override_db() -> MongoDBClient:
         return db
 
@@ -102,12 +107,19 @@ def _set_overrides(db: AsyncMock, uploader: AsyncMock | None = None) -> None:
             return uploader
 
         app.dependency_overrides[get_receipts_uploader] = _override_uploader
+    if publisher is not None:
+
+        async def _override_publisher() -> PubSubPublisher:
+            return publisher
+
+        app.dependency_overrides[get_pubsub_publisher] = _override_publisher
 
 
 def _clear_overrides() -> None:
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(get_receipts_uploader, None)
+    app.dependency_overrides.pop(get_pubsub_publisher, None)
 
 
 # ---------------------------------------------------------------------------
@@ -1496,13 +1508,23 @@ async def test_dismiss_rejects_unknown_reason(client: AsyncClient) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _publisher_mock(*, fail: bool = False) -> AsyncMock:
+    publisher = AsyncMock(spec=PubSubPublisher)
+    if fail:
+        publisher.publish = AsyncMock(side_effect=RuntimeError("broker rejected"))
+    else:
+        publisher.publish = AsyncMock(return_value="pub-msg-1")
+    return publisher
+
+
 @pytest.mark.asyncio
 async def test_upload_pdf_creates_pending_purchase(client: AsyncClient) -> None:
     mock_db = AsyncMock(spec=MongoDBClient)
     mock_db.upsert = AsyncMock(return_value="00000000-0000-4000-8000-000000000000")
     mock_uploader = AsyncMock(spec=ReceiptsUploader)
     mock_uploader.upload = AsyncMock(return_value="gs://test-bucket/receipts/x.pdf")
-    _set_overrides(mock_db, mock_uploader)
+    publisher = _publisher_mock()
+    _set_overrides(mock_db, mock_uploader, publisher)
     try:
         response = await client.post(
             "/api/v1/purchases/upload",
@@ -1516,6 +1538,13 @@ async def test_upload_pdf_creates_pending_purchase(client: AsyncClient) -> None:
         assert payload["purchase"]["receipt_storage_url"] == "gs://test-bucket/receipts/x.pdf"
         assert mock_uploader.upload.await_count == 1
         assert mock_db.upsert.await_count == 1
+        # The purchase.uploaded event must fire with the post-upload values.
+        publisher.publish.assert_awaited_once()
+        topic, body = publisher.publish.await_args.args
+        assert topic == "purchase.uploaded"
+        assert body["event_type"] == "purchase.uploaded"
+        assert body["receipt_storage_url"] == "gs://test-bucket/receipts/x.pdf"
+        assert body["content_type"] == "application/pdf"
     finally:
         _clear_overrides()
 
@@ -1526,7 +1555,8 @@ async def test_upload_jpeg_sets_image_ingestion_source(client: AsyncClient) -> N
     mock_db.upsert = AsyncMock(return_value="00000000-0000-4000-8000-000000000000")
     mock_uploader = AsyncMock(spec=ReceiptsUploader)
     mock_uploader.upload = AsyncMock(return_value="gs://test/x.jpg")
-    _set_overrides(mock_db, mock_uploader)
+    publisher = _publisher_mock()
+    _set_overrides(mock_db, mock_uploader, publisher)
     try:
         response = await client.post(
             "/api/v1/purchases/upload",
@@ -1535,6 +1565,10 @@ async def test_upload_jpeg_sets_image_ingestion_source(client: AsyncClient) -> N
         )
         assert response.status_code == 200
         assert response.json()["purchase"]["ingestion_source"] == "upload_image"
+        # content_type in the event is the uploaded mime, NOT a synthetic
+        # ingestion_source — ingest-agent uses it to pick the multimodal part.
+        body = publisher.publish.await_args.args[1]
+        assert body["content_type"] == "image/jpeg"
     finally:
         _clear_overrides()
 
@@ -1543,7 +1577,8 @@ async def test_upload_jpeg_sets_image_ingestion_source(client: AsyncClient) -> N
 async def test_upload_rejects_unsupported_content_type(client: AsyncClient) -> None:
     mock_db = AsyncMock(spec=MongoDBClient)
     mock_uploader = AsyncMock(spec=ReceiptsUploader)
-    _set_overrides(mock_db, mock_uploader)
+    publisher = _publisher_mock()
+    _set_overrides(mock_db, mock_uploader, publisher)
     try:
         response = await client.post(
             "/api/v1/purchases/upload",
@@ -1554,6 +1589,7 @@ async def test_upload_rejects_unsupported_content_type(client: AsyncClient) -> N
         assert response.json()["error"]["code"] == "unsupported_media_type"
         mock_uploader.upload.assert_not_awaited()
         mock_db.upsert.assert_not_awaited()
+        publisher.publish.assert_not_awaited()
     finally:
         _clear_overrides()
 
@@ -1562,7 +1598,8 @@ async def test_upload_rejects_unsupported_content_type(client: AsyncClient) -> N
 async def test_upload_rejects_file_larger_than_10mb(client: AsyncClient) -> None:
     mock_db = AsyncMock(spec=MongoDBClient)
     mock_uploader = AsyncMock(spec=ReceiptsUploader)
-    _set_overrides(mock_db, mock_uploader)
+    publisher = _publisher_mock()
+    _set_overrides(mock_db, mock_uploader, publisher)
     try:
         oversize = b"x" * (10 * 1024 * 1024 + 1)
         response = await client.post(
@@ -1574,6 +1611,61 @@ async def test_upload_rejects_file_larger_than_10mb(client: AsyncClient) -> None
         assert response.json()["error"]["code"] == "file_too_large"
         mock_uploader.upload.assert_not_awaited()
         mock_db.upsert.assert_not_awaited()
+        publisher.publish.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_upload_rolls_back_doc_on_publish_failure(client: AsyncClient) -> None:
+    """Publish failure → 503 + the doc that was just upserted is deleted."""
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.upsert = AsyncMock(return_value="00000000-0000-4000-8000-000000000000")
+    mock_db.delete = AsyncMock(return_value=True)
+    mock_uploader = AsyncMock(spec=ReceiptsUploader)
+    mock_uploader.upload = AsyncMock(return_value="gs://test-bucket/receipts/x.pdf")
+    publisher = _publisher_mock(fail=True)
+    _set_overrides(mock_db, mock_uploader, publisher)
+    try:
+        response = await client.post(
+            "/api/v1/purchases/upload",
+            headers={"Authorization": "Bearer valid-token"},
+            files={"file": ("receipt.pdf", b"%PDF-1.4 ...", "application/pdf")},
+        )
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "publish_failed"
+        # Upsert succeeded, publish failed → we must have rolled back the doc.
+        mock_db.upsert.assert_awaited_once()
+        publisher.publish.assert_awaited_once()
+        mock_db.delete.assert_awaited_once()
+        delete_args = mock_db.delete.await_args.args
+        assert delete_args[0] == "purchases"
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_upload_publish_failure_doc_rollback_failure_still_returns_503(
+    client: AsyncClient,
+) -> None:
+    """Doc-delete also failing must NOT mask the user-facing 503."""
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.upsert = AsyncMock(return_value="00000000-0000-4000-8000-000000000000")
+    mock_db.delete = AsyncMock(side_effect=RuntimeError("mongo down"))
+    mock_uploader = AsyncMock(spec=ReceiptsUploader)
+    mock_uploader.upload = AsyncMock(return_value="gs://test-bucket/receipts/x.pdf")
+    publisher = _publisher_mock(fail=True)
+    _set_overrides(mock_db, mock_uploader, publisher)
+    try:
+        response = await client.post(
+            "/api/v1/purchases/upload",
+            headers={"Authorization": "Bearer valid-token"},
+            files={"file": ("receipt.pdf", b"%PDF-1.4 ...", "application/pdf")},
+        )
+        # User-facing surface is still 503 — operator logs catch the
+        # stranded doc.
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "publish_failed"
     finally:
         _clear_overrides()
 

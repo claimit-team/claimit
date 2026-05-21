@@ -21,12 +21,13 @@ from claimit_mongodb_models import Category, MongoDBClient, PurchaseStatus, User
 from fastapi import APIRouter, Depends, File, Path, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 
-from ..deps import get_db, get_receipts_uploader
+from ..deps import get_db, get_pubsub_publisher, get_receipts_uploader
 from ..middleware.auth import get_current_user
 from ..middleware.errors import ApiError
 from ..serializers import serialize_purchase, serialize_purchase_detail
 from ..services import claims_service
 from ..services import purchases as purchases_service
+from ..services.pubsub_publisher import PubSubPublisher
 from ..services.purchases import DismissReason
 from ..services.receipts_storage import ReceiptsUploader
 
@@ -106,6 +107,7 @@ async def upload_purchase_receipt(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[MongoDBClient, Depends(get_db)],
     uploader: Annotated[ReceiptsUploader, Depends(get_receipts_uploader)],
+    publisher: Annotated[PubSubPublisher, Depends(get_pubsub_publisher)],
     file: Annotated[UploadFile, File(description="Receipt file (PDF/PNG/JPEG, ≤10 MB).")],
 ) -> dict[str, object]:
     """Persist a manually-uploaded receipt and create a pending Purchase doc."""
@@ -115,6 +117,7 @@ async def upload_purchase_receipt(
     purchase = await purchases_service.upload_receipt(
         db=db,
         uploader=uploader,
+        publisher=publisher,
         user=user,
         file_bytes=file_bytes,
         content_type=content_type,

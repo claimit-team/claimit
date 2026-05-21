@@ -33,11 +33,13 @@ from claimit_mongodb_models import (
     compute_window_days,
     normalize_sender,
 )
+from claimit_pubsub import TOPIC_PURCHASE_UPLOADED, PurchaseUploadedEvent
 from pydantic import ValidationError
 
 from ..middleware.errors import ApiError
 from ..middleware.pagination import apply_cursor_to_query, encode_cursor
 from ..services import claims_service
+from ..services.pubsub_publisher import PubSubPublisher
 from ..services.receipts_storage import ReceiptObjectMissingError, ReceiptsUploader
 
 _log = logging.getLogger(__name__)
@@ -563,6 +565,7 @@ async def upload_receipt(
     *,
     db: MongoDBClient,
     uploader: ReceiptsUploader,
+    publisher: PubSubPublisher,
     user: User,
     file_bytes: bytes,
     content_type: str,
@@ -572,13 +575,28 @@ async def upload_receipt(
 
     The new Purchase carries sentinel field values (price_paid=0.01,
     empty strings for ids/names, etc.) because nothing has been
-    extracted yet — the ingest agent will overwrite these once it
-    picks up the upload. Status is `pending_confirmation` so consumers
-    know not to trust the field values yet.
+    extracted yet — the ingest agent will overwrite these once the
+    purchase.uploaded Pub/Sub event lands on its push handler. Status
+    is `pending_confirmation` so consumers know not to trust the field
+    values yet.
+
+    Three side effects, ordered for clean rollback (ticket 5.14):
+      1. GCS write — if this fails, nothing else has happened; raise.
+      2. Mongo upsert — if this fails, the GCS blob is orphaned but
+         no doc exists; the orphan costs storage cents at worst and
+         the cleanup script can sweep. Raise.
+      3. Pub/Sub publish — if this fails, the user thinks the upload
+         worked (we'd otherwise return 200 with a doc that will never
+         get extracted). Delete the purchase doc, log the orphan blob
+         for ops, and surface 503 so the client retries the whole
+         flow. This matches the claim-approval pattern in
+         services/claims_service.publish_claim_approval.
 
     Raises:
         ApiError(unsupported_media_type, 415) for non-PDF/PNG/JPEG.
         ApiError(file_too_large, 413) for files > 10 MB.
+        ApiError(publish_failed, 503) when the broker rejects the
+            purchase.uploaded message after the doc was written.
     """
     ingestion_source = validate_upload_content_type(content_type)
     validate_upload_size(len(file_bytes))
@@ -621,6 +639,46 @@ async def upload_receipt(
         **_UPLOAD_PURCHASE_DEFAULTS,
     )
     await db.upsert("purchases", purchase_id, purchase)
+
+    event = PurchaseUploadedEvent(
+        user_id=str(user.id),
+        purchase_id=str(purchase_id),
+        receipt_storage_url=storage_url,
+        content_type=content_type,
+    )
+    try:
+        await publisher.publish(TOPIC_PURCHASE_UPLOADED, event.model_dump(mode="json"))
+    except Exception:
+        _log.exception(
+            "Failed to publish purchase.uploaded for purchase_id=%s; rolling back doc",
+            purchase_id,
+        )
+        try:
+            await db.delete("purchases", purchase_id)
+        except Exception:
+            # Rollback itself failed — the doc is stranded as a sentinel
+            # pending_confirmation that no ingest event will fire for.
+            # Surface in logs so on-call can clean up; user still gets
+            # 503 below so retry is the right next action.
+            _log.exception(
+                "Rollback failed after publish failure for purchase %s; manual fix required",
+                purchase_id,
+            )
+        else:
+            # Doc deleted; the GCS object is now orphaned. Cheap to
+            # leave (10 MB cap, storage costs cents), and a future
+            # bucket-lifecycle sweep based on missing-doc lookup can
+            # clean it up. Log so the orphan is discoverable.
+            _log.warning(
+                "Orphaned receipt blob after publish-rollback purchase_id=%s blob=%s",
+                purchase_id,
+                storage_url,
+            )
+        raise ApiError(
+            "publish_failed",
+            "Upload failed; please retry.",
+            status_code=503,
+        ) from None
 
     _log.info(
         "Receipt uploaded purchase_id=%s user_id=%s content_type=%s bytes=%d",
