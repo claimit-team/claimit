@@ -9,7 +9,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
-from claimit_mongodb_models import Purchase, compute_format_hash, normalize_sender
+from claimit_mongodb_models import (
+    Policy,
+    Purchase,
+    compute_format_hash,
+    compute_window_days,
+    normalize_sender,
+)
 from google.adk import Agent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -25,7 +31,6 @@ APP_NAME = "claimit-ingest-extractor"
 MAX_BODY_CHARS = 16_000
 MAX_ATTACHMENT_CHARS = 12_000
 EXTRACTOR_TIMEOUT_SECONDS = 30
-DEFAULT_CLAIM_WINDOW_DAYS = 15
 DEFAULT_MONITORING_CADENCE_MINUTES = 360
 FALLBACK_PRODUCT_ID_CONFIDENCE = 0.2
 
@@ -409,8 +414,20 @@ def _resolve_status(fallback_used: bool, confidence: dict[str, float | None]) ->
 def _purchase_payload(
     email: EmailForExtraction,
     extracted: ExtractedPurchaseFields,
+    *,
+    policy: Policy | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    """Build an insert-shaped Purchase dict from extracted fields.
+
+    `policy` is the matching `Policy` doc for `extracted.platform`. When
+    None, `compute_window_days` returns the 15-day default — same
+    behavior as the pre-5.14 hardcoded constant. Pass an actual Policy
+    (typically `await db.get_policy(extracted.platform)`) to drive
+    policy-aware windows for the email/Gmail path; ticket 5.14 keeps
+    this opt-in so existing email-path tests stay green by passing
+    nothing.
+    """
     timestamp = now or datetime.now(UTC)
     fallback_used = False
     product_id = extracted.product_id
@@ -426,6 +443,9 @@ def _purchase_payload(
         _merge_confidence_aggregate(confidence)
 
     status = _resolve_status(fallback_used, confidence)
+    window_days = compute_window_days(
+        policy, member_tier_at_purchase=extracted.member_tier_at_purchase
+    )
 
     return {
         "_id": uuid4(),
@@ -447,7 +467,7 @@ def _purchase_payload(
         "currency": "USD",
         "purchase_date": extracted.purchase_date,
         "purchase_date_basis": extracted.purchase_date_basis,
-        "window_expires": extracted.purchase_date + timedelta(days=DEFAULT_CLAIM_WINDOW_DAYS),
+        "window_expires": extracted.purchase_date + timedelta(days=window_days),
         "order_id": extracted.order_id,
         "member_tier_at_purchase": extracted.member_tier_at_purchase,
         "status": status,
@@ -483,6 +503,7 @@ async def extract(
     email: EmailForExtraction | dict[str, Any],
     *,
     purchases_collection: Any | None = None,
+    policy: Policy | None = None,
     user_email: str | None = None,
     gmail_refresh_token_ref: str | None = None,
     gmail_connected_email: str | None = None,
@@ -492,6 +513,15 @@ async def extract(
     When extraction yields ``pending_confirmation`` and ``user_email`` is set,
     sends a confirmation email with a deep link to ``/confirm/{purchase_id}``.
     Email failures are logged and do not fail extraction.
+
+    ``policy`` (ticket 5.14) is the matching `Policy` doc for the platform
+    the extractor returns. When provided, it drives `window_expires` via
+    `compute_window_days`. Callers without a Policy in hand pass None and
+    fall back to the 15-day default. The orchestrator (e.g. ticket 4.17's
+    Gmail handler) is expected to fetch the policy once and pass it
+    here; doing the lookup inside `extract()` would require a
+    MongoDBClient on the surface, which the unit-test seam intentionally
+    avoids.
 
     TODO(#105): ``extract()`` has no production caller yet — the HTTP entrypoint
     that threads ``user_email`` / ``gmail_refresh_token_ref`` / ``gmail_connected_email``
@@ -513,7 +543,7 @@ async def extract(
 
     raw_output = await _run_extractor_agent(validated_email)
     extracted = _parse_extraction_output(raw_output)
-    purchase = Purchase.model_validate(_purchase_payload(validated_email, extracted))
+    purchase = Purchase.model_validate(_purchase_payload(validated_email, extracted, policy=policy))
     result = purchase.model_dump(by_alias=True, mode="json")
     await maybe_send_confirmation_email(
         result,
