@@ -25,6 +25,13 @@ class DraftVersion(BaseModel):
     at: datetime
 
 
+class SelfEvalScore(BaseModel):
+    clarity: int = Field(ge=0, le=10)
+    tone: int = Field(ge=0, le=10)
+    accuracy: int = Field(ge=0, le=10)
+    completeness: int = Field(ge=0, le=10)
+
+
 class Claim(BaseDocument):
     # Invariant: draft_content always equals draft_versions[-1].content.
     # Kept as a top-level field for query convenience. Any update must keep both in sync.
@@ -47,6 +54,8 @@ class Claim(BaseDocument):
     denial_reason_extracted: DenialReason | None
     resolved_at: datetime | None
     trace_id: str | None
+    self_eval_score: SelfEvalScore | None = None
+    self_eval_attempts: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def _validate_draft_invariant(self) -> "Claim":

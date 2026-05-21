@@ -25,10 +25,12 @@ from claimit_observability import init_phoenix
 from fastapi import FastAPI, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from .draft.models import ClaimDraft
 from .draft.type_a_email import generate_email_draft
 from .draft.type_b_chat import generate_chat_script
 from .draft.type_c_in_store import generate_in_store_guide
 from .draft.type_d_self_service import generate_self_service_walkthrough
+from .orchestrate_eval import evaluate_and_maybe_regenerate
 from .plan import PriceDroppedEvent, plan_claim
 from .validator import validate
 
@@ -199,46 +201,56 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             trace_id=event.event_id,
         )
 
-        if claim_plan.draft_generator == "type_a_email":
-            draft = await generate_email_draft(
-                temp_claim,
-                purchase,
-                policy,
-                search_client,
-                user_name=user_name,
-                current_price=event.current_price,
-            )
-        elif claim_plan.draft_generator == "type_b_chat":
-            draft = await generate_chat_script(
-                temp_claim,
-                purchase,
-                policy,
-                search_client,
-                user_name=user_name,
-                current_price=event.current_price,
-            )
-        elif claim_plan.draft_generator == "type_c_in_store":
-            draft = await generate_in_store_guide(
-                temp_claim,
-                purchase,
-                policy,
-                search_client,
-                user_name=user_name,
-                current_price=event.current_price,
-                user_location=user.default_location if user else None,
-            )
-        elif claim_plan.draft_generator == "type_d_self_service":
-            draft = await generate_self_service_walkthrough(
-                temp_claim,
-                purchase,
-                policy,
-                search_client,
-                user_name=user_name,
-                current_price=event.current_price,
-            )
-        else:
+        async def _dispatch_generator(c: Claim) -> ClaimDraft:
+            if claim_plan.draft_generator == "type_a_email":
+                return await generate_email_draft(
+                    c,
+                    purchase,
+                    policy,
+                    search_client,
+                    user_name=user_name,
+                    current_price=event.current_price,
+                )
+            if claim_plan.draft_generator == "type_b_chat":
+                return await generate_chat_script(
+                    c,
+                    purchase,
+                    policy,
+                    search_client,
+                    user_name=user_name,
+                    current_price=event.current_price,
+                )
+            if claim_plan.draft_generator == "type_c_in_store":
+                return await generate_in_store_guide(
+                    c,
+                    purchase,
+                    policy,
+                    search_client,
+                    user_name=user_name,
+                    current_price=event.current_price,
+                    user_location=user.default_location if user else None,
+                )
+            if claim_plan.draft_generator == "type_d_self_service":
+                return await generate_self_service_walkthrough(
+                    c,
+                    purchase,
+                    policy,
+                    search_client,
+                    user_name=user_name,
+                    current_price=event.current_price,
+                )
+            raise ValueError(f"Unknown generator: {claim_plan.draft_generator}")
+
+        if claim_plan.draft_generator not in {
+            "type_a_email",
+            "type_b_chat",
+            "type_c_in_store",
+            "type_d_self_service",
+        }:
             _log.info("Skipping unsupported generator %s", claim_plan.draft_generator)
             return {"status": "skipped", "reason": claim_plan.draft_generator}
+
+        draft = await _dispatch_generator(temp_claim)
 
         # --- Validate draft (task 3.18) ---
         validation = validate(draft, temp_claim, purchase)
@@ -280,6 +292,35 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
                 "issues": validation.issues,
             }
 
+        # --- Self-evaluation pass (task 3.19) ---
+        async def _regenerate(current_draft: ClaimDraft, feedback: str, c: Claim) -> ClaimDraft:
+            _log.info(
+                "self_eval.regenerate claim_id=%s feedback=%r",
+                c.id,
+                feedback[:200],
+            )
+            # TODO(task-3.21): pass feedback to generator once generators support it
+            return await _dispatch_generator(c)
+
+        try:
+            draft, eval_result, attempts = await evaluate_and_maybe_regenerate(
+                draft, temp_claim, purchase, policy, regenerate_fn=_regenerate
+            )
+            if not eval_result.passed:
+                _log.warning(
+                    "claim %s proceeding with failed self_eval dims=%s after %d attempts",
+                    claim_id,
+                    eval_result.failed_dimensions,
+                    attempts,
+                )
+        except Exception:
+            _log.exception(
+                "self_eval failed for claim %s — proceeding with validated draft",
+                claim_id,
+            )
+            eval_result = None
+            attempts = 0
+
         # Persist claim with real draft content
         generated_version = DraftVersion(
             version=1,
@@ -292,6 +333,8 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
                 "draft_content": draft.draft_content,
                 "draft_versions": [generated_version],
                 "policy_clause_cited": draft.policy_clause_cited,
+                "self_eval_score": eval_result.scores if eval_result is not None else None,
+                "self_eval_attempts": attempts,
             }
         )
         await db.upsert_claim(final_claim)

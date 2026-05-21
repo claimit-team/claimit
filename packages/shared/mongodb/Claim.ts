@@ -10,6 +10,13 @@ import type {
   UUID,
 } from "./types";
 
+export type SelfEvalScore = {
+  clarity: number;
+  tone: number;
+  accuracy: number;
+  completeness: number;
+};
+
 export interface DraftVersion {
   version: number;
   content: string;
@@ -43,4 +50,6 @@ export interface Claim {
   denial_reason_extracted: DenialReason | null;
   resolved_at: ISODateString | null;
   trace_id: string | null;
+  self_eval_score: SelfEvalScore | null;
+  self_eval_attempts: number;
 }
