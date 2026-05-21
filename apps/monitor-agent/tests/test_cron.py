@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import unittest
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-from claimit_mongodb_models import Policy, PriceHistory, Purchase, PurchaseReadTolerant
+from claimit_mongodb_models import Claim, Policy, PriceHistory, Purchase, PurchaseReadTolerant
 from src import cron as cron_module
 from src.adapters.base import PriceFetchError, PriceSnapshot, PriceSourceAdapter
 from src.cron import run_cron
@@ -105,6 +105,7 @@ class _FakeDB:
         purchases: list[Purchase],
         *,
         policies: dict[str, Policy] | None = None,
+        claims: list[Claim] | None = None,
     ) -> None:
         self.purchases = purchases
         self.updates: list[tuple[object, dict[str, object]]] = []
@@ -114,6 +115,7 @@ class _FakeDB:
         # `no_policy` in tests that pre-date it. Override via the kwarg to
         # exercise the no_policy / ineligible counters.
         self.policies = policies if policies is not None else {"best_buy": _default_policy()}
+        self.claims: list[Claim] = list(claims) if claims else []
 
     async def find_purchases(self, _filter: dict[str, object], limit: int = 100) -> list[Purchase]:
         return self.purchases[:limit]
@@ -134,6 +136,31 @@ class _FakeDB:
 
     async def get_policy(self, platform: str) -> Policy | None:
         return self.policies.get(platform)
+
+    async def find_claims(
+        self,
+        filter: dict[str, object],
+        limit: int = 100,
+        sort: list[tuple[str, int]] | None = None,
+    ) -> list[Claim]:
+        purchase_id = filter.get("purchase_id")
+        matches = [c for c in self.claims if purchase_id is None or c.purchase_id == purchase_id]
+        if sort:
+            # Mirror the cron call: sort by updated_at desc. Treat None as -inf
+            # so freshly-seeded claims with no updated_at sort last.
+            field, direction = sort[0]
+            matches.sort(
+                key=lambda c: getattr(c, field) or datetime.min.replace(tzinfo=UTC),
+                reverse=direction == -1,
+            )
+        return matches[:limit]
+
+    async def upsert_claim(self, claim: Claim) -> str:
+        # Mirror the real upsert: stamp updated_at to now-UTC on every write so
+        # the dedup gate has a value to compare against.
+        object.__setattr__(claim, "updated_at", datetime.now(UTC))
+        self.claims.append(claim)
+        return str(claim.id)
 
 
 class _StubAdapter(PriceSourceAdapter):
@@ -186,6 +213,16 @@ def _last_checked_update(db: _FakeDB, purchase_id: object) -> dict[str, object] 
 
 
 class TestRunCron(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        # Stub `publish_event` for every test in this class — the cron's new
+        # `_handle_eligible_drop` path (ticket 3.12) would otherwise reach
+        # real GCP Pub/Sub via `_StubAdapter`'s drop-triggering snapshot.
+        # Tests that need to inspect publish calls override `self.publish_mock`.
+        self.publish_mock = AsyncMock(return_value="msg-test")
+        self._publish_patcher = patch.object(cron_module, "publish_event", self.publish_mock)
+        self._publish_patcher.start()
+        self.addCleanup(self._publish_patcher.stop)
+
     async def test_naive_mongo_datetimes_do_not_crash_cadence_checks(self) -> None:
         now = datetime.now(UTC)
         purchase = _make_purchase(
@@ -681,3 +718,130 @@ class TestRunCron(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["eligible"], 0)
         self.assertEqual(summary["ineligible"], 0)
         self.assertEqual(summary["no_policy"], 1)
+
+    # -- claim creation + price.dropped publish (ticket 3.12) ------------
+
+    async def test_eligible_drop_creates_claim_and_publishes_event(self) -> None:
+        """Eligible drop ⇒ one draft_pending Claim + one price.dropped event."""
+        from claimit_mongodb_models import ClaimOutcome
+        from claimit_pubsub import TOPIC_PRICE_DROPPED, PriceDroppedEvent
+
+        now = datetime.now(UTC)
+        purchase = _make_purchase(
+            last_checked_at=None,
+            window_expires=now + timedelta(days=3),
+        )
+        db = _FakeDB([purchase])
+        adapter = _StubAdapter()
+
+        with patch.object(cron_module, "get_adapter", return_value=adapter):
+            summary = await run_cron(db)  # type: ignore[arg-type]
+
+        self.assertEqual(summary["eligible"], 1)
+        self.assertEqual(summary["emitted"], 1)
+        self.assertEqual(summary["eligible_dedup"], 0)
+
+        # Exactly one Claim created in draft_pending, with the drop math.
+        self.assertEqual(len(db.claims), 1)
+        claim = db.claims[0]
+        self.assertEqual(claim.outcome, ClaimOutcome.DRAFT_PENDING)
+        self.assertEqual(claim.purchase_id, purchase.id)
+        self.assertEqual(claim.user_id, purchase.user_id)
+        self.assertAlmostEqual(claim.claim_amount, 349.99 - 299.99, places=2)
+        self.assertEqual(claim.currency, "USD")
+        self.assertEqual(len(claim.draft_versions), 1)
+        self.assertEqual(claim.draft_content, "")
+
+        # Exactly one publish, to the price.dropped topic, with matching payload.
+        self.publish_mock.assert_awaited_once()
+        topic, event = self.publish_mock.await_args.args
+        self.assertEqual(topic, TOPIC_PRICE_DROPPED)
+        self.assertIsInstance(event, PriceDroppedEvent)
+        self.assertEqual(event.purchase_id, str(purchase.id))
+        self.assertEqual(event.claim_id, str(claim.id))
+        self.assertEqual(event.user_id, str(purchase.user_id))
+        self.assertEqual(event.platform_id, purchase.platform)
+        self.assertAlmostEqual(event.original_price, 349.99, places=2)
+        self.assertAlmostEqual(event.current_price, 299.99, places=2)
+        self.assertAlmostEqual(event.price_drop_amount, 349.99 - 299.99, places=2)
+        self.assertAlmostEqual(event.price_drop_pct, (349.99 - 299.99) / 349.99 * 100, places=2)
+        self.assertEqual(event.purchase_date, purchase.purchase_date)
+        self.assertIsNotNone(event.detected_at)
+
+    async def test_eligible_drop_within_1h_of_prior_claim_does_not_re_emit(self) -> None:
+        """A second eligible detection within the 1h dedup window emits nothing."""
+        now = datetime.now(UTC)
+        purchase = _make_purchase(
+            last_checked_at=None,
+            window_expires=now + timedelta(days=3),
+        )
+
+        # Seed a Claim whose `updated_at` is 30 minutes ago — inside the
+        # 1h dedup window. The cron must skip re-emitting for this purchase.
+        prior_claim = Claim.model_construct(
+            id=uuid4(),
+            purchase_id=purchase.id,
+            user_id=purchase.user_id,
+            updated_at=now - timedelta(minutes=30),
+        )
+        db = _FakeDB([purchase], claims=[prior_claim])
+        adapter = _StubAdapter()
+
+        with patch.object(cron_module, "get_adapter", return_value=adapter):
+            summary = await run_cron(db)  # type: ignore[arg-type]
+
+        self.assertEqual(summary["eligible"], 1)
+        self.assertEqual(summary["emitted"], 0)
+        self.assertEqual(summary["eligible_dedup"], 1)
+        # No new Claim — only the seeded one remains.
+        self.assertEqual(len(db.claims), 1)
+        self.assertIs(db.claims[0], prior_claim)
+        self.publish_mock.assert_not_awaited()
+
+    async def test_eligible_drop_after_1h_of_prior_claim_re_emits(self) -> None:
+        """A prior Claim older than the dedup window does not block re-emission."""
+        now = datetime.now(UTC)
+        purchase = _make_purchase(
+            last_checked_at=None,
+            window_expires=now + timedelta(days=3),
+        )
+        stale_claim = Claim.model_construct(
+            id=uuid4(),
+            purchase_id=purchase.id,
+            user_id=purchase.user_id,
+            updated_at=now - timedelta(hours=2),
+        )
+        db = _FakeDB([purchase], claims=[stale_claim])
+        adapter = _StubAdapter()
+
+        with patch.object(cron_module, "get_adapter", return_value=adapter):
+            summary = await run_cron(db)  # type: ignore[arg-type]
+
+        self.assertEqual(summary["emitted"], 1)
+        self.assertEqual(summary["eligible_dedup"], 0)
+        # Stale + freshly-written = 2 claims.
+        self.assertEqual(len(db.claims), 2)
+        self.publish_mock.assert_awaited_once()
+
+    async def test_publish_failure_counts_as_error_but_persists_claim(self) -> None:
+        """Persist-then-publish: if Pub/Sub raises, the Claim still lands so the
+        next tick's dedup gate prevents duplicate emission. Counted in `errors`.
+        """
+        now = datetime.now(UTC)
+        purchase = _make_purchase(
+            last_checked_at=None,
+            window_expires=now + timedelta(days=3),
+        )
+        db = _FakeDB([purchase])
+        adapter = _StubAdapter()
+        self.publish_mock.side_effect = RuntimeError("simulated pubsub blip")
+
+        with patch.object(cron_module, "get_adapter", return_value=adapter):
+            summary = await run_cron(db)  # type: ignore[arg-type]
+
+        self.assertEqual(summary["eligible"], 1)
+        self.assertEqual(summary["emitted"], 0)
+        self.assertEqual(summary["errors"], 1)
+        # Claim was persisted before the publish failure.
+        self.assertEqual(len(db.claims), 1)
+        self.publish_mock.assert_awaited_once()
