@@ -18,6 +18,7 @@ data "google_project" "current" {
 
 locals {
   main_topic_names = [
+    "purchase.uploaded", # ticket 5.14 — api-gateway publishes after a user upload, ingest-agent extracts.
     "purchase.ingested",
     "price.dropped",
     "claim.drafted",
@@ -107,4 +108,17 @@ resource "google_pubsub_topic_iam_member" "service_agent_publisher_on_gmail_inbo
   topic   = google_pubsub_topic.gmail_inbound_dlq.name
   role    = "roles/pubsub.publisher"
   member  = local.pubsub_service_agent
+}
+
+# ---------- api-gateway producer on purchase.uploaded (ticket 5.14) ----------
+# The receipts-upload route publishes here after writing the sentinel Purchase
+# doc; without this binding the publish() call would 403 in prod even though
+# the doc + GCS blob landed cleanly (the rollback path in upload_receipt would
+# fire on every legitimate upload). Scoped to the single topic — api-gateway
+# is not a publisher to anything else in the main_topic_names set yet.
+resource "google_pubsub_topic_iam_member" "api_gateway_publisher_on_purchase_uploaded" {
+  project = var.project_id
+  topic   = google_pubsub_topic.main["purchase.uploaded"].name
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${module.api_gateway.service_account_email}"
 }
