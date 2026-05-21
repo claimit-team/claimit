@@ -16,6 +16,7 @@ dependencies = [
     "claimit-mcp",
     "claimit-mongodb-models",
     "claimit-pubsub",
+    "claimit-gmail",
     "google-cloud-secret-manager>=2.20.0",
     "google-auth>=2.29.0",
 ]
@@ -25,6 +26,7 @@ claimit-observability = { path = "../../packages/shared/observability" }
 claimit-mcp = { path = "../../packages/shared/mcp" }
 claimit-mongodb-models = { path = "../../packages/shared/mongodb" }
 claimit-pubsub = { path = "../../packages/shared/pubsub" }
+claimit-gmail = { path = "../../packages/shared/gmail" }
 
 [dependency-groups]
 dev = [

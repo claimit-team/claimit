@@ -1,0 +1,35 @@
+[project]
+name = "claimit-gmail"
+version = "0.1.0"
+description = "ClaimIt shared Gmail helpers — users.watch registration with retry, persistence, and failure surfacing. Used by api-gateway (OAuth callback BackgroundTask) and ingest-agent (4.16 daily renewal cron)."
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27.0",
+    "pydantic>=2.9.0",
+    "google-auth>=2.29.0",
+    "google-cloud-secret-manager>=2.20.0",
+    "claimit-mongodb-models",
+    "starlette>=0.40.0",
+]
+license = { text = "MIT" }
+
+[tool.uv.sources]
+claimit-mongodb-models = { path = "../mongodb" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["claimit_gmail"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.6.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
