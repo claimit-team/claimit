@@ -245,6 +245,11 @@ module "api_gateway" {
     FRONTEND_BASE_URL         = var.web_frontend_url
     GCP_PROJECT_ID            = var.project_id
     RECEIPTS_BUCKET           = google_storage_bucket.receipts.name
+    # Ticket 4.15: the gmail-inbound topic api-gateway tells Gmail to
+    # publish to during `users.watch`. The .id form yields the fully-
+    # qualified `projects/<project>/topics/gmail-inbound` path Gmail
+    # expects in the watch request body.
+    GMAIL_INBOUND_TOPIC = google_pubsub_topic.gmail_inbound.id
   }
   deletion_protection = false
 

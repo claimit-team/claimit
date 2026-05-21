@@ -49,6 +49,15 @@ resource "google_cloud_run_v2_service_iam_member" "pubsub_invoker_on_claim" {
   member   = "serviceAccount:${google_service_account.pubsub_pusher.email}"
 }
 
+# Added for ticket 4.15: gmail-inbound push lands on ingest-agent.
+resource "google_cloud_run_v2_service_iam_member" "pubsub_invoker_on_ingest" {
+  project  = var.project_id
+  location = var.region
+  name     = module.ingest_agent.service_name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.pubsub_pusher.email}"
+}
+
 # ---------- Push subscription map ----------
 # Key = subscription name. Each entry resolves to a fully-qualified push URL via
 # "${endpoint}${path}". The split lets the map stay readable while module
@@ -138,6 +147,54 @@ resource "google_pubsub_subscription_iam_member" "service_agent_dlq_subscriber" 
 
   project      = var.project_id
   subscription = google_pubsub_subscription.push[each.key].name
+  role         = "roles/pubsub.subscriber"
+  member       = local.pubsub_service_agent
+}
+
+# ---------- Gmail watch inbound subscription (ticket 4.15) ----------
+# Standalone resource (not in the local.subscriptions for_each map) because
+# its source topic lives outside the business-event topic set —
+# google_pubsub_topic.gmail_inbound vs google_pubsub_topic.main[...]. Same
+# subscription shape as the for_each entries above to stay consistent with
+# the ack/retry/DLQ pattern.
+resource "google_pubsub_subscription" "gmail_inbound_to_ingest" {
+  name    = "gmail-inbound-to-ingest"
+  topic   = google_pubsub_topic.gmail_inbound.id
+  project = var.project_id
+
+  ack_deadline_seconds       = 60
+  message_retention_duration = "604800s" # 7 days
+
+  push_config {
+    push_endpoint = "${module.ingest_agent.service_url}/pubsub/gmail-inbound"
+
+    oidc_token {
+      service_account_email = google_service_account.pubsub_pusher.email
+      # `audience` defaults to push_endpoint; the ingest-agent handler
+      # verifies the token with audience = its own service URL, so they
+      # match without explicit configuration here.
+    }
+  }
+
+  dead_letter_policy {
+    dead_letter_topic     = google_pubsub_topic.gmail_inbound_dlq.id
+    max_delivery_attempts = 5
+  }
+
+  retry_policy {
+    minimum_backoff = "10s"
+    maximum_backoff = "600s"
+  }
+
+  depends_on = [
+    google_service_account_iam_member.pubsub_service_agent_token_creator,
+    google_cloud_run_v2_service_iam_member.pubsub_invoker_on_ingest,
+  ]
+}
+
+resource "google_pubsub_subscription_iam_member" "service_agent_dlq_subscriber_gmail_inbound" {
+  project      = var.project_id
+  subscription = google_pubsub_subscription.gmail_inbound_to_ingest.name
   role         = "roles/pubsub.subscriber"
   member       = local.pubsub_service_agent
 }
