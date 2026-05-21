@@ -398,6 +398,100 @@ def _build_price_history_series(
     return rows
 
 
+def _purchase_status_from_outcome(outcome: ClaimOutcome) -> PurchaseStatus:
+    """Map a claim outcome to the corresponding purchase status.
+
+    Ticket 5.4/5.6 seeded fixtures defaulted every purchase to
+    `MONITORING` because PR1 only needed one detail page. PR2's list
+    surface needs ALL eight `PurchaseStatus` values exercised so the
+    `getListStatusBadge` mapping is visually proven against real data.
+
+    Decision matrix (PR2 plan, including the resolved open question on
+    DENIED → MONITORING):
+
+      DRAFT_PENDING  → MONITORING  (claim drafted, not yet submitted;
+                                    we're still actively watching)
+      PENDING        → CLAIMED     (claim submitted, awaiting merchant)
+      APPROVED       → REFUNDED    (refund received; stop watching)
+      DENIED         → MONITORING  (merchant said no, BUT seed
+                                    `window_expires` is in the future
+                                    → window still open → keep
+                                    watching. "Expired" would falsely
+                                    imply the window closed.)
+      EXPIRED        → EXPIRED     (window expired with no useful
+                                    resolution — this is the canonical
+                                    expired status)
+      NO_RESPONSE    → MONITORING  (merchant ghost; window still open
+                                    per seed offset, so we keep
+                                    watching)
+      USER_CANCELLED -> DISMISSED   (user pulled the claim from our
+                                    pipeline; we stop acting on it)
+      USER_SELF_SERV -> DISMISSED   (user resolved it themselves
+                                    outside our flow; same "user
+                                    took it out of pipeline" semantic
+                                    as USER_CANCELLED. NOT REFUNDED —
+                                    we didn't deliver the refund, so
+                                    crediting it to lifetime_savings
+                                    would be misleading.)
+
+    `monitoring_degraded`, `pending_confirmation`, and
+    `pending_user_edit` are intentionally NOT produced by this
+    function — they aren't natural outcomes of any seeded claim, and
+    forcing them via this mapping would mis-represent the seed.
+    They'll be exercised separately if/when those states need a demo
+    fixture.
+
+    A `case _:` wildcard falls through to MONITORING ONLY as a
+    forward-compat guard for future enum additions — known outcomes
+    MUST stay explicit above (the wildcard is not a substitute for
+    mapping new known values).
+    """
+    match outcome:
+        case ClaimOutcome.DRAFT_PENDING:
+            return PurchaseStatus.MONITORING
+        case ClaimOutcome.PENDING:
+            return PurchaseStatus.CLAIMED
+        case ClaimOutcome.APPROVED:
+            return PurchaseStatus.REFUNDED
+        case ClaimOutcome.DENIED:
+            return PurchaseStatus.MONITORING
+        case ClaimOutcome.EXPIRED:
+            return PurchaseStatus.EXPIRED
+        case ClaimOutcome.NO_RESPONSE:
+            return PurchaseStatus.MONITORING
+        case ClaimOutcome.USER_CANCELLED:
+            # User actively cancelled this claim — they pulled it out
+            # of the pipeline. The purchase is no longer being acted
+            # on by us, so DISMISSED is the right surface (matches the
+            # PR2 plan mapping table). MONITORING would falsely imply
+            # we're still watching for another drop on the user's
+            # behalf.
+            return PurchaseStatus.DISMISSED
+        case ClaimOutcome.USER_SELF_SERVICE:
+            # User resolved the refund themselves outside our flow.
+            # Same "user took it out of our pipeline" semantic as
+            # USER_CANCELLED — DISMISSED. REFUNDED would imply WE
+            # delivered the refund (which would falsely credit our
+            # system in the dashboard's lifetime_savings rollup);
+            # DISMISSED accurately reflects that the user handled it
+            # themselves.
+            return PurchaseStatus.DISMISSED
+        case _:
+            # Defensive: any FUTURE ClaimOutcome enum value added
+            # without updating this function falls through to a calm
+            # default rather than silently returning None (which would
+            # violate the `-> PurchaseStatus` annotation and pass an
+            # invalid value to the Pydantic Purchase model). MONITORING
+            # is the safest default for an unknown outcome — keeps the
+            # purchase visible in the user's monitored list so they
+            # can decide what to do with it. The explicit member cases
+            # above stay for readability + grep-ability and MUST stay
+            # exhaustive over known outcomes (this wildcard is for
+            # forward-compat only, not a substitute for explicit
+            # mapping of new known values).
+            return PurchaseStatus.MONITORING
+
+
 def _build_purchase(
     *,
     user_id: UUID,
@@ -408,6 +502,8 @@ def _build_purchase(
     window_expires: datetime,
     claim_type: ClaimType,
     ingested_at: datetime,
+    status: PurchaseStatus = PurchaseStatus.MONITORING,
+    ingestion_source: IngestionSource = IngestionSource.GMAIL,
     member_tier_at_purchase: str | None = None,
     non_member_price_at_purchase: float | None = None,
 ) -> Purchase:
@@ -441,12 +537,12 @@ def _build_purchase(
         window_expires=window_expires,
         order_id=f"demo-ord-{purchase_id.hex[:10]}",
         member_tier_at_purchase=member_tier_at_purchase,
-        status=PurchaseStatus.MONITORING,
+        status=status,
         claim_type=claim_type,
         monitoring_cadence_minutes=1440,
         last_checked_at=None,
         ingested_at=ingested_at,
-        ingestion_source=IngestionSource.GMAIL,
+        ingestion_source=ingestion_source,
         receipt_storage_url=None,
         receipt_hash=None,
         format_hash=None,
@@ -592,6 +688,24 @@ async def _run() -> int:
             # the "Original purchase details" list. Non-tier purchases
             # leave this None.
             non_member_price = round(price_paid * 1.10, 2) if member_tier is not None else None
+            # PR2: derive purchase status from claim outcome so the list
+            # surface exercises multiple `PurchaseStatus` values (not
+            # uniformly MONITORING). See `_purchase_status_from_outcome`
+            # for the decision matrix.
+            purchase_status = _purchase_status_from_outcome(outcome)
+            # PR2: vary `ingestion_source` on exactly two seeded
+            # purchases so the list source-icon column shows non-Gmail
+            # variety. Targets chosen by (platform, product_name) to
+            # stay stable across SPECS reorderings: one UPLOAD_PDF
+            # (Marriott SF — a hotel receipt scan) and one
+            # UPLOAD_IMAGE (Anker USB-C — a retail snap). The other
+            # 7 stay GMAIL (matches the default ingestion path).
+            if platform == Platform.MARRIOTT:
+                ingestion_source = IngestionSource.UPLOAD_PDF
+            elif platform == Platform.AMAZON and product_name.startswith("Anker"):
+                ingestion_source = IngestionSource.UPLOAD_IMAGE
+            else:
+                ingestion_source = IngestionSource.GMAIL
             purchase = _build_purchase(
                 user_id=user_id,
                 platform=platform,
@@ -601,6 +715,8 @@ async def _run() -> int:
                 window_expires=window_expires,
                 claim_type=claim_type,
                 ingested_at=ts,
+                status=purchase_status,
+                ingestion_source=ingestion_source,
                 member_tier_at_purchase=member_tier,
                 non_member_price_at_purchase=non_member_price,
             )
@@ -765,6 +881,37 @@ async def _run() -> int:
             )
             if len(rows) != expected or not low_match:
                 all_ok = False
+
+        # ---- Verification (PR2) - status + ingestion_source variety ----
+        # PR2 split the seed across multiple PurchaseStatus values (was
+        # uniformly MONITORING) and added 2 non-Gmail ingestion sources.
+        # Print the per-purchase status + source so an operator can
+        # eyeball the variety the list page now exercises. Also
+        # asserts: exactly 2 non-Gmail sources and at least 2 distinct
+        # statuses (the seed gets at least 3: MONITORING, CLAIMED,
+        # REFUNDED, EXPIRED).
+        print("\nVerification - purchase status + ingestion_source variety:")
+        status_counts: Counter[str] = Counter()
+        source_counts: Counter[str] = Counter()
+        for purchase in purchase_models:
+            status_counts[purchase.status.value] += 1
+            source_counts[purchase.ingestion_source.value] += 1
+            print(
+                f"  {purchase.product_name[:38]:<38} "
+                f"status={purchase.status.value:<12} "
+                f"source={purchase.ingestion_source.value}"
+            )
+        non_gmail = sum(c for s, c in source_counts.items() if s != "gmail")
+        print(f"  -> statuses: {dict(status_counts)}")
+        print(f"  -> sources:  {dict(source_counts)}")
+        variety_ok = non_gmail == 2 and len(status_counts) >= 2
+        variety_label = "OK" if variety_ok else "FAIL"
+        print(
+            f"  -> [{variety_label}] non-gmail={non_gmail} (expect 2); "
+            f"distinct_statuses={len(status_counts)} (expect ≥ 2)"
+        )
+        if not variety_ok:
+            all_ok = False
 
         # ---- Stale-data probe ----
         # Any unmarked claim still under the demo user is reportable -

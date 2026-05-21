@@ -22,7 +22,9 @@ from pydantic import BaseModel, Field
 
 from ..deps import get_db, get_receipts_uploader
 from ..middleware.auth import get_current_user
+from ..middleware.errors import ApiError
 from ..serializers import serialize_purchase, serialize_purchase_detail
+from ..services import claims_service
 from ..services import purchases as purchases_service
 from ..services.purchases import DismissReason
 from ..services.receipts_storage import ReceiptsUploader
@@ -48,17 +50,48 @@ class DismissPurchaseRequest(BaseModel):
 async def list_purchases(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[MongoDBClient, Depends(get_db)],
-    status: Annotated[PurchaseStatus | None, Query()] = None,
+    status: Annotated[list[PurchaseStatus] | None, Query()] = None,
     category: Annotated[Category | None, Query()] = None,
+    q: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     cursor: Annotated[str | None, Query()] = None,
 ) -> dict[str, object]:
-    """Paginated list scoped to the authenticated user."""
+    """Paginated list scoped to the authenticated user.
+
+    Filters:
+    - `status`: zero-or-more `PurchaseStatus` enum values. Accepts
+      repeated query keys (`?status=monitoring&status=monitoring_degraded`).
+      Backward compatible — a single `?status=x` becomes a 1-element
+      list that the service translates to `$in: [x]`, semantically
+      equivalent to the previous equality match. Repeating the param
+      lets the dashboard's "Monitored purchases" hook surface both
+      `monitoring` AND `monitoring_degraded` rows so the section's
+      row count matches the dashboard-summary `monitoring_purchases_count`.
+    - `category`: exact enum match (existing).
+    - `q`: case-insensitive substring search across `platform`,
+      `product_name`, and `order_id`. `re.escape`d server-side, capped at
+      `Q_MAX_LENGTH` characters. Combines with status/category via AND.
+
+    The `q` length guard mirrors the claims-list contract: same hard
+    cap (`Q_MAX_LENGTH = 100`) so runaway-input regex compile cost
+    stays bounded the same way across endpoints.
+    """
+    if q is not None:
+        q = q.strip()
+        if len(q) > claims_service.Q_MAX_LENGTH:
+            raise ApiError(
+                "invalid_search_query",
+                f"Search query must be at most {claims_service.Q_MAX_LENGTH} characters",
+                status_code=400,
+            )
+        if not q:
+            q = None
     return await purchases_service.list_purchases(
         db=db,
         user_id=user.id,
         status=status,
         category=category,
+        q=q,
         limit=limit,
         cursor=cursor,
     )

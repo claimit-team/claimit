@@ -37,6 +37,10 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useDashboardSummary } from "@/hooks/useDashboardSummary";
+import { useMonitoredPurchases } from "@/hooks/useMonitoredPurchases";
+import type { PurchaseListItem, PurchasesApiError } from "@/lib/api/purchases";
+import { formatWindowRemaining, snakeToTitleLabel } from "@/lib/claims-status";
+import { getListStatusBadge, isMonitoringDegraded } from "@/lib/purchase-status";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useUIStore } from "@/store";
 
@@ -73,48 +77,9 @@ const mockDashboardData = {
       lowConfidenceFields: ["fare_class", "purchase_date"],
     },
   ],
-  monitoredPurchases: [
-    {
-      purchaseId: "purchase_001",
-      platform: "Best Buy",
-      title: "Sony WH-1000XM5",
-      category: "retail" as const,
-      status: "monitoring" as const,
-      windowRemaining: "11 days remaining",
-    },
-    {
-      purchaseId: "purchase_002",
-      platform: "Southwest",
-      title: "LAX → MIA",
-      category: "airline" as const,
-      status: "claim drafted" as const,
-      windowRemaining: "Before departure",
-    },
-    {
-      purchaseId: "purchase_003",
-      platform: "Hilton",
-      title: "Hilton Waikiki stay",
-      category: "hotel" as const,
-      status: "submitted" as const,
-      windowRemaining: "Outcome needed",
-    },
-    {
-      purchaseId: "purchase_004",
-      platform: "Amazon",
-      title: "AirPods Pro 2",
-      category: "retail" as const,
-      status: "monitoring" as const,
-      windowRemaining: "22 days remaining",
-    },
-    {
-      purchaseId: "purchase_005",
-      platform: "Delta",
-      title: "NYC → LAX",
-      category: "airline" as const,
-      status: "window ending soon" as const,
-      windowRemaining: "3 days remaining",
-    },
-  ],
+  // monitoredPurchases removed in PR2 — the dashboard section now
+  // fetches the real top-N monitoring slice via `useMonitoredPurchases`
+  // (see MonitoredPurchasesSection).
   recentActivity: [
     { text: "You marked a Hilton claim approved", time: "2 minutes ago" },
     { text: "Claim Agent drafted a Best Buy chat script", time: "1 hour ago" },
@@ -591,10 +556,19 @@ function getCategoryIcon(category: "retail" | "airline" | "hotel") {
   }
 }
 
+// Skeleton row keys — fixed 5-row layout matches the dashboard section's
+// default visible slice (see useMonitoredPurchases DEFAULT_LIMIT). Stable
+// hand-rolled keys satisfy React's key constraint without an index.
+const MONITORED_SKELETON_KEYS = ["msk-1", "msk-2", "msk-3", "msk-4", "msk-5"] as const;
+
 function MonitoredPurchasesSection({
   purchases,
+  isLoading,
+  error,
 }: {
-  purchases: typeof mockDashboardData.monitoredPurchases;
+  purchases: PurchaseListItem[];
+  isLoading: boolean;
+  error: PurchasesApiError | null;
 }) {
   return (
     <section>
@@ -636,47 +610,90 @@ function MonitoredPurchasesSection({
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-200">
-                {purchases.map((purchase) => {
-                  const Icon = getCategoryIcon(purchase.category);
-                  const isWarning = purchase.status === "window ending soon";
-
-                  return (
-                    <tr key={purchase.purchaseId} className="hover:bg-neutral-50 transition-colors">
-                      <td className="px-4 py-3 text-sm font-medium text-neutral-900">
-                        {purchase.platform}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-neutral-700">{purchase.title}</td>
-                      <td className="px-4 py-3">
-                        <Badge variant="outline" className="text-xs capitalize">
-                          <Icon className="w-3 h-3 mr-1" aria-hidden="true" />
-                          {purchase.category}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge
-                          variant="secondary"
-                          className={cn(
-                            "text-xs capitalize",
-                            purchase.status === "monitoring" &&
-                              "bg-brand-primary-50 text-brand-primary-700",
-                            purchase.status === "claim drafted" &&
-                              "bg-neutral-100 text-neutral-700",
-                            purchase.status === "submitted" &&
-                              "bg-semantic-info-bg text-semantic-info",
-                            isWarning && "bg-semantic-warning-bg text-semantic-warning",
-                          )}
-                        >
-                          {purchase.status}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-neutral-600">
-                        <span className={cn(isWarning && "text-semantic-warning font-medium")}>
-                          {purchase.windowRemaining}
-                        </span>
+                {isLoading && purchases.length === 0 ? (
+                  // Skeleton rows preserve the section's layout slot so
+                  // the page doesn't reflow once data lands.
+                  MONITORED_SKELETON_KEYS.map((key) => (
+                    <tr key={key}>
+                      <td colSpan={5} className="px-4 py-3">
+                        <Skeleton className="h-6 w-full" />
                       </td>
                     </tr>
-                  );
-                })}
+                  ))
+                ) : error !== null && purchases.length === 0 ? (
+                  // Honest error state: a fetch failure is NOT the same
+                  // as "user has nothing monitored" — surface it as a
+                  // muted info row so the user knows the call didn't
+                  // succeed. Non-blocking; the rest of the dashboard
+                  // keeps rendering.
+                  <tr>
+                    <td colSpan={5} className="px-4 py-6 text-center text-sm text-neutral-500">
+                      Couldn't load monitored purchases.
+                    </td>
+                  </tr>
+                ) : purchases.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-6 text-center text-sm text-neutral-500">
+                      No purchases being monitored yet.
+                    </td>
+                  </tr>
+                ) : (
+                  purchases.map((purchase) => {
+                    // Read-tolerant category narrowing: the backend
+                    // surfaces the raw enum string, so cast to the
+                    // function's known input set when matched and
+                    // fall back to ShoppingBag (the safe generic
+                    // retail icon) for rogue / null values.
+                    const cat = purchase.category;
+                    const Icon =
+                      cat === "retail" || cat === "airline" || cat === "hotel"
+                        ? getCategoryIcon(cat)
+                        : ShoppingBag;
+                    const statusBadge = getListStatusBadge(purchase.status);
+                    const degraded = isMonitoringDegraded(purchase.status);
+                    return (
+                      <tr key={purchase._id} className="hover:bg-neutral-50 transition-colors">
+                        <td className="px-4 py-3 text-sm font-medium text-neutral-900">
+                          <Link href={`/purchases/${purchase._id}`} className="hover:underline">
+                            {snakeToTitleLabel(purchase.platform)}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-neutral-700">
+                          <Link href={`/purchases/${purchase._id}`} className="hover:underline">
+                            {purchase.product_name ?? "—"}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant="outline" className="text-xs capitalize">
+                            <Icon className="w-3 h-3 mr-1" aria-hidden="true" />
+                            {snakeToTitleLabel(purchase.category)}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex items-center gap-1.5">
+                            <Badge
+                              variant="outline"
+                              className={cn("text-xs capitalize", statusBadge.className)}
+                            >
+                              {statusBadge.label}
+                            </Badge>
+                            {degraded ? (
+                              <span
+                                role="img"
+                                aria-label="Monitoring partially degraded"
+                                title="Monitoring is partially degraded — last price check returned no data."
+                                className="inline-block h-2 w-2 rounded-full bg-semantic-warning"
+                              />
+                            ) : null}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-neutral-600">
+                          {formatWindowRemaining(purchase.window_expires)}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -851,7 +868,12 @@ export default function DashboardPage() {
   // real backend state — accounts with gmail_integration.connected=true in
   // Mongo were rendering as "not connected" in the dashboard header.
   const gmailConnected = useAuthStore((s) => s.user?.gmail_integration?.connected ?? false);
-  const { needsAttention, monitoredPurchases, recentActivity } = mockDashboardData;
+  const { needsAttention, recentActivity } = mockDashboardData;
+  const {
+    purchases: monitoredPurchases,
+    isLoading: isMonitoredLoading,
+    error: monitoredError,
+  } = useMonitoredPurchases();
 
   // Auto-derive userState from real summary data:
   // - lifetime_savings > 0 → user has resolved claims → "reclaim_experienced"
@@ -922,7 +944,13 @@ export default function DashboardPage() {
 
         {userState !== "new" && <NeedsAttentionSection items={needsAttention} />}
 
-        {userState !== "new" && <MonitoredPurchasesSection purchases={monitoredPurchases} />}
+        {userState !== "new" && (
+          <MonitoredPurchasesSection
+            purchases={monitoredPurchases}
+            isLoading={isMonitoredLoading}
+            error={monitoredError}
+          />
+        )}
 
         {/* Quick Upload + Recent Activity grid is hidden in the new-user state
             because HeroNewUser already renders an upload CTA at the top —
