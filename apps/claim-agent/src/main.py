@@ -163,7 +163,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         now = datetime.now(UTC)
         claim_id = (
             UUID(event.claim_id)
-            if event.claim_id
+            if event.claim_id is not None
             else uuid5(NAMESPACE_URL, f"claim:{event.event_id}")
         )
         placeholder = "Draft pending generation."
