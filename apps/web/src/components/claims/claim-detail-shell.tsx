@@ -20,7 +20,7 @@
  *                                        endpoint exists)
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AssistantPane } from "@/components/claims/assistant-pane";
 import { ClaimHeader } from "@/components/claims/claim-header";
@@ -55,6 +55,27 @@ export function ClaimDetailShell({ initialClaim }: ClaimDetailShellProps) {
 
   const isDesktop = useMediaQuery("(min-width: 1024px)");
   const isTablet = useMediaQuery("(min-width: 768px)");
+
+  // Pane-layout sync (preserved from the pre-real-ification shell —
+  // this is NOT a write-action handler, do NOT delete alongside the
+  // approve/cancel/edit/mark callbacks).
+  //
+  // The global `claimEmbeddedAssistantExpanded` flag can be flipped to
+  // `true` from OUTSIDE this component — specifically the floating
+  // assistant pill in `components/layout/floating-assistant.tsx` which
+  // calls `toggleClaimEmbeddedAssistant` on the same UI store. When it
+  // flips while the user has evidence maximized, the desktop layout
+  // ternary below would otherwise pin the assistant to the 10% bottom
+  // row because `evidenceFull` wins:
+  //
+  //   const rightTop    = evidenceFull ? 90 : assistantExpanded ? 10 : 60;
+  //   const rightBottom = evidenceFull ? 10 : assistantExpanded ? 90 : 40;
+  //
+  // Releasing `paneMax` from `"evidence"` lets the assistantExpanded
+  // branch take effect so the pane actually grows.
+  useEffect(() => {
+    if (assistantExpanded) setPaneMax((prev) => (prev === "evidence" ? null : prev));
+  }, [assistantExpanded]);
 
   const toggleHorizontalMax = () => {
     setPaneMax((prev) => (prev === "draft" ? null : "draft"));

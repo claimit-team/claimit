@@ -99,6 +99,10 @@ function ScreenshotPlaceholder() {
 export function EvidencePane({ claim, onDoubleClickHeader }: EvidencePaneProps) {
   const { evidence, purchase } = claim;
   const priceDifference = evidence.original_price - evidence.current_price;
+  // Lifted out of the JSX (was an IIFE) — purely a readability nit per
+  // CodeRabbit. Behavior identical: `null` means "no valid date";
+  // caller short-circuits the Clock pill.
+  const capturedDate = formatEvidenceDate(evidence.captured_at);
 
   return (
     <div className="flex h-full flex-col bg-neutral-0">
@@ -154,16 +158,12 @@ export function EvidencePane({ claim, onDoubleClickHeader }: EvidencePaneProps) 
 
               <div className="flex items-center justify-between text-neutral-500 text-xs">
                 <span>Source: {claim.platform}</span>
-                {(() => {
-                  const captured = formatEvidenceDate(evidence.captured_at);
-                  if (captured === null) return null;
-                  return (
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {captured}
-                    </span>
-                  );
-                })()}
+                {capturedDate !== null && (
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {capturedDate}
+                  </span>
+                )}
               </div>
             </CardContent>
           </Card>

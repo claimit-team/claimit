@@ -152,6 +152,11 @@ export function mapClaimTypeToUi(claimType: string | null | undefined): ClaimDet
  * Convert a snake-case backend platform value to a brand-style label.
  * `best_buy` -> `Best Buy`; `null`/`""` -> `Unknown platform`.
  * Mirrors `safePlatformLabel` in `purchase-detail-view.ts`.
+ *
+ * TODO(refactor): hoist this + the `purchase-detail-view.ts` copy to a
+ * shared helper in `lib/utils.ts` so the two detail VMs share one
+ * definition. Out of scope for this demo-breaker fix; tracked in a
+ * follow-up cleanup PR.
  */
 function safePlatformLabel(raw: string | null | undefined): string {
   if (raw === null || raw === undefined || raw === "") return "Unknown platform";
