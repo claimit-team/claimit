@@ -467,6 +467,42 @@ async def test_finalize_failure_does_not_publish_purchase_ingested(
 
 
 @pytest.mark.asyncio
+async def test_finalize_failure_skips_when_already_finalized() -> None:
+    """Redelivery clobber guard — must not over-write a happy-path finalize.
+
+    Pub/Sub at-least-once + retries mean the rescue path can be entered
+    AFTER a successful finalize already populated the doc. The guard
+    keys off `extraction_confidence.overall_min`: the upload sentinel
+    writes 0.0; every finalize (happy or rescue) moves it >0.0. So if
+    what's on disk is >0.0, somebody already finalized — we must NOT
+    partial_update, must NOT write a notification, must just log and
+    return.
+    """
+    purchase = _purchase_doc()
+    # Simulate a happy-path finalize having already populated real
+    # confidence values. The exact number is irrelevant — any
+    # `overall_min > 0` should trip the skip branch.
+    purchase = purchase.model_copy(
+        update={
+            "extraction_confidence": purchase.extraction_confidence.model_copy(
+                update={"overall_min": 0.87, "platform": 0.99, "price": 0.95}
+            )
+        }
+    )
+
+    db = AsyncMock(spec=MongoDBClient)
+    db.get_purchase = AsyncMock(return_value=purchase)
+    db.partial_update = AsyncMock(return_value=True)
+    db.find_one = AsyncMock(return_value=None)
+    db.upsert_notification_event = AsyncMock(return_value="event-id")
+
+    await finalize_purchase_extraction_failure(db=db, purchase_id=PURCHASE_ID)
+
+    db.partial_update.assert_not_awaited()
+    db.upsert_notification_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_finalize_failure_handles_missing_purchase_without_raising(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

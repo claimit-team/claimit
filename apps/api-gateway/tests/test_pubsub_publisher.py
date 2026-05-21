@@ -76,6 +76,25 @@ def test_raises_when_all_three_paths_fail() -> None:
         _resolve_project_id()
 
 
+def test_default_credentials_error_surfaces_as_runtime_error() -> None:
+    """google.auth.default() raises DefaultCredentialsError on missing/invalid ADC.
+
+    Per the google-auth contract, "no ADC available" doesn't return
+    `(None, None)` — it raises `DefaultCredentialsError`. Before this
+    branch existed, that bare exception would propagate up and confuse
+    callers (the FastAPI error handler would see a DefaultCredentialsError
+    rather than the explicit RuntimeError naming every fix path). Pin
+    the conversion so the user always gets the actionable message.
+    """
+    from google.auth.exceptions import DefaultCredentialsError
+
+    with (
+        patch("google.auth.default", side_effect=DefaultCredentialsError("no ADC")),
+        pytest.raises(RuntimeError, match="GCP project ID is not configured"),
+    ):
+        _resolve_project_id()
+
+
 def test_resolver_caches_first_successful_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     # First call populates the cache via env var ...
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "cached-value")

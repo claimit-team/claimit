@@ -30,6 +30,24 @@ from src.notifier import maybe_send_confirmation_email
 
 logger = logging.getLogger(__name__)
 
+
+def _is_genai_teardown_attribute_error(exc: AttributeError) -> bool:
+    """True iff `exc` matches the known google-genai teardown bug signature.
+
+    The bug surfaces as `AttributeError: 'BaseApiClient' object has no
+    attribute '_async_httpx_client'` (or, post-2b patch, an attribute
+    error referencing the `aclose` cleanup path). Narrowing to this
+    signature prevents a bug somewhere else in the runner loop (a
+    typo in `event.is_final_response()`, an ADK shape change, …) from
+    being silently treated as a "successful extraction with broken
+    teardown" — which would have us returning a possibly-stale
+    `final_text` from a half-broken loop. Anything outside this
+    signature is re-raised so it bubbles up as a real ExtractorError.
+    """
+    message = repr(exc)
+    return "_async_httpx_client" in message or "aclose" in message
+
+
 # Install the defensive `BaseApiClient.aclose` patch (workaround for
 # upstream PR googleapis/python-genai#2243). Reassigns a class
 # method, so calling at module import is sufficient — every Gemini
@@ -283,8 +301,19 @@ async def _run_extractor_agent(email: EmailForExtraction) -> str | None:
         # async-auth path that attribute is None, so the cleanup raises
         # AttributeError. The error can propagate out of `runner.run_async`
         # because ADK keeps a reference to the cached Gemini client across
-        # the async-for loop. Two-mode recovery, decided by whether the
-        # Gemini call actually completed BEFORE teardown ran:
+        # the async-for loop.
+        #
+        # NARROW the rescue to ONLY this signature — see
+        # `_is_genai_teardown_attribute_error`. A bare `except AttributeError`
+        # would silently mislabel an unrelated bug (typo in
+        # `event.is_final_response()`, ADK API shape change, …) as a
+        # successful-but-untorn-down extraction and return the
+        # possibly-stale `final_text`. That class of false-recovery is
+        # worse than the original problem.
+        if not _is_genai_teardown_attribute_error(exc):
+            raise
+        # Two-mode recovery, decided by whether the Gemini call actually
+        # completed BEFORE teardown ran:
         #   - Scenario A (final_text captured): the model returned a real
         #     response; only cleanup failed. Recover by returning the
         #     captured text. This is the expected case once the root cause
@@ -324,6 +353,12 @@ async def _run_extractor_agent(email: EmailForExtraction) -> str | None:
     #   - True  + AttributeError caught   => Scenario A (recovered)
     #   - False + AttributeError caught   => Scenario B (root cause needs fixing)
     # See commit 2a / 2b plan notes for the decision tree.
+    #
+    # Deliberately NO `final_text_preview` field — the model output is
+    # purchase content (product names, order IDs, prices, etc.) and we
+    # do not want any of it landing in Cloud Logging. The boolean +
+    # length carry every diagnostic signal we need to disambiguate
+    # Scenario A vs B without leaking extraction payload.
     logger.info(
         "extractor.runner_loop_exit",
         extra={
@@ -331,7 +366,6 @@ async def _run_extractor_agent(email: EmailForExtraction) -> str | None:
             "session_id": session_id,
             "final_text_captured": final_text is not None,
             "final_text_len": len(final_text) if final_text else 0,
-            "final_text_preview": (final_text[:120] if final_text else None),
         },
     )
     return final_text
@@ -419,7 +453,11 @@ async def _run_extractor_agent_blob(*, data: bytes, mime_type: str) -> str | Non
         # that function's matching block for the full Scenario A vs B
         # explanation. Twin guard required because vision and email
         # paths both go through their own ADK Runner instance with its
-        # own genai client lifecycle.
+        # own genai client lifecycle. The narrowing predicate is the
+        # same: only rescue the known teardown signature, re-raise
+        # everything else so unrelated bugs surface as real errors.
+        if not _is_genai_teardown_attribute_error(exc):
+            raise
         logger.warning(
             "extractor.attribute_error_caught",
             extra={
@@ -442,6 +480,8 @@ async def _run_extractor_agent_blob(*, data: bytes, mime_type: str) -> str | Non
         )
         raise ExtractorError("genai async client teardown error with no result captured") from exc
 
+    # See email path for the rationale on the dropped `final_text_preview`
+    # field — same PII concern, same boolean+length diagnostic surface.
     logger.info(
         "extractor.runner_loop_exit",
         extra={
@@ -449,7 +489,6 @@ async def _run_extractor_agent_blob(*, data: bytes, mime_type: str) -> str | Non
             "session_id": session_id,
             "final_text_captured": final_text is not None,
             "final_text_len": len(final_text) if final_text else 0,
-            "final_text_preview": (final_text[:120] if final_text else None),
         },
     )
     return final_text

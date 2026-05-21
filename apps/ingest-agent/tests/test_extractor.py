@@ -515,6 +515,37 @@ def test_attribute_error_with_no_final_response_raises(
 
 
 @pytest.mark.parametrize("path", ["email", "blob"])
+def test_unrelated_attribute_error_is_reraised_not_rescued(
+    monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    """An AttributeError that ISN'T the genai teardown bug must NOT be rescued.
+
+    Pre-narrowing the predicate, any `AttributeError` raised inside the
+    runner loop would be treated as the genai teardown bug. A typo in
+    `event.is_final_response()` or an ADK API shape change would then
+    be silently swallowed and the function would either return None
+    (Scenario B) or a stale final_text — both worse than just crashing.
+    Pin the re-raise behavior so the narrowing predicate can't regress.
+    """
+
+    class UnrelatedAttributeErrorRunner:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def run_async(self, **_kwargs: object):
+            raise AttributeError("'SomethingElse' object has no attribute 'totally_unrelated'")
+            yield  # never reached — keeps the runtime happy that this is an async generator
+
+    monkeypatch.setattr(extractor, "Runner", UnrelatedAttributeErrorRunner)
+
+    with pytest.raises(AttributeError, match="totally_unrelated"):
+        if path == "email":
+            asyncio.run(extractor._run_extractor_agent(_sample_email()))
+        else:
+            asyncio.run(extractor._run_extractor_agent_blob(data=b"x", mime_type="application/pdf"))
+
+
+@pytest.mark.parametrize("path", ["email", "blob"])
 def test_runner_loop_exit_log_fires_with_captured_text(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, path: str
 ) -> None:

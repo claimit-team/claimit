@@ -54,9 +54,23 @@ def _resolve_project_id() -> str:
 
     # Local import: google.auth pulls in a non-trivial dependency graph and
     # we want module import to stay cheap for tests that never publish.
+    # We import DefaultCredentialsError alongside `default` because the
+    # google.auth contract is: missing OR invalid ADC raises
+    # DefaultCredentialsError; it does NOT return `(None, None)` in the
+    # missing-credentials case. Treating that raise as a "fall through to
+    # the no-creds path" gives the operator the same RuntimeError message
+    # as the all-env-vars-unset case, which names every fix path.
     import google.auth
+    from google.auth.exceptions import DefaultCredentialsError
 
-    _, ambient = google.auth.default()
+    try:
+        _, ambient = google.auth.default()
+    except DefaultCredentialsError as exc:
+        raise RuntimeError(
+            "GCP project ID is not configured. Set GOOGLE_CLOUD_PROJECT or "
+            "GCP_PROJECT_ID, or run with Application Default Credentials."
+        ) from exc
+
     if ambient:
         logger.info(
             "GCP project resolved via google.auth.default() (no env var set): %s",

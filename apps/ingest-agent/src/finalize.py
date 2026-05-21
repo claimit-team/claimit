@@ -339,6 +339,30 @@ async def finalize_purchase_extraction_failure(
         )
         return
 
+    # Redelivery clobber guard. Pub/Sub at-least-once + the handler's
+    # own retry budget means the rescue path can be re-entered after a
+    # successful finalize has already populated this doc with real
+    # extracted fields (push redelivery during a tail-end ack, slow
+    # downstream call timing out the original handler invocation while
+    # the doc write succeeded, …). Without this guard the rescue would
+    # over-write a real result with `overall_min=0.01` and silently
+    # demote a perfectly good extraction to manual-fill.
+    #
+    # The discriminator: the upload sentinel writes
+    # `extraction_confidence.overall_min == 0.0`. ANY finalize — happy
+    # path or this very rescue — moves it off zero (>=0.01). So if
+    # what's on disk is no longer the sentinel, somebody already
+    # finalized this purchase and we must NOT touch it.
+    confidence = purchase.extraction_confidence
+    overall_min = getattr(confidence, "overall_min", None) if confidence is not None else None
+    if overall_min is not None and overall_min > 0.0:
+        logger.info(
+            "finalize_purchase_extraction_failure: already finalized, skipping rescue purchase_id=%s overall_min=%s",
+            purchase_id,
+            overall_min,
+        )
+        return
+
     # Minimal confidence payload: keep `price` / `platform` aligned with
     # the upload sentinel (0.0) and only nudge `overall_min` off zero so
     # the FE's "still analyzing" poll exits. Every other confidence key
