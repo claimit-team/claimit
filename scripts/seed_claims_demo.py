@@ -374,12 +374,30 @@ _PENDING_SPECS: list[
         },
     ),
     (
+        # `mostly-failed` exercises the neutral "Couldn't extract most
+        # details, please fill in manually" banner copy. Pre-fix the
+        # row's confidence scores were honestly low but every field
+        # carried a fully populated value (Instant Pot, $89.00, real
+        # order_id) — which contradicted the banner: the form opened
+        # pre-filled with believable extracted data while the banner
+        # claimed the extraction failed. Now match the banner's claim:
+        #   - product_name = ""   (Purchase.product_name is `str` with
+        #     no min_length — empty round-trips through the validator)
+        #   - order_id     = ""   (same model contract)
+        #   - price_paid   = 0.01 (Purchase.price_paid is `gt=0`, so
+        #     0.01 is the smallest VALID sentinel — same value the
+        #     upload sentinel writes when ingesting a receipt for
+        #     extraction; reusing it keeps the FE's "still analyzing"
+        #     vs "rescued" semantics consistent across surfaces)
+        # The form lands with three empty / sentinel fields the user
+        # must actually fill in, which is the experience the banner
+        # was always describing.
         "mostly-failed",
         Platform.WALMART,
         Category.RETAIL,
-        "Instant Pot Duo 6qt",
-        89.00,
-        "WMT-9982002-0011",
+        "",
+        0.01,
+        "",
         "sample-receipt.jpg",
         IngestionSource.UPLOAD_IMAGE,
         {
