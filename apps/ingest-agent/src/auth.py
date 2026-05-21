@@ -55,16 +55,31 @@ def _expected_pusher_email() -> str:
 def _expected_audience(request: Request) -> str:
     """The token's `aud` is whatever URL Pub/Sub was configured to push to.
 
-    We reconstruct that from the incoming request. `request.url` includes
-    the query string in some clients; Pub/Sub never sends one on the
-    push endpoint, so trimming is unnecessary for correctness, but we
-    do it anyway for defense in depth (a future routing tweak that adds
-    a query param shouldn't quietly invalidate every token).
+    We reconstruct that from the incoming request, but with one critical
+    twist for Cloud Run: the load balancer terminates TLS and forwards
+    plain HTTP to the container, so `request.url.scheme` is "http" even
+    when the public-facing call was https. Pub/Sub minted the token
+    against the https push_endpoint, so we'd get a wrong-audience 401
+    if we trusted the in-container scheme.
+
+    `X-Forwarded-Proto` is the documented way Cloud Run (and any sane
+    HTTPS-terminating proxy) tells us what the original scheme was.
+    When it's present we substitute it onto request.url; when it's
+    absent we fall back to request.url as-is, which is correct for
+    local dev (uvicorn directly serving HTTP or HTTPS) and unit tests
+    that build a synthetic ASGI scope.
+
+    Query string is stripped defensively — Pub/Sub never adds one to
+    the push endpoint, but a future routing tweak shouldn't be able
+    to silently invalidate every token.
     """
-    url = str(request.url)
-    if "?" in url:
-        url = url.split("?", 1)[0]
-    return url
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    url = (
+        request.url.replace(scheme=forwarded_proto, query="")
+        if forwarded_proto
+        else request.url.replace(query="")
+    )
+    return str(url)
 
 
 def _extract_bearer_token(request: Request) -> str:

@@ -86,20 +86,42 @@ def test_handler_invalid_payload_returns_200_with_error_reason() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _make_request(headers: dict[str, str], url: str = "http://test/pubsub/gmail-inbound"):
-    """Construct a minimal FastAPI Request stand-in via the test client."""
-    # auth.verify_pubsub_oidc only reads request.headers and request.url, so
-    # a Starlette Request built from a fake ASGI scope is sufficient.
+def _make_request(
+    headers: dict[str, str],
+    *,
+    scheme: str = "http",
+    host: str = "test",
+):
+    """Construct a minimal FastAPI Request stand-in via a fake ASGI scope.
+
+    Default `scheme="http"` mirrors what Cloud Run actually delivers to the
+    container: the load balancer terminates TLS and forwards plain HTTP.
+    Tests simulating a direct HTTPS server (no proxy) can pass
+    `scheme="https"`. The original Stage-3 prod bug was that this helper
+    defaulted to "https" with no X-Forwarded-Proto, masking the real
+    Cloud Run scheme and letting the audience-derivation bug ship.
+
+    Always injects a Host header so request.url is built from the header
+    (no port) rather than from the synthetic server tuple (which Starlette
+    decorates with `:443` for non-default ports). That matches what Pub/Sub
+    actually sends and lets the test's audience assertion equal the
+    audience Pub/Sub mints in production.
+    """
     from starlette.requests import Request as StarletteRequest
+
+    # Caller-provided Host header wins; otherwise inject one matching `host`.
+    merged_headers = {**headers}
+    if not any(k.lower() == "host" for k in merged_headers):
+        merged_headers["host"] = host
 
     scope = {
         "type": "http",
         "method": "POST",
-        "scheme": "https",
+        "scheme": scheme,
         "server": ("test", 443),
         "path": "/pubsub/gmail-inbound",
         "query_string": b"",
-        "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
+        "headers": [(k.lower().encode(), v.encode()) for k, v in merged_headers.items()],
         "root_path": "",
     }
     return StarletteRequest(scope)
@@ -193,12 +215,28 @@ async def test_verify_pubsub_oidc_rejects_unverified_email(
 
 
 @pytest.mark.asyncio
-async def test_verify_pubsub_oidc_accepts_valid_token(
+async def test_verify_pubsub_oidc_uses_x_forwarded_proto_for_audience(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Production scenario: Cloud Run terminates TLS at the LB and forwards
+    plain HTTP to the container, but sets X-Forwarded-Proto: https. The
+    OIDC token's audience is the https push_endpoint, so the verifier
+    must reconstruct the audience using the forwarded scheme — not the
+    in-container http scheme — or Pub/Sub pushes 401 in prod.
+
+    This test pins the regression we shipped at the original 4.15 PR:
+    audience was derived from raw request.url.scheme="http", and Pub/Sub
+    tokens with aud=https://... were rejected as "wrong audience".
+    """
     monkeypatch.delenv("PUBSUB_AUTH_DISABLED", raising=False)
     monkeypatch.setenv("GCP_PROJECT_ID", "test-project")
-    req = _make_request(headers={"Authorization": "Bearer faketoken"})
+    req = _make_request(
+        headers={
+            "Authorization": "Bearer faketoken",
+            "X-Forwarded-Proto": "https",
+        },
+        scheme="http",  # explicit: mirrors Cloud Run in-container behavior
+    )
 
     with patch.object(
         auth.id_token,
@@ -206,22 +244,47 @@ async def test_verify_pubsub_oidc_accepts_valid_token(
         return_value={
             "email": "pubsub-pusher@test-project.iam.gserviceaccount.com",
             "email_verified": True,
-            "aud": "http://test/pubsub/gmail-inbound",
+            "aud": "https://test/pubsub/gmail-inbound",
         },
     ) as mock_verify:
         # Should not raise.
         await auth.verify_pubsub_oidc(req)
 
-    # Pin the call shape so a future refactor that drops the audience kwarg
-    # (and silently accepts any token from any service) fails loudly here.
     mock_verify.assert_called_once()
     call_args = mock_verify.call_args
     assert call_args.args[0] == "faketoken"
-    # `audience` is derived from request.url — proves the runtime-derived
-    # audience logic actually wires through, not just that the function
-    # was called. Scheme is https because _make_request's scope sets
-    # "scheme": "https" (matching what Cloud Run / Pub/Sub use in prod).
+    # Must be the *forwarded* scheme. If this assertion ever flips back
+    # to http://, OIDC verification will 401 every Pub/Sub push in prod.
     assert call_args.kwargs["audience"] == "https://test/pubsub/gmail-inbound"
+
+
+@pytest.mark.asyncio
+async def test_verify_pubsub_oidc_no_proxy_falls_back_to_request_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No-proxy fallback (local dev, direct uvicorn HTTPS, test rigs):
+    when there's no X-Forwarded-Proto, request.url.scheme is authoritative.
+    """
+    monkeypatch.delenv("PUBSUB_AUTH_DISABLED", raising=False)
+    monkeypatch.setenv("GCP_PROJECT_ID", "test-project")
+    req = _make_request(
+        headers={"Authorization": "Bearer faketoken"},
+        scheme="https",  # direct HTTPS server, no proxy
+    )
+
+    with patch.object(
+        auth.id_token,
+        "verify_oauth2_token",
+        return_value={
+            "email": "pubsub-pusher@test-project.iam.gserviceaccount.com",
+            "email_verified": True,
+            "aud": "https://test/pubsub/gmail-inbound",
+        },
+    ) as mock_verify:
+        await auth.verify_pubsub_oidc(req)
+
+    mock_verify.assert_called_once()
+    assert mock_verify.call_args.kwargs["audience"] == "https://test/pubsub/gmail-inbound"
 
 
 @pytest.mark.asyncio
