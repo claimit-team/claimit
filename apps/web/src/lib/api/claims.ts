@@ -72,6 +72,15 @@ export type ClaimListItem = {
   submitted_at: string | null;
   resolved_at: string | null;
   redraft_count: number | null;
+  /**
+   * Ticket 5.15 / WI-7: surfaced on `queued_for_send` rows so the
+   * dashboard auto-send banner can render its countdown
+   * ("Sending in M:SS") on initial load without a second N+1 detail
+   * fetch. `null` for any other outcome (the field is only set on the
+   * queued path).
+   */
+  auto_send_at: string | null;
+  send_override: string | null;
   // Joined from Purchase (nullable for orphan claims).
   product_name: string | null;
   category: Category | string | null;
@@ -231,6 +240,14 @@ export type ClaimDetailDoc = {
   policy_clause_cited: string | null;
   evidence_screenshot_url: string | null;
   send_override: string | null;
+  /**
+   * Ticket 5.15 / WI-7: ISO timestamp of when the claim-agent's
+   * auto-send worker will (or did) submit this claim. Set on the
+   * queued path (handle_auto_mode) and cleared on cancel / approve.
+   * The claim-header's queued_for_send branch (WI-8) reads this to
+   * render the countdown.
+   */
+  auto_send_at: string | null;
   submitted_at: string | null;
   submitted_via: string | null;
   outcome: ClaimOutcome | string | null;

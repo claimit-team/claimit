@@ -366,6 +366,11 @@ export function buildClaimDetailViewModel(response: ClaimDetailResponse): ClaimD
     evidence: buildEvidence(response),
     purchase: buildPurchaseBlock(response),
     policy: buildPolicyBlock(response),
+    // WI-7: surface auto_send_at as-is so the queued_for_send claim
+    // header branch (WI-8) and any future detail-page banner can render
+    // the live countdown. Null when not queued — the header's branch
+    // guards on the value before computing MM:SS.
+    auto_send_at: claim.auto_send_at,
     ...resolution,
   };
 }

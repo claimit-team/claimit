@@ -142,6 +142,14 @@ export interface ClaimDetail {
    * `cancelled` branch as muted subtext.
    */
   cancel_reason?: string;
+  /**
+   * Ticket 5.15 / WI-7: ISO timestamp the auto-send worker will (or
+   * did) submit this claim. Set only while the claim is in
+   * `queued_for_send`; null/absent otherwise. Surfaced as a live
+   * MM:SS countdown by the claim-header's queued branch (WI-8) and
+   * by the dashboard auto-send banner (WI-9).
+   */
+  auto_send_at?: string | null;
 }
 
 export interface ClaimMessage {

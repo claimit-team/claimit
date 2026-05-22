@@ -142,6 +142,15 @@ _CLAIM_LIST_PROJECT_STAGE: dict[str, Any] = {
         "submitted_at": 1,
         "resolved_at": 1,
         "redraft_count": 1,
+        # Ticket 5.15 / WI-7: queued_for_send rows need `auto_send_at`
+        # + `send_override` for the dashboard's auto-send banner to
+        # render its countdown ("Sending in M:SS") and the
+        # Send-now/Cancel actions on initial load. Both fields are
+        # cheap scalars on the Claim doc; no extra join. Adding here
+        # vs. fetching detail-by-id avoids an N+1 against the banner's
+        # initial fetch.
+        "auto_send_at": 1,
+        "send_override": 1,
         "product_name": "$purchase.product_name",
         "category": "$purchase.category",
         "window_expires": "$purchase.window_expires",
@@ -185,6 +194,13 @@ class ClaimListItem(BaseModel):
     submitted_at: datetime | None = None
     resolved_at: datetime | None = None
     redraft_count: int | None = None
+    # Ticket 5.15 / WI-7: queued_for_send rows need `auto_send_at` +
+    # `send_override` for the dashboard auto-send banner countdown and
+    # action wiring. Both are read-tolerant — historical rows may not
+    # carry the values (set only on the queued path); `None` means
+    # "no queue marker, render no countdown".
+    auto_send_at: datetime | None = None
+    send_override: str | None = None
 
     # Joined from Purchase via $lookup.
     product_name: str | None = None
