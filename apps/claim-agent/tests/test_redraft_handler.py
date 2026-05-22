@@ -17,12 +17,11 @@ from src.validator import ValidationResult
 
 _USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 _CLAIM_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-_CONV_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 
 
 def _make_redraft_event(
     claim_id: str = _CLAIM_ID,
-    user_instruction: str = "make it friendlier",
+    feedback: str = "make it friendlier",
 ) -> dict:
     return {
         "schema_version": 1,
@@ -31,8 +30,7 @@ def _make_redraft_event(
         "event_type": "claim.redraft_requested",
         "user_id": _USER_ID,
         "claim_id": claim_id,
-        "conversation_id": _CONV_ID,
-        "user_instruction": user_instruction,
+        "feedback": feedback,
     }
 
 
@@ -299,12 +297,14 @@ async def test_redraft_validation_failure_escalation() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 6. user_instruction is passed through to the generator
+# 6. event.feedback is passed through to the generator (as `user_instruction`,
+#    which is the generator's downstream kwarg — different field name on each
+#    side of the event-to-generator boundary; see main.py:gen_kwargs comment).
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_redraft_user_instruction_passed_to_generator() -> None:
+async def test_redraft_feedback_passed_to_generator() -> None:
     mock_claim = _make_mock_claim(claim_type="email")
     mock_db = _make_mock_db(mock_claim)
     mock_draft = _make_mock_draft()
@@ -313,7 +313,7 @@ async def test_redraft_user_instruction_passed_to_generator() -> None:
     eval_result = _make_eval_result()
 
     instruction = "make it friendlier"
-    request = _make_mock_request(_pubsub_body(_make_redraft_event(user_instruction=instruction)))
+    request = _make_mock_request(_pubsub_body(_make_redraft_event(feedback=instruction)))
 
     with (
         patch("src.main.MongoDBClient", return_value=mock_db),
