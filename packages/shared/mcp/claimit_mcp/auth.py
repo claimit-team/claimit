@@ -86,11 +86,13 @@ class GoogleIDTokenAuth(httpx.Auth):
         # Created on first use so __init__ stays pickle-safe. After a
         # pickle round-trip _lock is absent from __dict__ (see
         # __getstate__) and this re-creates it on the restored instance.
-        lock = getattr(self, "_lock", None)
-        if lock is None:
-            lock = threading.Lock()
-            self._lock = lock
-        return lock
+        # dict.setdefault is atomic under CPython's GIL — concurrent
+        # first-callers race on the dict insert, not the lock identity,
+        # so they all end up with the same Lock instance. A read-then-
+        # write pattern would let two threads each create their own
+        # Lock, with the second write clobbering the first, and _refresh
+        # would then serialize on two different locks.
+        return self.__dict__.setdefault("_lock", threading.Lock())
 
     def __getstate__(self) -> dict:
         # Strip the unpicklable Lock; everything else (audience, cached

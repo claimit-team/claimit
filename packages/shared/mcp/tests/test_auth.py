@@ -224,3 +224,37 @@ def test_auth_is_cloudpickle_safe_for_agent_engine_deploy() -> None:
     # Lock must work on the restored instance — lazy recreation, not a no-op.
     with restored._get_lock():
         pass
+
+
+def test_get_lock_returns_same_instance_under_concurrent_first_calls() -> None:
+    """Regression: prevents 'two threads → two different Lock instances'
+    race in _get_lock. Concurrent first-callers must all get the same
+    Lock so _refresh actually serializes — a read-then-write pattern
+    would let the second writer clobber the first, leaving different
+    threads holding different locks. dict.setdefault is atomic under
+    CPython's GIL and closes that gap.
+
+    The Barrier forces all 8 threads to release simultaneously, so they
+    all enter _get_lock before any one of them returns — the contended
+    path is what the test is verifying."""
+    auth = GoogleIDTokenAuth(audience=_AUDIENCE)
+    locks: list[threading.Lock] = []
+    locks_lock = threading.Lock()
+    barrier = threading.Barrier(8)
+
+    def collect() -> None:
+        barrier.wait()  # release all 8 threads simultaneously
+        lock = auth._get_lock()
+        with locks_lock:
+            locks.append(lock)
+
+    threads = [threading.Thread(target=collect) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(locks) == 8
+    # All 8 threads must have gotten the same Lock instance.
+    assert all(lock is locks[0] for lock in locks)
+    assert len({id(lock) for lock in locks}) == 1
