@@ -175,9 +175,17 @@ export function ClaimHeader({
       case "cancelled":
         // Closed by user action — surface the cancel reason inline so
         // the user remembers why this claim is sitting on the list as
-        // "Cancelled" rather than "Window Closed".
+        // "Cancelled" rather than "Window Closed". Truncated with
+        // `max-w-[16rem]` + hover-tooltip so a long free-text reason
+        // doesn't push the breadcrumb / actions off-screen on
+        // narrower layouts (CodeRabbit MINOR, PR #168).
         return claim.cancel_reason !== undefined && claim.cancel_reason !== "" ? (
-          <span className="text-neutral-500 text-sm italic">Cancelled: {claim.cancel_reason}</span>
+          <span
+            className="max-w-[16rem] truncate text-neutral-500 text-sm italic"
+            title={`Cancelled: ${claim.cancel_reason}`}
+          >
+            Cancelled: {claim.cancel_reason}
+          </span>
         ) : null;
 
       default:

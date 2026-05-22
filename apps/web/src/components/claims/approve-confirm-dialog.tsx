@@ -28,6 +28,7 @@ import { Loader2, Send } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { isValidSelfServiceJson } from "@/components/claims/draft-parsers";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -116,6 +117,20 @@ export function ApproveConfirmDialog({
 
   const handleConfirm = async () => {
     if (isSubmitting) return;
+    // Pre-approve validation for dirty self-service drafts: when the
+    // reviewer clicks "Approve and send" with unsaved edits, the body
+    // includes `edited_draft_content` straight from the editor, which
+    // bypasses `DraftPane.handleSave`'s JSON shape guard. Apply the
+    // same guard here so malformed `self_service_walkthrough` JSON
+    // never makes it server-side (CodeRabbit MAJOR, PR #168).
+    if (
+      dirty &&
+      claim.claim_type === "self_service_walkthrough" &&
+      !isValidSelfServiceJson(editedDraftContent)
+    ) {
+      toast.error("Invalid walkthrough format — fix the JSON before approving");
+      return;
+    }
     setIsSubmitting(true);
     try {
       const body = dirty ? { edited_draft_content: editedDraftContent } : {};

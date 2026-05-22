@@ -152,6 +152,17 @@ function VersionDropdown({
   onVersionChange: (version: number) => void;
 }) {
   const totalVersions = versions.length;
+  // Empty-versions edge: render neutral, non-interactive copy so the
+  // header doesn't imply a real version exists (the empty-draft
+  // Alert in `renderPreview` already handles the user-facing
+  // message; CodeRabbit MINOR, PR #168).
+  if (totalVersions === 0) {
+    return (
+      <span className="inline-flex h-8 items-center px-2 font-medium text-neutral-500 text-sm">
+        No versions yet
+      </span>
+    );
+  }
   const selected = versions[selectedVersion - 1];
   const selectedSource = selected ? sourceLabel(selected.generated_by) : "";
   const selectedWhen = selected ? formatVersionTimestamp(selected.created_at) : "";

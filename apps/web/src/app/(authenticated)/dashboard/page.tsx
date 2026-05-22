@@ -513,17 +513,39 @@ type UpdateNeededItem = (typeof mockDashboardData.needsAttention)[number] & {
 type NeedsAttentionItem = ReviewDraftItem | UpdateNeededItem | ConfirmExtractionItem;
 
 /**
+ * `best_buy` → `Best Buy` (Title Case). `snakeToTitleLabel` is
+ * sentence-case (`Best buy`) and would visually disagree with the
+ * detail page's `safePlatformLabel` helper, so we duplicate the
+ * Title-Case logic locally rather than re-import (Bugbot LOW, PR
+ * #168 — dashboard / detail casing mismatch).
+ */
+function toPlatformLabel(raw: string | null | undefined): string {
+  if (raw === null || raw === undefined || raw === "") return "";
+  return raw
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+/**
  * Map an `outcome=draft_pending` claim row to the dashboard's
  * `ReviewDraftCard` shape. Falls back to neutral defaults so a
  * partial / read-tolerant row never crashes the section.
  */
 function buildReviewDraftItems(claims: ClaimListItem[]): ReviewDraftItem[] {
   return claims
-    .filter((c): c is ClaimListItem & { _id: string } => c._id !== null && c._id !== undefined)
+    .filter(
+      // Empty-string `_id` would generate a broken `/claims/` link
+      // and unstable React key — reject alongside null/undefined
+      // (CodeRabbit MINOR, PR #168).
+      (c): c is ClaimListItem & { _id: string } =>
+        typeof c._id === "string" && c._id.trim().length > 0,
+    )
     .map((c) => ({
       type: "review_draft" as const,
       claimId: c._id,
-      platform: snakeToTitleLabel(c.platform),
+      platform: toPlatformLabel(c.platform),
       title: c.product_name ?? "Untitled claim",
       claimType: typeof c.claim_type === "string" ? c.claim_type : "email",
       windowRemaining: formatWindowRemaining(c.window_expires),
