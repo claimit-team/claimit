@@ -277,3 +277,103 @@ export async function getClaimDetail(claimId: string): Promise<ClaimDetailRespon
     "Claim detail request failed",
   );
 }
+
+// ---------------------------------------------------------------------------
+// Write endpoints — approve / cancel / edit
+// ---------------------------------------------------------------------------
+//
+// All three mirror the request models in `apps/api-gateway/src/routes/claims.py`
+// (`ApproveClaimRequest`, `CancelClaimRequest`, `EditClaimDraftRequest`) and the
+// concrete return values in
+// `apps/api-gateway/src/services/claims_service.py`. 5.7 intentionally omits
+// `send_override` from the approve body — that toggle is wired in 5.15.
+//
+// Return-type alignment with the backend:
+//   - approveClaim → `{claim_id, submitted_at, submitted_via}` (small descriptor)
+//   - cancelClaim  → `{success: true}`
+//   - editClaimDraft → `{claim: <full refreshed claim doc>}` — NOT
+//     `{success: true}`. The page refetches after every write (single source of
+//     truth), so callers don't depend on this payload, but the type must match
+//     so future call sites don't trip on it.
+
+/**
+ * Request body for `POST /api/v1/claims/{id}/approve`. 5.7 omits
+ * `send_override` (5.15's toggle); only `edited_draft_content` is opt-in here.
+ */
+export type ApproveClaimBody = {
+  edited_draft_content?: string;
+};
+
+/**
+ * Response shape for `POST /api/v1/claims/{id}/approve` — see
+ * `apps/api-gateway/src/services/claims_service.py::approve_claim`. The
+ * downstream `claim.approved` Pub/Sub topic has no consumer yet (4.18 work),
+ * so `submitted_via` only reflects which path the gateway intended; the user
+ * sees an optimistic "Submitted" UI rather than a merchant confirmation.
+ */
+export type ApproveClaimResponse = {
+  claim_id: string;
+  submitted_at: string;
+  submitted_via: string | null;
+};
+
+export async function approveClaim(
+  claimId: string,
+  body: ApproveClaimBody = {},
+): Promise<ApproveClaimResponse> {
+  return _request<ApproveClaimResponse>(
+    `/api/v1/claims/${encodeURIComponent(claimId)}/approve`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    "Approve claim request failed",
+  );
+}
+
+export type CancelClaimBody = {
+  reason?: string;
+};
+
+export type CancelClaimResponse = {
+  success: true;
+};
+
+export async function cancelClaim(
+  claimId: string,
+  body: CancelClaimBody = {},
+): Promise<CancelClaimResponse> {
+  return _request<CancelClaimResponse>(
+    `/api/v1/claims/${encodeURIComponent(claimId)}/cancel`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    "Cancel claim request failed",
+  );
+}
+
+export type EditClaimDraftBody = {
+  draft_content: string;
+};
+
+export type EditClaimDraftResponse = {
+  claim: ClaimDetailDoc;
+};
+
+export async function editClaimDraft(
+  claimId: string,
+  body: EditClaimDraftBody,
+): Promise<EditClaimDraftResponse> {
+  return _request<EditClaimDraftResponse>(
+    `/api/v1/claims/${encodeURIComponent(claimId)}/edit`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    "Edit claim draft request failed",
+  );
+}
