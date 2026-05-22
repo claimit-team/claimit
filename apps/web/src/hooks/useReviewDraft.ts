@@ -1,0 +1,101 @@
+/**
+ * useReviewDraft — small, dedicated fetch for the dashboard's
+ * "Needs your attention" section (the `review_draft` cards).
+ *
+ * Mirrors the shape of `usePendingConfirmation` and
+ * `useMonitoredPurchases`:
+ *   - small fixed slice (5 rows by default), never paginated;
+ *   - no search/filter UI;
+ *   - non-blocking error state — the dashboard never blocks render.
+ *
+ * Scoped to `outcome=draft_pending` only. Surfaces the top-N claims
+ * the user can still approve/cancel/edit. When the call fails or
+ * returns zero, the dashboard simply omits the `review_draft` section
+ * (matches the `confirm_extraction` empty-state semantics) — we'd
+ * rather under-surface than render a fake error inside a multi-card
+ * section.
+ */
+
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+
+import { type ClaimListItem, ClaimsApiError, listClaims } from "@/lib/api/claims";
+import { useAuthStore } from "@/store";
+
+const DEFAULT_LIMIT = 5;
+
+type UseReviewDraftArgs = {
+  limit?: number;
+};
+
+type UseReviewDraftResult = {
+  claims: ClaimListItem[];
+  isLoading: boolean;
+  error: ClaimsApiError | null;
+  refetch: () => void;
+};
+
+export function useReviewDraft({
+  limit = DEFAULT_LIMIT,
+}: UseReviewDraftArgs = {}): UseReviewDraftResult {
+  const userId = useAuthStore((state) => state.user?._id ?? null);
+  const isAuthLoading = useAuthStore((state) => state.isLoading);
+
+  const [claims, setClaims] = useState<ClaimListItem[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<ClaimsApiError | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
+
+  const refetch = useCallback(() => {
+    setReloadTick((tick) => tick + 1);
+  }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadTick is an intentional refetch trigger; not read inside the effect body
+  useEffect(() => {
+    if (isAuthLoading) {
+      setIsLoading(true);
+      return;
+    }
+    if (!userId) {
+      setClaims([]);
+      setError(new ClaimsApiError("unauthenticated", "User must be signed in."));
+      setIsLoading(false);
+      return;
+    }
+
+    let mounted = true;
+    setIsLoading(true);
+    setError(null);
+
+    listClaims({ outcome: "draft_pending", limit })
+      .then((page) => {
+        if (!mounted) return;
+        setClaims(page.claims);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (!mounted) return;
+        if (err instanceof ClaimsApiError) {
+          setError(err);
+        } else {
+          setError(
+            new ClaimsApiError(
+              "unknown_error",
+              err instanceof Error ? err.message : "Unknown error",
+            ),
+          );
+        }
+      })
+      .finally(() => {
+        if (!mounted) return;
+        setIsLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [userId, isAuthLoading, limit, reloadTick]);
+
+  return { claims, isLoading, error, refetch };
+}
