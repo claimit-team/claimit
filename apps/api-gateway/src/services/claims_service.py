@@ -41,9 +41,12 @@ from claimit_mongodb_models import (
 from claimit_mongodb_models.enums import (
     ClaimOutcome,
     DraftGeneratedBy,
+    NotificationEntityType,
+    NotificationEventType,
     Platform,
     SendMode,
 )
+from claimit_mongodb_models.notification_helpers import write_notification_event
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..middleware.errors import ApiError
@@ -525,15 +528,29 @@ async def approve_claim(
     send_override: SendMode | None = None,
     edited_draft_content: str | None = None,
 ) -> dict[str, object]:
-    """Approve a draft claim — transitions outcome draft_pending → pending and
-    publishes claim.approved for the claim-agent to actually submit.
+    """Approve a draft claim — transitions outcome `(draft_pending |
+    queued_for_send) → pending` and publishes claim.approved for the
+    claim-agent to actually submit.
 
-    409 if the claim is not in DRAFT_PENDING state.
+    `queued_for_send` is accepted (ticket 5.15 / WI-6) so the
+    auto-send-queue's "Send now" button reuses this endpoint instead of
+    adding a dedicated route — same approve semantics, just an
+    additional pre-state. The `auto_send_at` queue marker is cleared on
+    both paths so the Cloud Scheduler worker (WI-10) cannot pick the
+    claim up after a manual send.
+
+    409 if the claim is in any other state. The race where the worker
+    auto-submits the same tick the user clicks "Send now" surfaces as
+    a 409 here; the FE banner treats that 409 as success ("already
+    sent") per WI-9 H3.
     """
     claim = await _load_owned_claim(db, claim_id, user_id)
     # `claim.outcome` is `str | None` on the tolerant model. Compare to
-    # the canonical enum value rather than the enum instance.
-    if claim.outcome != ClaimOutcome.DRAFT_PENDING.value:
+    # the canonical enum values rather than the enum instances.
+    if claim.outcome not in (
+        ClaimOutcome.DRAFT_PENDING.value,
+        ClaimOutcome.QUEUED_FOR_SEND.value,
+    ):
         raise ApiError(
             "claim_not_approvable",
             f"Claim cannot be approved in state {claim.outcome!r}",
@@ -545,10 +562,11 @@ async def approve_claim(
     # Two write paths:
     #
     # 1. No edited draft → plain `partial_update` over the scalar fields
-    #    (outcome / submitted_at / send_override). The `Claim` field
-    #    validations on these scalars run via `TypeAdapter` per-field; no
-    #    historical sub-document is read or rewritten. This is the
-    #    strict-on-write contract from the original §6 fix.
+    #    (outcome / submitted_at / send_override / auto_send_at-clear).
+    #    The `Claim` field validations on these scalars run via
+    #    `TypeAdapter` per-field; no historical sub-document is read or
+    #    rewritten. This is the strict-on-write contract from the
+    #    original §6 fix.
     #
     # 2. Edited draft → append the new `DraftVersion` via Mongo `$push`
     #    in the SAME write that $sets the scalars. `partial_update` with
@@ -564,6 +582,11 @@ async def approve_claim(
             "send_override": (send_override.value if send_override is not None else None),
             "submitted_at": now,
             "outcome": ClaimOutcome.PENDING.value,
+            # Clear the queue marker. Harmless when the claim came from
+            # `draft_pending` (the field was already null); load-bearing
+            # when it came from `queued_for_send` (the WI-10 scheduler
+            # filters on `auto_send_at <= now`, and we want it idle).
+            "auto_send_at": None,
         }
         success = await db.partial_update("claims", claim_id, updates, model=Claim)
     else:
@@ -590,12 +613,42 @@ async def approve_claim(
                 "send_override": (send_override.value if send_override is not None else None),
                 "submitted_at": now,
                 "outcome": ClaimOutcome.PENDING.value,
+                # Same auto_send_at clear as the plain-approve path; the
+                # queue marker must not survive a Send-now-with-edit.
+                "auto_send_at": None,
             },
             parent_model=Claim,
         )
     if not success:
         # Document deleted between read and write. Race; treat as 404.
         raise ApiError("claim_not_found", "Claim not found", status_code=404)
+
+    # Emit a `claim_submitted` NotificationEvent so the dashboard
+    # auto-send banner (and any other SSE consumer) gets the same
+    # event-driven "Sent ✓" signal whether the submission came from
+    # the scheduler worker (apps/claim-agent/src/main.py L487-L498
+    # already writes this on the auto path) or from a user clicking
+    # Send-now in the banner / claim header. Before this commit the
+    # Send-now path published `claim.approved` Pub/Sub but the topic
+    # has no subscriber yet (4.18 work), so no SSE signal would have
+    # reached the FE and the banner's "Sent ✓" would depend solely on
+    # an optimistic 0:00 flip. Writing the notification here closes
+    # that gap. Refund amount comes from the tolerant claim (may be
+    # null for degraded docs); submitted_via is unchanged on this
+    # write (claim-agent sets it downstream after the actual send) so
+    # it passes through as whatever the tolerant load saw.
+    await write_notification_event(
+        db=db,
+        user_id=str(claim.user_id) if claim.user_id is not None else "",
+        event_type=NotificationEventType.CLAIM_SUBMITTED,
+        entity_type=NotificationEntityType.CLAIM,
+        entity_id=str(claim_id),
+        data={
+            "claim_id": str(claim_id),
+            "submitted_via": claim.submitted_via,
+            "refund_amount": claim.claim_amount,
+        },
+    )
 
     # Build the Pub/Sub payload from the tolerant claim plus our just-written
     # mutations. `claim` is a `ClaimReadTolerant` so every field that was
@@ -676,12 +729,22 @@ async def cancel_claim(
     claim_id: UUID,
     reason: str | None = None,
 ) -> dict[str, object]:
-    """Cancel a claim. Allowed only if not yet submitted, OR within the
-    5-minute auto-send hold window (claim-agent honors auto_send_delay_seconds
-    before actually sending, so a recent PENDING in auto mode is still
-    cancellable).
+    """Cancel a claim. Allowed when:
+      - the claim is still DRAFT_PENDING (user hasn't approved), OR
+      - the claim is QUEUED_FOR_SEND (auto-send queue, ticket 5.15 /
+        WI-6) — clears `auto_send_at` so the scheduler worker can't
+        pick it up after the cancel, OR
+      - the claim is PENDING with `send_override == auto` and is
+        within the 5-minute auto-send hold window (claim-agent
+        honors auto_send_delay_seconds before actually dispatching,
+        so a recent PENDING-in-auto is still cancellable).
 
-    409 if the claim is past the cancellation window.
+    409 if the claim is past the cancellation window. The race where
+    the WI-10 scheduler auto-submits the same tick the user clicks
+    Cancel surfaces as a 409 here; the FE banner treats that 409 as
+    "already sent" (the user's intent was satisfied — they wanted to
+    stop a queue, but the queue already drained) and removes the
+    banner entry rather than showing an error toast (WI-9 H3).
     """
     claim = await _load_owned_claim(db, claim_id, user_id)
 
@@ -698,7 +761,11 @@ async def cancel_claim(
         and _to_utc(claim.submitted_at) is not None
         and (now - _to_utc(claim.submitted_at)) < _AUTO_SEND_CANCEL_WINDOW
     )
-    is_cancellable = claim.outcome == ClaimOutcome.DRAFT_PENDING.value or within_auto_window
+    is_cancellable = (
+        claim.outcome == ClaimOutcome.DRAFT_PENDING.value
+        or claim.outcome == ClaimOutcome.QUEUED_FOR_SEND.value
+        or within_auto_window
+    )
     if not is_cancellable:
         raise ApiError(
             "claim_not_cancellable",
@@ -713,6 +780,11 @@ async def cancel_claim(
             "outcome": ClaimOutcome.USER_CANCELLED.value,
             "outcome_note": reason,
             "resolved_at": now,
+            # Clear the queue marker for the `queued_for_send` cancel
+            # path. Harmless when the claim came from `draft_pending`
+            # (already null) or the auto-PENDING window (also null;
+            # the field is only set while queued, not after submit).
+            "auto_send_at": None,
         },
         model=Claim,
     )
