@@ -153,6 +153,7 @@ async def generate_in_store_guide(
     user_name: str = "Valued Customer",
     current_price: float | None = None,
     user_location: DefaultLocation | None = None,
+    user_instruction: str | None = None,
 ) -> ClaimDraft:
     query = f"{purchase.platform} price match in-store refund policy"
     try:
@@ -193,7 +194,7 @@ async def generate_in_store_guide(
         )
 
     raw_output = await _run_draft_agent(
-        str(purchase.platform), policy_clause, _build_in_store_agent
+        str(purchase.platform), policy_clause, _build_in_store_agent, user_instruction
     )
     output = _parse_in_store_guide_output(raw_output)
 

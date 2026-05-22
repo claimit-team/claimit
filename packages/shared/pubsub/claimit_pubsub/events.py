@@ -93,3 +93,19 @@ class PurchaseUploadedEvent(EventEnvelope):
     purchase_id: str
     receipt_storage_url: str
     content_type: Literal["application/pdf", "image/png", "image/jpeg"]
+
+
+TOPIC_CLAIM_REDRAFT_REQUESTED: str = "claim.redraft_requested"
+
+
+class ClaimRedraftRequestedEvent(EventEnvelope):
+    """Published by the assistant agent when a user asks to refine a draft.
+
+    Mirrors Attachment 2 §2.6. Subscribers: Claim Agent (redraft generation).
+    """
+
+    event_type: Literal["claim.redraft_requested"] = "claim.redraft_requested"
+    user_id: str
+    claim_id: str
+    conversation_id: str
+    user_instruction: str

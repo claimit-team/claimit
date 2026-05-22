@@ -230,6 +230,7 @@ async def generate_self_service_walkthrough(
     search_client: SearchClient,
     user_name: str = "Valued Customer",
     current_price: float | None = None,
+    user_instruction: str | None = None,
 ) -> ClaimDraft:
     platform = (
         purchase.platform.value.lower()
@@ -276,6 +277,7 @@ async def generate_self_service_walkthrough(
         platform,
         getattr(policy, "policy_text_relevant_clause", "") or "",
         _build_notes_agent,
+        user_instruction,
     )
     notes = _parse_notes(raw_notes, policy)
 

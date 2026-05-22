@@ -117,6 +117,7 @@ async def generate_chat_script(
     search_client: SearchClient,
     user_name: str = "Valued Customer",
     current_price: float | None = None,
+    user_instruction: str | None = None,
 ) -> ClaimDraft:
     query = f"{purchase.platform} price match guarantee refund eligibility"
     try:
@@ -132,7 +133,7 @@ async def generate_chat_script(
         policy_clause = policy.policy_text_relevant_clause
 
     raw_output = await _run_draft_agent(
-        str(purchase.platform), policy_clause, _build_chat_script_agent
+        str(purchase.platform), policy_clause, _build_chat_script_agent, user_instruction
     )
     draft_output = _parse_chat_script_output(raw_output)
 

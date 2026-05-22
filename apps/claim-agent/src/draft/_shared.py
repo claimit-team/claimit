@@ -75,17 +75,22 @@ def _fill_placeholders(
     return text
 
 
-def _build_user_message(platform: str, policy_clause: str) -> str:
-    return json.dumps(
-        {"platform": platform, "policy_clause": policy_clause},
-        ensure_ascii=False,
-    )
+def _build_user_message(
+    platform: str,
+    policy_clause: str,
+    user_instruction: str | None = None,
+) -> str:
+    payload: dict[str, str] = {"platform": platform, "policy_clause": policy_clause}
+    if user_instruction is not None:
+        payload["user_instruction"] = user_instruction
+    return json.dumps(payload, ensure_ascii=False)
 
 
 async def _run_draft_agent(
     platform: str,
     policy_clause: str,
     build_agent: Callable[[], Agent],
+    user_instruction: str | None = None,
 ) -> str | None:
     session_service = InMemorySessionService()
     session_id = f"draft-{uuid4()}"
@@ -106,7 +111,11 @@ async def _run_draft_agent(
     )
     message = types.Content(
         role="user",
-        parts=[types.Part.from_text(text=_build_user_message(platform, policy_clause))],
+        parts=[
+            types.Part.from_text(
+                text=_build_user_message(platform, policy_clause, user_instruction)
+            )
+        ],
     )
 
     final_text: str | None = None
