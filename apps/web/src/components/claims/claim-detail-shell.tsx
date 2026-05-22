@@ -1,23 +1,23 @@
 "use client";
 
 /**
- * /claims/[id] shell — viewer-only post-real-ification.
+ * /claims/[id] shell — three-pane approval flow (5.7).
  *
- * Write actions are NOT wired here. Approve / Cancel / Edit draft /
- * Send now / Mark submitted / Execute / Mark result render as
- * disabled buttons with "coming soon" tooltips in `ClaimHeader`. A
- * separate immediate follow-up PR will wire these to the real
- * endpoints, avoiding fake-success local-state mutations on real
- * production claims.
+ * The page owns the wire `ClaimDetailResponse` and exposes:
+ *   - `claim`             — the derived `ClaimDetail` view-model
+ *   - `refetch()`         — re-pulls server truth (single source of
+ *                            truth after every write)
+ *   - `applyOptimistic()` — shallow-merges a `Partial<ClaimDetailDoc>`
+ *                            into the wire `claim` so the UI updates
+ *                            before the network round-trip completes
  *
- * TODO(claims-detail-write-actions): wire the disabled actions to:
- *   - POST /api/v1/claims/:id/approve   (header "Approve and send")
- *   - POST /api/v1/claims/:id/cancel    (header "Cancel claim" / "Cancel")
- *   - PUT  /api/v1/claims/:id/edit      (header "Edit draft" / "Review")
- *   - <no endpoint yet>                 (MarkResultSection — manual
- *                                        outcome marking; not rendered
- *                                        on real data until a backend
- *                                        endpoint exists)
+ * The shell threads these through to `ClaimHeader`, `DraftPane`, and
+ * `AssistantPane`. WI-3 (edit/save) and WI-6/7 (approve/cancel)
+ * consume them; WI-2 only sets up the plumbing.
+ *
+ * AssistantPane receives `refetch` but doesn't call it in 5.7 — the
+ * 5.9 seam comment marks where assistant→draft redraft sync will
+ * hook in.
  */
 
 import { useEffect, useState } from "react";
@@ -29,22 +29,20 @@ import { EvidencePane } from "@/components/claims/evidence-pane";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import type { ClaimDetailDoc } from "@/lib/api/claims";
 import type { ClaimDetail } from "@/lib/claim-detail-types";
 import { useUIStore } from "@/store";
 
 interface ClaimDetailShellProps {
-  /**
-   * The view-model claim (built from `getClaimDetail` ->
-   * `buildClaimDetailViewModel`). Treated as a read-only snapshot;
-   * the shell never mutates it — write actions are disabled until
-   * the follow-up PR wires real endpoints (see top-of-file TODO).
-   */
-  initialClaim: ClaimDetail;
+  /** Derived view-model (built from the page-owned wire response). */
+  claim: ClaimDetail;
+  /** Re-pull server truth; pair with `applyOptimistic` in write paths. */
+  refetch: () => Promise<void>;
+  /** Shallow-merge a partial wire claim and re-derive the VM. */
+  applyOptimistic: (patch: Partial<ClaimDetailDoc>) => void;
 }
 
-export function ClaimDetailShell({ initialClaim }: ClaimDetailShellProps) {
-  const claim = initialClaim;
-
+export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetailShellProps) {
   const [paneMax, setPaneMax] = useState<"draft" | "evidence" | null>(null);
   const [mobileTab, setMobileTab] = useState<"draft" | "evidence" | "assistant">("draft");
   const [tabletTab, setTabletTab] = useState<"evidence" | "assistant">("evidence");
@@ -99,7 +97,12 @@ export function ClaimDetailShell({ initialClaim }: ClaimDetailShellProps) {
     return (
       <ResizablePanelGroup orientation="horizontal" className="h-full">
         <ResizablePanel defaultSize={defaultSizes[0]} minSize={20}>
-          <DraftPane claim={claim} onDoubleClickHeader={toggleHorizontalMax} />
+          <DraftPane
+            claim={claim}
+            refetch={refetch}
+            applyOptimistic={applyOptimistic}
+            onDoubleClickHeader={toggleHorizontalMax}
+          />
         </ResizablePanel>
 
         <ResizableHandle withHandle />
@@ -115,6 +118,7 @@ export function ClaimDetailShell({ initialClaim }: ClaimDetailShellProps) {
             <ResizablePanel defaultSize={rightBottom} minSize={15}>
               <AssistantPane
                 claimId={claim.claim_id}
+                refetch={refetch}
                 onDoubleClickHeader={() => {
                   toggleEmbedded();
                   setPaneMax(null);
@@ -131,7 +135,7 @@ export function ClaimDetailShell({ initialClaim }: ClaimDetailShellProps) {
     return (
       <ResizablePanelGroup orientation="horizontal" className="h-full">
         <ResizablePanel defaultSize={50} minSize={30}>
-          <DraftPane claim={claim} />
+          <DraftPane claim={claim} refetch={refetch} applyOptimistic={applyOptimistic} />
         </ResizablePanel>
 
         <ResizableHandle withHandle />
@@ -156,7 +160,7 @@ export function ClaimDetailShell({ initialClaim }: ClaimDetailShellProps) {
               <EvidencePane claim={claim} />
             </TabsContent>
             <TabsContent value="assistant" className="m-0 flex-1 overflow-hidden">
-              <AssistantPane claimId={claim.claim_id} />
+              <AssistantPane claimId={claim.claim_id} refetch={refetch} />
             </TabsContent>
           </Tabs>
         </ResizablePanel>
@@ -185,13 +189,13 @@ export function ClaimDetailShell({ initialClaim }: ClaimDetailShellProps) {
           </TabsList>
         </div>
         <TabsContent value="draft" className="m-0 flex-1 overflow-hidden">
-          <DraftPane claim={claim} />
+          <DraftPane claim={claim} refetch={refetch} applyOptimistic={applyOptimistic} />
         </TabsContent>
         <TabsContent value="evidence" className="m-0 flex-1 overflow-hidden">
           <EvidencePane claim={claim} />
         </TabsContent>
         <TabsContent value="assistant" className="m-0 flex-1 overflow-hidden">
-          <AssistantPane claimId={claim.claim_id} />
+          <AssistantPane claimId={claim.claim_id} refetch={refetch} />
         </TabsContent>
       </Tabs>
     );
@@ -199,17 +203,7 @@ export function ClaimDetailShell({ initialClaim }: ClaimDetailShellProps) {
 
   return (
     <div className="flex h-[calc(100dvh-4rem)] flex-col overflow-hidden">
-      <ClaimHeader claim={claim} />
-
-      {/*
-        FIXME(claims-detail-write-actions): MarkResultSection was
-        previously rendered when `claim.status === "submitted"`. It
-        accepted a manual outcome (approved/denied + amount/reason)
-        and mutated local state only — there is no backend endpoint
-        for "manually mark outcome" today, so on real data this
-        would have been a misleading fake action. Re-enable when a
-        real endpoint exists.
-      */}
+      <ClaimHeader claim={claim} refetch={refetch} applyOptimistic={applyOptimistic} />
 
       <div className="min-h-0 flex-1 overflow-hidden bg-neutral-50">
         {isDesktop ? renderDesktopLayout() : isTablet ? renderTabletLayout() : renderMobileLayout()}

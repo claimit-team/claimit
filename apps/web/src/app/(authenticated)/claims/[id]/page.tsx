@@ -21,14 +21,18 @@
  * pages behave consistently.
  */
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
 
 import { ClaimDetailShell } from "@/components/claims/claim-detail-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ClaimsApiError, getClaimDetail } from "@/lib/api/claims";
-import type { ClaimDetail } from "@/lib/claim-detail-types";
+import {
+  type ClaimDetailDoc,
+  type ClaimDetailResponse,
+  ClaimsApiError,
+  getClaimDetail,
+} from "@/lib/api/claims";
 import { buildClaimDetailViewModel } from "@/lib/claim-detail-view";
 import { useAuthStore } from "@/store";
 
@@ -36,23 +40,77 @@ type ClaimDetailRouteProps = {
   params: Promise<{ id: string }>;
 };
 
+/**
+ * The page owns the *wire* `ClaimDetailResponse` (not the view-model)
+ * so write callers can optimistically patch the underlying `claim`
+ * fields and have the VM auto-derive on the next render. Mirrors the
+ * `/confirm/:id` loader pattern (page owns the wire bundle; children
+ * receive the derived render shape).
+ */
 type LoadState =
   | { status: "loading" }
-  | { status: "ready"; vm: ClaimDetail }
+  | { status: "ready"; wire: ClaimDetailResponse }
   | { status: "notFound" }
   | { status: "error"; message: string };
 
 export default function ClaimDetailPage({ params }: ClaimDetailRouteProps) {
-  // `use(params)` unwraps the Next 15+ Promise-based dynamic-segment
-  // value on the client (matches PR1's purchase detail).
   const { id } = use(params);
   const isAuthLoading = useAuthStore((state) => state.isLoading);
   const userId = useAuthStore((state) => state.user?._id ?? null);
 
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [reloadTick, setReloadTick] = useState(0);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadTick is an intentional refetch trigger; not read inside the effect body
+  /**
+   * Refetch the enriched detail bundle and replace the wire state.
+   * Used by write handlers (approve / cancel / edit) to reconcile
+   * optimistic patches with server truth. Intentionally does NOT
+   * flip back to "loading" — the previous wire stays visible so the
+   * UI doesn't flash a skeleton between optimistic + server states.
+   */
+  const refetch = useCallback(async () => {
+    if (isAuthLoading) return;
+    if (userId === null) {
+      setState({ status: "error", message: "User must be signed in." });
+      return;
+    }
+    try {
+      const wire = await getClaimDetail(id);
+      setState({ status: "ready", wire });
+    } catch (err: unknown) {
+      if (err instanceof ClaimsApiError && err.code === "claim_not_found") {
+        setState({ status: "notFound" });
+        return;
+      }
+      const message =
+        err instanceof ClaimsApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Unknown error";
+      setState({ status: "error", message });
+    }
+  }, [id, isAuthLoading, userId]);
+
+  /**
+   * Shallow-merge a `Partial<ClaimDetailDoc>` into the wire `claim`.
+   * The VM re-derives on the next render via `useMemo`. Always paired
+   * with `await refetch()` in `catch` (per WI write contract) so a
+   * failed server write reconciles back to server truth — never
+   * leave optimistic state hanging.
+   */
+  const applyOptimistic = useCallback((patch: Partial<ClaimDetailDoc>) => {
+    setState((prev) => {
+      if (prev.status !== "ready") return prev;
+      return {
+        ...prev,
+        wire: {
+          ...prev.wire,
+          claim: { ...prev.wire.claim, ...patch },
+        },
+      };
+    });
+  }, []);
+
   useEffect(() => {
     if (isAuthLoading) {
       setState({ status: "loading" });
@@ -69,15 +127,10 @@ export default function ClaimDetailPage({ params }: ClaimDetailRouteProps) {
     getClaimDetail(id)
       .then((response) => {
         if (!mounted) return;
-        const vm = buildClaimDetailViewModel(response);
-        setState({ status: "ready", vm });
+        setState({ status: "ready", wire: response });
       })
       .catch((err: unknown) => {
         if (!mounted) return;
-        // 404 (missing OR cross-user — the backend returns the same
-        // `claim_not_found` for both to avoid leaking existence) maps
-        // to the not-found state. Other failures (timeout, 5xx,
-        // network) get a retryable error message.
         if (err instanceof ClaimsApiError && err.code === "claim_not_found") {
           setState({ status: "notFound" });
           return;
@@ -94,7 +147,12 @@ export default function ClaimDetailPage({ params }: ClaimDetailRouteProps) {
     return () => {
       mounted = false;
     };
-  }, [id, isAuthLoading, userId, reloadTick]);
+  }, [id, isAuthLoading, userId]);
+
+  const vm = useMemo(
+    () => (state.status === "ready" ? buildClaimDetailViewModel(state.wire) : null),
+    [state],
+  );
 
   if (state.status === "loading") {
     return <ClaimDetailSkeleton />;
@@ -103,11 +161,12 @@ export default function ClaimDetailPage({ params }: ClaimDetailRouteProps) {
     return <ClaimDetailNotFound />;
   }
   if (state.status === "error") {
-    return (
-      <ClaimDetailError message={state.message} onRetry={() => setReloadTick((tick) => tick + 1)} />
-    );
+    return <ClaimDetailError message={state.message} onRetry={() => void refetch()} />;
   }
-  return <ClaimDetailShell initialClaim={state.vm} />;
+  if (vm === null) {
+    return <ClaimDetailSkeleton />;
+  }
+  return <ClaimDetailShell claim={vm} refetch={refetch} applyOptimistic={applyOptimistic} />;
 }
 
 // ---------------------------------------------------------------------------

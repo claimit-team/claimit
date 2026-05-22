@@ -15,6 +15,12 @@ import type { UIMessage, UIToolCall, WireConversationMessage } from "@/types/ass
 interface AssistantPaneProps {
   /** Claim id this conversation is scoped to. */
   claimId: string;
+  /**
+   * 5.9 seam: assistant redraft will call `refetch()` here to sync
+   * the draft pane after a successful assistant-driven draft mutation.
+   * Accepted in 5.7 so the prop interface is stable; not invoked yet.
+   */
+  refetch?: () => Promise<void>;
   onDoubleClickHeader?: () => void;
 }
 

@@ -25,11 +25,23 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import type { ClaimDetailDoc } from "@/lib/api/claims";
 import type { ClaimDetail, ClaimDetailDraftType } from "@/lib/claim-detail-types";
 import { cn } from "@/lib/utils";
 
 interface DraftPaneProps {
   claim: ClaimDetail;
+  /**
+   * Re-pull server truth. Consumed by WI-3 (edit/save) after the PUT
+   * /edit completes; accepted here so the prop interface is stable
+   * across the WI-2 plumbing commit.
+   */
+  refetch: () => Promise<void>;
+  /**
+   * Shallow-merge a partial wire claim. Consumed by WI-3 to push the
+   * new draft version into the wire state before the network round-trip.
+   */
+  applyOptimistic: (patch: Partial<ClaimDetailDoc>) => void;
   onDoubleClickHeader?: () => void;
 }
 
@@ -309,7 +321,12 @@ const claimTypeLabels: Record<ClaimDetailDraftType, string> = {
   self_service_walkthrough: "Self-Service Walkthrough",
 };
 
-export function DraftPane({ claim, onDoubleClickHeader }: DraftPaneProps) {
+export function DraftPane({
+  claim,
+  refetch: _refetch,
+  applyOptimistic: _applyOptimistic,
+  onDoubleClickHeader,
+}: DraftPaneProps) {
   const [selectedVersion, setSelectedVersion] = useState(claim.current_version);
   const baseline = claim.draft_versions[selectedVersion - 1]?.content ?? "";
 

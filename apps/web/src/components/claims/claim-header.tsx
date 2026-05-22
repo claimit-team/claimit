@@ -23,12 +23,24 @@ import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { ClaimDetailDoc } from "@/lib/api/claims";
 import { formatClaimCurrency, formatClaimRemainingTime } from "@/lib/claim-detail";
 import type { ClaimDetail, ClaimDetailWorkflowStatus } from "@/lib/claim-detail-types";
 import { cn } from "@/lib/utils";
 
 interface ClaimHeaderProps {
   claim: ClaimDetail;
+  /**
+   * Re-pull server truth. Consumed by WI-6 (approve) / WI-7 (cancel)
+   * after a write completes; accepted here so the prop interface is
+   * stable across the WI-2 plumbing commit.
+   */
+  refetch: () => Promise<void>;
+  /**
+   * Shallow-merge a partial wire claim. Consumed by WI-6/7 to flip
+   * the workflow state optimistically before the network round-trip.
+   */
+  applyOptimistic: (patch: Partial<ClaimDetailDoc>) => void;
 }
 
 // Tooltip copy per pending endpoint — kept top-level so future
@@ -83,7 +95,11 @@ function StatusBadge({ status }: { status: ClaimDetailWorkflowStatus }) {
   );
 }
 
-export function ClaimHeader({ claim }: ClaimHeaderProps) {
+export function ClaimHeader({
+  claim,
+  refetch: _refetch,
+  applyOptimistic: _applyOptimistic,
+}: ClaimHeaderProps) {
   const renderActions = () => {
     // The view-model maps backend `outcome` to UI workflow status per
     // `mapOutcomeToWorkflowStatus`; `queued_for_send` and
