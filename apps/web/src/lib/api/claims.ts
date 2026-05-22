@@ -102,7 +102,19 @@ export class ClaimsApiError extends Error {
   }
 }
 
-async function _request<T>(path: string, init: RequestInit, failureMessage: string): Promise<T> {
+/**
+ * Authenticated fetch helper. Returns the raw `Response` on success so
+ * callers can decode JSON OR a binary blob (the evidence-proxy endpoint
+ * streams PNG bytes — `.json()` would crash there).
+ *
+ * Mirrors lib/api/purchases.ts:_authedFetch so the JSON wrapper
+ * `_request` can stay focused on shape conversion.
+ */
+async function _authedFetch(
+  path: string,
+  init: RequestInit,
+  failureMessage: string,
+): Promise<Response> {
   if (!API_BASE_URL) {
     throw new ClaimsApiError("missing_api_base_url", "NEXT_PUBLIC_API_BASE_URL is not configured.");
   }
@@ -136,7 +148,13 @@ async function _request<T>(path: string, init: RequestInit, failureMessage: stri
   }
 
   if (!response.ok) {
-    let code = "request_failed";
+    // Default `code` derives from the HTTP status so callers can
+    // reliably match `err.code === "not_found"` on a 404 regardless of
+    // whether the server attached a structured JSON error body. Without
+    // this, a plain-text 404 (or one with a non-JSON body — e.g. a load
+    // balancer returning HTML) would leave `code` as the generic
+    // `request_failed`. Same shape as the receipt-proxy helper.
+    let code = response.status === 404 ? "not_found" : "request_failed";
     let message = `${failureMessage} (${response.status})`;
     try {
       const body = (await response.json()) as {
@@ -145,11 +163,16 @@ async function _request<T>(path: string, init: RequestInit, failureMessage: stri
       code = body.error?.code ?? code;
       message = body.error?.message ?? message;
     } catch {
-      // Non-JSON body; keep defaults.
+      // Non-JSON body (e.g. binary evidence with non-200) — keep defaults.
     }
     throw new ClaimsApiError(code, message);
   }
 
+  return response;
+}
+
+async function _request<T>(path: string, init: RequestInit, failureMessage: string): Promise<T> {
+  const response = await _authedFetch(path, init, failureMessage);
   return (await response.json()) as T;
 }
 
@@ -376,4 +399,48 @@ export async function editClaimDraft(
     },
     "Edit claim draft request failed",
   );
+}
+
+// ---------------------------------------------------------------------------
+// Evidence proxy — binary blob (ticket 5.8)
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of a successful evidence-proxy fetch. Caller is responsible for
+ * `URL.createObjectURL(blob)` + revoking the URL on unmount — same
+ * pattern as `ReceiptBlob` in lib/api/purchases.ts.
+ */
+export type EvidenceBlob = {
+  blob: Blob;
+  contentType: string;
+};
+
+/**
+ * GET /api/v1/claims/:id/evidence — fetch the price-drop screenshot bytes
+ * through the authenticated proxy. Returns `null` when the claim has no
+ * evidence (`evidence_screenshot_url` null, non-owner, blob gone,
+ * bucket mismatch, or malformed gs://) — the evidence card renders a
+ * calm "No evidence captured yet" fallback instead of an error.
+ *
+ * Maps 404 → `null` because the backend collapses every "no evidence"
+ * shape into a single 404 (never 403) to avoid existence leaks across
+ * users. Any other non-2xx surfaces as a ClaimsApiError. Mirrors
+ * `fetchReceiptBlob` exactly.
+ */
+export async function fetchEvidenceBlob(claimId: string): Promise<EvidenceBlob | null> {
+  try {
+    const response = await _authedFetch(
+      `/api/v1/claims/${encodeURIComponent(claimId)}/evidence`,
+      { method: "GET" },
+      "Evidence fetch failed",
+    );
+    const blob = await response.blob();
+    const contentType = response.headers.get("Content-Type") ?? blob.type ?? "";
+    return { blob, contentType };
+  } catch (err) {
+    if (err instanceof ClaimsApiError && err.code === "not_found") {
+      return null;
+    }
+    throw err;
+  }
 }

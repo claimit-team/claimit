@@ -8,9 +8,10 @@ import {
   Image as ImageIcon,
   Receipt,
   TrendingDown,
+  ZoomIn,
 } from "lucide-react";
 import Link from "next/link";
-import type { ElementType } from "react";
+import { type ElementType, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +23,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { ClaimsApiError, fetchEvidenceBlob } from "@/lib/api/claims";
 import { formatClaimCurrency } from "@/lib/claim-detail";
 import type { ClaimDetail } from "@/lib/claim-detail-types";
 
@@ -85,14 +87,131 @@ function formatDateShort(dateString: string): string {
   }).format(date);
 }
 
-function ScreenshotPlaceholder() {
-  return (
-    <div className="flex h-32 items-center justify-center rounded-lg border border-dashed border-neutral-300 bg-neutral-50">
-      <div className="text-center">
-        <ImageIcon className="mx-auto h-8 w-8 text-neutral-400" />
-        <span className="mt-1 text-neutral-400 text-xs">Price screenshot</span>
+/**
+ * Real price-drop screenshot loaded through the api-gateway evidence
+ * proxy (ticket 5.8 / WI-2). Mirrors the load+zoom shape of
+ * `components/confirm/receipt-preview.tsx`: blob → object URL → click
+ * to open a centered Dialog with the full-size image.
+ *
+ * The evidence bucket has `public_access_prevention=enforced`, so we
+ * always go through `GET /api/v1/claims/:id/evidence` rather than a
+ * signed URL (matches the receipt-proxy decision).
+ *
+ * States:
+ *   - `loading`  → skeleton.
+ *   - `missing`  → calm "No evidence captured yet" — fired when the
+ *     proxy returns null (no `evidence_screenshot_url`, blob gone,
+ *     bucket mismatch — every "no evidence" wire shape collapses into
+ *     a single 404, never 403, see services.claims_service).
+ *   - `error`    → compact retry surface.
+ *   - `ready`    → image + click-to-zoom Dialog.
+ *
+ * Object URLs are revoked on unmount AND on every retry (the cleanup
+ * runs before the next effect body) to avoid leaking the in-memory
+ * bitmap — same hygiene as receipt-preview's blob handling.
+ */
+type EvidenceLoadState =
+  | { kind: "loading" }
+  | { kind: "missing" }
+  | { kind: "error"; message: string }
+  | { kind: "ready"; url: string };
+
+function EvidenceScreenshot({ claimId, platform }: { claimId: string; platform: string }) {
+  const [state, setState] = useState<EvidenceLoadState>({ kind: "loading" });
+  const [zoomOpen, setZoomOpen] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
+  const altText = `${platform} price-drop screenshot`;
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `reloadTick` is the manual refetch trigger; it isn't read inside the effect body but its state change must re-run the fetch.
+  useEffect(() => {
+    let cancelled = false;
+    let createdUrl: string | null = null;
+    setState({ kind: "loading" });
+
+    fetchEvidenceBlob(claimId)
+      .then((result) => {
+        if (cancelled) return;
+        if (result === null) {
+          setState({ kind: "missing" });
+          return;
+        }
+        createdUrl = URL.createObjectURL(result.blob);
+        setState({ kind: "ready", url: createdUrl });
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message =
+          err instanceof ClaimsApiError ? err.message : "We couldn't load the price screenshot.";
+        setState({ kind: "error", message });
+      });
+
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [claimId, reloadTick]);
+
+  if (state.kind === "loading") {
+    return (
+      <div className="flex h-32 animate-pulse items-center justify-center rounded-lg border border-neutral-200 bg-neutral-100">
+        <ImageIcon className="h-8 w-8 text-neutral-300" aria-hidden />
       </div>
-    </div>
+    );
+  }
+
+  if (state.kind === "missing") {
+    return (
+      <div className="flex h-32 items-center justify-center rounded-lg border border-dashed border-neutral-300 bg-neutral-50">
+        <div className="text-center">
+          <ImageIcon className="mx-auto h-8 w-8 text-neutral-400" aria-hidden />
+          <span className="mt-1 text-neutral-400 text-xs">No evidence captured yet</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.kind === "error") {
+    return (
+      <div className="flex h-32 flex-col items-center justify-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-center">
+        <p className="text-neutral-600 text-xs">{state.message}</p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setReloadTick((t) => t + 1)}
+        >
+          Try again
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setZoomOpen(true)}
+        className="group relative w-full cursor-zoom-in overflow-hidden rounded-lg border border-neutral-200 bg-neutral-0 text-left"
+      >
+        {/* biome-ignore lint/performance/noImgElement: Object-URL preview backed by the api-gateway proxy fetch; next/image would force a remote loader on a blob: URL. */}
+        <img src={state.url} alt={altText} className="block h-32 w-full object-cover" />
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-neutral-950/0 transition-colors group-hover:bg-neutral-950/10">
+          <div className="rounded-full bg-neutral-0/90 p-2 opacity-0 shadow transition-opacity group-hover:opacity-100">
+            <ZoomIn className="h-4 w-4 text-neutral-700" aria-hidden />
+          </div>
+        </div>
+      </button>
+
+      <Dialog open={zoomOpen} onOpenChange={setZoomOpen}>
+        <DialogContent className="max-w-3xl" showCloseButton>
+          <DialogTitle className="sr-only">{altText}</DialogTitle>
+          <div className="flex max-h-[80vh] items-center justify-center overflow-auto p-4">
+            {/* biome-ignore lint/performance/noImgElement: Object-URL preview backed by the api-gateway proxy fetch. */}
+            <img src={state.url} alt={altText} className="h-auto w-full" />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -135,26 +254,7 @@ export function EvidencePane({ claim, onDoubleClickHeader }: EvidencePaneProps) 
                 </div>
               </div>
 
-              <Dialog>
-                <DialogTrigger
-                  render={<button type="button" className="w-full text-left outline-none" />}
-                >
-                  <ScreenshotPlaceholder />
-                </DialogTrigger>
-                <DialogContent className="max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle>Price Screenshot</DialogTitle>
-                  </DialogHeader>
-                  <div className="flex h-96 items-center justify-center rounded-lg border border-dashed border-neutral-300 bg-neutral-50">
-                    <div className="text-center">
-                      <ImageIcon className="mx-auto h-12 w-12 text-neutral-400" />
-                      <span className="mt-2 text-neutral-400 text-sm">
-                        Full price screenshot would appear here
-                      </span>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
+              <EvidenceScreenshot claimId={claim.claim_id} platform={claim.platform} />
 
               <div className="flex items-center justify-between text-neutral-500 text-xs">
                 <span>Source: {claim.platform}</span>
