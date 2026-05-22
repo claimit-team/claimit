@@ -55,6 +55,11 @@ import type {
  *
  * Mapping rules:
  *  - `draft_pending`        -> `awaiting_approval`
+ *  - `queued_for_send`      -> `queued_for_send` (NEW in 5.15 / WI-8 —
+ *                              live MM:SS countdown + Send now/Cancel
+ *                              actions; replaces the previous
+ *                              fall-through to awaiting_approval that
+ *                              hid the queue state from the header)
  *  - `pending`              -> `submitted` (in-flight to merchant)
  *  - `approved`             -> `approved`
  *  - `denied`               -> `denied`
@@ -68,6 +73,10 @@ import type {
  *                              "Cancelled" badge)
  *  - `user_self_service`    -> `expired` (CLOSED — user resolved
  *                              outside the funnel)
+ *  - `awaiting_approval`    -> `awaiting_approval` (read-tolerance:
+ *                              legacy docs from before 5.15 / WI-5
+ *                              may still carry this; same UI as a
+ *                              fresh draft_pending)
  *  - unknown / null         -> `awaiting_approval` (calm default;
  *                              same as a freshly-drafted claim)
  */
@@ -77,6 +86,8 @@ export function mapOutcomeToWorkflowStatus(
   switch (outcome) {
     case "draft_pending":
       return "awaiting_approval";
+    case "queued_for_send":
+      return "queued_for_send";
     case "pending":
       return "submitted";
     case "approved":

@@ -21,7 +21,7 @@
 
 import { AlertCircle, ArrowLeft, Check, Clock, Edit, Send, XCircle } from "lucide-react";
 import Link from "next/link";
-import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
+import { type KeyboardEvent, type MouseEvent, type ReactNode, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -95,17 +95,44 @@ function StatusBadge({ status }: { status: ClaimDetailWorkflowStatus }) {
   );
 }
 
+/**
+ * Live MM:SS countdown for the queued-for-send claim header branch.
+ * Recomputes once a second; floors at 0:00 so a late re-render after
+ * the scheduler fires shows "0:00" rather than a negative value.
+ *
+ * Re-running `setInterval` on every `autoSendAt` change cleanly
+ * cancels a stale interval if the user navigates between queued
+ * claims (claim-detail page can be reused across IDs).
+ */
+function useAutoSendCountdown(autoSendAt: string | null | undefined): string {
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (!autoSendAt) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [autoSendAt]);
+  if (!autoSendAt) return "0:00";
+  const target = new Date(autoSendAt).getTime();
+  if (Number.isNaN(target)) return "0:00";
+  const remainingMs = Math.max(0, target - now);
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
 export function ClaimHeader({
   claim,
   onClickEdit,
   onClickCancel,
   onClickApprove,
 }: ClaimHeaderProps) {
+  // Hook called unconditionally (rules-of-hooks). When the claim isn't
+  // queued the value is unused — `auto_send_at` will be null/absent
+  // and the hook returns "0:00" without firing an interval.
+  const countdown = useAutoSendCountdown(claim.auto_send_at);
+
   const renderActions = () => {
-    // `queued_for_send` and `ready_to_execute` are UI-only intermediate
-    // states never emitted by real data today; the `default: null` arm
-    // covers them and will gain real branches alongside 5.15's send-
-    // mode wiring.
     switch (claim.status) {
       case "awaiting_approval":
         return (
@@ -127,6 +154,36 @@ export function ClaimHeader({
             <Button size="sm" type="button" onClick={onClickApprove}>
               <Send className="mr-2 h-4 w-4" />
               Approve and send
+            </Button>
+          </>
+        );
+
+      case "queued_for_send":
+        // 5.15 / WI-8: the auto-send queue surface on the claim page
+        // itself — countdown drives urgency; Send now / Cancel reuse
+        // the same approve / cancel dialogs as the awaiting_approval
+        // branch so the gateway path is identical (Send-now from the
+        // banner OR the header both hit POST /approve, which accepts
+        // queued_for_send per WI-6).
+        return (
+          <>
+            <span className="flex items-center gap-1 text-neutral-700 text-sm tabular-nums">
+              <Clock className="h-4 w-4 text-semantic-warning" />
+              Sending in {countdown}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={onClickCancel}
+              className="text-semantic-danger"
+            >
+              <XCircle className="mr-2 h-4 w-4" />
+              Cancel
+            </Button>
+            <Button size="sm" type="button" onClick={onClickApprove}>
+              <Send className="mr-2 h-4 w-4" />
+              Send now
             </Button>
           </>
         );
