@@ -23,8 +23,9 @@ from uuid import UUID
 import pytest
 from claimit_mongodb_models import Claim, MongoDBClient, User
 from httpx import AsyncClient
-from src.deps import get_db, get_pubsub_publisher
+from src.deps import get_db, get_evidence_reader, get_pubsub_publisher
 from src.main import app
+from src.services.evidence_storage import EvidenceReader
 from src.services.pubsub_publisher import PubSubPublisher
 
 from ._fixtures import USER_FIXTURE, make_claim, make_purchase
@@ -71,9 +72,17 @@ def _override_db(db: MongoDBClient) -> None:
     app.dependency_overrides[get_db] = _override
 
 
+def _override_evidence_reader(reader: EvidenceReader) -> None:
+    async def _override() -> EvidenceReader:
+        return reader
+
+    app.dependency_overrides[get_evidence_reader] = _override
+
+
 def _clear_overrides() -> None:
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(get_pubsub_publisher, None)
+    app.dependency_overrides.pop(get_evidence_reader, None)
 
 
 # ---------------------------------------------------------------------------
@@ -1203,5 +1212,186 @@ async def test_edit_draft_rejected_when_not_draft_pending(client: AsyncClient) -
             )
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "claim_not_editable"
+    finally:
+        _clear_overrides()
+
+
+# ---------------------------------------------------------------------------
+# GET /claims/{id}/evidence — proxy (ticket 5.8)
+# ---------------------------------------------------------------------------
+
+_EVIDENCE_BUCKET = "test-evidence-bucket"
+
+
+def _claim_with_evidence(
+    *,
+    user_id: str = _USER_ID,
+    evidence_url: str | None = f"gs://{_EVIDENCE_BUCKET}/evidence/best_buy/sku123/2026.png",
+    outcome: str = "draft_pending",
+) -> Claim:
+    # `_claim_doc` already pins user_id/claim_id; route ownership-mismatch
+    # tests pass a different user via `make_claim` directly instead of
+    # this helper.
+    return Claim.model_validate(
+        make_claim(
+            user_id=user_id,
+            claim_id=_CLAIM_ID,
+            evidence_screenshot_url=evidence_url,
+            outcome=outcome,
+            submitted_at=None if outcome == "draft_pending" else "2026-05-10T12:00:00Z",
+            resolved_at=None,
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_evidence_proxy_streams_owner_blob(client: AsyncClient) -> None:
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), _claim_with_evidence()])
+    reader = AsyncMock(spec=EvidenceReader)
+    reader.bucket_name = _EVIDENCE_BUCKET
+    reader.download = AsyncMock(return_value=(b"\x89PNG\r\n\x1a\nfake", "image/png"))
+
+    _override_db(db)
+    _override_evidence_reader(reader)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_CLAIM_ID}/evidence",
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("image/png")
+        assert response.content == b"\x89PNG\r\n\x1a\nfake"
+        # The service parses gs://{bucket}/evidence/best_buy/sku123/2026.png →
+        # blob_path is everything after the bucket.
+        reader.download.assert_awaited_once_with(blob_path="evidence/best_buy/sku123/2026.png")
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_evidence_proxy_returns_404_for_non_owner(client: AsyncClient) -> None:
+    # _load_owned_claim filters on {_id, user_id} — a non-owner read yields
+    # None, surfaced as 404 (`claim_not_found`). Mirrors the
+    # `test_get_claim_detail_not_found` shape.
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), None])
+    reader = AsyncMock(spec=EvidenceReader)
+    reader.bucket_name = _EVIDENCE_BUCKET
+
+    _override_db(db)
+    _override_evidence_reader(reader)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_OTHER_CLAIM_ID}/evidence",
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 404
+        # Never reach GCS for a doc we don't own — same leak-prevention
+        # stance as the receipt proxy.
+        reader.download.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_evidence_proxy_returns_404_when_no_evidence_url(client: AsyncClient) -> None:
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), _claim_with_evidence(evidence_url=None)])
+    reader = AsyncMock(spec=EvidenceReader)
+    reader.bucket_name = _EVIDENCE_BUCKET
+
+    _override_db(db)
+    _override_evidence_reader(reader)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_CLAIM_ID}/evidence",
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 404
+        reader.download.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_evidence_proxy_returns_404_on_bucket_mismatch(client: AsyncClient) -> None:
+    # Stored URI points at a bucket we don't manage — refuse the read
+    # even though the SA might happen to have access. Defence-in-depth
+    # against a bad write (H1: TF env wiring uses the bucket name from
+    # google_storage_bucket.evidence.name so this should never fire in
+    # prod, but the guard is the contract).
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(
+        side_effect=[
+            _user_for_auth(),
+            _claim_with_evidence(evidence_url="gs://other-bucket/some/object.png"),
+        ]
+    )
+    reader = AsyncMock(spec=EvidenceReader)
+    reader.bucket_name = _EVIDENCE_BUCKET
+
+    _override_db(db)
+    _override_evidence_reader(reader)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_CLAIM_ID}/evidence",
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 404
+        reader.download.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_evidence_proxy_returns_404_on_malformed_gs_uri(client: AsyncClient) -> None:
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(
+        side_effect=[
+            _user_for_auth(),
+            _claim_with_evidence(evidence_url="not-a-gs-uri"),
+        ]
+    )
+    reader = AsyncMock(spec=EvidenceReader)
+    reader.bucket_name = _EVIDENCE_BUCKET
+
+    _override_db(db)
+    _override_evidence_reader(reader)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_CLAIM_ID}/evidence",
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 404
+        reader.download.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_evidence_proxy_returns_404_when_blob_missing(client: AsyncClient) -> None:
+    from src.services.evidence_storage import EvidenceObjectMissingError
+
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), _claim_with_evidence()])
+    reader = AsyncMock(spec=EvidenceReader)
+    reader.bucket_name = _EVIDENCE_BUCKET
+    reader.download = AsyncMock(side_effect=EvidenceObjectMissingError("missing"))
+
+    _override_db(db)
+    _override_evidence_reader(reader)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_CLAIM_ID}/evidence",
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 404
     finally:
         _clear_overrides()

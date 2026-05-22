@@ -291,6 +291,14 @@ module "api_gateway" {
     # future deploy doesn't wipe the temporary `gcloud run services update`.
     GOOGLE_CLOUD_PROJECT = var.project_id
     RECEIPTS_BUCKET      = google_storage_bucket.receipts.name
+    # Ticket 5.8: the GET /api/v1/claims/:id/evidence proxy reads
+    # price-drop screenshots from the evidence bucket (written by
+    # monitor-agent's screenshot service, ticket 4.12). Value is the
+    # TF resource attribute — never a hardcoded string — so the bucket
+    # name stays in lockstep with infra/terraform/storage.tf across
+    # envs. Matching api_gateway_evidence_reader IAM binding in
+    # storage.tf grants the read access this env enables.
+    EVIDENCE_BUCKET = google_storage_bucket.evidence.name
     # Ticket 4.15: the gmail-inbound topic api-gateway tells Gmail to
     # publish to during `users.watch`. The .id form yields the fully-
     # qualified `projects/<project>/topics/gmail-inbound` path Gmail

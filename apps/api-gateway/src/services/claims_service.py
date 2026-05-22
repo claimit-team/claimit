@@ -42,6 +42,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..middleware.errors import ApiError
 from ..middleware.pagination import decode_cursor, encode_cursor
+from .evidence_storage import EvidenceObjectMissingError, EvidenceReader
 from .pubsub_publisher import PubSubPublisher
 
 logger = logging.getLogger(__name__)
@@ -728,9 +729,81 @@ async def edit_claim_draft(
     return {"claim": refreshed.model_dump(mode="json", by_alias=True)}
 
 
+async def fetch_evidence_for_user(
+    *,
+    db: MongoDBClient,
+    evidence_reader: EvidenceReader,
+    user_id: UUID,
+    claim_id: UUID,
+) -> tuple[bytes, str]:
+    """Fetch a price-drop evidence blob for the route layer, scoped to the
+    owning user.
+
+    Mirrors `services.purchases.fetch_receipt_for_user` — 404 covers every
+    failure mode (missing claim, non-owner, no `evidence_screenshot_url`,
+    malformed gs:// URI, blob missing in GCS, bucket mismatch). We never
+    403 / never leak existence across users.
+
+    Bucket-mismatch guard: stored URIs that don't point at the configured
+    `EVIDENCE_BUCKET` are refused even if the SA happens to have access.
+    Defence-in-depth against a bad write that aimed at another bucket.
+    """
+    claim = await _load_owned_claim(db, claim_id, user_id)
+    if not claim.evidence_screenshot_url:
+        raise ApiError("not_found", "Evidence not found", status_code=404)
+
+    try:
+        bucket, blob_path = _parse_gs_uri(claim.evidence_screenshot_url)
+    except ValueError:
+        logger.warning(
+            "Malformed evidence_screenshot_url claim_id=%s url=%r",
+            claim_id,
+            claim.evidence_screenshot_url,
+        )
+        raise ApiError("not_found", "Evidence not found", status_code=404) from None
+
+    if bucket != evidence_reader.bucket_name:
+        logger.warning(
+            "Evidence URI bucket mismatch claim_id=%s uri_bucket=%s expected=%s",
+            claim_id,
+            bucket,
+            evidence_reader.bucket_name,
+        )
+        raise ApiError("not_found", "Evidence not found", status_code=404)
+
+    try:
+        return await evidence_reader.download(blob_path=blob_path)
+    except EvidenceObjectMissingError:
+        logger.warning(
+            "Evidence blob missing in GCS claim_id=%s blob_path=%s",
+            claim_id,
+            blob_path,
+        )
+        raise ApiError("not_found", "Evidence not found", status_code=404) from None
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _parse_gs_uri(uri: str) -> tuple[str, str]:
+    """Split a `gs://bucket/path/with/slashes` URI into `(bucket, path)`.
+
+    Raises `ValueError` for any malformed input. The caller maps that to
+    a 404 rather than a 500 so a stored bogus URI doesn't leak as an
+    internal-error surface to the client. Twin of `services.purchases._parse_gs_uri`
+    — duplicated here (rather than imported) because both call sites want a
+    pure-function dependency local to their service module, and the
+    function is 5 lines of trivially-correct logic that won't drift.
+    """
+    if not uri.startswith("gs://"):
+        raise ValueError(f"Not a gs:// URI: {uri!r}")
+    remainder = uri[len("gs://") :]
+    bucket, sep, path = remainder.partition("/")
+    if not bucket or not sep or not path:
+        raise ValueError(f"Malformed gs:// URI (missing bucket or path): {uri!r}")
+    return bucket, path
 
 
 async def _load_owned_claim(
@@ -768,6 +841,7 @@ __all__ = [
     "approve_claim",
     "cancel_claim",
     "edit_claim_draft",
+    "fetch_evidence_for_user",
     "get_claim_detail",
     "list_claims",
     "list_claims_for_purchase",

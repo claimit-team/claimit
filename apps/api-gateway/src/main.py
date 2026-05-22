@@ -57,6 +57,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     deps._token_cache = AccessTokenCache()
     deps.init_pubsub_publisher()
     deps.init_receipts_uploader()
+    deps.init_evidence_reader()
     yield
     if deps._db is not None:
         await deps._db.close()
