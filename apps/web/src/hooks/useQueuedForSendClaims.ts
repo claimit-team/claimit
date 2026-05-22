@@ -57,15 +57,14 @@ export function useQueuedForSendClaims({ limit = DEFAULT_LIMIT }: { limit?: numb
       .catch((err: unknown) => {
         if (!mounted || requestSeq !== requestSeqRef.current) return;
         // Non-blocking by design — a 5xx or auth blip silently
-        // hides the banner; the SSE stream will repopulate it on
-        // the next claim_queued_auto frame. Logging the error keeps
-        // a paper trail for prod debugging.
-        // Silent failure by design — the banner is non-blocking and
-        // the SSE stream will repopulate it on the next
-        // claim_queued_auto frame. We swallow the error so a
-        // transient blip doesn't leak through the dashboard.
+        // hides the banner; the SSE stream is the source of live
+        // truth. Critically, do NOT call setRows([]) here: rows
+        // added by useProactiveAssistant's claim_queued_auto fanout
+        // during this in-flight hydration would be destructively
+        // wiped (CodeRabbit MAJOR, PR #182). The user keeps seeing
+        // whatever SSE delivered; the next claim_queued_auto frame
+        // keeps it fresh.
         void err;
-        setRows([]);
       });
 
     return () => {

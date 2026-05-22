@@ -142,7 +142,15 @@ resource "google_cloud_scheduler_job" "claim_auto_send" {
 
     oidc_token {
       service_account_email = google_service_account.pubsub_pusher.email
-      audience              = "${module.claim_agent.service_url}/internal/auto-send"
+      # Cloud Run expects the OIDC `aud` claim to match the service's
+      # base URL (origin), NOT a path-specific URL. Mirrors the other
+      # Scheduler jobs in this file (monitor_cron audience =
+      # module.monitor_agent.service_url, gmail_watch_renewal audience
+      # = module.ingest_agent.service_url). Setting the path-specific
+      # audience caused a token-aud mismatch on the Cloud Run side
+      # → 401 → the queued claims would never have been auto-submitted
+      # (CodeRabbit MAJOR, PR #182).
+      audience = module.claim_agent.service_url
     }
   }
 

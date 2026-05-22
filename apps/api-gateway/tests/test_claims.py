@@ -957,6 +957,78 @@ async def test_approve_rollback_outcome_on_publish_failure(client: AsyncClient) 
 
 
 @pytest.mark.asyncio
+async def test_approve_rollback_restores_queued_for_send_state(client: AsyncClient) -> None:
+    """Regression for CodeRabbit MAJOR (PR #182): when approval starts from
+    queued_for_send, a publish failure must restore the ORIGINAL outcome +
+    its `auto_send_at`, not silently drop the claim to draft_pending."""
+    original_auto_send_at = datetime(2030, 1, 1, 12, 0, 0, tzinfo=UTC)
+    claim = Claim.model_validate(
+        _claim_doc(
+            outcome="queued_for_send",
+            submitted_at=None,
+            resolved_at=None,
+            auto_send_at=original_auto_send_at,
+            send_override="auto",
+        )
+    )
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
+    db.partial_update = AsyncMock(return_value=True)
+
+    publisher = AsyncMock(spec=PubSubPublisher)
+    publisher.publish = AsyncMock(side_effect=RuntimeError("broker unreachable"))
+
+    _override_db(db)
+    _override_publisher(publisher)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/approve",
+                json={},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 502
+        assert response.json()["error"]["code"] == "publish_failed"
+        assert db.partial_update.await_count == 2
+        rollback_call = db.partial_update.await_args_list[1]
+        rollback_updates = rollback_call.args[2]
+        assert rollback_updates["outcome"] == "queued_for_send"
+        assert rollback_updates["submitted_at"] is None
+        assert rollback_updates["auto_send_at"] == original_auto_send_at
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_approve_skips_notification_when_publish_fails(client: AsyncClient) -> None:
+    """Regression for CodeRabbit MAJOR (PR #182): the claim_submitted
+    notification must be emitted AFTER the publish so a publish failure
+    doesn't surface a false 'Sent ✓' SSE event."""
+    claim = Claim.model_validate(_claim_doc(outcome="draft_pending", submitted_at=None))
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
+    db.partial_update = AsyncMock(return_value=True)
+    db.upsert_notification_event = AsyncMock(return_value="notif-id")
+
+    publisher = AsyncMock(spec=PubSubPublisher)
+    publisher.publish = AsyncMock(side_effect=RuntimeError("broker unreachable"))
+
+    _override_db(db)
+    _override_publisher(publisher)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/approve",
+                json={},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 502
+        db.upsert_notification_event.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
 async def test_approve_claim_rejects_non_draft_pending_state(client: AsyncClient) -> None:
     claim = Claim.model_validate(_claim_doc(outcome="pending"))
     db = AsyncMock(spec=MongoDBClient)

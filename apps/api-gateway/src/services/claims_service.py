@@ -573,6 +573,18 @@ async def approve_claim(
             status_code=409,
         )
 
+    # Capture the pre-approve state so a publish failure can restore
+    # the EXACT prior outcome + queue marker (ticket 5.15 / WI-6
+    # CodeRabbit MAJOR). Pre-fix the rollback unconditionally forced
+    # DRAFT_PENDING + null `auto_send_at`, which silently removed
+    # queued claims from the auto-send queue on any transient broker
+    # error. With this we restore the exact state the caller would
+    # see by re-reading the doc, so a retry hits the same approve
+    # gate again (queued_for_send retries from queued; draft_pending
+    # retries from draft).
+    previous_outcome = claim.outcome
+    previous_auto_send_at = claim.auto_send_at
+
     now = datetime.now(UTC)
 
     # Two write paths:
@@ -639,33 +651,6 @@ async def approve_claim(
         # Document deleted between read and write. Race; treat as 404.
         raise ApiError("claim_not_found", "Claim not found", status_code=404)
 
-    # Emit a `claim_submitted` NotificationEvent so the dashboard
-    # auto-send banner (and any other SSE consumer) gets the same
-    # event-driven "Sent ✓" signal whether the submission came from
-    # the scheduler worker (apps/claim-agent/src/main.py L487-L498
-    # already writes this on the auto path) or from a user clicking
-    # Send-now in the banner / claim header. Before this commit the
-    # Send-now path published `claim.approved` Pub/Sub but the topic
-    # has no subscriber yet (4.18 work), so no SSE signal would have
-    # reached the FE and the banner's "Sent ✓" would depend solely on
-    # an optimistic 0:00 flip. Writing the notification here closes
-    # that gap. Refund amount comes from the tolerant claim (may be
-    # null for degraded docs); submitted_via is unchanged on this
-    # write (claim-agent sets it downstream after the actual send) so
-    # it passes through as whatever the tolerant load saw.
-    await write_notification_event(
-        db=db,
-        user_id=str(claim.user_id) if claim.user_id is not None else "",
-        event_type=NotificationEventType.CLAIM_SUBMITTED,
-        entity_type=NotificationEntityType.CLAIM,
-        entity_id=str(claim_id),
-        data={
-            "claim_id": str(claim_id),
-            "submitted_via": claim.submitted_via,
-            "refund_amount": claim.claim_amount,
-        },
-    )
-
     # Build the Pub/Sub payload from the tolerant claim plus our just-written
     # mutations. `claim` is a `ClaimReadTolerant` so every field that was
     # required-on-strict is now `T | None` here — `str(None)` produces the
@@ -698,8 +683,10 @@ async def approve_claim(
         # Persist already moved the claim to PENDING but the broker didn't
         # accept the wake-up message. If we leave it at PENDING, a client
         # retry hits the state gate (claim_not_approvable) — the user gets
-        # stuck. Roll the outcome back to DRAFT_PENDING and clear the
-        # submission stamp so retry is well-defined.
+        # stuck. Roll the outcome back to its PRE-APPROVE state so a
+        # retry is well-defined (queued_for_send retries the same queued
+        # claim with its prior `auto_send_at` intact; draft_pending
+        # retries the draft).
         logger.exception(
             "Failed to publish claim.approved for claim %s; rolling back outcome", claim.id
         )
@@ -708,8 +695,9 @@ async def approve_claim(
                 "claims",
                 claim_id,
                 {
-                    "outcome": ClaimOutcome.DRAFT_PENDING.value,
+                    "outcome": previous_outcome,
                     "submitted_at": None,
+                    "auto_send_at": previous_auto_send_at,
                 },
                 model=Claim,
             )
@@ -726,6 +714,36 @@ async def approve_claim(
             "Claim approval failed; please retry.",
             status_code=502,
         ) from None
+
+    # Publish succeeded — emit the `claim_submitted` NotificationEvent
+    # so the dashboard auto-send banner (and any other SSE consumer)
+    # gets the event-driven "Sent ✓" signal. Order matters: persisting
+    # the notification BEFORE the publish would surface a false Sent ✓
+    # SSE if the publish then failed and we rolled back to draft /
+    # queued (CodeRabbit MAJOR, PR #182). Best-effort wrap so a
+    # downstream notification-write failure doesn't roll back the
+    # already-published claim (the auto-send worker uses the same
+    # post-publish ordering — see apps/claim-agent/src/main.py
+    # L487-L498).
+    try:
+        await write_notification_event(
+            db=db,
+            user_id=str(claim.user_id) if claim.user_id is not None else "",
+            event_type=NotificationEventType.CLAIM_SUBMITTED,
+            entity_type=NotificationEntityType.CLAIM,
+            entity_id=str(claim_id),
+            data={
+                "claim_id": str(claim_id),
+                "submitted_via": claim.submitted_via,
+                "refund_amount": claim.claim_amount,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Failed to persist claim_submitted notification for claim %s "
+            "(publish already succeeded; UI may miss the Sent ✓ SSE)",
+            claim.id,
+        )
 
     # `submitted_via` is unchanged on this write (claim-agent sets it
     # downstream); pass through whatever was loaded. `claim_id` here is
