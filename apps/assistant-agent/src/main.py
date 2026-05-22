@@ -43,7 +43,9 @@ class ModeBStreamRequest(BaseModel):
 
 
 def _format_sse_frame(event: str, data: str) -> str:
-    return f"event: {event}\ndata: {data}\n\n"
+    lines = data.splitlines() or [""]
+    data_block = "".join(f"data: {line}\n" for line in lines)
+    return f"event: {event}\n{data_block}\n"
 
 
 async def _stream_mode_b(body: ModeBStreamRequest) -> AsyncIterator[str]:

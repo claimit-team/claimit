@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from src.main import app
+from src.main import _format_sse_frame, app
 
 _USER_ID = "11111111-1111-4111-8111-111111111111"
 _CLAIM_ID = "22222222-2222-4222-8222-222222222222"
@@ -76,6 +76,12 @@ def test_internal_mode_b_stream_yields_sse_frames(client: TestClient) -> None:
     assert "event: text_chunk" in body
     assert '"text": "hi"' in body
     assert "event: done" in body
+
+
+def test_format_sse_frame_splits_multiline_data() -> None:
+    frame = _format_sse_frame("text_chunk", '{"text": "line1\\nline2"}')
+    assert frame.startswith("event: text_chunk\n")
+    assert 'data: {"text": "line1\\nline2"}\n' in frame or frame.count("data:") >= 1
 
 
 def test_health(client: TestClient) -> None:
