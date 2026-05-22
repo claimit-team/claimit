@@ -24,6 +24,7 @@ TOPIC_PRICE_DROPPED = "price.dropped"
 # `finalize_purchase_extraction` which then publishes `purchase.ingested`
 # (i.e. this is strictly an upstream event of the existing pipeline).
 TOPIC_PURCHASE_UPLOADED = "purchase.uploaded"
+TOPIC_CLAIM_REDRAFT_REQUESTED = "claim.redraft_requested"
 
 
 def _new_event_id() -> str:
@@ -93,3 +94,21 @@ class PurchaseUploadedEvent(EventEnvelope):
     purchase_id: str
     receipt_storage_url: str
     content_type: Literal["application/pdf", "image/png", "image/jpeg"]
+
+
+class ClaimRedraftRequestedEvent(EventEnvelope):
+    """Published by the Assistant Agent (Mode B) when a user asks for a redraft.
+
+    Ticket 3.23. Subscriber: claim-agent (handler ships in ticket 3.21).
+    `feedback` is the natural-language steer ("make it friendlier", "shorter",
+    etc.) the user gave; the claim-agent generator consumes it to bias the
+    next draft. `requested_by` distinguishes assistant-mediated redrafts
+    from a hypothetical direct-from-user trigger so the receiver can apply
+    different rate limits or routing if needed.
+    """
+
+    event_type: Literal["claim.redraft_requested"] = "claim.redraft_requested"
+    user_id: str
+    claim_id: str
+    feedback: str = Field(min_length=1, max_length=500)
+    requested_by: Literal["assistant", "user"] = "assistant"

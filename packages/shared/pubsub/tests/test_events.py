@@ -8,8 +8,10 @@ from uuid import UUID
 
 import pytest
 from claimit_pubsub.events import (
+    TOPIC_CLAIM_REDRAFT_REQUESTED,
     TOPIC_PRICE_DROPPED,
     TOPIC_PURCHASE_INGESTED,
+    ClaimRedraftRequestedEvent,
     EventEnvelope,
     PriceDroppedEvent,
     PurchaseIngestedEvent,
@@ -146,3 +148,70 @@ def test_price_dropped_amounts_must_be_positive() -> None:
 def test_price_dropped_extra_fields_rejected() -> None:
     with pytest.raises(ValidationError):
         PriceDroppedEvent(**{**_VALID_PRICE_DROPPED_PAYLOAD, "bogus": True})
+
+
+_VALID_CLAIM_REDRAFT_PAYLOAD = {
+    "user_id": "11111111-1111-4111-8111-111111111111",
+    "claim_id": "44444444-4444-4444-8444-444444444444",
+    "feedback": "make it friendlier",
+}
+
+
+def test_claim_redraft_topic_constant() -> None:
+    assert TOPIC_CLAIM_REDRAFT_REQUESTED == "claim.redraft_requested"
+
+
+def test_claim_redraft_defaults_are_populated() -> None:
+    event = ClaimRedraftRequestedEvent(**_VALID_CLAIM_REDRAFT_PAYLOAD)
+    assert event.schema_version == 1
+    assert event.event_type == "claim.redraft_requested"
+    assert event.requested_by == "assistant"
+    UUID(event.event_id)
+    assert isinstance(event.emitted_at, datetime)
+    assert event.emitted_at.tzinfo is not None
+
+
+def test_claim_redraft_round_trip_through_json() -> None:
+    event = ClaimRedraftRequestedEvent(**_VALID_CLAIM_REDRAFT_PAYLOAD)
+    decoded = ClaimRedraftRequestedEvent.model_validate_json(event.model_dump_json())
+    assert decoded == event
+
+
+def test_claim_redraft_payload_matches_schema_keys() -> None:
+    event = ClaimRedraftRequestedEvent(**_VALID_CLAIM_REDRAFT_PAYLOAD)
+    body = json.loads(event.model_dump_json())
+    assert set(body) == {
+        "schema_version",
+        "event_id",
+        "emitted_at",
+        "event_type",
+        "requested_by",
+        *_VALID_CLAIM_REDRAFT_PAYLOAD,
+    }
+
+
+def test_claim_redraft_feedback_min_length() -> None:
+    with pytest.raises(ValidationError):
+        ClaimRedraftRequestedEvent(**{**_VALID_CLAIM_REDRAFT_PAYLOAD, "feedback": ""})
+
+
+def test_claim_redraft_feedback_max_length() -> None:
+    with pytest.raises(ValidationError):
+        ClaimRedraftRequestedEvent(**{**_VALID_CLAIM_REDRAFT_PAYLOAD, "feedback": "x" * 501})
+
+
+def test_claim_redraft_requested_by_user_allowed() -> None:
+    event = ClaimRedraftRequestedEvent(**{**_VALID_CLAIM_REDRAFT_PAYLOAD, "requested_by": "user"})
+    assert event.requested_by == "user"
+
+
+def test_claim_redraft_requested_by_other_rejected() -> None:
+    with pytest.raises(ValidationError):
+        ClaimRedraftRequestedEvent(
+            **{**_VALID_CLAIM_REDRAFT_PAYLOAD, "requested_by": "claim_agent"}
+        )
+
+
+def test_claim_redraft_extra_fields_rejected() -> None:
+    with pytest.raises(ValidationError):
+        ClaimRedraftRequestedEvent(**{**_VALID_CLAIM_REDRAFT_PAYLOAD, "bogus": True})
