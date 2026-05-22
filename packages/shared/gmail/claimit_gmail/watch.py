@@ -181,7 +181,13 @@ async def exchange_refresh_for_access(
         raise WatchRegistrationError("Gmail OAuth client credentials are not configured")
 
     secret_ref = user.gmail_integration.refresh_token_ref
-    assert secret_ref is not None  # _load_user guarantees this
+    # Public API: callers don't necessarily route through `_load_user`
+    # (which validated this for register_watch_or_raise's path), and
+    # `python -O` strips asserts entirely. Use a typed raise so the
+    # documented WatchRegistrationError contract holds for every caller
+    # and runtime configuration.
+    if not secret_ref:
+        raise WatchRegistrationError("Gmail is not connected")
     try:
         # `access_secret_version` is a sync gRPC call that talks to Secret
         # Manager over the network — running it inline blocks the ASGI

@@ -146,13 +146,17 @@ async def history_list(
         httpx.HTTPError on network-level failures (DNS, connection
             reset, etc.) — propagates unchanged.
     """
-    params: dict[str, str] = {
+    # Gmail's `historyTypes` is a repeated field
+    # (https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list).
+    # The correct wire encoding is `?historyTypes=messageAdded&historyTypes=labelAdded`,
+    # NOT a single comma-joined value (which Gmail treats as a literal
+    # string and would silently never match anything). httpx encodes a
+    # list value into exactly that repeated form.
+    if not history_types:
+        raise ValueError("history_types must be non-empty")
+    params: dict[str, str | list[str]] = {
         "startHistoryId": start_history_id,
-        # Gmail accepts repeated `historyTypes` query params; httpx
-        # encodes a list value as ?historyTypes=messageAdded by default
-        # so we pass a single comma-joined string only when needed.
-        # For the single-element default this is a literal string.
-        "historyTypes": ",".join(history_types) if len(history_types) > 1 else history_types[0],
+        "historyTypes": list(history_types),
     }
     if page_token:
         params["pageToken"] = page_token

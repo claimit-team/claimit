@@ -352,6 +352,24 @@ async def test_messages_get_failure_does_not_break_batch(
     assert patch_all_pipeline_boundaries["finalize"].await_count == 1
     assert patch_all_pipeline_boundaries["rescue"].await_count == 0
 
+    # Cursor still advances to the push's historyId even though one
+    # message failed. This pins the first-cut behavior — see the
+    # comment block above the cursor-advance call in main.py. The
+    # alternative (don't advance on any failure) would let a single
+    # permanent 404 block all subsequent pushes for the user; the
+    # planned per-record-advancement follow-up will refine this
+    # without taking the "always advance" trap.
+    cursor_advances = [
+        c
+        for c in mock_db.partial_update.await_args_list
+        if "gmail_integration.last_processed_history_id" in c.args[2]
+    ]
+    assert len(cursor_advances) == 1
+    assert (
+        cursor_advances[0].args[2]["gmail_integration.last_processed_history_id"]
+        == _PUSH_HISTORY_ID
+    )
+
 
 @pytest.mark.asyncio
 async def test_extract_failure_calls_rescue(

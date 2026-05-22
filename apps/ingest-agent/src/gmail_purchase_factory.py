@@ -47,6 +47,7 @@ from claimit_mongodb_models import (
     Purchase,
     PurchaseDateBasis,
     PurchaseStatus,
+    normalize_sender,
 )
 from claimit_mongodb_models.purchase import ExtractionConfidence
 
@@ -148,7 +149,12 @@ async def insert_gmail_sentinel_purchase(
         receipt_storage_url=None,
         receipt_hash=receipt_hash,
         format_hash=format_hash,
-        sender=email.sender,
+        # Normalize so the stored value matches what classifier
+        # skiplist lookups + extractor format-hashing compute on the
+        # fly. Without this, a sender like "Amazon <orders@amazon.com>"
+        # would store unnormalized while every downstream consumer
+        # works against the normalized form.
+        sender=normalize_sender(email.sender),
         # purchase_date / window_expires get overwritten by
         # finalize_purchase_extraction. The sentinel uses `now` for
         # both so the Purchase model validates (non-nullable datetimes)

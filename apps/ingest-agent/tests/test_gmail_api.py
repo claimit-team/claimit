@@ -66,7 +66,38 @@ async def test_history_list_happy_path_returns_json() -> None:
     assert call.args[0] == "https://gmail.googleapis.com/gmail/v1/users/me/history"
     assert call.kwargs["headers"] == {"Authorization": "Bearer fake-token"}
     assert call.kwargs["params"]["startHistoryId"] == "12340"
-    assert call.kwargs["params"]["historyTypes"] == "messageAdded"
+    # `historyTypes` is passed as a list so httpx encodes it as the
+    # repeated query params Gmail's REST API actually requires
+    # (?historyTypes=messageAdded&historyTypes=labelAdded). A
+    # comma-joined string would be treated as a literal value by
+    # Gmail and silently never match the intended types.
+    assert call.kwargs["params"]["historyTypes"] == ["messageAdded"]
+
+
+@pytest.mark.asyncio
+async def test_history_list_multiple_history_types_passes_list_not_comma_joined() -> None:
+    """Multi-element history_types must be a list (httpx encodes it as
+    repeated query params). A comma-joined string would be treated by
+    Gmail as a literal value and silently never match. This test pins
+    the wire encoding so a future refactor doesn't regress to the
+    pre-CodeRabbit comma-join shape."""
+    response = _fake_response(status_code=200, json_body={"history": []})
+    cm, mock_client = _patched_client(response)
+    with cm as mock_client_cls:
+        mock_client_cls.return_value.__aenter__.return_value = mock_client
+        await history_list("fake-token", "12340", history_types=("messageAdded", "labelAdded"))
+
+    params = mock_client.get.await_args.kwargs["params"]
+    assert params["historyTypes"] == ["messageAdded", "labelAdded"]
+
+
+@pytest.mark.asyncio
+async def test_history_list_empty_history_types_raises_value_error() -> None:
+    """`history_types[0]` would IndexError under the old comma-join
+    logic. The new path raises ValueError explicitly — a defensive
+    sharp-edge guard for a public-ish API surface."""
+    with pytest.raises(ValueError, match="non-empty"):
+        await history_list("fake-token", "12340", history_types=())
 
 
 @pytest.mark.asyncio

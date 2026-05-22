@@ -579,11 +579,25 @@ async def _process_gmail_inbound(
         finally:
             processed += 1
 
-    # 7. Advance cursor. Per the plan, first cut uses the push's
-    # historyId as the new cursor (Gmail's "latest as of when this
-    # push fired" watermark). Messages beyond the N=5 cap are lost
-    # in this iteration — a follow-up ticket can switch to
-    # per-record advancement to avoid that.
+    # 7. Advance cursor to the push's historyId.
+    #
+    # Design decision: this is the first-cut behavior. Cursor advances
+    # even when one or more messages in the batch failed (GmailApiError
+    # on messages.get, GmailParseError, extract_failure, finalize_failure)
+    # OR when the N=5 cap dropped the tail of the batch.
+    #
+    # The tradeoff matters: WITHOUT cursor advance on failure, a single
+    # permanently-404 message (Gmail GC'd it, or the user deleted it
+    # before our fetch) would block every subsequent push for that
+    # user. Distinguishing transient from permanent failures requires
+    # per-record cursor advancement, which is the explicit follow-up
+    # ticket scope. CodeRabbit raised this on PR #170 and we
+    # explicitly declined the change in favour of the planned
+    # follow-up.
+    #
+    # Today's `gmail.batch_complete` log captures the failed counter
+    # so we have observability on how often this branch triggers — if
+    # the rate climbs in prod we'd accelerate the follow-up.
     try:
         await db.partial_update(
             "users",
@@ -655,15 +669,16 @@ async def handle_gmail_inbound(
     try:
         payload = _GmailNotification.model_validate(json.loads(raw_data))
     except Exception as err:
-        # raw_data[:200] is intentional here — this branch fires only on
-        # a parse failure, so we need to see what Gmail actually sent to
-        # debug. By contract the payload contains only `emailAddress` +
-        # `historyId`; the 200-char cap bounds blast radius if a future
-        # schema change adds a larger field.
+        # The decoded payload by contract is just `emailAddress` +
+        # `historyId`. The emailAddress is the same PII the happy-path
+        # log masks; logging the raw bytes here at error-level would
+        # negate that masking. Log payload length + the exception
+        # text — enough to recognize a schema shift without leaking
+        # the inbox address.
         _log.error(
-            "Gmail inbound push: payload parse failed (message_id=%s, data=%r): %s",
+            "Gmail inbound push: payload parse failed (message_id=%s, payload_len=%d): %s",
             body.message.message_id,
-            raw_data[:200],
+            len(raw_data),
             err,
         )
         return {"status": "error", "reason": "invalid_payload"}
