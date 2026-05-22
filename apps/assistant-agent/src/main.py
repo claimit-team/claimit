@@ -48,17 +48,23 @@ def _format_sse_frame(event: str, data: str) -> str:
 
 async def _stream_mode_b(body: ModeBStreamRequest) -> AsyncIterator[str]:
     history = [HistoryMessage(role=m.role, content=m.content) for m in body.messages]
-    async for frame in handle_message(
-        body.user_id,
-        body.claim_id,
-        body.message,
-        history=history or None,
-    ):
-        event = frame.get("event", "message")
-        data = frame.get("data", "")
-        if not isinstance(data, str):
-            data = json.dumps(data)
-        yield _format_sse_frame(str(event), data)
+    try:
+        async for frame in handle_message(
+            body.user_id,
+            body.claim_id,
+            body.message,
+            history=history or None,
+        ):
+            event = frame.get("event", "message")
+            data = frame.get("data", "")
+            if not isinstance(data, str):
+                data = json.dumps(data)
+            yield _format_sse_frame(str(event), data)
+    except Exception:
+        yield _format_sse_frame(
+            "done",
+            json.dumps({"error": "Mode B stream failed unexpectedly."}),
+        )
 
 
 @app.get("/health")

@@ -48,7 +48,9 @@ def _expected_audience(request: Request) -> str:
         if forwarded_proto
         else request.url.replace(query="")
     )
-    return str(url)
+    # Cloud Run OIDC audience is the service origin — api-gateway mints
+    # tokens with audience=ASSISTANT_AGENT_URL (no path component).
+    return f"{url.scheme}://{url.netloc}"
 
 
 def _extract_bearer_token(request: Request) -> str:
