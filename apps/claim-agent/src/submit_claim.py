@@ -80,7 +80,7 @@ async def submit_claim(
 
     update: dict = {
         "submitted_via": submitted_via.value,
-        "submitted_at": submitted_at.isoformat(),
+        "submitted_at": submitted_at,
         "outcome": ClaimOutcome.PENDING.value,
     }
     if gmail_message_id is not None:
