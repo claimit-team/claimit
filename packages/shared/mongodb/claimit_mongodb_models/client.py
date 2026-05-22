@@ -64,6 +64,10 @@ COLLECTION_MODELS: dict[str, type[BaseDocument]] = {
 }
 
 
+class DocumentNotFoundError(Exception):
+    """Raised when an update targets a document that does not exist."""
+
+
 class MongoDBClient:
     """Thin async wrapper around motor with typed Pydantic CRUD.
 
@@ -392,14 +396,18 @@ class MongoDBClient:
             )
             raise
 
-        element_payload = validated_element.model_dump(mode="json")
+        element_payload = validated_element.model_dump(by_alias=True)
         set_payload: dict[str, Any] = {**updates, "updated_at": datetime.now(UTC)}
         update_doc: dict[str, Any] = {
             "$push": {field: element_payload},
             "$set": set_payload,
         }
         uid = _coerce_uuid(id)
-        await self._db[collection].update_one({"_id": uid}, update_doc)
+        result = await self._db[collection].update_one({"_id": uid}, update_doc)
+        if result.matched_count == 0:
+            raise DocumentNotFoundError(
+                f"No document with _id={uid!r} in collection {collection!r}."
+            )
 
     async def update_many(
         self,

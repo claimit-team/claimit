@@ -8,7 +8,7 @@ ISODateString in TypeScript), `_id` field) is identical across both languages by
 from .base import BaseDocument
 from .claim import Claim, DraftVersion, SelfEvalScore
 from .claim_read_tolerant import ClaimReadTolerant, DraftVersionReadTolerant
-from .client import MongoDBClient
+from .client import DocumentNotFoundError, MongoDBClient
 from .conversation import Conversation, ConversationMessage, ToolCall
 from .create_indexes import INDEX_DEFINITIONS, create_indexes
 from .enums import (
@@ -76,6 +76,7 @@ __all__ = [
     "ConversationStatus",
     "DefaultLocation",
     "DenialReason",
+    "DocumentNotFoundError",
     "DraftGeneratedBy",
     "DraftVersion",
     "DraftVersionReadTolerant",
