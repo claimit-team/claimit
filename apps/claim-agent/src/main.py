@@ -505,7 +505,7 @@ async def handle_auto_send(request: Request) -> dict:
     return results
 
 
-@app.post("/pubsub/claim.redraft-requested", status_code=200)
+@app.post("/pubsub/claim.redraft_requested", status_code=200)
 async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
     """Handle Pub/Sub push for claim.redraft_requested events.
 
@@ -524,6 +524,15 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
         if claim is None:
             _log.error("claim_agent.redraft.claim_not_found claim_id=%s", event.claim_id)
             return {"status": "error", "reason": "claim_not_found"}
+
+        if str(claim.user_id) != str(event.user_id):
+            _log.error(
+                "claim_agent.redraft.user_mismatch claim_id=%s event_user=%s claim_user=%s",
+                event.claim_id,
+                event.user_id,
+                claim.user_id,
+            )
+            return {"status": "error", "reason": "permission_denied"}
 
         purchase = await db.get_purchase(claim.purchase_id)
         if purchase is None:
@@ -567,10 +576,11 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
         search_client = get_search_adapter()
 
         next_version = len(claim.draft_versions or []) + 1
+        current_price = (purchase.price_paid or 0.0) - (claim.claim_amount or 0.0)
 
         gen_kwargs: dict = dict(
             user_name=user_name,
-            current_price=claim.claim_amount,
+            current_price=current_price,
             user_instruction=event.user_instruction,
         )
         if claim_type_enum == ClaimType.IN_STORE:
@@ -614,7 +624,7 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
             )
             regen_kwargs: dict = dict(
                 user_name=user_name,
-                current_price=claim.claim_amount,
+                current_price=current_price,
                 user_instruction="; ".join(p for p in [event.user_instruction, feedback] if p)
                 or None,
             )
@@ -648,16 +658,12 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
             generated_by=DraftGeneratedBy.ASSISTANT_REDRAFT,
             at=now,
         )
-        await db.array_push(
+        await db.array_push_and_update(
             collection="claims",
             id=event.claim_id,
             field="draft_versions",
             element=new_version,
             element_model=DraftVersion,
-        )
-        await db.partial_update(
-            collection="claims",
-            id=event.claim_id,
             updates={
                 "draft_content": final_draft.draft_content,
                 "redraft_count": (claim.redraft_count or 0) + 1,

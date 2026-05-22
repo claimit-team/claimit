@@ -7,7 +7,7 @@ import json
 import sys
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from claimit_mongodb_models import DraftGeneratedBy, SelfEvalScore
@@ -48,7 +48,7 @@ def _make_mock_claim(
 ) -> MagicMock:
     claim = MagicMock()
     claim.id = uuid4()
-    claim.user_id = uuid4()
+    claim.user_id = UUID(_USER_ID)
     claim.purchase_id = uuid4()
     claim.platform = "best_buy"
     claim.claim_type = claim_type
@@ -162,11 +162,10 @@ async def test_redraft_happy_path_email() -> None:
         result = await handle_claim_redraft_requested(request)
 
     assert result == {"status": "ok"}
-    mock_db.array_push.assert_awaited_once()
-    mock_db.partial_update.assert_awaited_once()
-    partial_updates = mock_db.partial_update.await_args.kwargs["updates"]
-    assert partial_updates["redraft_count"] == 1
-    assert partial_updates["draft_content"] == mock_draft.draft_content
+    mock_db.array_push_and_update.assert_awaited_once()
+    updates = mock_db.array_push_and_update.await_args.kwargs["updates"]
+    assert updates["redraft_count"] == 1
+    assert updates["draft_content"] == mock_draft.draft_content
     assert mock_approval.await_count + mock_auto.await_count == 1
 
 
@@ -373,9 +372,9 @@ async def test_redraft_appends_version_not_replaces() -> None:
         result = await handle_claim_redraft_requested(request)
 
     assert result == {"status": "ok"}
-    mock_db.array_push.assert_awaited_once()
+    mock_db.array_push_and_update.assert_awaited_once()
     mock_db.upsert_claim.assert_not_awaited()
-    pushed_element = mock_db.array_push.await_args.kwargs["element"]
+    pushed_element = mock_db.array_push_and_update.await_args.kwargs["element"]
     assert pushed_element.version == 2
     assert pushed_element.generated_by == DraftGeneratedBy.ASSISTANT_REDRAFT
 
