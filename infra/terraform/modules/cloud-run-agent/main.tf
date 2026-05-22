@@ -75,10 +75,26 @@ resource "google_cloud_run_v2_service" "agent" {
         cpu_idle = true
       }
 
+      # Probe block — http_get (default, covers every existing consumer
+      # whose container serves /health on container_port) or tcp_socket
+      # (for non-FastAPI images like the mongodb-mcp-server in ticket
+      # 5.10 that don't expose an HTTP /health on the same port their
+      # main protocol listens on). Selected by var.probe_type; the
+      # for_each on each dynamic block picks exactly one shape per
+      # probe.
       startup_probe {
-        http_get {
-          path = "/health"
-          port = var.container_port
+        dynamic "http_get" {
+          for_each = var.probe_type == "http" ? [1] : []
+          content {
+            path = var.probe_path
+            port = var.container_port
+          }
+        }
+        dynamic "tcp_socket" {
+          for_each = var.probe_type == "tcp" ? [1] : []
+          content {
+            port = var.container_port
+          }
         }
         initial_delay_seconds = 5
         timeout_seconds       = 5
@@ -87,9 +103,18 @@ resource "google_cloud_run_v2_service" "agent" {
       }
 
       liveness_probe {
-        http_get {
-          path = "/health"
-          port = var.container_port
+        dynamic "http_get" {
+          for_each = var.probe_type == "http" ? [1] : []
+          content {
+            path = var.probe_path
+            port = var.container_port
+          }
+        }
+        dynamic "tcp_socket" {
+          for_each = var.probe_type == "tcp" ? [1] : []
+          content {
+            port = var.container_port
+          }
         }
         period_seconds    = 30
         failure_threshold = 3
