@@ -214,9 +214,13 @@ def make_request_redraft(
         )
         try:
             message_id = await publish(TOPIC_CLAIM_REDRAFT_REQUESTED, event)
-        except Exception as exc:
+        except Exception:
+            # Keep exception detail in server logs only — surfacing it to
+            # the LLM (and from there to the user) risks leaking internal
+            # state like project IDs or broker hostnames embedded in
+            # google-cloud-pubsub error messages.
             logger.exception("request_redraft publish failed claim_id=%s", claim_id)
-            return {"error": "publish_failed", "detail": str(exc)}
+            return {"error": "publish_failed"}
 
         return {"ok": True, "message_id": message_id, "event_id": event.event_id}
 

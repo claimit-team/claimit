@@ -242,8 +242,10 @@ async def test_request_redraft_reports_publish_failure() -> None:
 
     out = await tool("shorter please")
 
-    assert out["error"] == "publish_failed"
-    assert "broker unreachable" in out["detail"]
+    # Generic failure payload — exception detail stays in server logs so we
+    # don't leak internal broker/project state to the LLM (and from there
+    # to the user). See claim_tools.py for the rationale.
+    assert out == {"error": "publish_failed"}
 
 
 async def test_request_redraft_refuses_when_user_mismatch() -> None:

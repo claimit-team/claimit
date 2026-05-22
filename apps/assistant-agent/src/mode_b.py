@@ -152,23 +152,33 @@ async def handle_message(
         parts=[types.Part.from_text(text=message)],
     )
 
-    async for event in runner.run_async(
-        user_id=user_id,
-        session_id=session_id,
-        new_message=new_message,
-    ):
-        sse_event = _adk_event_to_sse_dict(event)
-        yield sse_event
-
-        # Guarantee a terminating "done" frame so SSE consumers don't hang.
-        # Mirrors the same defense in mode_a.py — final events that carry
-        # text/tool parts get translated as text_chunk/etc., and the
-        # consumer would otherwise never see an explicit terminator.
-        if (
-            sse_event.get("event") != "done"
-            and hasattr(event, "is_final_response")
-            and event.is_final_response()
+    # Track whether we have emitted a terminating frame so the `finally`
+    # block can guarantee one even if `runner.run_async` raises mid-stream
+    # or the consumer drops the generator early. Without this, an
+    # exception inside the Runner leaves SSE consumers waiting forever.
+    done_sent = False
+    try:
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session_id,
+            new_message=new_message,
         ):
+            sse_event = _adk_event_to_sse_dict(event)
+            yield sse_event
+
+            # Final events that carry text/tool parts get translated as
+            # text_chunk/etc.; the consumer would otherwise never see an
+            # explicit terminator. Track that we sent one so `finally`
+            # doesn't double-emit.
+            if (
+                sse_event.get("event") != "done"
+                and hasattr(event, "is_final_response")
+                and event.is_final_response()
+            ):
+                done_sent = True
+                yield {"event": "done", "data": "{}"}
+    finally:
+        if not done_sent:
             yield {"event": "done", "data": "{}"}
 
 
