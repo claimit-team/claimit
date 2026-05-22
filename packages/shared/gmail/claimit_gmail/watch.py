@@ -101,7 +101,7 @@ async def register_watch_or_raise(
     active. This is the contract the 4.16 renewal cron depends on.
     """
     user = await _load_user(db, user_id)
-    access_token = await _exchange_refresh_for_access(sm_client, user)
+    access_token = await exchange_refresh_for_access(sm_client, user)
     topic = _resolve_topic_name()
     response_body = await _call_watch(access_token, topic)
     await _persist_success(db, user_id, response_body)
@@ -157,13 +157,23 @@ async def _load_user(db: MongoDBClient, user_id: str) -> User:
     return user
 
 
-async def _exchange_refresh_for_access(
+async def exchange_refresh_for_access(
     sm_client: secretmanager.SecretManagerServiceClient, user: User
 ) -> str:
     """Load refresh token from Secret Manager, exchange for an access token.
 
-    Mirrors `ingest-agent/src/notifier.py:get_gmail_access_token` so we
-    stay consistent across services on how Gmail credentials are minted.
+    Public surface — both `register_watch_or_raise` (this module) and
+    the 4.17 Gmail ingest handler in ingest-agent need a fresh access
+    token to call Gmail APIs on a user's behalf. Mirrors
+    `ingest-agent/src/notifier.py:get_gmail_access_token` so the
+    confirmation-email path and the watch / ingest paths stay aligned
+    on how Gmail credentials are minted.
+
+    Raises `WatchRegistrationError` (kept for backward compatibility
+    with `register_watch_or_raise`) on any failure: missing OAuth
+    client env vars, Secret Manager read failure, refresh-token grant
+    rejected by Google. Callers that don't want the watch-specific
+    error type can catch this and re-raise as their own.
     """
     client_id = os.environ.get("GMAIL_OAUTH_CLIENT_ID", "").strip()
     client_secret = os.environ.get("GMAIL_OAUTH_CLIENT_SECRET", "").strip()
