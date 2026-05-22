@@ -685,13 +685,20 @@ export function DraftPane({
   };
 
   const applyPending = () => {
+    // Discard the user's in-progress edits by resetting the buffer to
+    // the pending version's content. We can't rely on the
+    // `currentDraftContent`-keyed effect in the shell to do this for
+    // us — if two versions happen to share identical content (rare but
+    // possible when an AI regen produces the same output), the effect
+    // wouldn't fire and the dirty buffer would silently carry over to
+    // the new version even after the user clicked "Discard" (Bugbot
+    // LOW finding, PR #168). Compute the target baseline explicitly
+    // and reset unconditionally.
+    const nextSelectedVersion = pendingVersion !== null ? pendingVersion : selectedVersion;
+    const nextBaseline = claim.draft_versions[nextSelectedVersion - 1]?.content ?? "";
     if (pendingTab !== null) setDraftMode(pendingTab);
     if (pendingVersion !== null) setSelectedVersion(pendingVersion);
-    // The setSelectedVersion useEffect resets editBuffer for us; force a
-    // baseline reset for the tab-only case (no version change).
-    if (pendingVersion === null) {
-      setEditBuffer(baseline);
-    }
+    setEditBuffer(nextBaseline);
     clearPending();
   };
 
