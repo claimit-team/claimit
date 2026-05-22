@@ -420,7 +420,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         return {"status": "error"}
 
 
-# NOTE(task-3.20): This endpoint must be wired to a Cloud Scheduler job.
+# NOTE(task-3.20): This is an internalendpoint must be wired to a Cloud Scheduler job.
 # Add to infra/terraform/scheduler.tf:
 #
 # resource "google_cloud_scheduler_job" "claim_auto_send" {
