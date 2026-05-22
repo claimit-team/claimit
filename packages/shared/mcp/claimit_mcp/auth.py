@@ -66,6 +66,12 @@ class GoogleIDTokenAuth(httpx.Auth):
     so concurrent requests don't all kick off duplicate metadata-server
     fetches under load. The lock is contended only when refreshing —
     happy-path requests just read the cached values.
+
+    Pickle-safe: the lock is created lazily in `_get_lock` (rather than
+    eagerly in `__init__`) and stripped in `__getstate__`. ADK's Agent
+    Engine deploy path cloudpickles the whole toolset, including this
+    auth instance via the `httpx_client_factory` closure, and a live
+    `threading.Lock` would fail with "cannot pickle '_thread.lock' object".
     """
 
     def __init__(self, audience: str) -> None:
@@ -74,7 +80,30 @@ class GoogleIDTokenAuth(httpx.Auth):
         self._audience = audience
         self._token: str | None = None
         self._expires_at: float = 0.0
-        self._lock = threading.Lock()
+        # _lock is built lazily by _get_lock so __init__ stays cloudpickle-safe.
+
+    def _get_lock(self) -> threading.Lock:
+        # Created on first use so __init__ stays pickle-safe. After a
+        # pickle round-trip _lock is absent from __dict__ (see
+        # __getstate__) and this re-creates it on the restored instance.
+        # dict.setdefault is atomic under CPython's GIL — concurrent
+        # first-callers race on the dict insert, not the lock identity,
+        # so they all end up with the same Lock instance. A read-then-
+        # write pattern would let two threads each create their own
+        # Lock, with the second write clobbering the first, and _refresh
+        # would then serialize on two different locks.
+        return self.__dict__.setdefault("_lock", threading.Lock())
+
+    def __getstate__(self) -> dict:
+        # Strip the unpicklable Lock; everything else (audience, cached
+        # token, expiry) is plain data and round-trips cleanly.
+        state = self.__dict__.copy()
+        state.pop("_lock", None)
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        # _lock left absent on purpose; _get_lock() recreates it lazily.
 
     def _token_needs_refresh(self) -> bool:
         # Refresh when there's no token at all OR the existing token will
@@ -86,7 +115,7 @@ class GoogleIDTokenAuth(httpx.Auth):
         # Double-checked locking: a waiter that grabbed the lock after a
         # previous refresher already wrote the new token doesn't need to
         # hit the metadata server again.
-        with self._lock:
+        with self._get_lock():
             if not self._token_needs_refresh():
                 # Cast for the type checker — we just confirmed it's not None.
                 assert self._token is not None

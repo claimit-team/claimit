@@ -239,6 +239,24 @@ def deploy_one(
     """Create or update one agent. Idempotent — matches by display_name."""
     print(f"\n--- {agent_name} ---")
 
+    # Set MDB_MCP_URL in the BUILD environment before importing the agent
+    # module. The `claimit_mcp.get_mongodb_mcp_toolset` factory dispatches
+    # on `os.environ["MDB_MCP_URL"]` at call time (lazy), but
+    # apps/*-agent/src/agent.py calls the factory at module-import time
+    # (`tools=[get_mongodb_mcp_toolset(...)]`). That returned `McpToolset`
+    # holds its `connection_params` as a concrete attribute, which then
+    # gets baked into the cloudpickle at line 253 — there is no second
+    # factory call inside the deployed engine to re-read the runtime env.
+    # So the env var has to be present BEFORE import, or the pickle locks
+    # in `StdioConnectionParams(command="npx", ...)` and the deployed
+    # agent fails with `[Errno 2] No such file or directory: 'npx'` on
+    # every request (Agent Engine has no Node.js). The downstream
+    # env_vars["MDB_MCP_URL"] injection at line ~292 is retained as
+    # defense-in-depth — harmless if the pickle already has the URL
+    # baked in, useful if a future refactor moves to lazy resolution.
+    if not dry_run:
+        os.environ["MDB_MCP_URL"] = get_mongodb_mcp_url(agent_name)
+
     raw_agent = import_agent(module_path, agent_name)
     print(f"  Loaded: {raw_agent.name} (model={raw_agent.model})")
 
