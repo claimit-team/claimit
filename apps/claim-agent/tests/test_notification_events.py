@@ -123,6 +123,8 @@ async def test_write_notification_event_called_after_upsert_claim() -> None:
             new=AsyncMock(return_value=(draft, _eval_result, 1)),
         ),
         patch("src.main.write_notification_event", return_value="notif-id") as mock_write,
+        patch("src.main.handle_approval_mode", new=AsyncMock(return_value=MagicMock())),
+        patch("src.main.handle_auto_mode", new=AsyncMock(return_value=(MagicMock(), MagicMock()))),
         patch.dict(sys.modules, {"search": mock_search}),
     ):
         result = await handle_price_dropped(request)

@@ -114,6 +114,8 @@ class ClaimOutcome(StrEnum):
     USER_SELF_SERVICE = "user_self_service"
     USER_CANCELLED = "user_cancelled"
     NO_RESPONSE = "no_response"
+    AWAITING_APPROVAL = "awaiting_approval"
+    QUEUED_FOR_SEND = "queued_for_send"
 
 
 class DenialReason(StrEnum):
