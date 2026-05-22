@@ -58,6 +58,21 @@ resource "google_storage_bucket_iam_member" "claim_agent_evidence_reader" {
   member = "serviceAccount:${module.claim_agent.service_account_email}"
 }
 
+# api-gateway SA reads screenshots for the GET /api/v1/claims/:id/evidence
+# proxy (ticket 5.8). Mirrors api_gateway_receipts_reader above: the
+# evidence bucket has public_access_prevention=enforced, so the proxy is
+# how the authenticated browser fetches the bytes — without this grant
+# the first evidence request after deploy would 403 inside GCS and the
+# EvidenceReader.download path would surface as a 404 to the client
+# (defence-in-depth in evidence_storage.py logs the Forbidden at ERROR
+# so an alert fires on IAM regression even though the user-facing
+# surface stays the same).
+resource "google_storage_bucket_iam_member" "api_gateway_evidence_reader" {
+  bucket = google_storage_bucket.evidence.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${module.api_gateway.service_account_email}"
+}
+
 # Receipts bucket for manually-uploaded purchase receipts (ticket 6.3).
 # The api-gateway writes here on POST /api/v1/purchases/upload, and the
 # ingest-agent reads to extract structured purchase data from the file.

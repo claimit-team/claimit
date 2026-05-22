@@ -12,13 +12,14 @@ from uuid import UUID
 
 from claimit_mongodb_models import MongoDBClient, User
 from claimit_mongodb_models.enums import ClaimOutcome, Platform, SendMode
-from fastapi import APIRouter, Body, Depends, Path, Query
+from fastapi import APIRouter, Body, Depends, Path, Query, Response
 from pydantic import BaseModel, Field
 
-from ..deps import get_db, get_pubsub_publisher
+from ..deps import get_db, get_evidence_reader, get_pubsub_publisher
 from ..middleware.auth import get_current_user
 from ..middleware.errors import ApiError
 from ..services import claims_service
+from ..services.evidence_storage import EvidenceReader
 from ..services.pubsub_publisher import PubSubPublisher
 
 router = APIRouter(prefix="/claims", tags=["claims"])
@@ -102,9 +103,43 @@ async def get_claim_detail(
 ) -> dict[str, object]:
     """Return a claim plus its linked purchase + policy.
 
-    Response: { claim, purchase, policy, evidence_url }
+    Response: { claim, purchase, policy, evidence_url, evidence_captured_at }
     """
     return await claims_service.get_claim_detail(db=db, user_id=user.id, claim_id=claim_id)
+
+
+@router.get("/{claim_id}/evidence")
+async def get_claim_evidence(
+    claim_id: Annotated[UUID, Path()],
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[MongoDBClient, Depends(get_db)],
+    evidence_reader: Annotated[EvidenceReader, Depends(get_evidence_reader)],
+) -> Response:
+    """Stream a user's price-drop evidence blob from GCS through api-gateway.
+
+    Proxy (NOT a signed URL): the evidence bucket has
+    public_access_prevention=enforced per terraform/storage.tf so we
+    never mint signBlob credentials. api-gateway holds
+    roles/storage.objectViewer on the bucket via the
+    api_gateway_evidence_reader IAM binding (ticket 5.8); we proxy the
+    bytes back to the authenticated browser with the original content-type.
+
+    404 covers every failure mode (missing claim, non-owner, no
+    evidence_screenshot_url, malformed gs:// URI, blob missing in GCS,
+    bucket mismatch) — see services.claims_service.fetch_evidence_for_user.
+    We never 403 / never leak existence across users.
+
+    Screenshots are watermarked PNGs from the monitor-agent screenshot
+    service (ticket 4.12); a plain `Response(content=bytes)` is
+    sufficient — no streaming required.
+    """
+    data, content_type = await claims_service.fetch_evidence_for_user(
+        db=db,
+        evidence_reader=evidence_reader,
+        user_id=user.id,
+        claim_id=claim_id,
+    )
+    return Response(content=data, media_type=content_type)
 
 
 @router.post("/{claim_id}/approve")

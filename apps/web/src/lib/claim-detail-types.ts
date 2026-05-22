@@ -49,7 +49,26 @@ export interface ClaimEvidence {
   current_price: number;
   original_price: number;
   screenshot_url: string;
+  /**
+   * Real capture time joined from the `PriceHistory` snapshot whose
+   * `evidence_screenshot_url` matches the claim's (ticket 5.8 / WI-3).
+   * Empty string when the wire field is null (no snapshot row OR the
+   * claim was drafted without a price-drop event); evidence-pane
+   * formats empty as "hide the pill" rather than rendering a proxy
+   * date like `claim.updated_at`.
+   */
   captured_at: string;
+  /**
+   * The original product URL (`purchase.product_url`) — used as the
+   * "Source" link in the evidence card so the user can verify the
+   * snapshot against the live page. Optional in the interface so legacy
+   * fixtures in `claim-detail.ts` (a dead-code mock module slated for
+   * cleanup) keep type-checking without forcing a synthetic URL on
+   * every row; the view-model builder always populates a string
+   * (empty when `purchase` is null) so renderers can treat empty +
+   * undefined identically as "platform label only, no link".
+   */
+  source_url?: string;
   policy_clause: string;
   policy_url: string;
 }
@@ -72,6 +91,22 @@ export interface ClaimPolicy {
   claim_url: string;
   claim_phone: string;
   window_days: number;
+  /**
+   * External link to the merchant's price-match policy page. Empty
+   * string when no row matches the claim's platform/category combo —
+   * evidence-pane renders the "Read full policy" link conditionally
+   * (passes through `toSafeExternalHref` so a malformed/relative URL
+   * also hides the link). Optional in the interface to keep legacy
+   * mock fixtures type-checking.
+   */
+  policy_url?: string;
+  /**
+   * ISO timestamp of when the policy text was last verified
+   * (ticket 5.8 / WI-4). Empty string when null on the wire — the
+   * evidence-pane hides the "Policy verified …" caption. Optional so
+   * legacy mocks keep type-checking.
+   */
+  last_verified?: string;
 }
 
 export interface ClaimDetail {
@@ -107,6 +142,14 @@ export interface ClaimDetail {
    * `cancelled` branch as muted subtext.
    */
   cancel_reason?: string;
+  /**
+   * Ticket 5.15 / WI-7: ISO timestamp the auto-send worker will (or
+   * did) submit this claim. Set only while the claim is in
+   * `queued_for_send`; null/absent otherwise. Surfaced as a live
+   * MM:SS countdown by the claim-header's queued branch (WI-8) and
+   * by the dashboard auto-send banner (WI-9).
+   */
+  auto_send_at?: string | null;
 }
 
 export interface ClaimMessage {

@@ -18,6 +18,7 @@ import uuid
 from claimit_mongodb_models import MongoDBClient
 from google.cloud import secretmanager
 
+from .services.evidence_storage import EvidenceReader
 from .services.pubsub_publisher import PubSubPublisher
 from .services.receipts_storage import ReceiptsUploader
 from .services.token_cache import AccessTokenCache
@@ -28,6 +29,7 @@ _state_jwt_key: str | None = None
 _token_cache: AccessTokenCache | None = None
 _pubsub_publisher: PubSubPublisher | None = None
 _receipts_uploader: ReceiptsUploader | None = None
+_evidence_reader: EvidenceReader | None = None
 
 
 async def get_db() -> MongoDBClient:
@@ -76,6 +78,24 @@ async def get_receipts_uploader() -> ReceiptsUploader:
     if _receipts_uploader is None:
         raise RuntimeError("ReceiptsUploader not initialized")
     return _receipts_uploader
+
+
+def init_evidence_reader() -> None:
+    """Initialize the module-global evidence reader. Called from lifespan().
+
+    Read-only counterpart to the receipts uploader — backs the GET
+    /api/v1/claims/:id/evidence proxy (ticket 5.8). Bucket comes from
+    EVIDENCE_BUCKET env (resolved in Terraform from
+    google_storage_bucket.evidence.name).
+    """
+    global _evidence_reader
+    _evidence_reader = EvidenceReader()
+
+
+async def get_evidence_reader() -> EvidenceReader:
+    if _evidence_reader is None:
+        raise RuntimeError("EvidenceReader not initialized")
+    return _evidence_reader
 
 
 def derive_user_id(firebase_uid: str) -> uuid.UUID:

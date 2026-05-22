@@ -426,27 +426,17 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         return {"status": "error"}
 
 
-# NOTE(task-3.20): This is an internal endpoint must be wired to a Cloud Scheduler job.
-# Add to infra/terraform/scheduler.tf:
+# Auto-send cron handler — wired to a Cloud Scheduler job in
+# infra/terraform/scheduler.tf (resource: claim_auto_send, ticket 5.15
+# / WI-10). Scheduler fires this endpoint every minute, the worker
+# picks up queued claims whose `auto_send_at` has elapsed, and
+# `submit_claim` flips them to `pending` + emits the
+# `claim_submitted` NotificationEvent that drives the dashboard
+# banner's Sent ✓ flip via SSE.
 #
-# resource "google_cloud_scheduler_job" "claim_auto_send" {
-#   name             = "claimit-claim-auto-send"
-#   schedule         = "* * * * *"
-#   time_zone        = "UTC"
-#   attempt_deadline = "60s"
-#   # max_concurrent_dispatches=1 ensures only one run at a time,
-#   # preventing duplicate submissions if a run exceeds 60s.
-#   # The re-read guard in handle_auto_send provides a second layer.
-#   http_target {
-#     http_method = "POST"
-#     uri         = "${module.claim_agent.service_url}/internal/auto-send"
-#     oidc_token {
-#       service_account_email = google_service_account.pubsub_pusher.email
-#       audience              = "${module.claim_agent.service_url}/internal/auto-send"
-#     }
-#   }
-# }
-# This is an [INTERFACE-CHANGE] — tag the PR accordingly.
+# Concurrency: Cloud Scheduler's `attempt_deadline = 60s` matches the
+# cron cadence; the re-read guard below (L469-L471) is the second
+# layer that prevents duplicate submits if a run goes long.
 @app.post("/internal/auto-send")
 async def handle_auto_send(request: Request) -> dict:
     now = datetime.now(UTC)

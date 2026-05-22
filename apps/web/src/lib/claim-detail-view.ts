@@ -55,6 +55,11 @@ import type {
  *
  * Mapping rules:
  *  - `draft_pending`        -> `awaiting_approval`
+ *  - `queued_for_send`      -> `queued_for_send` (NEW in 5.15 / WI-8 —
+ *                              live MM:SS countdown + Send now/Cancel
+ *                              actions; replaces the previous
+ *                              fall-through to awaiting_approval that
+ *                              hid the queue state from the header)
  *  - `pending`              -> `submitted` (in-flight to merchant)
  *  - `approved`             -> `approved`
  *  - `denied`               -> `denied`
@@ -68,6 +73,10 @@ import type {
  *                              "Cancelled" badge)
  *  - `user_self_service`    -> `expired` (CLOSED — user resolved
  *                              outside the funnel)
+ *  - `awaiting_approval`    -> `awaiting_approval` (read-tolerance:
+ *                              legacy docs from before 5.15 / WI-5
+ *                              may still carry this; same UI as a
+ *                              fresh draft_pending)
  *  - unknown / null         -> `awaiting_approval` (calm default;
  *                              same as a freshly-drafted claim)
  */
@@ -77,6 +86,8 @@ export function mapOutcomeToWorkflowStatus(
   switch (outcome) {
     case "draft_pending":
       return "awaiting_approval";
+    case "queued_for_send":
+      return "queued_for_send";
     case "pending":
       return "submitted";
     case "approved":
@@ -231,7 +242,7 @@ function mapDraftVersions(claim: ClaimDetailDoc): DraftVersion[] {
  * copy for missing policy text.
  */
 function buildEvidence(response: ClaimDetailResponse): ClaimEvidence {
-  const { claim, purchase, policy, evidence_url } = response;
+  const { claim, purchase, policy, evidence_url, evidence_captured_at } = response;
   const pricePaid = purchase?.price_paid ?? 0;
   const claimAmount = claim.claim_amount ?? 0;
   // `current_price` is what the merchant is showing now -> price_paid
@@ -242,12 +253,11 @@ function buildEvidence(response: ClaimDetailResponse): ClaimEvidence {
     current_price: currentPrice,
     original_price: pricePaid,
     screenshot_url: evidence_url ?? claim.evidence_screenshot_url ?? "",
-    // `updated_at` is the best in-band "when did we capture this"
-    // signal we have; `submitted_at` is the next-best for a claim
-    // that was submitted but never updated post-submit. Empty string
-    // when both are null -> the defensive formatter in evidence-pane
-    // skips the date pill.
-    captured_at: claim.updated_at ?? claim.submitted_at ?? "",
+    // Real `checked_at` from the PriceHistory snapshot (WI-3). Empty
+    // string when null — the formatter in evidence-pane hides the
+    // captured-at pill rather than rendering `updated_at` as a proxy.
+    captured_at: evidence_captured_at ?? "",
+    source_url: purchase?.product_url ?? "",
     policy_clause:
       claim.policy_clause_cited ??
       policy?.policy_text_relevant_clause ??
@@ -270,6 +280,8 @@ function buildPolicyBlock(response: ClaimDetailResponse): ClaimPolicy {
     claim_url: policy?.claim_url ?? "",
     claim_phone: policy?.claim_phone ?? "",
     window_days: policy?.window_days ?? 0,
+    policy_url: policy?.policy_url ?? "",
+    last_verified: policy?.last_verified ?? "",
   };
 }
 
@@ -365,6 +377,11 @@ export function buildClaimDetailViewModel(response: ClaimDetailResponse): ClaimD
     evidence: buildEvidence(response),
     purchase: buildPurchaseBlock(response),
     policy: buildPolicyBlock(response),
+    // WI-7: surface auto_send_at as-is so the queued_for_send claim
+    // header branch (WI-8) and any future detail-page banner can render
+    // the live countdown. Null when not queued — the header's branch
+    // guards on the value before computing MM:SS.
+    auto_send_at: claim.auto_send_at,
     ...resolution,
   };
 }

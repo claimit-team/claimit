@@ -8,22 +8,19 @@ import {
   Image as ImageIcon,
   Receipt,
   TrendingDown,
+  ZoomIn,
 } from "lucide-react";
 import Link from "next/link";
-import type { ElementType } from "react";
+import { type ElementType, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { ClaimsApiError, fetchEvidenceBlob } from "@/lib/api/claims";
 import { formatClaimCurrency } from "@/lib/claim-detail";
 import type { ClaimDetail } from "@/lib/claim-detail-types";
+import { toSafeExternalHref } from "@/lib/safe-url";
 
 interface EvidencePaneProps {
   claim: ClaimDetail;
@@ -85,14 +82,193 @@ function formatDateShort(dateString: string): string {
   }).format(date);
 }
 
-function ScreenshotPlaceholder() {
+/**
+ * Real price-drop screenshot loaded through the api-gateway evidence
+ * proxy (ticket 5.8 / WI-2). Mirrors the load+zoom shape of
+ * `components/confirm/receipt-preview.tsx`: blob → object URL → click
+ * to open a centered Dialog with the full-size image.
+ *
+ * The evidence bucket has `public_access_prevention=enforced`, so we
+ * always go through `GET /api/v1/claims/:id/evidence` rather than a
+ * signed URL (matches the receipt-proxy decision).
+ *
+ * States:
+ *   - `loading`  → skeleton.
+ *   - `missing`  → calm "No evidence captured yet" — fired when the
+ *     proxy returns null (no `evidence_screenshot_url`, blob gone,
+ *     bucket mismatch — every "no evidence" wire shape collapses into
+ *     a single 404, never 403, see services.claims_service).
+ *   - `error`    → compact retry surface.
+ *   - `ready`    → image + click-to-zoom Dialog.
+ *
+ * Object URLs are revoked on unmount AND on every retry (the cleanup
+ * runs before the next effect body) to avoid leaking the in-memory
+ * bitmap — same hygiene as receipt-preview's blob handling.
+ */
+type EvidenceLoadState =
+  | { kind: "loading" }
+  | { kind: "missing" }
+  | { kind: "error"; message: string }
+  | { kind: "ready"; url: string };
+
+/**
+ * Source line under the evidence screenshot. Renders `Source: <platform>`
+ * as a plain label when `sourceUrl` is missing or non-http(s); otherwise
+ * makes the platform name a sanitized external link to the live product
+ * page so the user can verify the snapshot against current pricing.
+ * Sanitization via `toSafeExternalHref` mirrors the post-approve banner
+ * + draft pane callsites (PR #168 R6 — never inject `javascript:` or
+ * relative URLs into anchor hrefs).
+ */
+function SourceLine({ platform, sourceUrl }: { platform: string; sourceUrl: string | undefined }) {
+  const safeHref = toSafeExternalHref(sourceUrl);
+  if (!safeHref) {
+    return <span>Source: {platform}</span>;
+  }
   return (
-    <div className="flex h-32 items-center justify-center rounded-lg border border-dashed border-neutral-300 bg-neutral-50">
-      <div className="text-center">
-        <ImageIcon className="mx-auto h-8 w-8 text-neutral-400" />
-        <span className="mt-1 text-neutral-400 text-xs">Price screenshot</span>
+    <span>
+      Source:{" "}
+      <a
+        href={safeHref}
+        target="_blank"
+        rel="noreferrer noopener"
+        className="text-brand-primary-500 hover:underline"
+      >
+        {platform}
+      </a>
+    </span>
+  );
+}
+
+function EvidenceScreenshot({ claimId, platform }: { claimId: string; platform: string }) {
+  const [state, setState] = useState<EvidenceLoadState>({ kind: "loading" });
+  const [zoomOpen, setZoomOpen] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
+  const altText = `${platform} price-drop screenshot`;
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `reloadTick` is the manual refetch trigger; it isn't read inside the effect body but its state change must re-run the fetch.
+  useEffect(() => {
+    let cancelled = false;
+    let createdUrl: string | null = null;
+    setState({ kind: "loading" });
+
+    fetchEvidenceBlob(claimId)
+      .then((result) => {
+        if (cancelled) return;
+        if (result === null) {
+          setState({ kind: "missing" });
+          return;
+        }
+        createdUrl = URL.createObjectURL(result.blob);
+        setState({ kind: "ready", url: createdUrl });
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message =
+          err instanceof ClaimsApiError ? err.message : "We couldn't load the price screenshot.";
+        setState({ kind: "error", message });
+      });
+
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [claimId, reloadTick]);
+
+  if (state.kind === "loading") {
+    return (
+      <div className="flex h-32 animate-pulse items-center justify-center rounded-lg border border-neutral-200 bg-neutral-100">
+        <ImageIcon className="h-8 w-8 text-neutral-300" aria-hidden />
       </div>
-    </div>
+    );
+  }
+
+  if (state.kind === "missing") {
+    return (
+      <div className="flex h-32 items-center justify-center rounded-lg border border-dashed border-neutral-300 bg-neutral-50">
+        <div className="text-center">
+          <ImageIcon className="mx-auto h-8 w-8 text-neutral-400" aria-hidden />
+          <span className="mt-1 text-neutral-400 text-xs">No evidence captured yet</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.kind === "error") {
+    return (
+      <div className="flex h-32 flex-col items-center justify-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-center">
+        <p className="text-neutral-600 text-xs">{state.message}</p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setReloadTick((t) => t + 1)}
+        >
+          Try again
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setZoomOpen(true)}
+        className="group relative w-full cursor-zoom-in overflow-hidden rounded-lg border border-neutral-200 bg-neutral-0 text-left"
+      >
+        {/* biome-ignore lint/performance/noImgElement: Object-URL preview backed by the api-gateway proxy fetch; next/image would force a remote loader on a blob: URL. */}
+        <img src={state.url} alt={altText} className="block h-32 w-full object-cover" />
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-neutral-950/0 transition-colors group-hover:bg-neutral-950/10">
+          <div className="rounded-full bg-neutral-0/90 p-2 opacity-0 shadow transition-opacity group-hover:opacity-100">
+            <ZoomIn className="h-4 w-4 text-neutral-700" aria-hidden />
+          </div>
+        </div>
+      </button>
+
+      <Dialog open={zoomOpen} onOpenChange={setZoomOpen}>
+        <DialogContent className="max-w-3xl" showCloseButton>
+          <DialogTitle className="sr-only">{altText}</DialogTitle>
+          <div className="flex max-h-[80vh] items-center justify-center overflow-auto p-4">
+            {/* biome-ignore lint/performance/noImgElement: Object-URL preview backed by the api-gateway proxy fetch. */}
+            <img src={state.url} alt={altText} className="h-auto w-full" />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+/**
+ * "Read full policy" external link. Replaces the old static
+ * in-app Dialog (ticket 5.8 / WI-4) — the merchant's policy text
+ * evolves out-of-band, so the source-of-truth surface is the merchant's
+ * own page, not a frozen Eligibility-requirements bullet list we ship.
+ *
+ * `policy_url` is sanitized via `toSafeExternalHref` so a malformed,
+ * relative, or non-http(s) wire value yields no link rather than
+ * injecting `javascript:` into the anchor. When no safe link, the
+ * link is hidden entirely (preferable to a dead button).
+ */
+function PolicyExternalLink({
+  platform,
+  policyUrl,
+}: {
+  platform: string;
+  policyUrl: string | undefined;
+}) {
+  const safeHref = toSafeExternalHref(policyUrl);
+  if (!safeHref) return null;
+  return (
+    <a
+      href={safeHref}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="inline-flex items-center gap-1 font-medium text-brand-primary-500 text-sm hover:underline"
+    >
+      Read {platform} policy
+      <ExternalLink className="h-3 w-3" aria-hidden />
+    </a>
   );
 }
 
@@ -135,29 +311,10 @@ export function EvidencePane({ claim, onDoubleClickHeader }: EvidencePaneProps) 
                 </div>
               </div>
 
-              <Dialog>
-                <DialogTrigger
-                  render={<button type="button" className="w-full text-left outline-none" />}
-                >
-                  <ScreenshotPlaceholder />
-                </DialogTrigger>
-                <DialogContent className="max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle>Price Screenshot</DialogTitle>
-                  </DialogHeader>
-                  <div className="flex h-96 items-center justify-center rounded-lg border border-dashed border-neutral-300 bg-neutral-50">
-                    <div className="text-center">
-                      <ImageIcon className="mx-auto h-12 w-12 text-neutral-400" />
-                      <span className="mt-2 text-neutral-400 text-sm">
-                        Full price screenshot would appear here
-                      </span>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
+              <EvidenceScreenshot claimId={claim.claim_id} platform={claim.platform} />
 
               <div className="flex items-center justify-between text-neutral-500 text-xs">
-                <span>Source: {claim.platform}</span>
+                <SourceLine platform={claim.platform} sourceUrl={evidence.source_url} />
                 {capturedDate !== null && (
                   <span className="flex items-center gap-1">
                     <Clock className="h-3 w-3" />
@@ -176,40 +333,21 @@ export function EvidencePane({ claim, onDoubleClickHeader }: EvidencePaneProps) 
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <blockquote className="border-brand-primary-500 border-l-2 pl-3 text-neutral-700 text-sm italic">
+              {/* Highlighted cited clause — visual highlight via the
+                  --semantic-warning-bg token (light amber). True ES-snippet
+                  per-token highlighting would need backend support and a
+                  matching wire field; deferred. */}
+              <blockquote className="rounded-r-md border-semantic-warning border-l-4 bg-semantic-warning-bg/30 px-3 py-2 text-neutral-700 text-sm italic">
                 {evidence.policy_clause}
               </blockquote>
 
-              <Dialog>
-                <DialogTrigger
-                  render={
-                    <Button
-                      variant="link"
-                      type="button"
-                      className="h-auto gap-1 p-0 text-brand-primary-500"
-                    />
-                  }
-                >
-                  Read full policy
-                  <ExternalLink className="h-3 w-3" aria-hidden />
-                </DialogTrigger>
-                <DialogContent className="max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle>{claim.platform} price match policy</DialogTitle>
-                  </DialogHeader>
-                  <ScrollArea className="max-h-96">
-                    <div className="space-y-4 pr-4 text-neutral-700 text-sm">
-                      <p>{evidence.policy_clause}</p>
-                      <h4 className="font-medium text-neutral-900">Eligibility requirements</h4>
-                      <ul className="list-disc space-y-1 pl-5">
-                        <li>Keep your receipt or confirmation handy</li>
-                        <li>Show the advertised lower eligible price when you reach out</li>
-                        <li>Follow merchant-specific timing rules for adjustments</li>
-                      </ul>
-                    </div>
-                  </ScrollArea>
-                </DialogContent>
-              </Dialog>
+              <PolicyExternalLink platform={claim.platform} policyUrl={claim.policy?.policy_url} />
+
+              {claim.policy?.last_verified ? (
+                <p className="text-neutral-500 text-xs">
+                  Policy verified {formatDateShort(claim.policy.last_verified)}
+                </p>
+              ) : null}
             </CardContent>
           </Card>
 

@@ -23,8 +23,9 @@ from uuid import UUID
 import pytest
 from claimit_mongodb_models import Claim, MongoDBClient, User
 from httpx import AsyncClient
-from src.deps import get_db, get_pubsub_publisher
+from src.deps import get_db, get_evidence_reader, get_pubsub_publisher
 from src.main import app
+from src.services.evidence_storage import EvidenceReader
 from src.services.pubsub_publisher import PubSubPublisher
 
 from ._fixtures import USER_FIXTURE, make_claim, make_purchase
@@ -71,9 +72,17 @@ def _override_db(db: MongoDBClient) -> None:
     app.dependency_overrides[get_db] = _override
 
 
+def _override_evidence_reader(reader: EvidenceReader) -> None:
+    async def _override() -> EvidenceReader:
+        return reader
+
+    app.dependency_overrides[get_evidence_reader] = _override
+
+
 def _clear_overrides() -> None:
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(get_pubsub_publisher, None)
+    app.dependency_overrides.pop(get_evidence_reader, None)
 
 
 # ---------------------------------------------------------------------------
@@ -488,7 +497,11 @@ async def test_get_claim_detail_success(client: AsyncClient) -> None:
     purchase = Purchase.model_validate(make_purchase(user_id=_USER_ID))
 
     db = AsyncMock(spec=MongoDBClient)
-    # 1st find_one: auth middleware (User). 2nd find_one: claims_service._load_owned_claim.
+    # find_one calls: 1) auth User, 2) _load_owned_claim, 3) _find_evidence_snapshot.
+    # The claim fixture has evidence_screenshot_url=None, so the snapshot
+    # lookup short-circuits and the 3rd find_one is never invoked — match
+    # that by NOT providing a 3rd side_effect value (extra ones would
+    # raise StopIteration here only if hit).
     db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
     db.get_purchase = AsyncMock(return_value=purchase)
     db.get_policy = AsyncMock(return_value=None)  # policy may legitimately be missing
@@ -501,10 +514,121 @@ async def test_get_claim_detail_success(client: AsyncClient) -> None:
             )
         assert response.status_code == 200
         payload = response.json()
-        assert set(payload.keys()) == {"claim", "purchase", "policy", "evidence_url"}
+        assert set(payload.keys()) == {
+            "claim",
+            "purchase",
+            "policy",
+            "evidence_url",
+            "evidence_captured_at",
+        }
         assert payload["claim"]["_id"] == _CLAIM_ID
         assert payload["purchase"]["_id"] == str(purchase.id)
         assert payload["policy"] is None
+        # No evidence_screenshot_url on the claim → snapshot lookup
+        # short-circuits and returns None → wire field is null.
+        assert payload["evidence_captured_at"] is None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_get_claim_detail_joins_price_history_for_evidence_captured_at(
+    client: AsyncClient,
+) -> None:
+    """When the claim carries an `evidence_screenshot_url`, the gateway
+    looks up the matching `PriceHistory` row on
+    `(purchase_id, evidence_screenshot_url)` and surfaces its
+    `checked_at` as a top-level `evidence_captured_at` (ticket 5.8 / WI-3).
+
+    The frontend uses this as the real capture time instead of the
+    `claim.updated_at` proxy used before this PR.
+    """
+    from claimit_mongodb_models import PriceHistory, Purchase
+
+    evidence_url = "gs://test-evidence-bucket/evidence/best_buy/sku/2026-05-13.png"
+    claim = Claim.model_validate(_claim_doc(evidence_screenshot_url=evidence_url))
+    purchase = Purchase.model_validate(make_purchase(user_id=_USER_ID))
+    snapshot = PriceHistory.model_validate(
+        {
+            "_id": "50000000-0000-0000-0000-000000000001",
+            "updated_at": None,
+            "purchase_id": str(claim.purchase_id),
+            "platform": "best_buy",
+            "product_id": "sku-123",
+            "price_member": 199.99,
+            "price_non_member": 249.99,
+            "member_tier_required": None,
+            "currency": "USD",
+            "checked_at": "2026-05-13T20:00:00+00:00",
+            "source": "scraperapi",
+            "evidence_screenshot_url": evidence_url,
+            "raw_response_hash": "abc",
+        }
+    )
+
+    db = AsyncMock(spec=MongoDBClient)
+    # find_one: 1) auth User, 2) _load_owned_claim, 3) _find_evidence_snapshot.
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim, snapshot])
+    db.get_purchase = AsyncMock(return_value=purchase)
+    db.get_policy = AsyncMock(return_value=None)
+
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_CLAIM_ID}", headers={"Authorization": "Bearer t"}
+            )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["evidence_url"] == evidence_url
+        # Real PriceHistory checked_at threaded through.
+        assert payload["evidence_captured_at"].startswith("2026-05-13T20:00")
+
+        # Confirm the lookup filter shape — purchase_id + evidence_url
+        # are both required to disambiguate when a purchase has many
+        # snapshots.
+        snapshot_call = db.find_one.await_args_list[2]
+        coll, query = snapshot_call.args[0], snapshot_call.args[1]
+        assert coll == "price_history"
+        assert query == {
+            "purchase_id": claim.purchase_id,
+            "evidence_screenshot_url": evidence_url,
+        }
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_get_claim_detail_evidence_captured_at_null_when_no_matching_snapshot(
+    client: AsyncClient,
+) -> None:
+    """Legacy claim with an evidence link but NO matching `PriceHistory`
+    row (pre-4.12 or rogue write) — the gateway must NOT 500; it
+    surfaces `evidence_captured_at = null` and the frontend hides the
+    captured-at pill rather than rendering a proxy timestamp.
+    """
+    from claimit_mongodb_models import Purchase
+
+    evidence_url = "gs://test-evidence-bucket/evidence/orphan.png"
+    claim = Claim.model_validate(_claim_doc(evidence_screenshot_url=evidence_url))
+    purchase = Purchase.model_validate(make_purchase(user_id=_USER_ID))
+
+    db = AsyncMock(spec=MongoDBClient)
+    # find_one #3 returns None → no matching PriceHistory row.
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim, None])
+    db.get_purchase = AsyncMock(return_value=purchase)
+    db.get_policy = AsyncMock(return_value=None)
+
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_CLAIM_ID}", headers={"Authorization": "Bearer t"}
+            )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["evidence_url"] == evidence_url
+        assert payload["evidence_captured_at"] is None
     finally:
         _clear_overrides()
 
@@ -828,6 +952,78 @@ async def test_approve_rollback_outcome_on_publish_failure(client: AsyncClient) 
         assert rollback_call.args[0] == "claims"
         assert rollback_call.args[2]["outcome"] == "draft_pending"
         assert rollback_call.args[2]["submitted_at"] is None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_approve_rollback_restores_queued_for_send_state(client: AsyncClient) -> None:
+    """Regression for CodeRabbit MAJOR (PR #182): when approval starts from
+    queued_for_send, a publish failure must restore the ORIGINAL outcome +
+    its `auto_send_at`, not silently drop the claim to draft_pending."""
+    original_auto_send_at = datetime(2030, 1, 1, 12, 0, 0, tzinfo=UTC)
+    claim = Claim.model_validate(
+        _claim_doc(
+            outcome="queued_for_send",
+            submitted_at=None,
+            resolved_at=None,
+            auto_send_at=original_auto_send_at,
+            send_override="auto",
+        )
+    )
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
+    db.partial_update = AsyncMock(return_value=True)
+
+    publisher = AsyncMock(spec=PubSubPublisher)
+    publisher.publish = AsyncMock(side_effect=RuntimeError("broker unreachable"))
+
+    _override_db(db)
+    _override_publisher(publisher)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/approve",
+                json={},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 502
+        assert response.json()["error"]["code"] == "publish_failed"
+        assert db.partial_update.await_count == 2
+        rollback_call = db.partial_update.await_args_list[1]
+        rollback_updates = rollback_call.args[2]
+        assert rollback_updates["outcome"] == "queued_for_send"
+        assert rollback_updates["submitted_at"] is None
+        assert rollback_updates["auto_send_at"] == original_auto_send_at
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_approve_skips_notification_when_publish_fails(client: AsyncClient) -> None:
+    """Regression for CodeRabbit MAJOR (PR #182): the claim_submitted
+    notification must be emitted AFTER the publish so a publish failure
+    doesn't surface a false 'Sent ✓' SSE event."""
+    claim = Claim.model_validate(_claim_doc(outcome="draft_pending", submitted_at=None))
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
+    db.partial_update = AsyncMock(return_value=True)
+    db.upsert_notification_event = AsyncMock(return_value="notif-id")
+
+    publisher = AsyncMock(spec=PubSubPublisher)
+    publisher.publish = AsyncMock(side_effect=RuntimeError("broker unreachable"))
+
+    _override_db(db)
+    _override_publisher(publisher)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/approve",
+                json={},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 502
+        db.upsert_notification_event.assert_not_awaited()
     finally:
         _clear_overrides()
 
@@ -1203,5 +1399,394 @@ async def test_edit_draft_rejected_when_not_draft_pending(client: AsyncClient) -
             )
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "claim_not_editable"
+    finally:
+        _clear_overrides()
+
+
+# ---------------------------------------------------------------------------
+# GET /claims/{id}/evidence — proxy (ticket 5.8)
+# ---------------------------------------------------------------------------
+
+_EVIDENCE_BUCKET = "test-evidence-bucket"
+
+
+def _claim_with_evidence(
+    *,
+    user_id: str = _USER_ID,
+    evidence_url: str | None = f"gs://{_EVIDENCE_BUCKET}/evidence/best_buy/sku123/2026.png",
+    outcome: str = "draft_pending",
+) -> Claim:
+    # `_claim_doc` already pins user_id/claim_id; route ownership-mismatch
+    # tests pass a different user via `make_claim` directly instead of
+    # this helper.
+    return Claim.model_validate(
+        make_claim(
+            user_id=user_id,
+            claim_id=_CLAIM_ID,
+            evidence_screenshot_url=evidence_url,
+            outcome=outcome,
+            submitted_at=None if outcome == "draft_pending" else "2026-05-10T12:00:00Z",
+            resolved_at=None,
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_evidence_proxy_streams_owner_blob(client: AsyncClient) -> None:
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), _claim_with_evidence()])
+    reader = AsyncMock(spec=EvidenceReader)
+    reader.bucket_name = _EVIDENCE_BUCKET
+    reader.download = AsyncMock(return_value=(b"\x89PNG\r\n\x1a\nfake", "image/png"))
+
+    _override_db(db)
+    _override_evidence_reader(reader)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_CLAIM_ID}/evidence",
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("image/png")
+        assert response.content == b"\x89PNG\r\n\x1a\nfake"
+        # The service parses gs://{bucket}/evidence/best_buy/sku123/2026.png →
+        # blob_path is everything after the bucket.
+        reader.download.assert_awaited_once_with(blob_path="evidence/best_buy/sku123/2026.png")
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_evidence_proxy_returns_404_for_non_owner(client: AsyncClient) -> None:
+    # _load_owned_claim filters on {_id, user_id} — a non-owner read yields
+    # None, surfaced as 404 (`claim_not_found`). Mirrors the
+    # `test_get_claim_detail_not_found` shape.
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), None])
+    reader = AsyncMock(spec=EvidenceReader)
+    reader.bucket_name = _EVIDENCE_BUCKET
+
+    _override_db(db)
+    _override_evidence_reader(reader)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_OTHER_CLAIM_ID}/evidence",
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 404
+        # Never reach GCS for a doc we don't own — same leak-prevention
+        # stance as the receipt proxy.
+        reader.download.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_evidence_proxy_returns_404_when_no_evidence_url(client: AsyncClient) -> None:
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), _claim_with_evidence(evidence_url=None)])
+    reader = AsyncMock(spec=EvidenceReader)
+    reader.bucket_name = _EVIDENCE_BUCKET
+
+    _override_db(db)
+    _override_evidence_reader(reader)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_CLAIM_ID}/evidence",
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 404
+        reader.download.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_evidence_proxy_returns_404_on_bucket_mismatch(client: AsyncClient) -> None:
+    # Stored URI points at a bucket we don't manage — refuse the read
+    # even though the SA might happen to have access. Defence-in-depth
+    # against a bad write (H1: TF env wiring uses the bucket name from
+    # google_storage_bucket.evidence.name so this should never fire in
+    # prod, but the guard is the contract).
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(
+        side_effect=[
+            _user_for_auth(),
+            _claim_with_evidence(evidence_url="gs://other-bucket/some/object.png"),
+        ]
+    )
+    reader = AsyncMock(spec=EvidenceReader)
+    reader.bucket_name = _EVIDENCE_BUCKET
+
+    _override_db(db)
+    _override_evidence_reader(reader)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_CLAIM_ID}/evidence",
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 404
+        reader.download.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_evidence_proxy_returns_404_on_malformed_gs_uri(client: AsyncClient) -> None:
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(
+        side_effect=[
+            _user_for_auth(),
+            _claim_with_evidence(evidence_url="not-a-gs-uri"),
+        ]
+    )
+    reader = AsyncMock(spec=EvidenceReader)
+    reader.bucket_name = _EVIDENCE_BUCKET
+
+    _override_db(db)
+    _override_evidence_reader(reader)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_CLAIM_ID}/evidence",
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 404
+        reader.download.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_evidence_proxy_returns_404_when_blob_missing(client: AsyncClient) -> None:
+    from src.services.evidence_storage import EvidenceObjectMissingError
+
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), _claim_with_evidence()])
+    reader = AsyncMock(spec=EvidenceReader)
+    reader.bucket_name = _EVIDENCE_BUCKET
+    reader.download = AsyncMock(side_effect=EvidenceObjectMissingError("missing"))
+
+    _override_db(db)
+    _override_evidence_reader(reader)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_CLAIM_ID}/evidence",
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 404
+    finally:
+        _clear_overrides()
+
+
+# ---------------------------------------------------------------------------
+# Ticket 5.15 / WI-6 — queued_for_send cancel + Send-now (approve) path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cancel_claim_success_when_queued_for_send(client: AsyncClient) -> None:
+    """A claim in QUEUED_FOR_SEND must be cancellable from the auto-send
+    banner — the user has 5 minutes to abort the scheduler before it
+    auto-submits. Before WI-6 this 409'd because the cancel gate only
+    accepted DRAFT_PENDING + the within-auto-window PENDING case."""
+    claim = Claim.model_validate(
+        _claim_doc(
+            outcome="queued_for_send",
+            submitted_at=None,
+            resolved_at=None,
+        )
+    )
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
+    db.partial_update = AsyncMock(return_value=True)
+
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/cancel",
+                json={"reason": "Changed my mind"},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 200
+        assert response.json() == {"success": True}
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_cancel_clears_auto_send_at(client: AsyncClient) -> None:
+    """Cancelling a queued claim must clear `auto_send_at` so the WI-10
+    Cloud Scheduler worker cannot pick the claim up after the cancel.
+    The field stays cleared regardless of the pre-state (draft_pending
+    or queued_for_send), keeping the post-cancel doc consistent."""
+    claim = Claim.model_validate(
+        _claim_doc(
+            outcome="queued_for_send",
+            submitted_at=None,
+            resolved_at=None,
+        )
+    )
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
+    db.partial_update = AsyncMock(return_value=True)
+
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/cancel",
+                json={"reason": "Stop the queue"},
+                headers={"Authorization": "Bearer t"},
+            )
+        db.partial_update.assert_awaited_once()
+        updates = db.partial_update.await_args.args[2]
+        assert updates["outcome"] == "user_cancelled"
+        # Critical: auto_send_at cleared explicitly so the scheduler
+        # filter (auto_send_at <= now) drops this claim.
+        assert updates["auto_send_at"] is None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_approve_claim_success_from_queued_for_send(client: AsyncClient) -> None:
+    """The auto-send banner's "Send now" button reuses the approve
+    endpoint (no dedicated route). Approve must accept a claim in
+    QUEUED_FOR_SEND in addition to DRAFT_PENDING."""
+    claim = Claim.model_validate(
+        _claim_doc(
+            outcome="queued_for_send",
+            submitted_at=None,
+            resolved_at=None,
+        )
+    )
+    db = AsyncMock(spec=MongoDBClient)
+    # find_one calls: 1) auth User, 2) _load_owned_claim,
+    # 3) write_notification_event dedup lookup (H2 — claim_submitted).
+    # The third call returns None so the helper writes a fresh
+    # NotificationEvent via upsert_notification_event.
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim, None])
+    db.partial_update = AsyncMock(return_value=True)
+    db.upsert_notification_event = AsyncMock(return_value="notif-id")
+
+    publisher = AsyncMock(spec=PubSubPublisher)
+    publisher.publish = AsyncMock(return_value="msg-id")
+
+    _override_db(db)
+    _override_publisher(publisher)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/approve",
+                json={},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 200
+        assert response.json()["claim_id"] == _CLAIM_ID
+        publisher.publish.assert_awaited_once()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_approve_clears_auto_send_at(client: AsyncClient) -> None:
+    """Send-now must clear `auto_send_at` so the scheduler cannot
+    auto-submit the same claim a second time. Cleared on both the
+    plain-approve path (partial_update) and the edited-draft path
+    (array_push set_fields) — this test exercises the plain path; the
+    edited path is covered by the existing
+    test_approve_claim_with_edited_draft_appends_version test (now also
+    asserts the clear via the set_fields snapshot below)."""
+    claim = Claim.model_validate(
+        _claim_doc(
+            outcome="queued_for_send",
+            submitted_at=None,
+            resolved_at=None,
+        )
+    )
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim, None])
+    db.partial_update = AsyncMock(return_value=True)
+    db.upsert_notification_event = AsyncMock(return_value="notif-id")
+
+    publisher = AsyncMock(spec=PubSubPublisher)
+    publisher.publish = AsyncMock(return_value="msg-id")
+
+    _override_db(db)
+    _override_publisher(publisher)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/approve",
+                json={},
+                headers={"Authorization": "Bearer t"},
+            )
+        updates = db.partial_update.await_args.args[2]
+        assert updates["outcome"] == "pending"
+        assert updates["submitted_at"] is not None
+        # Critical: the queue marker is cleared so the WI-10 scheduler
+        # filter (`auto_send_at <= now`) cannot pick the claim up
+        # again. Same clear shape across draft_pending → pending and
+        # queued_for_send → pending — explicit None either way.
+        assert updates["auto_send_at"] is None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_approve_writes_claim_submitted_notification(client: AsyncClient) -> None:
+    """H2: approve must write a `claim_submitted` NotificationEvent so
+    the dashboard auto-send banner gets the same event-driven Sent ✓
+    signal whether submission came from the scheduler worker or from
+    a user clicking Send-now. Before this fix, the Send-now path only
+    published the `claim.approved` Pub/Sub (no SSE subscriber) and the
+    banner would have depended solely on an FE-optimistic 0:00 flip.
+    """
+    claim = Claim.model_validate(
+        _claim_doc(
+            outcome="draft_pending",
+            submitted_at=None,
+            resolved_at=None,
+        )
+    )
+    db = AsyncMock(spec=MongoDBClient)
+    # find_one #3 returns None so the helper writes a fresh notification.
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim, None])
+    db.partial_update = AsyncMock(return_value=True)
+    db.upsert_notification_event = AsyncMock(return_value="notif-id")
+
+    publisher = AsyncMock(spec=PubSubPublisher)
+    publisher.publish = AsyncMock(return_value="msg-id")
+
+    _override_db(db)
+    _override_publisher(publisher)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/approve",
+                json={},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 200
+
+        # The helper does a dedup find_one then upserts. Verify it
+        # got the right event_type + entity wiring; data carries the
+        # claim_id / submitted_via passthrough / refund_amount.
+        db.upsert_notification_event.assert_awaited_once()
+        event_doc = db.upsert_notification_event.await_args.args[0]
+        assert event_doc.event_type.value == "claim_submitted"
+        assert event_doc.entity_type.value == "claim"
+        assert str(event_doc.entity_id) == _CLAIM_ID
+        assert event_doc.data["claim_id"] == _CLAIM_ID
+        # The Pub/Sub publish is independent and still fires (claim.approved
+        # topic; downstream Cloud Run subscriber is still 4.18 stub work).
+        publisher.publish.assert_awaited_once()
     finally:
         _clear_overrides()

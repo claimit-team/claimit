@@ -31,17 +31,27 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
-from claimit_mongodb_models import Claim, ClaimReadTolerant, DraftVersion, MongoDBClient
+from claimit_mongodb_models import (
+    Claim,
+    ClaimReadTolerant,
+    DraftVersion,
+    MongoDBClient,
+    PriceHistoryReadTolerant,
+)
 from claimit_mongodb_models.enums import (
     ClaimOutcome,
     DraftGeneratedBy,
+    NotificationEntityType,
+    NotificationEventType,
     Platform,
     SendMode,
 )
+from claimit_mongodb_models.notification_helpers import write_notification_event
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..middleware.errors import ApiError
 from ..middleware.pagination import decode_cursor, encode_cursor
+from .evidence_storage import EvidenceObjectMissingError, EvidenceReader
 from .pubsub_publisher import PubSubPublisher
 
 logger = logging.getLogger(__name__)
@@ -132,6 +142,15 @@ _CLAIM_LIST_PROJECT_STAGE: dict[str, Any] = {
         "submitted_at": 1,
         "resolved_at": 1,
         "redraft_count": 1,
+        # Ticket 5.15 / WI-7: queued_for_send rows need `auto_send_at`
+        # + `send_override` for the dashboard's auto-send banner to
+        # render its countdown ("Sending in M:SS") and the
+        # Send-now/Cancel actions on initial load. Both fields are
+        # cheap scalars on the Claim doc; no extra join. Adding here
+        # vs. fetching detail-by-id avoids an N+1 against the banner's
+        # initial fetch.
+        "auto_send_at": 1,
+        "send_override": 1,
         "product_name": "$purchase.product_name",
         "category": "$purchase.category",
         "window_expires": "$purchase.window_expires",
@@ -175,6 +194,13 @@ class ClaimListItem(BaseModel):
     submitted_at: datetime | None = None
     resolved_at: datetime | None = None
     redraft_count: int | None = None
+    # Ticket 5.15 / WI-7: queued_for_send rows need `auto_send_at` +
+    # `send_override` for the dashboard auto-send banner countdown and
+    # action wiring. Both are read-tolerant — historical rows may not
+    # carry the values (set only on the queued path); `None` means
+    # "no queue marker, render no countdown".
+    auto_send_at: datetime | None = None
+    send_override: str | None = None
 
     # Joined from Purchase via $lookup.
     product_name: str | None = None
@@ -416,29 +442,76 @@ async def get_claim_detail(
     user_id: UUID,
     claim_id: UUID,
 ) -> dict[str, object]:
-    """Return a claim with its linked purchase + policy.
+    """Return a claim with its linked purchase + policy + evidence snapshot
+    metadata.
 
     404s on missing claim or ownership mismatch.
+
+    `evidence_captured_at` is sourced from the `PriceHistory` row whose
+    `(purchase_id, evidence_screenshot_url)` pair matches the claim's —
+    the monitor-agent writes both the snapshot link AND the
+    `checked_at` timestamp atomically, so a single lookup yields the
+    real capture time. Falls back to `null` when:
+      - the claim has no `evidence_screenshot_url` (Gemini draft
+        generated without a price-drop event), OR
+      - no matching `PriceHistory` row exists (legacy claims pre-4.12,
+        or a rogue write).
+    The frontend then hides the captured-at pill rather than showing
+    `updated_at` as a proxy (ticket 5.8 — accurate-or-absent).
     """
     claim = await _load_owned_claim(db, claim_id, user_id)
 
-    # Parallelize the two follow-up reads — both are user-scoped reads with no
-    # cross-dependency, so a single round-trip-of-two saves one network RTT.
-    # `claim.platform` is `str | None` on the tolerant model; only attempt
-    # the policy lookup when it's both present and a known Platform value.
-    # An unknown platform string yields no policy (frontend handles null).
+    # Parallelize the three follow-up reads — all are user-scoped reads
+    # with no cross-dependency, so a single round-trip-of-three saves
+    # two network RTTs vs. sequential. `claim.platform` is `str | None`
+    # on the tolerant model; only attempt the policy lookup when it's
+    # both present and a known Platform value. An unknown platform
+    # string yields no policy (frontend handles null).
     policy_platform = _safe_platform_value(claim.platform)
     purchase_id = claim.purchase_id
     purchase_task = db.get_purchase(purchase_id) if purchase_id is not None else _none_async()
     policy_task = db.get_policy(policy_platform) if policy_platform is not None else _none_async()
-    purchase, policy = await asyncio.gather(purchase_task, policy_task)
+    snapshot_task = _find_evidence_snapshot(db, claim)
+    purchase, policy, snapshot = await asyncio.gather(purchase_task, policy_task, snapshot_task)
+
+    evidence_captured_at = (
+        snapshot.checked_at.isoformat()
+        if snapshot is not None and snapshot.checked_at is not None
+        else None
+    )
 
     return {
         "claim": claim.model_dump(mode="json", by_alias=True),
         "purchase": purchase.model_dump(mode="json", by_alias=True) if purchase else None,
         "policy": policy.model_dump(mode="json", by_alias=True) if policy else None,
         "evidence_url": claim.evidence_screenshot_url,
+        "evidence_captured_at": evidence_captured_at,
     }
+
+
+async def _find_evidence_snapshot(
+    db: MongoDBClient,
+    claim: ClaimReadTolerant,
+) -> PriceHistoryReadTolerant | None:
+    """Look up the `PriceHistory` row whose snapshot the claim cites.
+
+    Returns `None` (no error) when the claim has insufficient data to
+    join — null `purchase_id` or null `evidence_screenshot_url` — or
+    when no matching row exists. Read-tolerant variant: a legacy
+    PriceHistory doc with an enum-value the strict schema no longer
+    accepts (e.g. a deprecated `source`) must not break the detail
+    page.
+    """
+    if claim.evidence_screenshot_url is None or claim.purchase_id is None:
+        return None
+    return await db.find_one(
+        "price_history",
+        {
+            "purchase_id": claim.purchase_id,
+            "evidence_screenshot_url": claim.evidence_screenshot_url,
+        },
+        PriceHistoryReadTolerant,
+    )
 
 
 def _safe_platform_value(raw: str | None) -> str | None:
@@ -471,30 +544,57 @@ async def approve_claim(
     send_override: SendMode | None = None,
     edited_draft_content: str | None = None,
 ) -> dict[str, object]:
-    """Approve a draft claim — transitions outcome draft_pending → pending and
-    publishes claim.approved for the claim-agent to actually submit.
+    """Approve a draft claim — transitions outcome `(draft_pending |
+    queued_for_send) → pending` and publishes claim.approved for the
+    claim-agent to actually submit.
 
-    409 if the claim is not in DRAFT_PENDING state.
+    `queued_for_send` is accepted (ticket 5.15 / WI-6) so the
+    auto-send-queue's "Send now" button reuses this endpoint instead of
+    adding a dedicated route — same approve semantics, just an
+    additional pre-state. The `auto_send_at` queue marker is cleared on
+    both paths so the Cloud Scheduler worker (WI-10) cannot pick the
+    claim up after a manual send.
+
+    409 if the claim is in any other state. The race where the worker
+    auto-submits the same tick the user clicks "Send now" surfaces as
+    a 409 here; the FE banner treats that 409 as success ("already
+    sent") per WI-9 H3.
     """
     claim = await _load_owned_claim(db, claim_id, user_id)
     # `claim.outcome` is `str | None` on the tolerant model. Compare to
-    # the canonical enum value rather than the enum instance.
-    if claim.outcome != ClaimOutcome.DRAFT_PENDING.value:
+    # the canonical enum values rather than the enum instances.
+    if claim.outcome not in (
+        ClaimOutcome.DRAFT_PENDING.value,
+        ClaimOutcome.QUEUED_FOR_SEND.value,
+    ):
         raise ApiError(
             "claim_not_approvable",
             f"Claim cannot be approved in state {claim.outcome!r}",
             status_code=409,
         )
 
+    # Capture the pre-approve state so a publish failure can restore
+    # the EXACT prior outcome + queue marker (ticket 5.15 / WI-6
+    # CodeRabbit MAJOR). Pre-fix the rollback unconditionally forced
+    # DRAFT_PENDING + null `auto_send_at`, which silently removed
+    # queued claims from the auto-send queue on any transient broker
+    # error. With this we restore the exact state the caller would
+    # see by re-reading the doc, so a retry hits the same approve
+    # gate again (queued_for_send retries from queued; draft_pending
+    # retries from draft).
+    previous_outcome = claim.outcome
+    previous_auto_send_at = claim.auto_send_at
+
     now = datetime.now(UTC)
 
     # Two write paths:
     #
     # 1. No edited draft → plain `partial_update` over the scalar fields
-    #    (outcome / submitted_at / send_override). The `Claim` field
-    #    validations on these scalars run via `TypeAdapter` per-field; no
-    #    historical sub-document is read or rewritten. This is the
-    #    strict-on-write contract from the original §6 fix.
+    #    (outcome / submitted_at / send_override / auto_send_at-clear).
+    #    The `Claim` field validations on these scalars run via
+    #    `TypeAdapter` per-field; no historical sub-document is read or
+    #    rewritten. This is the strict-on-write contract from the
+    #    original §6 fix.
     #
     # 2. Edited draft → append the new `DraftVersion` via Mongo `$push`
     #    in the SAME write that $sets the scalars. `partial_update` with
@@ -510,6 +610,11 @@ async def approve_claim(
             "send_override": (send_override.value if send_override is not None else None),
             "submitted_at": now,
             "outcome": ClaimOutcome.PENDING.value,
+            # Clear the queue marker. Harmless when the claim came from
+            # `draft_pending` (the field was already null); load-bearing
+            # when it came from `queued_for_send` (the WI-10 scheduler
+            # filters on `auto_send_at <= now`, and we want it idle).
+            "auto_send_at": None,
         }
         success = await db.partial_update("claims", claim_id, updates, model=Claim)
     else:
@@ -536,6 +641,9 @@ async def approve_claim(
                 "send_override": (send_override.value if send_override is not None else None),
                 "submitted_at": now,
                 "outcome": ClaimOutcome.PENDING.value,
+                # Same auto_send_at clear as the plain-approve path; the
+                # queue marker must not survive a Send-now-with-edit.
+                "auto_send_at": None,
             },
             parent_model=Claim,
         )
@@ -575,8 +683,10 @@ async def approve_claim(
         # Persist already moved the claim to PENDING but the broker didn't
         # accept the wake-up message. If we leave it at PENDING, a client
         # retry hits the state gate (claim_not_approvable) — the user gets
-        # stuck. Roll the outcome back to DRAFT_PENDING and clear the
-        # submission stamp so retry is well-defined.
+        # stuck. Roll the outcome back to its PRE-APPROVE state so a
+        # retry is well-defined (queued_for_send retries the same queued
+        # claim with its prior `auto_send_at` intact; draft_pending
+        # retries the draft).
         logger.exception(
             "Failed to publish claim.approved for claim %s; rolling back outcome", claim.id
         )
@@ -585,8 +695,9 @@ async def approve_claim(
                 "claims",
                 claim_id,
                 {
-                    "outcome": ClaimOutcome.DRAFT_PENDING.value,
+                    "outcome": previous_outcome,
                     "submitted_at": None,
+                    "auto_send_at": previous_auto_send_at,
                 },
                 model=Claim,
             )
@@ -603,6 +714,36 @@ async def approve_claim(
             "Claim approval failed; please retry.",
             status_code=502,
         ) from None
+
+    # Publish succeeded — emit the `claim_submitted` NotificationEvent
+    # so the dashboard auto-send banner (and any other SSE consumer)
+    # gets the event-driven "Sent ✓" signal. Order matters: persisting
+    # the notification BEFORE the publish would surface a false Sent ✓
+    # SSE if the publish then failed and we rolled back to draft /
+    # queued (CodeRabbit MAJOR, PR #182). Best-effort wrap so a
+    # downstream notification-write failure doesn't roll back the
+    # already-published claim (the auto-send worker uses the same
+    # post-publish ordering — see apps/claim-agent/src/main.py
+    # L487-L498).
+    try:
+        await write_notification_event(
+            db=db,
+            user_id=str(claim.user_id) if claim.user_id is not None else "",
+            event_type=NotificationEventType.CLAIM_SUBMITTED,
+            entity_type=NotificationEntityType.CLAIM,
+            entity_id=str(claim_id),
+            data={
+                "claim_id": str(claim_id),
+                "submitted_via": claim.submitted_via,
+                "refund_amount": claim.claim_amount,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Failed to persist claim_submitted notification for claim %s "
+            "(publish already succeeded; UI may miss the Sent ✓ SSE)",
+            claim.id,
+        )
 
     # `submitted_via` is unchanged on this write (claim-agent sets it
     # downstream); pass through whatever was loaded. `claim_id` here is
@@ -622,12 +763,22 @@ async def cancel_claim(
     claim_id: UUID,
     reason: str | None = None,
 ) -> dict[str, object]:
-    """Cancel a claim. Allowed only if not yet submitted, OR within the
-    5-minute auto-send hold window (claim-agent honors auto_send_delay_seconds
-    before actually sending, so a recent PENDING in auto mode is still
-    cancellable).
+    """Cancel a claim. Allowed when:
+      - the claim is still DRAFT_PENDING (user hasn't approved), OR
+      - the claim is QUEUED_FOR_SEND (auto-send queue, ticket 5.15 /
+        WI-6) — clears `auto_send_at` so the scheduler worker can't
+        pick it up after the cancel, OR
+      - the claim is PENDING with `send_override == auto` and is
+        within the 5-minute auto-send hold window (claim-agent
+        honors auto_send_delay_seconds before actually dispatching,
+        so a recent PENDING-in-auto is still cancellable).
 
-    409 if the claim is past the cancellation window.
+    409 if the claim is past the cancellation window. The race where
+    the WI-10 scheduler auto-submits the same tick the user clicks
+    Cancel surfaces as a 409 here; the FE banner treats that 409 as
+    "already sent" (the user's intent was satisfied — they wanted to
+    stop a queue, but the queue already drained) and removes the
+    banner entry rather than showing an error toast (WI-9 H3).
     """
     claim = await _load_owned_claim(db, claim_id, user_id)
 
@@ -644,7 +795,11 @@ async def cancel_claim(
         and _to_utc(claim.submitted_at) is not None
         and (now - _to_utc(claim.submitted_at)) < _AUTO_SEND_CANCEL_WINDOW
     )
-    is_cancellable = claim.outcome == ClaimOutcome.DRAFT_PENDING.value or within_auto_window
+    is_cancellable = (
+        claim.outcome == ClaimOutcome.DRAFT_PENDING.value
+        or claim.outcome == ClaimOutcome.QUEUED_FOR_SEND.value
+        or within_auto_window
+    )
     if not is_cancellable:
         raise ApiError(
             "claim_not_cancellable",
@@ -659,6 +814,11 @@ async def cancel_claim(
             "outcome": ClaimOutcome.USER_CANCELLED.value,
             "outcome_note": reason,
             "resolved_at": now,
+            # Clear the queue marker for the `queued_for_send` cancel
+            # path. Harmless when the claim came from `draft_pending`
+            # (already null) or the auto-PENDING window (also null;
+            # the field is only set while queued, not after submit).
+            "auto_send_at": None,
         },
         model=Claim,
     )
@@ -728,9 +888,81 @@ async def edit_claim_draft(
     return {"claim": refreshed.model_dump(mode="json", by_alias=True)}
 
 
+async def fetch_evidence_for_user(
+    *,
+    db: MongoDBClient,
+    evidence_reader: EvidenceReader,
+    user_id: UUID,
+    claim_id: UUID,
+) -> tuple[bytes, str]:
+    """Fetch a price-drop evidence blob for the route layer, scoped to the
+    owning user.
+
+    Mirrors `services.purchases.fetch_receipt_for_user` — 404 covers every
+    failure mode (missing claim, non-owner, no `evidence_screenshot_url`,
+    malformed gs:// URI, blob missing in GCS, bucket mismatch). We never
+    403 / never leak existence across users.
+
+    Bucket-mismatch guard: stored URIs that don't point at the configured
+    `EVIDENCE_BUCKET` are refused even if the SA happens to have access.
+    Defence-in-depth against a bad write that aimed at another bucket.
+    """
+    claim = await _load_owned_claim(db, claim_id, user_id)
+    if not claim.evidence_screenshot_url:
+        raise ApiError("not_found", "Evidence not found", status_code=404)
+
+    try:
+        bucket, blob_path = _parse_gs_uri(claim.evidence_screenshot_url)
+    except ValueError:
+        logger.warning(
+            "Malformed evidence_screenshot_url claim_id=%s url=%r",
+            claim_id,
+            claim.evidence_screenshot_url,
+        )
+        raise ApiError("not_found", "Evidence not found", status_code=404) from None
+
+    if bucket != evidence_reader.bucket_name:
+        logger.warning(
+            "Evidence URI bucket mismatch claim_id=%s uri_bucket=%s expected=%s",
+            claim_id,
+            bucket,
+            evidence_reader.bucket_name,
+        )
+        raise ApiError("not_found", "Evidence not found", status_code=404)
+
+    try:
+        return await evidence_reader.download(blob_path=blob_path)
+    except EvidenceObjectMissingError:
+        logger.warning(
+            "Evidence blob missing in GCS claim_id=%s blob_path=%s",
+            claim_id,
+            blob_path,
+        )
+        raise ApiError("not_found", "Evidence not found", status_code=404) from None
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _parse_gs_uri(uri: str) -> tuple[str, str]:
+    """Split a `gs://bucket/path/with/slashes` URI into `(bucket, path)`.
+
+    Raises `ValueError` for any malformed input. The caller maps that to
+    a 404 rather than a 500 so a stored bogus URI doesn't leak as an
+    internal-error surface to the client. Twin of `services.purchases._parse_gs_uri`
+    — duplicated here (rather than imported) because both call sites want a
+    pure-function dependency local to their service module, and the
+    function is 5 lines of trivially-correct logic that won't drift.
+    """
+    if not uri.startswith("gs://"):
+        raise ValueError(f"Not a gs:// URI: {uri!r}")
+    remainder = uri[len("gs://") :]
+    bucket, sep, path = remainder.partition("/")
+    if not bucket or not sep or not path:
+        raise ValueError(f"Malformed gs:// URI (missing bucket or path): {uri!r}")
+    return bucket, path
 
 
 async def _load_owned_claim(
@@ -768,6 +1000,7 @@ __all__ = [
     "approve_claim",
     "cancel_claim",
     "edit_claim_draft",
+    "fetch_evidence_for_user",
     "get_claim_detail",
     "list_claims",
     "list_claims_for_purchase",
