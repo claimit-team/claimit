@@ -29,6 +29,20 @@ resource "google_cloud_run_v2_service_iam_member" "scheduler_invoker_on_ingest" 
   member   = "serviceAccount:${google_service_account.pubsub_pusher.email}"
 }
 
+# ---------- pubsub_pusher → run.invoker on claim_agent ----------
+# subscriptions.tf already grants this for the Pub/Sub push subscriptions
+# that fan claim.drafted into claim_agent. The auto-send cron (Job 4
+# below) uses the SAME service account for OIDC, so the invoker grant
+# applies to it transparently — but explicitly pinning it here documents
+# the dependency and survives a future split of the two invoker grants.
+resource "google_cloud_run_v2_service_iam_member" "scheduler_invoker_on_claim_agent" {
+  project  = var.project_id
+  location = var.region
+  name     = module.claim_agent.service_name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.pubsub_pusher.email}"
+}
+
 # ---------- Job 1: monitor cron (every 15 min) ----------
 resource "google_cloud_scheduler_job" "monitor_cron" {
   name        = "claimit-monitor-cron"
@@ -85,6 +99,56 @@ resource "google_cloud_scheduler_job" "gmail_watch_renewal" {
   depends_on = [
     google_service_account_iam_member.scheduler_service_agent_token_creator,
     google_cloud_run_v2_service_iam_member.scheduler_invoker_on_ingest,
+  ]
+}
+
+# ---------- Job 4: claim-agent auto-send cron (every 1 min) ----------
+# Ticket 5.15 / WI-10. The claim-agent /internal/auto-send endpoint
+# (apps/claim-agent/src/main.py L450) finds queued_for_send claims
+# whose auto_send_at has elapsed, calls submit_claim, and emits the
+# claim_submitted NotificationEvent that drives the dashboard banner's
+# "Sent ✓" SSE flip. Without this job, queued claims would sit
+# indefinitely and the auto-send pipeline would be FE-optimistic only.
+#
+# Single-worker: attempt_deadline 60s aligned with the cron cadence;
+# the worker's re-read-then-update guard (L469-L471) is the second
+# layer that prevents duplicate submits if a run goes long. Retry
+# disabled — Scheduler will fire again 60s later regardless.
+#
+# Note on prod behavior (flagged in PR body): once this lands, queued
+# claims auto-submit ~every minute. The seeded Hilton queued claim
+# (WI-11) sets auto_send_at = now+20min to give a comfortable
+# verify/record window; re-run the seed right before any demo so the
+# banner is live.
+resource "google_cloud_scheduler_job" "claim_auto_send" {
+  name        = "claimit-claim-auto-send"
+  description = "Trigger claim-agent /internal/auto-send every minute to submit queued claims."
+  project     = var.project_id
+  region      = var.region
+  schedule    = "* * * * *"
+  time_zone   = "UTC"
+
+  attempt_deadline = "60s"
+
+  retry_config {
+    retry_count          = 0
+    min_backoff_duration = "10s"
+    max_retry_duration   = "60s"
+  }
+
+  http_target {
+    uri         = "${module.claim_agent.service_url}/internal/auto-send"
+    http_method = "POST"
+
+    oidc_token {
+      service_account_email = google_service_account.pubsub_pusher.email
+      audience              = "${module.claim_agent.service_url}/internal/auto-send"
+    }
+  }
+
+  depends_on = [
+    google_service_account_iam_member.scheduler_service_agent_token_creator,
+    google_cloud_run_v2_service_iam_member.scheduler_invoker_on_claim_agent,
   ]
 }
 
