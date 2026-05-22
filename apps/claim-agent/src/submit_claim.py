@@ -61,7 +61,7 @@ async def submit_claim(
             claim.id,
         )
         submitted_via = SubmittedVia.GMAIL_SEND
-        gmail_message_id: str | None = f"stub-{claim.id}"
+        gmail_message_id: str | None = None
     elif claim.claim_type == ClaimType.CHAT_SCRIPT:
         submitted_via = SubmittedVia.CLIPBOARD
         gmail_message_id = None

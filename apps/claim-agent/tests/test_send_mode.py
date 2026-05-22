@@ -211,6 +211,5 @@ async def test_submit_claim_email_uses_stub(caplog: pytest.LogCaptureFixture) ->
         result = await submit_claim(claim, user, db)
 
     assert result.submitted_via == SubmittedVia.GMAIL_SEND
-    assert result.gmail_message_id is not None
-    assert result.gmail_message_id.startswith("stub-")
+    assert result.gmail_message_id is None
     assert any("awaiting task 4.18" in r.message for r in caplog.records)

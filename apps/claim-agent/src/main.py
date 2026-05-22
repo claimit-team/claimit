@@ -428,6 +428,9 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
 #   schedule         = "* * * * *"
 #   time_zone        = "UTC"
 #   attempt_deadline = "60s"
+#   # max_concurrent_dispatches=1 ensures only one run at a time,
+#   # preventing duplicate submissions if a run exceeds 60s.
+#   # The re-read guard in handle_auto_send provides a second layer.
 #   http_target {
 #     http_method = "POST"
 #     uri         = "${module.claim_agent.service_url}/internal/auto-send"
@@ -443,11 +446,15 @@ async def handle_auto_send(request: Request) -> dict:
     now = datetime.now(UTC)
     db = MongoDBClient()
 
+    # Single-worker model: Cloud Scheduler max_concurrent_dispatches=1
+    # + re-read guard below prevents double-processing.
+    batch_size = int(os.getenv("AUTO_SEND_BATCH_SIZE", "50"))
     overdue = await db.find_claims(
         {
             "outcome": ClaimOutcome.QUEUED_FOR_SEND.value,
             "auto_send_at": {"$lte": now},
-        }
+        },
+        limit=batch_size,
     )
 
     results: dict[str, int] = {"processed": 0, "errors": 0}
