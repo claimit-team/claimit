@@ -352,6 +352,55 @@ class MongoDBClient:
         result = await self._db[collection].update_one({"_id": uid}, update_doc)
         return result.matched_count > 0
 
+    async def array_push_and_update(
+        self,
+        collection: str,
+        id: str | UUID,
+        field: str,
+        element: Any,
+        element_model: type[Any],
+        updates: dict[str, Any],
+    ) -> None:
+        """Push `element` to an array field and apply `updates` atomically.
+
+        Validates `element` against `element_model` (strict-on-new-data),
+        then issues a single `update_one` with both `$push` and `$set` so
+        the array append and the sibling-field writes are never split across
+        two round-trips (eliminating the TOCTOU window between a separate
+        `array_push` + `partial_update` pair).
+
+        `updated_at` is always included in the `$set` payload.
+        """
+        if "_id" in updates:
+            raise ValueError("`updates` may not contain '_id'; identity is fixed by `id`.")
+
+        try:
+            if isinstance(element, element_model):
+                validated_element = element
+            else:
+                validated_element = element_model.model_validate(element)
+        except ValidationError as exc:
+            sanitized = [
+                {"loc": e.get("loc"), "type": e.get("type"), "msg": e.get("msg")}
+                for e in exc.errors()
+            ]
+            logger.error(
+                "array_push_and_update element validation failed for collection=%s field=%s: %s",
+                collection,
+                field,
+                sanitized,
+            )
+            raise
+
+        element_payload = validated_element.model_dump(mode="json")
+        set_payload: dict[str, Any] = {**updates, "updated_at": datetime.now(UTC)}
+        update_doc: dict[str, Any] = {
+            "$push": {field: element_payload},
+            "$set": set_payload,
+        }
+        uid = _coerce_uuid(id)
+        await self._db[collection].update_one({"_id": uid}, update_doc)
+
     async def update_many(
         self,
         collection: str,
