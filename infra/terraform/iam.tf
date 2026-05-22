@@ -68,6 +68,17 @@ resource "google_cloud_run_v2_service_iam_member" "api_gateway_public_invoker" {
   depends_on = [module.api_gateway]
 }
 
+# Ticket 5.9: api-gateway → run.invoker on assistant-agent for Mode B SSE.
+resource "google_cloud_run_v2_service_iam_member" "api_gateway_invoker_on_assistant_agent" {
+  project  = var.project_id
+  location = var.region
+  name     = "claimit-assistant-agent"
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${module.api_gateway.service_account_email}"
+
+  depends_on = [module.api_gateway, module.assistant_agent]
+}
+
 # CI service account needs aiplatform.user to deploy ADK agent definitions
 # via scripts/deploy_agents.py in the deploy-agents.yml workflow (ticket 1.29).
 resource "google_project_iam_member" "ci_aiplatform_user" {

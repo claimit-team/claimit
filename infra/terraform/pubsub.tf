@@ -165,3 +165,11 @@ resource "google_pubsub_topic_iam_member" "monitor_agent_publisher_on_price_drop
   role    = "roles/pubsub.publisher"
   member  = "serviceAccount:${module.monitor_agent.service_account_email}"
 }
+
+# Ticket 5.9: assistant-agent Mode B request_redraft → claim.redraft_requested.
+resource "google_pubsub_topic_iam_member" "assistant_agent_publisher_on_claim_redraft_requested" {
+  project = var.project_id
+  topic   = google_pubsub_topic.main["claim.redraft_requested"].name
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${module.assistant_agent.service_account_email}"
+}
