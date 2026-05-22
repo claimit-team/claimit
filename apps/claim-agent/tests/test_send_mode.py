@@ -85,12 +85,20 @@ def test_determine_send_mode_respects_send_override() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 6c — handle_approval_mode sets awaiting_approval outcome and publishes
+# 6c — handle_approval_mode sets draft_pending (ticket 5.15 / WI-5)
+#
+# Reconciles the approval-mode outcome with the rest of the stack:
+# gateway gates, FE workflow-status mapping, dashboard hook, and
+# seed all key on DRAFT_PENDING. Writing AWAITING_APPROVAL (the
+# previous behavior) left a real-pipeline claim invisible to the
+# Review-draft dashboard and 409'd approve/cancel/edit. The seed
+# masked this in dev. AWAITING_APPROVAL stays in the enum for
+# read-tolerance against historical docs.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_handle_approval_mode_sets_correct_outcome() -> None:
+async def test_handle_approval_mode_writes_draft_pending() -> None:
     claim = _make_claim()
     db = AsyncMock()
     db.partial_update.return_value = True
@@ -106,7 +114,7 @@ async def test_handle_approval_mode_sets_correct_outcome() -> None:
     db.partial_update.assert_awaited_once_with(
         "claims",
         claim.id,
-        {"outcome": ClaimOutcome.AWAITING_APPROVAL.value},
+        {"outcome": ClaimOutcome.DRAFT_PENDING.value},
     )
 
     mock_publish.assert_awaited_once()
@@ -115,7 +123,7 @@ async def test_handle_approval_mode_sets_correct_outcome() -> None:
     assert event.send_mode == "approval"
     assert event.auto_send_at is None
 
-    claim.model_copy.assert_called_once_with(update={"outcome": ClaimOutcome.AWAITING_APPROVAL})
+    claim.model_copy.assert_called_once_with(update={"outcome": ClaimOutcome.DRAFT_PENDING})
 
 
 # ---------------------------------------------------------------------------

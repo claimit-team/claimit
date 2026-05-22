@@ -135,6 +135,10 @@ export const ClaimOutcome = {
   USER_SELF_SERVICE: "user_self_service",
   USER_CANCELLED: "user_cancelled",
   NO_RESPONSE: "no_response",
+  // Read-tolerance only as of ticket 5.15 (WI-5). Nothing in the writer
+  // path produces this value any more; approval-mode draft creation now
+  // writes DRAFT_PENDING. Historical docs may still carry it — the FE
+  // mapOutcomeToWorkflowStatus tolerates both values.
   AWAITING_APPROVAL: "awaiting_approval",
   QUEUED_FOR_SEND: "queued_for_send",
 } as const;

@@ -114,6 +114,12 @@ class ClaimOutcome(StrEnum):
     USER_SELF_SERVICE = "user_self_service"
     USER_CANCELLED = "user_cancelled"
     NO_RESPONSE = "no_response"
+    # Read-tolerance only as of ticket 5.15 (WI-5). Nothing in the writer
+    # path produces this value any more; approval-mode draft creation now
+    # writes DRAFT_PENDING so the rest of the stack (gateway gates,
+    # dashboard hooks, seed) sees one canonical "user needs to review"
+    # outcome. Kept in the enum so historical docs that still carry
+    # `awaiting_approval` load cleanly through ClaimReadTolerant.
     AWAITING_APPROVAL = "awaiting_approval"
     QUEUED_FOR_SEND = "queued_for_send"
 

@@ -49,10 +49,28 @@ async def handle_approval_mode(
     event_platform_id: str,
     refund_amount: float,
 ) -> Claim:
+    # Write `draft_pending` (not `awaiting_approval`) so the rest of the
+    # stack — 6.4 gateway gates, 5.7 FE workflow status, useReviewDraft
+    # dashboard hook, scripts/seed_claims_demo.py — sees the canonical
+    # "user needs to review this" outcome the rest of the stack keys on.
+    #
+    # Before this fix (ticket 5.15 / WI-5): a real-pipeline approval-mode
+    # claim landed as `awaiting_approval`. The seed (which uses
+    # `draft_pending`) masked the divergence in dev; in prod the claim
+    # never surfaced on the Review-draft dashboard cards AND approve /
+    # cancel / edit 409'd because the gateway gate keys on
+    # DRAFT_PENDING. The frontend `mapOutcomeToWorkflowStatus` still
+    # tolerates a legacy `awaiting_approval` value (read-tolerance), so
+    # historical claims in either state render the same workflow label.
+    #
+    # `ClaimOutcome.AWAITING_APPROVAL` stays in the enum (read-tolerance:
+    # historical docs may still hold it). Nothing in the writer path
+    # produces it after this commit — verified by an rg guard in the
+    # local gate.
     await db.partial_update(
         "claims",
         claim.id,
-        {"outcome": ClaimOutcome.AWAITING_APPROVAL.value},
+        {"outcome": ClaimOutcome.DRAFT_PENDING.value},
     )
     event = ClaimDraftedEvent(
         user_id=str(claim.user_id),
@@ -65,7 +83,7 @@ async def handle_approval_mode(
         auto_send_at=None,
     )
     await publish_event(TOPIC_CLAIM_DRAFTED, event)
-    return claim.model_copy(update={"outcome": ClaimOutcome.AWAITING_APPROVAL})
+    return claim.model_copy(update={"outcome": ClaimOutcome.DRAFT_PENDING})
 
 
 async def handle_auto_mode(
