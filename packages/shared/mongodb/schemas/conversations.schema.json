@@ -155,6 +155,18 @@
         }
       ],
       "title": "Archived At"
+    },
+    "agent_session_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Agent Session Id"
     }
   },
   "required": [

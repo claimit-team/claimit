@@ -573,3 +573,109 @@ def test_runner_loop_exit_log_fires_with_captured_text(
     assert rec.final_text_captured is True
     assert rec.final_text_len > 0
     assert rec.path == path
+
+
+# ---------------------------------------------------------------------------
+# extract_from_email — ticket 4.17 public seam
+# ---------------------------------------------------------------------------
+#
+# The full email-path `extract()` orchestrator does dedup, payload build,
+# and confirmation-email side effects on top of the Gemini call. The 4.17
+# Gmail ingest handler doesn't want any of that — it has its own
+# sentinel-insert + finalize flow. `extract_from_email` is the inner
+# Gemini-call+parse seam factored out for that consumer.
+
+
+def test_extract_from_email_returns_parsed_extracted_purchase_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Happy path: Gemini returns valid JSON → returns ExtractedPurchaseFields."""
+
+    async def fake_run_agent(email: EmailForExtraction) -> str:
+        return json.dumps(_sample_extracted_payload())
+
+    monkeypatch.setattr(extractor, "_run_extractor_agent", fake_run_agent)
+
+    result = asyncio.run(extractor.extract_from_email(_sample_email()))
+    assert isinstance(result, ExtractedPurchaseFields)
+    assert result.platform == "best_buy"
+    assert result.price_paid == 24.99
+    assert result.order_id == "A123"
+    # Confidence aggregate stays raw — the Purchase-payload-building
+    # logic in finalize.py is what computes overall_min from material
+    # fields. extract_from_email returns whatever the model produced.
+    assert result.extraction_confidence.overall_min == 0.95
+
+
+def test_extract_from_email_empty_output_raises_extractor_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gemini returning empty string → ExtractorError. Same surface as
+    the existing extract() empty-output path so the 4.17 handler can
+    catch the same way."""
+
+    async def fake_run_agent(_email: EmailForExtraction) -> str:
+        return ""
+
+    monkeypatch.setattr(extractor, "_run_extractor_agent", fake_run_agent)
+
+    with pytest.raises(ExtractorError):
+        asyncio.run(extractor.extract_from_email(_sample_email()))
+
+
+def test_extract_from_email_malformed_json_raises_extractor_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gemini returning non-JSON → ExtractorError (not a raw
+    JSONDecodeError) so the handler's except clause stays clean."""
+
+    async def fake_run_agent(_email: EmailForExtraction) -> str:
+        return "this is not json"
+
+    monkeypatch.setattr(extractor, "_run_extractor_agent", fake_run_agent)
+
+    with pytest.raises(ExtractorError):
+        asyncio.run(extractor.extract_from_email(_sample_email()))
+
+
+def test_extract_from_email_schema_violation_raises_validation_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gemini returning JSON that violates the ExtractedPurchaseFields
+    schema → pydantic.ValidationError. Same surface as extract_from_blob.
+    The 4.17 handler catches all exceptions in this branch anyway."""
+
+    async def fake_run_agent(_email: EmailForExtraction) -> str:
+        payload = _sample_extracted_payload()
+        payload["price_paid"] = "not a number"  # schema requires float
+        return json.dumps(payload)
+
+    monkeypatch.setattr(extractor, "_run_extractor_agent", fake_run_agent)
+
+    with pytest.raises(ValidationError):
+        asyncio.run(extractor.extract_from_email(_sample_email()))
+
+
+def test_extract_from_email_no_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The function must NOT call the dedup check, the confirmation
+    email sender, or any Mongo helper. Asserting via monkeypatched
+    sentinels: if any of those got called, the test would fail."""
+
+    called = {"dedup": False, "email": False}
+
+    async def fake_run_agent(_email: EmailForExtraction) -> str:
+        return json.dumps(_sample_extracted_payload())
+
+    async def fake_check_duplicate(*_args, **_kwargs):
+        called["dedup"] = True
+        return False
+
+    async def fake_send_confirmation(*_args, **_kwargs):
+        called["email"] = True
+
+    monkeypatch.setattr(extractor, "_run_extractor_agent", fake_run_agent)
+    monkeypatch.setattr(extractor, "check_duplicate", fake_check_duplicate)
+    monkeypatch.setattr(extractor, "maybe_send_confirmation_email", fake_send_confirmation)
+
+    asyncio.run(extractor.extract_from_email(_sample_email()))
+    assert called == {"dedup": False, "email": False}

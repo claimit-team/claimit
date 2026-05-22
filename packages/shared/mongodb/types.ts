@@ -135,6 +135,8 @@ export const ClaimOutcome = {
   USER_SELF_SERVICE: "user_self_service",
   USER_CANCELLED: "user_cancelled",
   NO_RESPONSE: "no_response",
+  AWAITING_APPROVAL: "awaiting_approval",
+  QUEUED_FOR_SEND: "queued_for_send",
 } as const;
 export type ClaimOutcome = (typeof ClaimOutcome)[keyof typeof ClaimOutcome];
 
