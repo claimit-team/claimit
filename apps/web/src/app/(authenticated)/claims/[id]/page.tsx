@@ -61,21 +61,51 @@ export default function ClaimDetailPage({ params }: ClaimDetailRouteProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
 
   /**
-   * Refetch the enriched detail bundle and replace the wire state.
-   * Used by write handlers (approve / cancel / edit) to reconcile
-   * optimistic patches with server truth. Intentionally does NOT
-   * flip back to "loading" — the previous wire stays visible so the
-   * UI doesn't flash a skeleton between optimistic + server states.
+   * Refetch the enriched detail bundle and replace the wire state on
+   * success. Used by write handlers (approve / cancel / edit) to
+   * reconcile optimistic patches with server truth.
+   *
+   * IMPORTANT: re-throws on error and does NOT mutate page state — the
+   * caller decides how to handle a refetch failure. Post-write callers
+   * catch and show a "refresh failed" toast WITHOUT wiping the
+   * optimistic patch from page state; the load-retry path (see
+   * `loadDetail`) wraps the call in its own try/catch and converts the
+   * error back into a full-page error state.
+   *
+   * Bugbot MEDIUM finding (PR #168): the earlier version silently
+   * caught errors and called `setState({ status: "error" })`, which
+   * (a) wiped the optimistic patch on a transient refetch failure
+   * and (b) made the nested try/catch in approve/cancel dialogs dead
+   * code. The user could see a success toast and a full error page
+   * simultaneously. Re-throwing here restores the contract.
+   *
+   * Intentionally does NOT flip back to "loading" — the previous wire
+   * stays visible so the UI doesn't flash a skeleton between
+   * optimistic + server states.
    */
   const refetch = useCallback(async () => {
+    if (isAuthLoading) return;
+    if (userId === null) {
+      throw new Error("User must be signed in.");
+    }
+    const wire = await getClaimDetail(id);
+    setState({ status: "ready", wire });
+  }, [id, isAuthLoading, userId]);
+
+  /**
+   * Load (or retry-load) the detail bundle and convert any failure into
+   * a page-level error state. Used by the initial mount effect and by
+   * the "Try again" button in the error view. Shares the error-to-state
+   * conversion with the original useEffect (DRY).
+   */
+  const loadDetail = useCallback(async () => {
     if (isAuthLoading) return;
     if (userId === null) {
       setState({ status: "error", message: "User must be signed in." });
       return;
     }
     try {
-      const wire = await getClaimDetail(id);
-      setState({ status: "ready", wire });
+      await refetch();
     } catch (err: unknown) {
       if (err instanceof ClaimsApiError && err.code === "claim_not_found") {
         setState({ status: "notFound" });
@@ -89,7 +119,7 @@ export default function ClaimDetailPage({ params }: ClaimDetailRouteProps) {
             : "Unknown error";
       setState({ status: "error", message });
     }
-  }, [id, isAuthLoading, userId]);
+  }, [isAuthLoading, refetch, userId]);
 
   /**
    * Shallow-merge a `Partial<ClaimDetailDoc>` into the wire `claim`.
@@ -121,33 +151,14 @@ export default function ClaimDetailPage({ params }: ClaimDetailRouteProps) {
       return;
     }
 
-    let mounted = true;
+    // Mount → loading → loadDetail() converts success/failure into the
+    // appropriate page state. We can't await loadDetail inside the
+    // effect (synchronous), so fire-and-forget; the unmount guard in
+    // refetch's setState is unnecessary because loadDetail itself
+    // checks isAuthLoading / userId before calling refetch.
     setState({ status: "loading" });
-
-    getClaimDetail(id)
-      .then((response) => {
-        if (!mounted) return;
-        setState({ status: "ready", wire: response });
-      })
-      .catch((err: unknown) => {
-        if (!mounted) return;
-        if (err instanceof ClaimsApiError && err.code === "claim_not_found") {
-          setState({ status: "notFound" });
-          return;
-        }
-        const message =
-          err instanceof ClaimsApiError
-            ? err.message
-            : err instanceof Error
-              ? err.message
-              : "Unknown error";
-        setState({ status: "error", message });
-      });
-
-    return () => {
-      mounted = false;
-    };
-  }, [id, isAuthLoading, userId]);
+    void loadDetail();
+  }, [isAuthLoading, loadDetail, userId]);
 
   const vm = useMemo(
     () => (state.status === "ready" ? buildClaimDetailViewModel(state.wire) : null),
@@ -161,7 +172,7 @@ export default function ClaimDetailPage({ params }: ClaimDetailRouteProps) {
     return <ClaimDetailNotFound />;
   }
   if (state.status === "error") {
-    return <ClaimDetailError message={state.message} onRetry={() => void refetch()} />;
+    return <ClaimDetailError message={state.message} onRetry={() => void loadDetail()} />;
   }
   if (vm === null) {
     return <ClaimDetailSkeleton />;

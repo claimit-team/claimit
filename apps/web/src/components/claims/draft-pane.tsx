@@ -717,22 +717,23 @@ export function DraftPane({
     try {
       const nowIso = new Date().toISOString();
       await editClaimDraft(claim.claim_id, { draft_content: editBuffer });
-      // Optimistic patch: extend draft_versions with a v(n+1) row so the
-      // preview snaps to the just-saved content immediately. The refetch
-      // below replaces this with server truth (single source of truth)
-      // but the in-flight UI never flashes the old content.
+      // Edit write succeeded — apply the optimistic patch + flip back
+      // to preview regardless of whether the follow-up refetch lands.
+      // A refetch-only failure does NOT mean the save failed; reporting
+      // it as such would mislead the user into re-typing changes that
+      // already persisted (matches the approve / cancel pattern;
+      // Bugbot LOW finding, PR #168).
       applyOptimistic({
         draft_content: editBuffer,
         draft_versions: [
           ...claim.draft_versions.map((dv) => ({
             version: dv.version,
             content: dv.content,
-            // PRESERVE the prior version's authorship (`generated_by`)
-            // through the optimistic patch — even though the refetch
-            // immediately replaces this with server truth, erasing it
-            // for the sub-second window would briefly hide the
-            // "AI draft" / "You edited" badges in the version dropdown
-            // (Bugbot LOW finding, PR #168).
+            // PRESERVE prior versions' authorship through the
+            // optimistic patch — refetch replaces with server truth,
+            // but erasing it for the sub-second window would briefly
+            // hide the "AI draft" / "You edited" badges in the
+            // version dropdown (Bugbot LOW finding, PR #168).
             // The wire shape uses `at`; the VM consumes `created_at`,
             // so round-trip via refetch normalises both.
             generated_by: dv.generated_by ?? null,
@@ -746,20 +747,21 @@ export function DraftPane({
           },
         ],
       });
-      await refetch();
+      try {
+        await refetch();
+      } catch {
+        toast.error("Draft saved, but refresh failed. Reload to see latest state.");
+      }
       toast.success("Draft updated");
       setDraftMode("preview");
       // setSelectedVersion will fire via the useEffect when the refreshed
       // current_version lands; no explicit set needed here.
     } catch (err: unknown) {
+      // Write itself failed — surface the real error and let the user
+      // retry. No optimistic patch was applied so there's nothing to
+      // reconcile.
       const message = err instanceof Error ? err.message : "Could not save draft";
       toast.error(message);
-      // Reconcile back to server truth so the optimistic patch (which
-      // didn't include a server-assigned id / final timestamps) doesn't
-      // linger. WI-11 polishes the re-enable UX.
-      await refetch().catch(() => {
-        /* ignore — surfaced via the toast above */
-      });
     } finally {
       setIsSaving(false);
     }
