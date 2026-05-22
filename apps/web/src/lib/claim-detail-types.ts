@@ -21,6 +21,20 @@ export interface DraftVersion {
   version: number;
   content: string;
   created_at: string;
+  /**
+   * Author of this version. Backend `DraftGeneratedBy` enum:
+   *  - `agent`              — initial AI-authored draft
+   *  - `user_edit`          — user saved an edit via PUT /edit
+   *  - `assistant_redraft`  — assistant-driven redraft (5.9)
+   *
+   * Widened to `string | null | undefined` (read-tolerant: a legacy
+   * doc may carry a value the current enum no longer recognises;
+   * null/undefined when the wire field is missing). Renderers fall
+   * back to a Title-Case label on unknown values. The `undefined`
+   * branch keeps legacy mock fixtures in `claim-detail.ts`
+   * type-checking without forcing a synthetic value on every row.
+   */
+  generated_by?: string | null;
 }
 
 export interface ClaimEvidence {

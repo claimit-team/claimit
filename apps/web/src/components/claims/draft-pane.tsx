@@ -1,6 +1,8 @@
 "use client";
 
+import { formatDistanceToNow } from "date-fns";
 import {
+  ArrowLeft,
   Check,
   ChevronDown,
   Copy,
@@ -32,8 +34,9 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type ClaimDetailDoc, editClaimDraft } from "@/lib/api/claims";
-import type { ClaimDetail, ClaimDetailDraftType } from "@/lib/claim-detail-types";
+import type { ClaimDetail, ClaimDetailDraftType, DraftVersion } from "@/lib/claim-detail-types";
 import { cn } from "@/lib/utils";
 
 interface DraftPaneProps {
@@ -97,15 +100,54 @@ function PaneHeader({
   );
 }
 
+/**
+ * Map backend `DraftGeneratedBy` (read-tolerant string | null) to a
+ * UI label. Unknown values render Title-Case via the fallback so a
+ * legacy/future enum value doesn't crash the dropdown.
+ */
+function sourceLabel(generatedBy: string | null | undefined): string {
+  if (generatedBy === null || generatedBy === undefined) return "Source unknown";
+  switch (generatedBy) {
+    case "agent":
+      return "AI draft";
+    case "user_edit":
+      return "You edited";
+    case "assistant_redraft":
+      return "Assistant rewrite";
+    default:
+      return generatedBy
+        .split("_")
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ");
+  }
+}
+
+function formatVersionTimestamp(iso: string): string {
+  if (iso === "") return "";
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "";
+  try {
+    return formatDistanceToNow(new Date(ms), { addSuffix: true });
+  } catch {
+    return "";
+  }
+}
+
 function VersionDropdown({
-  currentVersion,
-  totalVersions,
+  versions,
+  selectedVersion,
   onVersionChange,
 }: {
-  currentVersion: number;
-  totalVersions: number;
+  versions: DraftVersion[];
+  selectedVersion: number;
   onVersionChange: (version: number) => void;
 }) {
+  const totalVersions = versions.length;
+  const selected = versions[selectedVersion - 1];
+  const selectedSource = selected ? sourceLabel(selected.generated_by) : "";
+  const selectedWhen = selected ? formatVersionTimestamp(selected.created_at) : "";
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -113,15 +155,28 @@ function VersionDropdown({
           "inline-flex h-8 items-center gap-1 rounded-lg px-2 font-medium text-neutral-700 text-sm outline-none hover:bg-muted",
         )}
       >
-        Version {currentVersion} of {totalVersions}
+        <span>
+          v{selectedVersion}
+          {totalVersions > 1 ? ` of ${totalVersions}` : ""}
+          {selectedSource ? ` · ${selectedSource}` : ""}
+          {selectedWhen ? ` · ${selectedWhen}` : ""}
+        </span>
         <ChevronDown className="h-4 w-4" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
-        {Array.from({ length: totalVersions }, (_, i) => i + 1).map((v) => (
-          <DropdownMenuItem key={v} onClick={() => onVersionChange(v)}>
-            Version {v}
-          </DropdownMenuItem>
-        ))}
+        {versions.map((dv) => {
+          const when = formatVersionTimestamp(dv.created_at);
+          return (
+            <DropdownMenuItem key={dv.version} onClick={() => onVersionChange(dv.version)}>
+              <div className="flex flex-col">
+                <span className="font-medium">
+                  v{dv.version} · {sourceLabel(dv.generated_by)}
+                </span>
+                {when ? <span className="text-neutral-500 text-xs">{when}</span> : null}
+              </div>
+            </DropdownMenuItem>
+          );
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -322,6 +377,15 @@ export function DraftPane({
   }, [selectedVersion, claim]);
 
   const dirty = useMemo(() => editBuffer !== baseline, [editBuffer, baseline]);
+  const totalVersions = claim.draft_versions.length;
+  const onLatestVersion = selectedVersion === totalVersions;
+  // When the user browses an older version, force preview-only — editing
+  // an older version is not a supported rollback flow in 5.7.
+  useEffect(() => {
+    if (!onLatestVersion && draftMode === "edit") {
+      setDraftMode("preview");
+    }
+  }, [onLatestVersion, draftMode]);
 
   const Icon = claimTypeIcons[claim.claim_type];
 
@@ -450,10 +514,22 @@ export function DraftPane({
 
       <div className="flex items-center justify-between border-neutral-200 border-b px-4 py-2">
         <VersionDropdown
-          currentVersion={selectedVersion}
-          totalVersions={claim.draft_versions.length}
+          versions={claim.draft_versions}
+          selectedVersion={selectedVersion}
           onVersionChange={handleVersionChange}
         />
+        {!onLatestVersion ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            className="text-neutral-600"
+            onClick={() => handleVersionChange(totalVersions)}
+          >
+            <ArrowLeft className="mr-1 h-3.5 w-3.5" />
+            Back to latest
+          </Button>
+        ) : null}
       </div>
 
       <Tabs
@@ -466,9 +542,24 @@ export function DraftPane({
             <TabsTrigger value="preview" className="data-active:bg-neutral-100">
               Preview
             </TabsTrigger>
-            <TabsTrigger value="edit" className="data-active:bg-neutral-100">
-              Edit
-            </TabsTrigger>
+            {onLatestVersion ? (
+              <TabsTrigger value="edit" className="data-active:bg-neutral-100">
+                Edit
+              </TabsTrigger>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger
+                  type="button"
+                  aria-disabled="true"
+                  className={cn(
+                    "inline-flex h-10 cursor-not-allowed items-center justify-center rounded-md px-3 font-medium text-sm opacity-50",
+                  )}
+                >
+                  Edit
+                </TooltipTrigger>
+                <TooltipContent>Switch to the latest version to edit.</TooltipContent>
+              </Tooltip>
+            )}
           </TabsList>
         </div>
 

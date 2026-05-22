@@ -201,6 +201,7 @@ function mapDraftVersions(claim: ClaimDetailDoc): DraftVersion[] {
       version: dv.version ?? idx + 1,
       content: dv.content ?? "",
       created_at: dv.at ?? "",
+      generated_by: dv.generated_by,
     }));
   }
   if (claim.draft_content !== null && claim.draft_content !== "") {
@@ -209,6 +210,9 @@ function mapDraftVersions(claim: ClaimDetailDoc): DraftVersion[] {
         version: 1,
         content: claim.draft_content,
         created_at: claim.updated_at ?? "",
+        // Synthesized fallback when the wire array is empty — assume
+        // the (single) version came from the agent.
+        generated_by: "agent",
       },
     ];
   }
