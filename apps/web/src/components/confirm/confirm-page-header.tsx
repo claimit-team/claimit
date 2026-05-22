@@ -18,8 +18,14 @@ import { Button } from "@/components/ui/button";
  * Allow-list rather than block-list so the open-redirect surface is
  * naturally bounded: the only thing a future call-site can do via
  * `?from=` is pick from these known interior surfaces.
+ *
+ * `/upload` is deliberately NOT in this list — the standalone /upload
+ * page was deleted in ticket 5.14 B2 (replaced by the global
+ * `UploadDialog` that opens from any page; see `action-bar.tsx` L68).
+ * Routing Back to `/upload` would 404. Any residual `?from=/upload`
+ * query (e.g. from a stale email link) falls through to `/dashboard`.
  */
-const FROM_EXACT_ALLOWLIST = new Set<string>(["/dashboard", "/", "/purchases", "/upload"]);
+const FROM_EXACT_ALLOWLIST = new Set<string>(["/dashboard", "/", "/purchases"]);
 const FROM_PREFIX_ALLOWLIST = ["/purchases/", "/purchases?"];
 
 /**
