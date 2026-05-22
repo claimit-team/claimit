@@ -84,6 +84,10 @@ function StatusBadge({ status }: { status: ClaimDetailWorkflowStatus }) {
       label: "Window Closed",
       className: "bg-neutral-100 text-neutral-500 border-neutral-200",
     },
+    cancelled: {
+      label: "Cancelled",
+      className: "bg-neutral-100 text-neutral-500 border-neutral-200",
+    },
   };
 
   const { label, className } = config[status];
@@ -173,6 +177,14 @@ export function ClaimHeader({
 
       case "expired":
         return null;
+
+      case "cancelled":
+        // Closed by user action — surface the cancel reason inline so
+        // the user remembers why this claim is sitting on the list as
+        // "Cancelled" rather than "Window Closed".
+        return claim.cancel_reason !== undefined && claim.cancel_reason !== "" ? (
+          <span className="text-neutral-500 text-sm italic">Cancelled: {claim.cancel_reason}</span>
+        ) : null;
 
       default:
         return null;

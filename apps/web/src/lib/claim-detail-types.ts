@@ -7,7 +7,15 @@ export type ClaimDetailWorkflowStatus =
   | "submitted"
   | "approved"
   | "denied"
-  | "expired";
+  | "expired"
+  /**
+   * User-driven cancellation (POST /api/v1/claims/:id/cancel). Distinct
+   * from `expired` (window closed) and `submitted` (in-flight) — the
+   * claim is CLOSED but for a different reason. Header surfaces a
+   * neutral "Cancelled" badge + the user's reason as muted subtext;
+   * no actions.
+   */
+  | "cancelled";
 
 export type ClaimDetailDraftType =
   | "email"
@@ -93,6 +101,12 @@ export interface ClaimDetail {
   outcome?: OutcomeStatus;
   outcome_amount?: number;
   denial_reason?: string;
+  /**
+   * User-provided cancel reason (`outcome_note` when the backend
+   * `outcome === "user_cancelled"`). Surfaced by the header's
+   * `cancelled` branch as muted subtext.
+   */
+  cancel_reason?: string;
 }
 
 export interface ClaimMessage {
