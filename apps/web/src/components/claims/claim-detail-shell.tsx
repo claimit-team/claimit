@@ -87,9 +87,10 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
   // reference but MUST NOT clobber in-progress edits in the buffer.
   // CodeRabbit MAJOR finding, PR #168.
   const currentDraftContent = claim.draft_versions[selectedVersion - 1]?.content ?? "";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedVersion is intentionally listed alongside currentDraftContent so the buffer also resets across version switches where two versions happen to share identical content (rare but possible after AI regens); without it the effect wouldn't re-fire and stale edits could carry across the flip — CodeRabbit MINOR, PR #168.
   useEffect(() => {
     setEditBuffer(currentDraftContent);
-  }, [currentDraftContent]);
+  }, [currentDraftContent, selectedVersion]);
 
   const [approveOpen, setApproveOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);

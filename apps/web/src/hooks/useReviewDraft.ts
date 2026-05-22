@@ -18,7 +18,7 @@
 
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { type ClaimListItem, ClaimsApiError, listClaims } from "@/lib/api/claims";
 import { useAuthStore } from "@/store";
@@ -47,6 +47,17 @@ export function useReviewDraft({
   const [error, setError] = useState<ClaimsApiError | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
 
+  /**
+   * Per-instance request-sequence counter. Each effect run increments
+   * it and captures the new value into a local; the .then / .catch /
+   * .finally handlers only commit state if the captured sequence
+   * still matches `requestSeqRef.current` (and `mounted`). Guards
+   * against rapid refetches (or an args change that re-fires the
+   * effect mid-fetch) racing each other and a stale older response
+   * clobbering a newer one (CodeRabbit MAJOR, PR #168).
+   */
+  const requestSeqRef = useRef(0);
+
   const refetch = useCallback(() => {
     setReloadTick((tick) => tick + 1);
   }, []);
@@ -65,17 +76,18 @@ export function useReviewDraft({
     }
 
     let mounted = true;
+    const requestSeq = ++requestSeqRef.current;
     setIsLoading(true);
     setError(null);
 
     listClaims({ outcome: "draft_pending", limit })
       .then((page) => {
-        if (!mounted) return;
+        if (!mounted || requestSeq !== requestSeqRef.current) return;
         setClaims(page.claims);
         setError(null);
       })
       .catch((err: unknown) => {
-        if (!mounted) return;
+        if (!mounted || requestSeq !== requestSeqRef.current) return;
         // Clear stale rows so the dashboard's "Review draft" cards
         // disappear on fetch failure — otherwise a transient error
         // would keep showing previously-fetched cards alongside the
@@ -95,7 +107,7 @@ export function useReviewDraft({
         }
       })
       .finally(() => {
-        if (!mounted) return;
+        if (!mounted || requestSeq !== requestSeqRef.current) return;
         setIsLoading(false);
       });
 
