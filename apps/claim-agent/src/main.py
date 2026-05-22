@@ -466,13 +466,45 @@ async def handle_auto_send(request: Request) -> dict:
                 results["errors"] += 1
                 continue
 
+            previous_auto_send_at = current.auto_send_at
+
             submit_result = await submit_claim(current, user, db)
 
-            await publish_claim_approved(
-                claim=current,
-                submitted_via=submit_result.submitted_via,
-                approved_by="auto",
-            )
+            try:
+                await publish_claim_approved(
+                    claim=current,
+                    submitted_via=submit_result.submitted_via,
+                    approved_by="auto",
+                )
+            except Exception:
+                _log.exception(
+                    "Failed to publish claim.approved for claim %s; rolling back to queued_for_send",
+                    current.id,
+                )
+                try:
+                    rolled_back = await db.partial_update(
+                        "claims",
+                        current.id,
+                        {
+                            "outcome": ClaimOutcome.QUEUED_FOR_SEND.value,
+                            "submitted_at": None,
+                            "submitted_via": None,
+                            "auto_send_at": previous_auto_send_at,
+                        },
+                    )
+                    if not rolled_back:
+                        _log.error(
+                            "Rollback matched no claim after publish failure for claim %s; "
+                            "manual fix required",
+                            current.id,
+                        )
+                except Exception:
+                    _log.exception(
+                        "Rollback failed after publish failure for claim %s; manual fix required",
+                        current.id,
+                    )
+                results["errors"] += 1
+                continue
 
             await write_notification_event(
                 db=db,

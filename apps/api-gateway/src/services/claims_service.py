@@ -51,6 +51,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..middleware.errors import ApiError
 from ..middleware.pagination import decode_cursor, encode_cursor
+from .datetime_json import dump_model_json_utc, to_json_datetime
 from .evidence_storage import EvidenceObjectMissingError, EvidenceReader
 from .pubsub_publisher import PubSubPublisher
 
@@ -376,9 +377,7 @@ async def list_claims(
             sort_key_out = str(last_updated)
         next_cursor = encode_cursor(doc_id=str(last["_id"]), sort_key=sort_key_out)
 
-    items = [
-        ClaimListItem.model_validate(d).model_dump(mode="json", by_alias=True) for d in visible
-    ]
+    items = [dump_model_json_utc(ClaimListItem.model_validate(d)) for d in visible]
     return {"claims": items, "next_cursor": next_cursor}
 
 
@@ -432,9 +431,7 @@ async def list_claims_for_purchase(
         _CLAIM_LIST_PROJECT_STAGE,
     ]
     raw_docs = await db.aggregate("claims", pipeline)
-    return [
-        ClaimListItem.model_validate(d).model_dump(mode="json", by_alias=True) for d in raw_docs
-    ]
+    return [dump_model_json_utc(ClaimListItem.model_validate(d)) for d in raw_docs]
 
 
 async def get_claim_detail(
@@ -475,15 +472,15 @@ async def get_claim_detail(
     purchase, policy, snapshot = await asyncio.gather(purchase_task, policy_task, snapshot_task)
 
     evidence_captured_at = (
-        snapshot.checked_at.isoformat()
+        to_json_datetime(snapshot.checked_at)
         if snapshot is not None and snapshot.checked_at is not None
         else None
     )
 
     return {
-        "claim": claim.model_dump(mode="json", by_alias=True),
-        "purchase": purchase.model_dump(mode="json", by_alias=True) if purchase else None,
-        "policy": policy.model_dump(mode="json", by_alias=True) if policy else None,
+        "claim": dump_model_json_utc(claim),
+        "purchase": dump_model_json_utc(purchase) if purchase else None,
+        "policy": dump_model_json_utc(policy) if policy else None,
         "evidence_url": claim.evidence_screenshot_url,
         "evidence_captured_at": evidence_captured_at,
     }
@@ -710,9 +707,9 @@ async def approve_claim(
                 claim.id,
             )
         raise ApiError(
-            "publish_failed",
-            "Claim approval failed; please retry.",
-            status_code=502,
+            "submit_failed",
+            "Submit failed; please retry.",
+            status_code=503,
         ) from None
 
     # Publish succeeded — emit the `claim_submitted` NotificationEvent
@@ -752,7 +749,7 @@ async def approve_claim(
     # doc with a (theoretical) null `_id`.
     return {
         "claim_id": str(claim_id),
-        "submitted_at": now.isoformat(),
+        "submitted_at": to_json_datetime(now),
         "submitted_via": claim.submitted_via,
     }
 
@@ -885,7 +882,7 @@ async def edit_claim_draft(
     refreshed = await db.get_claim(claim_id)
     if refreshed is None:
         raise ApiError("claim_not_found", "Claim not found", status_code=404)
-    return {"claim": refreshed.model_dump(mode="json", by_alias=True)}
+    return {"claim": dump_model_json_utc(refreshed)}
 
 
 async def fetch_evidence_for_user(

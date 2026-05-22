@@ -201,6 +201,50 @@ async def test_auto_send_worker_skips_cancelled_claim() -> None:
     assert result["errors"] == 0
 
 
+@pytest.mark.asyncio
+async def test_auto_send_worker_rolls_back_on_publish_failure() -> None:
+    from src.main import handle_auto_send
+
+    original_auto_send_at = datetime(2030, 1, 1, 12, 0, 0, tzinfo=UTC)
+    queued_claim = _make_tolerant_claim(
+        outcome=ClaimOutcome.QUEUED_FOR_SEND,
+        auto_send_at=original_auto_send_at,
+    )
+    user = _make_user()
+
+    mock_db = AsyncMock()
+    mock_db.find_claims.return_value = [queued_claim]
+    mock_db.get_claim.return_value = queued_claim
+    mock_db.get_user.return_value = user
+    mock_db.partial_update.return_value = True
+
+    mock_request = MagicMock()
+
+    with (
+        patch("src.main.MongoDBClient", return_value=mock_db),
+        patch(
+            "src.main.submit_claim",
+            new=AsyncMock(return_value=MagicMock(submitted_via=SubmittedVia.GMAIL_SEND)),
+        ),
+        patch(
+            "src.main.publish_claim_approved",
+            new=AsyncMock(side_effect=RuntimeError("broker unreachable")),
+        ),
+        patch("src.main.write_notification_event", new=AsyncMock()) as mock_notify,
+    ):
+        result = await handle_auto_send(mock_request)
+
+    mock_notify.assert_not_awaited()
+    mock_db.partial_update.assert_awaited_once()
+    rollback_updates = mock_db.partial_update.await_args.args[2]
+    assert rollback_updates["outcome"] == ClaimOutcome.QUEUED_FOR_SEND.value
+    assert rollback_updates["submitted_at"] is None
+    assert rollback_updates["submitted_via"] is None
+    assert rollback_updates["auto_send_at"] == original_auto_send_at
+    assert result["processed"] == 0
+    assert result["errors"] == 1
+
+
 # ---------------------------------------------------------------------------
 # 6f — submit_claim EMAIL path uses stub and logs a warning
 # ---------------------------------------------------------------------------

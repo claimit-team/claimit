@@ -101,19 +101,67 @@ RECEIPTS_BUCKET_ENV = "RECEIPTS_BUCKET"
 # (matches the pre-5.15 seed state) and the queued_for_send row still inserts.
 EVIDENCE_BUCKET_ENV = "EVIDENCE_BUCKET"
 FIXTURES_DIR = ROOT / "scripts" / "fixtures"
+EVIDENCE_FIXTURE_PATH = FIXTURES_DIR / "sample-evidence-price-drop.png"
 
-# Ticket 5.15 / WI-11: minimal valid PNG used as the seeded evidence
-# screenshot. Tiny (~67 bytes) so it ships inline rather than as a
-# committed binary fixture; the upload helper writes it from bytes
-# rather than from disk. The image is a 1x1 transparent pixel — the
-# demo cares about the proxy path being exercised end-to-end, not the
-# visual content. Replace with a real price-drop screenshot before any
-# user-facing recording session.
-_SAMPLE_EVIDENCE_PNG_BYTES = bytes.fromhex(
-    "89504E470D0A1A0A0000000D49484452000000010000000108060000001F15C4"
-    "890000000D49444154789C62000100000500010D0A2DB40000000049454E44AE"
-    "426082"
-)
+
+# Demo product URLs — surfaced as clickable "Source" links on the evidence pane.
+def _product_url_for(platform: Platform, product_name: str) -> str | None:
+    """Return a demo product URL when we have a stable mapping."""
+    by_platform: dict[Platform, str] = {
+        Platform.BEST_BUY: "https://www.bestbuy.com/site/sony-wh-1000xm5/6505727.p",
+        Platform.AMAZON: "https://www.amazon.com/dp/B0BDJBDLSS",
+        Platform.TARGET: "https://www.target.com/p/kitchenaid-stand-mixer/-/A-81776395",
+        Platform.SOUTHWEST: "https://www.southwest.com/air/booking/select.html",
+        Platform.DELTA: "https://www.delta.com/flightstatus/search",
+        Platform.HILTON: "https://www.hilton.com/en/book/reservation/deeplink/",
+        Platform.WALMART: "https://www.walmart.com/ip/instant-pot-duo-6qt/",
+        Platform.UNITED: "https://www.united.com/en/us/flightstatus/details",
+        Platform.MARRIOTT: "https://www.marriott.com/reservation/availability.mi",
+    }
+    if platform == Platform.TARGET and product_name.startswith("Dyson"):
+        return "https://www.target.com/p/dyson-v8-vacuum/-/A-53331580"
+    return by_platform.get(platform)
+
+
+# Per-platform policy clause excerpts for the evidence pane policy card.
+_PLATFORM_POLICY_CLAUSES: dict[Platform, str] = {
+    Platform.BEST_BUY: (
+        "Best Buy Price Match Guarantee: we will match a lower price on an "
+        "identical item sold by Best Buy within the post-purchase window."
+    ),
+    Platform.AMAZON: (
+        "Amazon Pre-Order Price Guarantee: if the price drops before shipment, "
+        "you are charged the lowest price."
+    ),
+    Platform.TARGET: (
+        "Target Price Match Guarantee: identical items priced lower at Target "
+        "within 14 days qualify for a refund of the difference."
+    ),
+    Platform.SOUTHWEST: (
+        "Southwest Fare Adjustment: if your fare drops after purchase, you may "
+        "request a travel-funds credit for the difference."
+    ),
+    Platform.DELTA: (
+        "Delta Best Fare Guarantee: request a fare adjustment when a lower "
+        "published fare is available for the same itinerary."
+    ),
+    Platform.HILTON: (
+        "Hilton Price Match Guarantee: we will match a lower rate for the same "
+        "room, dates, and conditions found on an approved channel."
+    ),
+    Platform.WALMART: (
+        "Walmart Price Match Policy: identical in-stock items priced lower at "
+        "Walmart.com within the eligible window qualify for a refund."
+    ),
+    Platform.UNITED: (
+        "United Fare Guarantee: eligible tickets may be repriced when a lower "
+        "fare is published for the same route and travel dates."
+    ),
+    Platform.MARRIOTT: (
+        "Marriott Best Rate Guarantee: we will match a lower publicly available "
+        "rate for the same stay when booked through an approved channel."
+    ),
+}
 
 # SPECS tuple layout — POSITIONAL fields (12):
 # (group, outcome, platform, category, product_name,
@@ -785,7 +833,7 @@ def _build_purchase(
         category=category,
         product_name=product_name,
         product_id=f"demo-prod-{purchase_id.hex[:8]}",
-        product_url=None,
+        product_url=_product_url_for(platform, product_name),
         variant=None,
         fare_class=None,
         room_type=None,
@@ -858,11 +906,8 @@ def _upload_bytes_to_gcs(
 ) -> None:
     """Upload an in-memory blob — sibling of `_upload_fixture_to_gcs`.
 
-    Ticket 5.15 / WI-11 ships the sample evidence PNG inline (a 67-byte
-    1x1 PNG; see `_SAMPLE_EVIDENCE_PNG_BYTES`) rather than committing
-    a binary fixture, so a from-disk upload would be pointless. Same
-    idempotency contract as the file-based helper: re-uploading to the
-    same `blob_path` is safe.
+    Retained for callers that need inline bytes; evidence seeding now
+    uses `_upload_fixture_to_gcs` with the committed PNG fixture.
     """
     from google.cloud import storage  # local import: optional dep at seed time
 
@@ -1157,7 +1202,10 @@ def _build_claim(
             )
         ],
         redraft_count=0,
-        policy_clause_cited="demo-clause",
+        policy_clause_cited=_PLATFORM_POLICY_CLAUSES.get(
+            platform,
+            f"{platform.value.replace('_', ' ').title()} price match policy (demo excerpt).",
+        ),
         evidence_screenshot_url=evidence_screenshot_url,
         send_override=send_override,
         auto_send_at=auto_send_at,
@@ -1428,6 +1476,14 @@ async def _run() -> int:
             resolved_at=None,
             send_override=SendMode.AUTO,
             auto_send_at=now + timedelta(minutes=20),
+            draft_content_override=_build_draft_content_for_pending(
+                claim_type=ClaimType.EMAIL,
+                platform=Platform.HILTON,
+                product_name=hilton_queued_purchase.product_name,
+                price_paid=hilton_queued_purchase.price_paid,
+                claim_amount=74.00,
+                order_id=hilton_queued_purchase.order_id,
+            ),
         )
         purchase_models.append(hilton_queued_purchase)
         claim_models.append(("queued", hilton_queued_claim))
@@ -1530,17 +1586,22 @@ async def _run() -> int:
         # an unset EVIDENCE_BUCKET is a non-fatal warn (handled earlier
         # by the override block being skipped entirely).
         if evidence_bucket is not None and evidence_uploads:
+            if not EVIDENCE_FIXTURE_PATH.exists():
+                raise SystemExit(
+                    f"Seed evidence fixture missing: {EVIDENCE_FIXTURE_PATH} — "
+                    "commit scripts/fixtures/sample-evidence-price-drop.png."
+                )
             print(
                 f"\nUploading evidence fixtures to gs://{evidence_bucket}/ "
                 f"({len(evidence_uploads)} blob(s)) ..."
             )
             for blob_path, gs_uri in evidence_uploads:
                 try:
-                    _upload_bytes_to_gcs(
+                    _upload_fixture_to_gcs(
                         bucket_name=evidence_bucket,
                         blob_path=blob_path,
-                        data=_SAMPLE_EVIDENCE_PNG_BYTES,
-                        content_type="image/png",
+                        local_path=EVIDENCE_FIXTURE_PATH,
+                        overwrite=True,
                     )
                 except Exception as exc:
                     raise SystemExit(
@@ -1550,7 +1611,7 @@ async def _run() -> int:
                         f"(`gcloud auth application-default login`) or unset "
                         f"{EVIDENCE_BUCKET_ENV} for an offline run."
                     ) from exc
-                print(f"  uploaded sample-evidence.png → {gs_uri}")
+                print(f"  uploaded {EVIDENCE_FIXTURE_PATH.name} → {gs_uri}")
         elif evidence_bucket is None:
             print(
                 f"\nWarning: {EVIDENCE_BUCKET_ENV} not set — draft_pending claims will be "

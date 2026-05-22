@@ -583,6 +583,8 @@ async def test_get_claim_detail_joins_price_history_for_evidence_captured_at(
         assert payload["evidence_url"] == evidence_url
         # Real PriceHistory checked_at threaded through.
         assert payload["evidence_captured_at"].startswith("2026-05-13T20:00")
+        assert payload["evidence_captured_at"].endswith("Z")
+        assert payload["claim"]["draft_versions"][0]["at"].endswith("Z")
 
         # Confirm the lookup filter shape — purchase_id + evidence_url
         # are both required to disambiguate when a purchase has many
@@ -734,6 +736,7 @@ async def test_approve_claim_success_publishes_event(client: AsyncClient) -> Non
         payload = response.json()
         assert payload["claim_id"] == _CLAIM_ID
         assert payload["submitted_at"] is not None
+        assert payload["submitted_at"].endswith("Z")
 
         # Verify the publish call: right topic, right event shape.
         publisher.publish.assert_awaited_once()
@@ -940,8 +943,8 @@ async def test_approve_rollback_outcome_on_publish_failure(client: AsyncClient) 
                 json={},
                 headers={"Authorization": "Bearer t"},
             )
-        assert response.status_code == 502
-        assert response.json()["error"]["code"] == "publish_failed"
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "submit_failed"
         assert db.partial_update.await_count == 2
         # First call: the approve write (outcome -> pending).
         first_call = db.partial_update.await_args_list[0]
@@ -987,8 +990,8 @@ async def test_approve_rollback_restores_queued_for_send_state(client: AsyncClie
                 json={},
                 headers={"Authorization": "Bearer t"},
             )
-        assert response.status_code == 502
-        assert response.json()["error"]["code"] == "publish_failed"
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "submit_failed"
         assert db.partial_update.await_count == 2
         rollback_call = db.partial_update.await_args_list[1]
         rollback_updates = rollback_call.args[2]
@@ -1022,7 +1025,7 @@ async def test_approve_skips_notification_when_publish_fails(client: AsyncClient
                 json={},
                 headers={"Authorization": "Bearer t"},
             )
-        assert response.status_code == 502
+        assert response.status_code == 503
         db.upsert_notification_event.assert_not_awaited()
     finally:
         _clear_overrides()

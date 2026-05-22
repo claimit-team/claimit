@@ -110,15 +110,58 @@ resource "google_pubsub_topic_iam_member" "service_agent_publisher_on_gmail_inbo
   member  = local.pubsub_service_agent
 }
 
-# ---------- api-gateway producer on purchase.uploaded (ticket 5.14) ----------
-# The receipts-upload route publishes here after writing the sentinel Purchase
-# doc; without this binding the publish() call would 403 in prod even though
-# the doc + GCS blob landed cleanly (the rollback path in upload_receipt would
-# fire on every legitimate upload). Scoped to the single topic — api-gateway
-# is not a publisher to anything else in the main_topic_names set yet.
+# ---------- Producer publisher IAM (additive google_pubsub_topic_iam_member) ----------
+# Each binding grants roles/pubsub.publisher to the Cloud Run service account
+# that publishes to that topic. Additive only — safe alongside manual gcloud
+# grants already in prod. Do NOT use *_iam_binding / *_iam_policy (authoritative).
+#
+# Ticket 5.14: api-gateway → purchase.uploaded (receipt upload path).
 resource "google_pubsub_topic_iam_member" "api_gateway_publisher_on_purchase_uploaded" {
   project = var.project_id
   topic   = google_pubsub_topic.main["purchase.uploaded"].name
   role    = "roles/pubsub.publisher"
   member  = "serviceAccount:${module.api_gateway.service_account_email}"
+}
+
+# Ticket 5.8/5.15 prod fix: api-gateway → claim.approved (approve / Send-now).
+# Without this binding, approve_claim publish() 403s → 502/503 in prod.
+resource "google_pubsub_topic_iam_member" "api_gateway_publisher_on_claim_approved" {
+  project = var.project_id
+  topic   = google_pubsub_topic.main["claim.approved"].name
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${module.api_gateway.service_account_email}"
+}
+
+# Ticket 5.8/5.15 prod fix: claim-agent → claim.approved (auto-send worker path).
+resource "google_pubsub_topic_iam_member" "claim_agent_publisher_on_claim_approved" {
+  project = var.project_id
+  topic   = google_pubsub_topic.main["claim.approved"].name
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${module.claim_agent.service_account_email}"
+}
+
+# claim-agent → claim.drafted (send_mode approval/auto paths after price drop).
+resource "google_pubsub_topic_iam_member" "claim_agent_publisher_on_claim_drafted" {
+  project = var.project_id
+  topic   = google_pubsub_topic.main["claim.drafted"].name
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${module.claim_agent.service_account_email}"
+}
+
+# ingest-agent → purchase.ingested (finalize after extraction). Unblocks the
+# ingest→monitor→claim live pipeline beyond the 5.8/5.15 approve path.
+resource "google_pubsub_topic_iam_member" "ingest_agent_publisher_on_purchase_ingested" {
+  project = var.project_id
+  topic   = google_pubsub_topic.main["purchase.ingested"].name
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${module.ingest_agent.service_account_email}"
+}
+
+# monitor-agent → price.dropped (cron price polling). Unblocks the full
+# ingest→monitor→claim pipeline when a drop triggers claim drafting.
+resource "google_pubsub_topic_iam_member" "monitor_agent_publisher_on_price_dropped" {
+  project = var.project_id
+  topic   = google_pubsub_topic.main["price.dropped"].name
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${module.monitor_agent.service_account_email}"
 }
