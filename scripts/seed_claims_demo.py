@@ -73,6 +73,7 @@ from claimit_mongodb_models.enums import (  # noqa: E402
     PriceSource,
     PurchaseDateBasis,
     PurchaseStatus,
+    SendMode,
     SubmittedVia,
 )
 from claimit_mongodb_models.price_history import PriceHistory  # noqa: E402
@@ -91,7 +92,28 @@ PROD_DB = "claimit"
 # confirmation rows WITHOUT receipt_storage_url and skips the GCS
 # upload — useful for offline runs / CI where ADC isn't configured.
 RECEIPTS_BUCKET_ENV = "RECEIPTS_BUCKET"
+# Ticket 5.15 / WI-11 (H1): evidence-bucket env var. Mirrors RECEIPTS_BUCKET
+# — same name api-gateway uses (EvidenceReader.__init__) and same env var
+# used by infra/terraform/main.tf to wire the api-gateway service.
+# Production value is "claimit-beta-evidence" (NOT a bare "claimit-evidence"
+# — the project uses the env-suffixed pattern; see infra/terraform/storage.tf).
+# When unset, draft_pending rows insert with evidence_screenshot_url=None
+# (matches the pre-5.15 seed state) and the queued_for_send row still inserts.
+EVIDENCE_BUCKET_ENV = "EVIDENCE_BUCKET"
 FIXTURES_DIR = ROOT / "scripts" / "fixtures"
+
+# Ticket 5.15 / WI-11: minimal valid PNG used as the seeded evidence
+# screenshot. Tiny (~67 bytes) so it ships inline rather than as a
+# committed binary fixture; the upload helper writes it from bytes
+# rather than from disk. The image is a 1x1 transparent pixel — the
+# demo cares about the proxy path being exercised end-to-end, not the
+# visual content. Replace with a real price-drop screenshot before any
+# user-facing recording session.
+_SAMPLE_EVIDENCE_PNG_BYTES = bytes.fromhex(
+    "89504E470D0A1A0A0000000D49484452000000010000000108060000001F15C4"
+    "890000000D49444154789C62000100000500010D0A2DB40000000049454E44AE"
+    "426082"
+)
 
 # SPECS tuple layout — POSITIONAL fields (12):
 # (group, outcome, platform, category, product_name,
@@ -827,6 +849,29 @@ def _upload_fixture_to_gcs(
     blob.upload_from_filename(str(local_path), content_type=content_type)
 
 
+def _upload_bytes_to_gcs(
+    *,
+    bucket_name: str,
+    blob_path: str,
+    data: bytes,
+    content_type: str,
+) -> None:
+    """Upload an in-memory blob — sibling of `_upload_fixture_to_gcs`.
+
+    Ticket 5.15 / WI-11 ships the sample evidence PNG inline (a 67-byte
+    1x1 PNG; see `_SAMPLE_EVIDENCE_PNG_BYTES`) rather than committing
+    a binary fixture, so a from-disk upload would be pointless. Same
+    idempotency contract as the file-based helper: re-uploading to the
+    same `blob_path` is safe.
+    """
+    from google.cloud import storage  # local import: optional dep at seed time
+
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+    blob.upload_from_string(data, content_type=content_type)
+
+
 def _build_pending_confirmation_purchase(
     *,
     user_id: UUID,
@@ -1077,8 +1122,22 @@ def _build_claim(
     submitted_at: datetime | None,
     resolved_at: datetime | None,
     draft_content_override: str | None = None,
+    # Ticket 5.15 / WI-11: optional evidence + auto-send fields. Default
+    # to None so the existing call sites stay unchanged; the new
+    # queued_for_send branch and the WI-11 evidence override below pass
+    # these explicitly.
+    evidence_screenshot_url: str | None = None,
+    send_override: SendMode | None = None,
+    auto_send_at: datetime | None = None,
 ) -> Claim:
-    submitted_via = None if outcome == ClaimOutcome.DRAFT_PENDING else SubmittedVia.GMAIL_SEND
+    # For queued_for_send + draft_pending, no submitted_via yet (the
+    # claim hasn't reached the merchant). The auto-send worker (5.15)
+    # will set it on transition to pending.
+    submitted_via = (
+        None
+        if outcome in (ClaimOutcome.DRAFT_PENDING, ClaimOutcome.QUEUED_FOR_SEND)
+        else SubmittedVia.GMAIL_SEND
+    )
     draft_text = draft_content_override or "Demo claim draft (seeded for ticket 5.4)."
     return Claim(
         _id=uuid4(),
@@ -1099,8 +1158,9 @@ def _build_claim(
         ],
         redraft_count=0,
         policy_clause_cited="demo-clause",
-        evidence_screenshot_url=None,
-        send_override=None,
+        evidence_screenshot_url=evidence_screenshot_url,
+        send_override=send_override,
+        auto_send_at=auto_send_at,
         submitted_at=submitted_at,
         submitted_via=submitted_via,
         outcome=outcome,
@@ -1284,6 +1344,100 @@ async def _run() -> int:
             )
             price_history_models.extend(series)
 
+        # Ticket 5.15 / WI-11: attach a REAL evidence screenshot to the
+        # first two DRAFT_PENDING claims so the /claims/:id evidence
+        # card renders against a real GCS blob (proxied by
+        # /api/v1/claims/:id/evidence). Mutates BOTH the Claim's
+        # `evidence_screenshot_url` AND the LAST snapshot in the
+        # matching price_history series so the gateway's join (WI-3:
+        # PriceHistory where evidence_screenshot_url == claim's)
+        # surfaces `checked_at` as `evidence_captured_at` rather than
+        # null.
+        #
+        # No-bucket fallback: when EVIDENCE_BUCKET is unset the
+        # override is skipped — both fields stay None (matches the
+        # pre-WI-11 seed state, the FE renders the "no evidence yet"
+        # surface). The seed still inserts cleanly so offline / CI
+        # runs without ADC produce a valid Mongo state.
+        evidence_bucket = os.environ.get(EVIDENCE_BUCKET_ENV)
+        evidence_uploads: list[tuple[str, str]] = []  # (blob_path, gs_uri)
+        if evidence_bucket is not None:
+            # Pick draft_pending claims by index (Sony email at 0,
+            # KitchenAid in_store at 2 — both renderers worth proving
+            # end-to-end on the demo). Index-based pick is stable across
+            # SPECS reorderings of OTHER rows; if these specific specs
+            # ever move, update the predicate.
+            draft_indices = [
+                i
+                for i, (_, claim) in enumerate(claim_models)
+                if claim.outcome == ClaimOutcome.DRAFT_PENDING
+            ][:2]
+            for idx in draft_indices:
+                group, claim = claim_models[idx]
+                blob_path = f"{user_id}/seed/evidence-{claim.id.hex}.png"
+                gs_uri = f"gs://{evidence_bucket}/{blob_path}"
+                # Pydantic-safe in-place update via model_copy.
+                claim_models[idx] = (
+                    group,
+                    claim.model_copy(update={"evidence_screenshot_url": gs_uri}),
+                )
+                # Mutate the LAST snapshot in this purchase's series so
+                # WI-3's join finds it. PriceHistory is mutable on its
+                # model fields, but use model_copy + index replace to
+                # keep semantics consistent with the Claim mutation.
+                purchase_id = claim.purchase_id
+                series_indices = [
+                    j for j, p in enumerate(price_history_models) if p.purchase_id == purchase_id
+                ]
+                if series_indices:
+                    last_j = series_indices[-1]
+                    price_history_models[last_j] = price_history_models[last_j].model_copy(
+                        update={"evidence_screenshot_url": gs_uri},
+                    )
+                evidence_uploads.append((blob_path, gs_uri))
+
+        # Ticket 5.15 / WI-11 (+H5): one queued_for_send Hilton claim so
+        # the dashboard auto-send banner renders a live countdown on
+        # demo. `auto_send_at = now+20min` per H5 so the scheduler's
+        # ~1-min-interval submit doesn't fire mid-recording (the
+        # +5-min cushion in the original ticket left only a 4-minute
+        # demo window).
+        hilton_queued_purchase = _build_purchase(
+            user_id=user_id,
+            platform=Platform.HILTON,
+            category=Category.HOTEL,
+            product_name="Hilton Waikiki 3-night stay",
+            price=612.00,
+            window_expires=now + timedelta(days=10),
+            claim_type=ClaimType.EMAIL,
+            ingested_at=now - timedelta(minutes=2),
+            status=PurchaseStatus.MONITORING,
+            ingestion_source=IngestionSource.GMAIL,
+            member_tier_at_purchase=None,
+            non_member_price_at_purchase=None,
+        )
+        hilton_queued_claim = _build_claim(
+            user_id=user_id,
+            purchase_id=hilton_queued_purchase.id,
+            platform=Platform.HILTON,
+            claim_amount=74.00,
+            claim_type=ClaimType.EMAIL,
+            outcome=ClaimOutcome.QUEUED_FOR_SEND,
+            updated_at=now - timedelta(minutes=2),
+            submitted_at=None,
+            resolved_at=None,
+            send_override=SendMode.AUTO,
+            auto_send_at=now + timedelta(minutes=20),
+        )
+        purchase_models.append(hilton_queued_purchase)
+        claim_models.append(("queued", hilton_queued_claim))
+        # Track so the price_history verification below can skip this
+        # purchase (queued claim demo doesn't need a price series). The
+        # status_group verification (EXPECTED_COUNTS) is also unaffected
+        # because QUEUED_FOR_SEND isn't part of any STATUS_GROUP_OUTCOMES
+        # bucket (it lives in its own banner-driven surface).
+        extra_purchase_ids: set[UUID] = {hilton_queued_purchase.id}
+
         # Ticket 5.14: build the pending_confirmation rows alongside the
         # claim-linked purchases above. These rows DO NOT have linked
         # claims and DO NOT get price_history snapshots — they live in
@@ -1368,6 +1522,41 @@ async def _run() -> int:
                         f"{RECEIPTS_BUCKET_ENV} for an offline run."
                     ) from exc
                 print(f"  uploaded {fixture_filename} → gs://{bucket_name}/{blob_path}")
+
+        # Ticket 5.15 / WI-11: upload the sample evidence PNG to each
+        # gs:// URI staked out above. Same failure-policy as the
+        # receipts upload — a configured bucket with a failing upload
+        # is a HARD FAIL (leaves Atlas pointing at a missing object);
+        # an unset EVIDENCE_BUCKET is a non-fatal warn (handled earlier
+        # by the override block being skipped entirely).
+        if evidence_bucket is not None and evidence_uploads:
+            print(
+                f"\nUploading evidence fixtures to gs://{evidence_bucket}/ "
+                f"({len(evidence_uploads)} blob(s)) ..."
+            )
+            for blob_path, gs_uri in evidence_uploads:
+                try:
+                    _upload_bytes_to_gcs(
+                        bucket_name=evidence_bucket,
+                        blob_path=blob_path,
+                        data=_SAMPLE_EVIDENCE_PNG_BYTES,
+                        content_type="image/png",
+                    )
+                except Exception as exc:
+                    raise SystemExit(
+                        f"ERROR: failed to upload evidence fixture to {gs_uri} ({exc!r}). "
+                        f"Aborting seed — continuing would leave Atlas pointing at a "
+                        f"missing GCS object. Re-run with ADC configured "
+                        f"(`gcloud auth application-default login`) or unset "
+                        f"{EVIDENCE_BUCKET_ENV} for an offline run."
+                    ) from exc
+                print(f"  uploaded sample-evidence.png → {gs_uri}")
+        elif evidence_bucket is None:
+            print(
+                f"\nWarning: {EVIDENCE_BUCKET_ENV} not set — draft_pending claims will be "
+                "inserted without evidence_screenshot_url. Set "
+                "EVIDENCE_BUCKET=<project>-evidence to upload sample evidence."
+            )
 
         # `mode="python"` keeps native UUID/datetime; StrEnum subclasses str
         # so pymongo serialises enum values as plain strings on the wire.
@@ -1476,6 +1665,10 @@ async def _run() -> int:
         }
         print("\nVerification - price_history snapshots per purchase:")
         for purchase in purchase_models:
+            if purchase.id in extra_purchase_ids:
+                # Queued-for-send seeded purchase has no price_history
+                # series (the WI-11 demo banner doesn't depend on one).
+                continue
             rows = await db.find_price_history(purchase.id, limit=200)
             expected = _PRICE_SNAPSHOTS_PER_PURCHASE
             row_status = "OK" if len(rows) == expected else "FAIL"
