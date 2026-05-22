@@ -40,6 +40,23 @@ export function resolveBackHref(raw: string | null | undefined): string {
   // Must start with a single `/` and not `//` (which would be parsed
   // as a protocol-relative URL by router.push on some browsers).
   if (!raw.startsWith("/") || raw.startsWith("//")) return "/dashboard";
+  // Reject `..` segments — without this, a crafted
+  // `?from=/purchases/../admin` would pass the
+  // `startsWith("/purchases/")` prefix check, then `router.push`'s
+  // internal `new URL(path, origin)` resolution collapses the `..`
+  // and lands on `/admin`, bypassing the allow-list. Check after the
+  // path-shape gate so we know we're inspecting a real path (not a
+  // URL whose query / hash might legitimately contain "..").
+  //
+  // We strip the query / hash before scanning so a value like
+  // `/purchases?q=..foo` (where ".." sits inside the query, never
+  // traversed by the URL parser) stays allowable. Path traversal
+  // only matters in the pathname; any `..` between `/` separators
+  // there is a traversal segment regardless of context.
+  const pathOnly = raw.split(/[?#]/, 1)[0] ?? "";
+  if (pathOnly.split("/").some((segment) => segment === "..")) {
+    return "/dashboard";
+  }
   if (FROM_EXACT_ALLOWLIST.has(raw)) return raw;
   for (const prefix of FROM_PREFIX_ALLOWLIST) {
     if (raw.startsWith(prefix)) return raw;
