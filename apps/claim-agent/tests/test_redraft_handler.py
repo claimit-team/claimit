@@ -17,12 +17,11 @@ from src.validator import ValidationResult
 
 _USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 _CLAIM_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-_CONV_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 
 
 def _make_redraft_event(
     claim_id: str = _CLAIM_ID,
-    user_instruction: str = "make it friendlier",
+    feedback: str = "make it friendlier",
 ) -> dict:
     return {
         "schema_version": 1,
@@ -31,8 +30,7 @@ def _make_redraft_event(
         "event_type": "claim.redraft_requested",
         "user_id": _USER_ID,
         "claim_id": claim_id,
-        "conversation_id": _CONV_ID,
-        "user_instruction": user_instruction,
+        "feedback": feedback,
     }
 
 
@@ -299,12 +297,14 @@ async def test_redraft_validation_failure_escalation() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 6. user_instruction is passed through to the generator
+# 6. event.feedback is passed through to the generator (as `user_instruction`,
+#    which is the generator's downstream kwarg — different field name on each
+#    side of the event-to-generator boundary; see main.py:gen_kwargs comment).
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_redraft_user_instruction_passed_to_generator() -> None:
+async def test_redraft_feedback_passed_to_generator() -> None:
     mock_claim = _make_mock_claim(claim_type="email")
     mock_db = _make_mock_db(mock_claim)
     mock_draft = _make_mock_draft()
@@ -313,16 +313,23 @@ async def test_redraft_user_instruction_passed_to_generator() -> None:
     eval_result = _make_eval_result()
 
     instruction = "make it friendlier"
-    request = _make_mock_request(_pubsub_body(_make_redraft_event(user_instruction=instruction)))
+    request = _make_mock_request(_pubsub_body(_make_redraft_event(feedback=instruction)))
+
+    # Invoke regenerate_fn once inside the self-eval stub so the inner
+    # _redraft_regenerate closure body actually executes against the real
+    # event/feedback scope. Without this, a stale field reference inside
+    # the closure (e.g. event.user_instruction after the schema rename)
+    # flies under the test radar — exactly the bug a pre-merge grep had
+    # to catch by hand on this branch.
+    async def fake_evaluate(draft, claim, purchase, policy, *, regenerate_fn):
+        await regenerate_fn(draft, "self-eval suggested clearer wording", claim)
+        return (mock_draft, eval_result, 1)
 
     with (
         patch("src.main.MongoDBClient", return_value=mock_db),
         patch("src.main.generate_email_draft", return_value=mock_draft) as mock_gen,
         patch("src.main.validate", return_value=ValidationResult(valid=True)),
-        patch(
-            "src.main.evaluate_and_maybe_regenerate",
-            new=AsyncMock(return_value=(mock_draft, eval_result, 1)),
-        ),
+        patch("src.main.evaluate_and_maybe_regenerate", side_effect=fake_evaluate),
         patch("src.main.write_notification_event", return_value="notif-id"),
         patch("src.main.handle_approval_mode", new=AsyncMock(return_value=MagicMock())),
         patch(
@@ -333,8 +340,16 @@ async def test_redraft_user_instruction_passed_to_generator() -> None:
     ):
         await handle_claim_redraft_requested(request)
 
-    mock_gen.assert_awaited_once()
-    assert mock_gen.call_args.kwargs.get("user_instruction") == instruction
+    # First call: outer gen_kwargs (event.feedback only).
+    # Second call: inner _redraft_regenerate closure (event.feedback +
+    # self-eval critic feedback joined with "; ").
+    assert mock_gen.await_count == 2
+    first_call_kwargs = mock_gen.await_args_list[0].kwargs
+    assert first_call_kwargs.get("user_instruction") == instruction
+    second_call_kwargs = mock_gen.await_args_list[1].kwargs
+    assert second_call_kwargs.get("user_instruction") == (
+        f"{instruction}; self-eval suggested clearer wording"
+    )
 
 
 # ---------------------------------------------------------------------------

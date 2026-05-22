@@ -581,7 +581,13 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
         gen_kwargs: dict = dict(
             user_name=user_name,
             current_price=current_price,
-            user_instruction=event.user_instruction,
+            # `user_instruction` is the generator's kwarg (downstream API,
+            # unchanged); the event-side field was renamed to `feedback`
+            # in the PR-#174 schema refactor — more accurate for what the
+            # user sends about the current draft. Don't rename the
+            # generator side unless every draft-type signature is changed
+            # in lockstep; the event→generator mapping happens here.
+            user_instruction=event.feedback,
         )
         if claim_type_enum == ClaimType.IN_STORE:
             gen_kwargs["user_location"] = getattr(user, "default_location", None)
@@ -625,8 +631,7 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
             regen_kwargs: dict = dict(
                 user_name=user_name,
                 current_price=current_price,
-                user_instruction="; ".join(p for p in [event.user_instruction, feedback] if p)
-                or None,
+                user_instruction="; ".join(p for p in [event.feedback, feedback] if p) or None,
             )
             if claim_type_enum == ClaimType.IN_STORE:
                 regen_kwargs["user_location"] = getattr(user, "default_location", None)
