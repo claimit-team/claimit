@@ -110,10 +110,16 @@ locals {
   # claim: drafts refund claims via Anthropic + Agent Builder; sends them via
   # the user's Gmail (OAuth client); telemetry to Elastic.
   claim_secrets = {
-    MONGODB_URI               = "mongodb-uri"
-    ANTHROPIC_API_KEY         = "anthropic-api-key"
-    ELASTIC_URL               = "elastic-url"
-    ELASTIC_API_KEY           = "elastic-api-key"
+    MONGODB_URI       = "mongodb-uri"
+    ANTHROPIC_API_KEY = "anthropic-api-key"
+    ELASTIC_URL       = "elastic-url"
+    ELASTIC_API_KEY   = "elastic-api-key"
+    # Required for OTel→Phoenix export. Without it, init_phoenix
+    # short-circuits and claim-agent's `validator.validate` /
+    # `self_evaluate.evaluate` spans never reach Phoenix — which means
+    # the assistant's Mode B `get_reasoning_trace` query always falls
+    # back to claim-doc-only context regardless of PHOENIX_PROJECT_NAME.
+    PHOENIX_API_KEY           = "phoenix-api-key"
     GMAIL_OAUTH_CLIENT_ID     = "gmail-oauth-client-id"
     GMAIL_OAUTH_CLIENT_SECRET = "gmail-oauth-client-secret"
   }
@@ -233,6 +239,7 @@ module "claim_agent" {
     GOOGLE_CLOUD_PROJECT      = var.project_id
     GOOGLE_GENAI_USE_VERTEXAI = "true"
     GOOGLE_CLOUD_LOCATION     = var.region
+    PHOENIX_PROJECT_NAME      = "claimit"
   }
   deletion_protection = false
 
@@ -242,12 +249,28 @@ module "claim_agent" {
 module "assistant_agent" {
   source = "./modules/cloud-run-agent"
 
-  project_id          = var.project_id
-  region              = var.region
-  service_name        = "claimit-assistant-agent"
-  image               = var.assistant_agent_image
-  secret_ids          = values(local.assistant_secrets)
-  secret_env_map      = local.assistant_secrets
+  project_id     = var.project_id
+  region         = var.region
+  service_name   = "claimit-assistant-agent"
+  image          = var.assistant_agent_image
+  secret_ids     = values(local.assistant_secrets)
+  secret_env_map = local.assistant_secrets
+  env_vars = {
+    # Query base URL for Phoenix Cloud — distinct from the OTLP collector
+    # path (.../v1/traces) that PHOENIX_COLLECTOR_ENDPOINT points at.
+    # Mode B's get_reasoning_trace tool reads this to query spans for a
+    # claim (ticket 3.24) AND to construct the in-app deep link the user
+    # can click to inspect the trace directly.
+    PHOENIX_BASE_URL = "https://app.phoenix.arize.com/s/claimitbeta"
+    # Project routing — init_phoenix sets this as the OpenInference
+    # `openinference.project.name` resource attribute so spans land in
+    # the `claimit` project (not `default`). The read side queries the
+    # same project name. Until claim-agent / monitor-agent / ingest-
+    # agent also set this, the assistant only sees its OWN spans, not
+    # the claim-agent spans it needs for Mode B explanations — tracked
+    # as a follow-up issue.
+    PHOENIX_PROJECT_NAME = "claimit"
+  }
   deletion_protection = false
 
   depends_on = [google_secret_manager_secret.shared]
