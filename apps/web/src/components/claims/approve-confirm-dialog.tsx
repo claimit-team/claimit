@@ -132,10 +132,14 @@ export function ApproveConfirmDialog({
       });
       try {
         await refetch();
+        toast.success("Claim approved");
       } catch {
+        // Show ONLY the refresh-failure toast (not the success toast)
+        // so the user doesn't get a confusing double-toast. The
+        // approve itself succeeded; the optimistic patch is in state;
+        // reload syncs to server truth (CodeRabbit MINOR, PR #168).
         toast.error("Claim approved, but refresh failed. Reload to see latest state.");
       }
-      toast.success("Claim approved");
       onOpenChange(false);
     } catch (err: unknown) {
       // Write itself failed — surface the real error and let the user
