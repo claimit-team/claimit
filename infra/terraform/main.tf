@@ -168,6 +168,17 @@ module "ingest_agent" {
     # api-gateway in lockstep regardless of which env name a downstream
     # publisher prefers. Same value for both; pulls from var.project_id.
     GOOGLE_CLOUD_PROJECT = var.project_id
+    # Required for google-genai Vertex mode. Codifies the manual
+    # `gcloud run services update ... --set-env-vars GOOGLE_GENAI_USE_VERTEXAI=true,GOOGLE_CLOUD_LOCATION=us-east1`
+    # applied during 5.14 prod-verify so the next `terraform apply`
+    # doesn't wipe it. Without these the SDK defaults toward API-key
+    # mode and `Runner.run_async` raises `No API key was provided`
+    # before `extract_from_blob` ever reaches the model — every upload
+    # then falls through to the rescue path. ADC against Vertex is
+    # already wired (`roles/aiplatform.user` on the agent SA in
+    # `infra/terraform/iam.tf`), so this is the only missing piece.
+    GOOGLE_GENAI_USE_VERTEXAI = "true"
+    GOOGLE_CLOUD_LOCATION     = var.region
     # Ticket 5.14: the /pubsub/purchase.uploaded handler reads receipt
     # blobs out of this bucket. Same value as api-gateway's mount so the
     # gs:// URI written on upload is the URI ingest-agent fetches.
@@ -203,12 +214,26 @@ module "monitor_agent" {
 module "claim_agent" {
   source = "./modules/cloud-run-agent"
 
-  project_id          = var.project_id
-  region              = var.region
-  service_name        = "claimit-claim-agent"
-  image               = var.claim_agent_image
-  secret_ids          = values(local.claim_secrets)
-  secret_env_map      = local.claim_secrets
+  project_id     = var.project_id
+  region         = var.region
+  service_name   = "claimit-claim-agent"
+  image          = var.claim_agent_image
+  secret_ids     = values(local.claim_secrets)
+  secret_env_map = local.claim_secrets
+  env_vars = {
+    # Required for google-genai Vertex mode. The claim-agent runs
+    # the same on-Cloud-Run `Runner.run_async` path as ingest-agent
+    # (see `apps/claim-agent/src/draft/_shared.py` +
+    # `self_evaluate.py`); without these env vars, the first draft
+    # generation against a real price-drop event would raise
+    # `No API key was provided` exactly like the 5.14 ingest
+    # failure. Codified preemptively rather than waiting for the
+    # next prod claim run to flush it out. ADC + `aiplatform.user`
+    # on the SA (`infra/terraform/iam.tf`) already wired.
+    GOOGLE_CLOUD_PROJECT      = var.project_id
+    GOOGLE_GENAI_USE_VERTEXAI = "true"
+    GOOGLE_CLOUD_LOCATION     = var.region
+  }
   deletion_protection = false
 
   depends_on = [google_secret_manager_secret.shared]
