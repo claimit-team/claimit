@@ -26,6 +26,7 @@ import { AssistantPane } from "@/components/claims/assistant-pane";
 import { ClaimHeader } from "@/components/claims/claim-header";
 import { DraftPane } from "@/components/claims/draft-pane";
 import { EvidencePane } from "@/components/claims/evidence-pane";
+import { PostApproveBanner } from "@/components/claims/post-approve-banner";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -204,6 +205,8 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
   return (
     <div className="flex h-[calc(100dvh-4rem)] flex-col overflow-hidden">
       <ClaimHeader claim={claim} refetch={refetch} applyOptimistic={applyOptimistic} />
+
+      <PostApproveBanner claim={claim} />
 
       <div className="min-h-0 flex-1 overflow-hidden bg-neutral-50">
         {isDesktop ? renderDesktopLayout() : isTablet ? renderTabletLayout() : renderMobileLayout()}
