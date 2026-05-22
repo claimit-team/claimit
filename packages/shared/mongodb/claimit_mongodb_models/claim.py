@@ -47,6 +47,8 @@ class Claim(BaseDocument):
     policy_clause_cited: str
     evidence_screenshot_url: str | None
     send_override: SendMode | None
+    auto_send_at: datetime | None = None
+    gmail_message_id: str | None = None
     submitted_at: datetime | None
     submitted_via: SubmittedVia | None
     outcome: ClaimOutcome

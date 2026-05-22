@@ -102,6 +102,8 @@ class ClaimReadTolerant(BaseDocument):
     policy_clause_cited: str | None = None
     evidence_screenshot_url: str | None = None
     send_override: str | None = None
+    auto_send_at: datetime | None = None
+    gmail_message_id: str | None = None
     submitted_at: datetime | None = None
     submitted_via: str | None = None
     outcome: str | None = None

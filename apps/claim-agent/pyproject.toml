@@ -15,6 +15,7 @@ dependencies = [
     "claimit-observability",
     "claimit-mcp",
     "claimit-mongodb-models",
+    "claimit-pubsub",
     "claimit-elastic",
     "claimit-search",
     "claimit-maps",
@@ -24,6 +25,7 @@ dependencies = [
 claimit-observability = { path = "../../packages/shared/observability" }
 claimit-mcp = { path = "../../packages/shared/mcp" }
 claimit-mongodb-models = { path = "../../packages/shared/mongodb" }
+claimit-pubsub = { path = "../../packages/shared/pubsub", editable = true }
 claimit-search = { path = "../../packages/shared/search" }
 claimit-elastic = { path = "../../packages/shared/elastic" }
 claimit-maps = { path = "../../packages/shared/maps" }
