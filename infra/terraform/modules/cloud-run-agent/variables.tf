@@ -82,3 +82,28 @@ variable "env_vars" {
   description = "Plain (non-secret) environment variables to inject into the container."
   default     = {}
 }
+
+variable "probe_type" {
+  type        = string
+  description = "Startup + liveness probe transport: 'http' (HTTP GET at probe_path) or 'tcp' (TCP connect to container_port). Default 'http' matches every existing consumer."
+  default     = "http"
+
+  validation {
+    condition     = contains(["http", "tcp"], var.probe_type)
+    error_message = "probe_type must be 'http' or 'tcp'."
+  }
+}
+
+variable "probe_path" {
+  type        = string
+  description = "HTTP path used by startup + liveness probes when probe_type='http'. Ignored when probe_type='tcp'."
+  default     = "/health"
+
+  validation {
+    condition = var.probe_type == "tcp" || (
+      length(trimspace(var.probe_path)) > 0 &&
+      startswith(var.probe_path, "/")
+    )
+    error_message = "When probe_type is 'http', probe_path must be a non-empty absolute path (start with '/')."
+  }
+}

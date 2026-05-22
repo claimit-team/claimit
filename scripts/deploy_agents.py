@@ -42,7 +42,7 @@ from dataclasses import dataclass
 
 import vertexai
 from google.api_core import exceptions as gcp_exc
-from google.cloud import secretmanager
+from google.cloud import run_v2, secretmanager
 from vertexai.agent_engines import AdkApp
 
 # (agent_top_level_name, dotted_module_path)
@@ -65,6 +65,22 @@ ADK_REQUIREMENTS = [
 AGENT_FRAMEWORK = "google-adk"
 VERIFY_PROMPT = "Say hello"
 VERIFY_USER_ID = "deploy-agents-verify-bot"
+
+# Ticket 5.10: per-agent MongoDB MCP transport routing. The factory in
+# `claimit_mcp.get_mongodb_mcp_toolset` picks Streamable-HTTP transport
+# when MDB_MCP_URL is set in the environment, stdio otherwise. For each
+# agent we resolve the right Cloud Run service URL (readonly vs
+# readwrite) and inject it as MDB_MCP_URL. The keys here are the agent
+# name with the "_agent" suffix stripped (per AGENT_MODULES); the
+# values are True iff the agent should target the read-only service.
+AGENT_READONLY_MAP = {
+    "assistant": True,
+    "ingest": False,
+    "monitor": False,
+    "claim": False,
+}
+MONGODB_MCP_SERVICE_READONLY = "claimit-mongodb-mcp-readonly"
+MONGODB_MCP_SERVICE_READWRITE = "claimit-mongodb-mcp-readwrite"
 
 
 @dataclass
@@ -158,6 +174,49 @@ def get_mcp_wheel_path() -> str:
     return candidates[-1]  # latest version (alphabetic sort works for semver)
 
 
+def get_mongodb_mcp_url(agent_name: str) -> str:
+    """Resolve the Cloud Run service URL for the MongoDB MCP server this
+    agent should target (readonly vs readwrite per AGENT_READONLY_MAP).
+
+    Ticket 5.10: the readonly service hosts mongodb-mcp-server with
+    `--readOnly` so the upstream skips registering create/update/delete
+    tools — protects the assistant agent's LLM-controlled tool surface
+    from prompt-injection write attempts. The readwrite service has
+    the full tool set.
+
+    Returns the bare service URI (no /mcp suffix); the factory in
+    `claimit_mcp.get_mongodb_mcp_toolset` appends the MCP endpoint
+    path. The bare URL is also the OIDC audience the runtime SA must
+    target, so this is the right value to pass straight to
+    MDB_MCP_URL.
+
+    Raises RuntimeError when the service doesn't exist yet
+    (terraform-apply must run before this script — same ordering
+    constraint as the existing mongodb-uri Secret Manager lookup the
+    block above replaces).
+    """
+    key = agent_name.removesuffix("_agent")
+    if key not in AGENT_READONLY_MAP:
+        raise RuntimeError(f"Unknown agent '{agent_name}' — add it to AGENT_READONLY_MAP.")
+    read_only = AGENT_READONLY_MAP[key]
+    service_name = MONGODB_MCP_SERVICE_READONLY if read_only else MONGODB_MCP_SERVICE_READWRITE
+    project = get_project_id()
+    location = get_location()
+    full_name = f"projects/{project}/locations/{location}/services/{service_name}"
+    try:
+        run_client = run_v2.ServicesClient()
+        service = run_client.get_service(name=full_name)
+    except gcp_exc.NotFound as e:
+        raise RuntimeError(
+            f"Cloud Run service '{service_name}' not found in "
+            f"{project}/{location}. Run terraform apply (see "
+            "infra/terraform/mongodb_mcp.tf) before deploying agents."
+        ) from e
+    except Exception as e:
+        raise RuntimeError(f"Cannot resolve MDB_MCP_URL for {agent_name}: {e}") from e
+    return service.uri
+
+
 def find_existing_agent(client, display_name: str):
     """Find a deployed AgentEngine by display_name. Returns AgentEngine or None.
 
@@ -202,27 +261,35 @@ def deploy_one(
             f"Serialization smoke test failed for {agent_name}; aborting deploy."
         ) from pkl_err
 
-    # MCP toolset (mongodb-mcp-server stdio child process) reads this env var
-    # to connect. McpToolset env=None in the factory + SecretRef here = URI
-    # not baked into pickle; Agent Engine runtime fetches latest from Secret
-    # Manager at process start.
+    # Ticket 5.10: route the agent at the right MongoDB MCP Cloud Run
+    # service (readonly for the assistant, readwrite for ingest /
+    # monitor / claim). The factory in `claimit_mcp.get_mongodb_mcp_
+    # toolset` picks Streamable-HTTP transport when MDB_MCP_URL is set,
+    # falling back to stdio (local-dev) when unset — Agent Engine
+    # always gets HTTP because we set the env here.
     #
-    # env_vars is the dict form `{env_var_name: SecretRef | str}` — verified
-    # at runtime: the list-of-SecretEnvVar form (which the type hints suggest)
-    # is rejected by the SDK serializer; the dict form is what actually works.
-    # Secret ref dict format breaks Agent Engine container startup (silent crash,
-    # no stderr). Read the actual value from Secret Manager and pass as plain string.
-    # Verified: plain string env_vars work (test5 passed), secret ref dict does not (test2 failed).
-    try:
-        sm = secretmanager.SecretManagerServiceClient()
-        secret_path = f"projects/{get_project_id()}/secrets/mongodb-uri/versions/latest"
-        mdb_uri = sm.access_secret_version(name=secret_path).payload.data.decode("utf-8")
-    except Exception as e:
-        raise RuntimeError(f"Cannot read mongodb-uri from Secret Manager: {e}") from e
-
-    env_vars = {
-        "MDB_MCP_CONNECTION_STRING": mdb_uri,
-    }
+    # The MongoDB connection string (MDB_MCP_CONNECTION_STRING) is no
+    # longer mounted on the agent — it lives in Secret Manager bound
+    # to each Cloud Run MCP service via `secret_env_map`. The agent
+    # only needs the service URL.
+    #
+    # env_vars is the dict form `{env_var_name: SecretRef | str}` —
+    # verified at runtime: the list-of-SecretEnvVar form (which the
+    # type hints suggest) is rejected by the SDK serializer; the dict
+    # form is what actually works. Secret ref dict format breaks
+    # Agent Engine container startup (silent crash, no stderr). Plain
+    # string env_vars work (test5 passed in 1.29 verification).
+    #
+    # Dry-run guard: skip the Cloud Run service lookup on `--dry-run`
+    # so the script works without `terraform apply` having materialized
+    # the MCP services. The factory then sees no MDB_MCP_URL and stays
+    # on its local stdio path, which is the right fall-through for a
+    # plan-only invocation (no real Agent Engine create happens in
+    # dry-run — the deploy_one return is just a "would-create" /
+    # "would-update" planning marker).
+    env_vars: dict[str, str] = {}
+    if not dry_run:
+        env_vars["MDB_MCP_URL"] = get_mongodb_mcp_url(agent_name)
 
     config = {
         "staging_bucket": staging_bucket,

@@ -138,6 +138,7 @@ jobs:
             --python "3.12" \
             --with "google-cloud-aiplatform[agent_engines,adk]" \
             --with "google-cloud-secret-manager>=2.0.0" \
+            --with "google-cloud-run>=0.10.0" \
             --with-editable "packages/shared/mcp" \
             python scripts/deploy_agents.py
 
@@ -188,6 +189,7 @@ jobs:
             --python "3.12" \
             --with "google-cloud-aiplatform[agent_engines,adk]" \
             --with "google-cloud-secret-manager>=2.0.0" \
+            --with "google-cloud-run>=0.10.0" \
             --with-editable "packages/shared/mcp" \
             python scripts/deploy_agents.py --verify-only
 
