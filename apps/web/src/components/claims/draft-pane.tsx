@@ -17,6 +17,7 @@ import {
 import { type ElementType, useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -593,6 +594,27 @@ export function DraftPane({
     // version changes), so preview always reflects the selected
     // version. On the latest version with active edits, the user sees
     // their in-progress changes — matches the "live preview" pattern.
+    //
+    // Empty-draft guard (WI-11): when the selected version has no
+    // content (e.g. an upstream agent failure produced an empty
+    // draft_content row) we surface a calm alert instead of letting
+    // the parser fall through to an empty <pre>. The user can still
+    // switch to Edit and write one by hand.
+    if (editBuffer.trim() === "") {
+      return (
+        <div className="p-4">
+          <Alert>
+            <AlertCircle className="size-4" />
+            <AlertTitle>No draft yet</AlertTitle>
+            <AlertDescription>
+              {onLatestVersion
+                ? "This claim doesn't have a draft. Switch to Edit to write one."
+                : "This version had no content. Switch to a newer version to view the draft."}
+            </AlertDescription>
+          </Alert>
+        </div>
+      );
+    }
     switch (claim.claim_type) {
       case "email":
         return (
