@@ -1,12 +1,21 @@
 {
   "$defs": {
     "Category": {
-      "enum": ["retail", "airline", "hotel"],
+      "enum": [
+        "retail",
+        "airline",
+        "hotel"
+      ],
       "title": "Category",
       "type": "string"
     },
     "ClaimType": {
-      "enum": ["email", "chat_script", "in_store", "self_service"],
+      "enum": [
+        "email",
+        "chat_script",
+        "in_store",
+        "self_service"
+      ],
       "title": "ClaimType",
       "type": "string"
     },

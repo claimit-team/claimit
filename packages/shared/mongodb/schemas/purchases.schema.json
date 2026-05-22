@@ -1,12 +1,21 @@
 {
   "$defs": {
     "Category": {
-      "enum": ["retail", "airline", "hotel"],
+      "enum": [
+        "retail",
+        "airline",
+        "hotel"
+      ],
       "title": "Category",
       "type": "string"
     },
     "ClaimType": {
-      "enum": ["email", "chat_script", "in_store", "self_service"],
+      "enum": [
+        "email",
+        "chat_script",
+        "in_store",
+        "self_service"
+      ],
       "title": "ClaimType",
       "type": "string"
     },
@@ -157,12 +166,20 @@
           "title": "Category"
         }
       },
-      "required": ["platform", "price", "overall_min"],
+      "required": [
+        "platform",
+        "price",
+        "overall_min"
+      ],
       "title": "ExtractionConfidence",
       "type": "object"
     },
     "IngestionSource": {
-      "enum": ["gmail", "upload_pdf", "upload_image"],
+      "enum": [
+        "gmail",
+        "upload_pdf",
+        "upload_image"
+      ],
       "title": "IngestionSource",
       "type": "string"
     },
@@ -183,7 +200,12 @@
       "type": "string"
     },
     "PurchaseDateBasis": {
-      "enum": ["order_date", "ship_date", "pickup_date", "check_in_date"],
+      "enum": [
+        "order_date",
+        "ship_date",
+        "pickup_date",
+        "check_in_date"
+      ],
       "title": "PurchaseDateBasis",
       "type": "string"
     },

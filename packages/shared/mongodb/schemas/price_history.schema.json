@@ -17,7 +17,13 @@
       "type": "string"
     },
     "PriceSource": {
-      "enum": ["keepa", "scraperapi", "apify", "amadeus", "direct"],
+      "enum": [
+        "keepa",
+        "scraperapi",
+        "apify",
+        "amadeus",
+        "direct"
+      ],
       "title": "PriceSource",
       "type": "string"
     }
