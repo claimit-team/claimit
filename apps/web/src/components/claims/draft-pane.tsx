@@ -45,6 +45,7 @@ import type {
   ClaimPolicy,
   DraftVersion,
 } from "@/lib/claim-detail-types";
+import { toSafeExternalHref } from "@/lib/safe-url";
 import { cn } from "@/lib/utils";
 
 import {
@@ -349,6 +350,11 @@ function InStoreGuide({ content, policy }: { content: string; policy: ClaimPolic
   if (parsed === null) {
     return <FallbackPre content={content} />;
   }
+  // Policy URLs come from a backend pull; guard the scheme before
+  // binding to anchor `href` so a backend regression (or hostile
+  // upstream) can never inject a non-http(s) scheme into a clickable
+  // link (CodeRabbit MAJOR / Bugbot MEDIUM, PR #168).
+  const policyUrl = toSafeExternalHref(policy.claim_url);
 
   return (
     <div className="space-y-3 p-4">
@@ -393,23 +399,23 @@ function InStoreGuide({ content, policy }: { content: string; policy: ClaimPolic
           </div>
         );
       })}
-      {policy.claim_phone !== "" || policy.claim_url !== "" ? (
+      {policy.claim_phone !== "" || policyUrl !== null ? (
         <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-neutral-600 text-xs">
           {policy.claim_phone !== "" ? (
             <div>
               Call ahead: <span className="font-medium text-neutral-800">{policy.claim_phone}</span>
             </div>
           ) : null}
-          {policy.claim_url !== "" ? (
+          {policyUrl !== null ? (
             <div className="mt-1 truncate">
               Policy:{" "}
               <a
-                href={policy.claim_url}
+                href={policyUrl}
                 target="_blank"
                 rel="noreferrer noopener"
                 className="text-brand-primary-500 underline-offset-2 hover:underline"
               >
-                {policy.claim_url}
+                {policyUrl}
               </a>
             </div>
           ) : null}
@@ -425,6 +431,12 @@ function SelfServiceWalkthrough({ content }: { content: string }) {
     return <FallbackPre content={content} />;
   }
   const summary = parseOrderSummary(parsed.order_summary);
+  // `parsed.claim_url` comes from user-editable draft JSON, so a
+  // hand-edit could land a non-http scheme (`javascript:`, …) in the
+  // anchor. Guard via the shared allow-list helper before rendering
+  // — same pattern post-approve-banner uses for policy URLs
+  // (CodeRabbit MAJOR / Bugbot MEDIUM, PR #168).
+  const selfServiceUrl = toSafeExternalHref(parsed.claim_url);
 
   return (
     <div className="space-y-4 p-4">
@@ -493,11 +505,11 @@ function SelfServiceWalkthrough({ content }: { content: string }) {
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        {parsed.claim_url !== "" ? (
+        {selfServiceUrl !== null ? (
           <Button
             size="sm"
             render={
-              <a href={parsed.claim_url} target="_blank" rel="noreferrer noopener">
+              <a href={selfServiceUrl} target="_blank" rel="noreferrer noopener">
                 <ExternalLink className="mr-2 h-4 w-4" />
                 Open {parsed.platform_display_name}
               </a>
