@@ -20,7 +20,27 @@ INDEX_DEFINITIONS: dict[str, list[dict[str, Any]]] = {
     "purchases": [
         {"keys": [("user_id", 1), ("status", 1)]},
         {"keys": [("window_expires", 1)]},
-        {"keys": [("user_id", 1), ("platform", 1), ("order_id", 1)], "unique": True},
+        # Partial unique on the (user_id, platform, order_id) triple.
+        # Real purchases are still deduped — the constraint fires for
+        # any non-empty `order_id`. The api-gateway upload sentinel
+        # AND the extraction-failure rescue path both write
+        # `order_id=""` (no id to extract yet); without the partial
+        # filter a second upload from the same user collides on
+        # (user_id, "amazon", "") because the sentinel default
+        # platform is amazon, and Mongo returns DuplicateKeyError →
+        # 500 from the upload endpoint. The partial keeps real-
+        # purchase dedup intact and lets sentinels / rescued docs
+        # stack until each gets its real `order_id` from finalize.
+        # NOTE on dedup semantics for downstream consumers: this
+        # partial allows multiple (user_id, platform, "") rows AND
+        # multiple (user_id, platform, null) rows — but the strict
+        # `Purchase` model declares `order_id: str` (non-null,
+        # required), so null is a non-issue for prod-written docs.
+        {
+            "keys": [("user_id", 1), ("platform", 1), ("order_id", 1)],
+            "unique": True,
+            "partialFilterExpression": {"order_id": {"$gt": ""}},
+        },
         # Partial unique: only indexes documents with a string receipt_hash so
         # multiple null/missing hashes are allowed.
         {
@@ -54,6 +74,34 @@ INDEX_DEFINITIONS: dict[str, list[dict[str, Any]]] = {
 }
 
 
+async def _drop_index_by_keys(collection: Any, keys: list[tuple[str, int]]) -> bool:
+    """Drop the index on `collection` whose `key` matches `keys`. Return True if dropped.
+
+    Looks up the actual conflicting index by its key pattern via
+    `list_indexes()` instead of trusting a hardcoded name. Necessary
+    because OperationFailure code 86 (IndexKeySpecsConflict) is raised
+    precisely when the existing index has the SAME key pattern but a
+    DIFFERENT name from what `create_index` would auto-derive — e.g. an
+    index created out-of-band via mongosh with a custom name, or via an
+    older ODM that uses different naming conventions. Dropping the
+    hardcoded `user_id_1_platform_1_order_id_1` would silently fail in
+    that case and leave the migration stuck.
+
+    Returns True if an index was dropped, False if none matched (caller
+    should re-raise the original OperationFailure rather than loop).
+    """
+    # Mongo represents the index `key` field as an ordered dict /
+    # SON object: {field: direction, …}. Compare against the tuple
+    # list form `keys` uses by reconstructing the same shape.
+    target_key = dict(keys)
+    async for spec in collection.list_indexes():
+        existing_key = dict(spec.get("key", {}))
+        if existing_key == target_key:
+            await collection.drop_index(spec["name"])
+            return True
+    return False
+
+
 async def create_indexes(
     mongo_uri: str | None = None,
     db_name: str | None = None,
@@ -78,12 +126,41 @@ async def create_indexes(
                 try:
                     name = await collection.create_index(keys, **kwargs)
                 except OperationFailure as exc:
-                    if (
+                    # OperationFailure code 85 = IndexOptionsConflict (an
+                    # index with the same name/keys exists but with
+                    # different options — e.g. `unique:True` without our
+                    # new `partialFilterExpression`), code 86 =
+                    # IndexKeySpecsConflict (same key pattern but
+                    # different index name). In both cases the old shape
+                    # is incompatible with what we want; drop and
+                    # recreate to converge the live schema with
+                    # INDEX_DEFINITIONS. Idempotent: re-running this
+                    # script after the drop-and-recreate is a no-op
+                    # because the second `create_index` matches the
+                    # existing spec.
+                    code = getattr(exc, "code", None)
+                    # Cover the two purchases-collection migrations this
+                    # repo has had to do — receipt_hash and the
+                    # (user_id, platform, order_id) triple. Anything
+                    # else, re-raise so we don't accidentally drop an
+                    # unrelated index in a future code path.
+                    is_migratable = (
                         collection_name == "purchases"
-                        and keys == [("receipt_hash", 1)]
-                        and getattr(exc, "code", None) in (85, 86)
-                    ):
-                        await collection.drop_index("receipt_hash_1")
+                        and code in (85, 86)
+                        and (
+                            keys == [("receipt_hash", 1)]
+                            or keys == [("user_id", 1), ("platform", 1), ("order_id", 1)]
+                        )
+                    )
+                    if is_migratable:
+                        dropped = await _drop_index_by_keys(collection, keys)
+                        if not dropped:
+                            # The conflict report said an index with this
+                            # key pattern exists but list_indexes() didn't
+                            # find one. Re-raise the original error rather
+                            # than silently looping — the operator needs
+                            # to investigate the Atlas state.
+                            raise
                         name = await collection.create_index(keys, **kwargs)
                     else:
                         raise

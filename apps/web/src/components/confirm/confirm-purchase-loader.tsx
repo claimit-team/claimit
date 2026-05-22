@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { ConfirmPageHeader } from "@/components/confirm/confirm-page-header";
 import { ConfirmPurchaseContent } from "@/components/confirm/confirm-purchase-content";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -229,5 +230,17 @@ export function ConfirmPurchaseLoader({ purchaseId }: { purchaseId: string }) {
     );
   }
 
-  return <ConfirmPurchaseContent purchase={state.purchase} />;
+  // Back affordance sits above the form, mirroring the
+  // `/purchases/:id` header layout (`PurchasePageHeader`) so the
+  // top-left "back to where I came from" affordance is consistent
+  // across the two detail/confirm surfaces. Origin-aware via
+  // `?from=` — see `ConfirmPageHeader` / `resolveBackHref` for the
+  // open-redirect safe-list. Cancel inside the action-bar stays
+  // hardcoded to `/dashboard` per the locked decision.
+  return (
+    <div className="flex flex-col gap-4">
+      <ConfirmPageHeader />
+      <ConfirmPurchaseContent purchase={state.purchase} />
+    </div>
+  );
 }

@@ -136,7 +136,12 @@ export function UploadDialog() {
       // Close before navigating so the dialog doesn't briefly flash
       // back over the confirm page during route transition.
       setOpen(false);
-      router.push(`/confirm/${purchase._id}`);
+      // Carry `?from=/dashboard` so the confirm-page Back affordance
+      // lands the user back on the dashboard (the upload dialog can
+      // be opened from any page but the "I uploaded then changed my
+      // mind" return surface is the dashboard hero). Cancel inside
+      // the confirm page is unchanged — also lands on /dashboard.
+      router.push(`/confirm/${purchase._id}?from=/dashboard`);
     } catch (err) {
       let message = "We couldn't upload that receipt. Try again.";
       if (err instanceof PurchasesApiError) {
