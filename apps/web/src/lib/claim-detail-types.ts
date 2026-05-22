@@ -49,7 +49,26 @@ export interface ClaimEvidence {
   current_price: number;
   original_price: number;
   screenshot_url: string;
+  /**
+   * Real capture time joined from the `PriceHistory` snapshot whose
+   * `evidence_screenshot_url` matches the claim's (ticket 5.8 / WI-3).
+   * Empty string when the wire field is null (no snapshot row OR the
+   * claim was drafted without a price-drop event); evidence-pane
+   * formats empty as "hide the pill" rather than rendering a proxy
+   * date like `claim.updated_at`.
+   */
   captured_at: string;
+  /**
+   * The original product URL (`purchase.product_url`) — used as the
+   * "Source" link in the evidence card so the user can verify the
+   * snapshot against the live page. Optional in the interface so legacy
+   * fixtures in `claim-detail.ts` (a dead-code mock module slated for
+   * cleanup) keep type-checking without forcing a synthetic URL on
+   * every row; the view-model builder always populates a string
+   * (empty when `purchase` is null) so renderers can treat empty +
+   * undefined identically as "platform label only, no link".
+   */
+  source_url?: string;
   policy_clause: string;
   policy_url: string;
 }

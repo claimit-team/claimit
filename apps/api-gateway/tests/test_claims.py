@@ -497,7 +497,11 @@ async def test_get_claim_detail_success(client: AsyncClient) -> None:
     purchase = Purchase.model_validate(make_purchase(user_id=_USER_ID))
 
     db = AsyncMock(spec=MongoDBClient)
-    # 1st find_one: auth middleware (User). 2nd find_one: claims_service._load_owned_claim.
+    # find_one calls: 1) auth User, 2) _load_owned_claim, 3) _find_evidence_snapshot.
+    # The claim fixture has evidence_screenshot_url=None, so the snapshot
+    # lookup short-circuits and the 3rd find_one is never invoked — match
+    # that by NOT providing a 3rd side_effect value (extra ones would
+    # raise StopIteration here only if hit).
     db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
     db.get_purchase = AsyncMock(return_value=purchase)
     db.get_policy = AsyncMock(return_value=None)  # policy may legitimately be missing
@@ -510,10 +514,121 @@ async def test_get_claim_detail_success(client: AsyncClient) -> None:
             )
         assert response.status_code == 200
         payload = response.json()
-        assert set(payload.keys()) == {"claim", "purchase", "policy", "evidence_url"}
+        assert set(payload.keys()) == {
+            "claim",
+            "purchase",
+            "policy",
+            "evidence_url",
+            "evidence_captured_at",
+        }
         assert payload["claim"]["_id"] == _CLAIM_ID
         assert payload["purchase"]["_id"] == str(purchase.id)
         assert payload["policy"] is None
+        # No evidence_screenshot_url on the claim → snapshot lookup
+        # short-circuits and returns None → wire field is null.
+        assert payload["evidence_captured_at"] is None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_get_claim_detail_joins_price_history_for_evidence_captured_at(
+    client: AsyncClient,
+) -> None:
+    """When the claim carries an `evidence_screenshot_url`, the gateway
+    looks up the matching `PriceHistory` row on
+    `(purchase_id, evidence_screenshot_url)` and surfaces its
+    `checked_at` as a top-level `evidence_captured_at` (ticket 5.8 / WI-3).
+
+    The frontend uses this as the real capture time instead of the
+    `claim.updated_at` proxy used before this PR.
+    """
+    from claimit_mongodb_models import PriceHistory, Purchase
+
+    evidence_url = "gs://test-evidence-bucket/evidence/best_buy/sku/2026-05-13.png"
+    claim = Claim.model_validate(_claim_doc(evidence_screenshot_url=evidence_url))
+    purchase = Purchase.model_validate(make_purchase(user_id=_USER_ID))
+    snapshot = PriceHistory.model_validate(
+        {
+            "_id": "50000000-0000-0000-0000-000000000001",
+            "updated_at": None,
+            "purchase_id": str(claim.purchase_id),
+            "platform": "best_buy",
+            "product_id": "sku-123",
+            "price_member": 199.99,
+            "price_non_member": 249.99,
+            "member_tier_required": None,
+            "currency": "USD",
+            "checked_at": "2026-05-13T20:00:00+00:00",
+            "source": "scraperapi",
+            "evidence_screenshot_url": evidence_url,
+            "raw_response_hash": "abc",
+        }
+    )
+
+    db = AsyncMock(spec=MongoDBClient)
+    # find_one: 1) auth User, 2) _load_owned_claim, 3) _find_evidence_snapshot.
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim, snapshot])
+    db.get_purchase = AsyncMock(return_value=purchase)
+    db.get_policy = AsyncMock(return_value=None)
+
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_CLAIM_ID}", headers={"Authorization": "Bearer t"}
+            )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["evidence_url"] == evidence_url
+        # Real PriceHistory checked_at threaded through.
+        assert payload["evidence_captured_at"].startswith("2026-05-13T20:00")
+
+        # Confirm the lookup filter shape — purchase_id + evidence_url
+        # are both required to disambiguate when a purchase has many
+        # snapshots.
+        snapshot_call = db.find_one.await_args_list[2]
+        coll, query = snapshot_call.args[0], snapshot_call.args[1]
+        assert coll == "price_history"
+        assert query == {
+            "purchase_id": claim.purchase_id,
+            "evidence_screenshot_url": evidence_url,
+        }
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_get_claim_detail_evidence_captured_at_null_when_no_matching_snapshot(
+    client: AsyncClient,
+) -> None:
+    """Legacy claim with an evidence link but NO matching `PriceHistory`
+    row (pre-4.12 or rogue write) — the gateway must NOT 500; it
+    surfaces `evidence_captured_at = null` and the frontend hides the
+    captured-at pill rather than rendering a proxy timestamp.
+    """
+    from claimit_mongodb_models import Purchase
+
+    evidence_url = "gs://test-evidence-bucket/evidence/orphan.png"
+    claim = Claim.model_validate(_claim_doc(evidence_screenshot_url=evidence_url))
+    purchase = Purchase.model_validate(make_purchase(user_id=_USER_ID))
+
+    db = AsyncMock(spec=MongoDBClient)
+    # find_one #3 returns None → no matching PriceHistory row.
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim, None])
+    db.get_purchase = AsyncMock(return_value=purchase)
+    db.get_policy = AsyncMock(return_value=None)
+
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.get(
+                f"/api/v1/claims/{_CLAIM_ID}", headers={"Authorization": "Bearer t"}
+            )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["evidence_url"] == evidence_url
+        assert payload["evidence_captured_at"] is None
     finally:
         _clear_overrides()
 

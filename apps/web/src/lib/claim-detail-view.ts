@@ -231,7 +231,7 @@ function mapDraftVersions(claim: ClaimDetailDoc): DraftVersion[] {
  * copy for missing policy text.
  */
 function buildEvidence(response: ClaimDetailResponse): ClaimEvidence {
-  const { claim, purchase, policy, evidence_url } = response;
+  const { claim, purchase, policy, evidence_url, evidence_captured_at } = response;
   const pricePaid = purchase?.price_paid ?? 0;
   const claimAmount = claim.claim_amount ?? 0;
   // `current_price` is what the merchant is showing now -> price_paid
@@ -242,12 +242,11 @@ function buildEvidence(response: ClaimDetailResponse): ClaimEvidence {
     current_price: currentPrice,
     original_price: pricePaid,
     screenshot_url: evidence_url ?? claim.evidence_screenshot_url ?? "",
-    // `updated_at` is the best in-band "when did we capture this"
-    // signal we have; `submitted_at` is the next-best for a claim
-    // that was submitted but never updated post-submit. Empty string
-    // when both are null -> the defensive formatter in evidence-pane
-    // skips the date pill.
-    captured_at: claim.updated_at ?? claim.submitted_at ?? "",
+    // Real `checked_at` from the PriceHistory snapshot (WI-3). Empty
+    // string when null — the formatter in evidence-pane hides the
+    // captured-at pill rather than rendering `updated_at` as a proxy.
+    captured_at: evidence_captured_at ?? "",
+    source_url: purchase?.product_url ?? "",
     policy_clause:
       claim.policy_clause_cited ??
       policy?.policy_text_relevant_clause ??

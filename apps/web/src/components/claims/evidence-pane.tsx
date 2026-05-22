@@ -26,6 +26,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ClaimsApiError, fetchEvidenceBlob } from "@/lib/api/claims";
 import { formatClaimCurrency } from "@/lib/claim-detail";
 import type { ClaimDetail } from "@/lib/claim-detail-types";
+import { toSafeExternalHref } from "@/lib/safe-url";
 
 interface EvidencePaneProps {
   claim: ClaimDetail;
@@ -115,6 +116,35 @@ type EvidenceLoadState =
   | { kind: "missing" }
   | { kind: "error"; message: string }
   | { kind: "ready"; url: string };
+
+/**
+ * Source line under the evidence screenshot. Renders `Source: <platform>`
+ * as a plain label when `sourceUrl` is missing or non-http(s); otherwise
+ * makes the platform name a sanitized external link to the live product
+ * page so the user can verify the snapshot against current pricing.
+ * Sanitization via `toSafeExternalHref` mirrors the post-approve banner
+ * + draft pane callsites (PR #168 R6 — never inject `javascript:` or
+ * relative URLs into anchor hrefs).
+ */
+function SourceLine({ platform, sourceUrl }: { platform: string; sourceUrl: string | undefined }) {
+  const safeHref = toSafeExternalHref(sourceUrl);
+  if (!safeHref) {
+    return <span>Source: {platform}</span>;
+  }
+  return (
+    <span>
+      Source:{" "}
+      <a
+        href={safeHref}
+        target="_blank"
+        rel="noreferrer noopener"
+        className="text-brand-primary-500 hover:underline"
+      >
+        {platform}
+      </a>
+    </span>
+  );
+}
 
 function EvidenceScreenshot({ claimId, platform }: { claimId: string; platform: string }) {
   const [state, setState] = useState<EvidenceLoadState>({ kind: "loading" });
@@ -257,7 +287,7 @@ export function EvidencePane({ claim, onDoubleClickHeader }: EvidencePaneProps) 
               <EvidenceScreenshot claimId={claim.claim_id} platform={claim.platform} />
 
               <div className="flex items-center justify-between text-neutral-500 text-xs">
-                <span>Source: {claim.platform}</span>
+                <SourceLine platform={claim.platform} sourceUrl={evidence.source_url} />
                 {capturedDate !== null && (
                   <span className="flex items-center gap-1">
                     <Clock className="h-3 w-3" />

@@ -31,7 +31,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
-from claimit_mongodb_models import Claim, ClaimReadTolerant, DraftVersion, MongoDBClient
+from claimit_mongodb_models import (
+    Claim,
+    ClaimReadTolerant,
+    DraftVersion,
+    MongoDBClient,
+    PriceHistoryReadTolerant,
+)
 from claimit_mongodb_models.enums import (
     ClaimOutcome,
     DraftGeneratedBy,
@@ -417,29 +423,76 @@ async def get_claim_detail(
     user_id: UUID,
     claim_id: UUID,
 ) -> dict[str, object]:
-    """Return a claim with its linked purchase + policy.
+    """Return a claim with its linked purchase + policy + evidence snapshot
+    metadata.
 
     404s on missing claim or ownership mismatch.
+
+    `evidence_captured_at` is sourced from the `PriceHistory` row whose
+    `(purchase_id, evidence_screenshot_url)` pair matches the claim's —
+    the monitor-agent writes both the snapshot link AND the
+    `checked_at` timestamp atomically, so a single lookup yields the
+    real capture time. Falls back to `null` when:
+      - the claim has no `evidence_screenshot_url` (Gemini draft
+        generated without a price-drop event), OR
+      - no matching `PriceHistory` row exists (legacy claims pre-4.12,
+        or a rogue write).
+    The frontend then hides the captured-at pill rather than showing
+    `updated_at` as a proxy (ticket 5.8 — accurate-or-absent).
     """
     claim = await _load_owned_claim(db, claim_id, user_id)
 
-    # Parallelize the two follow-up reads — both are user-scoped reads with no
-    # cross-dependency, so a single round-trip-of-two saves one network RTT.
-    # `claim.platform` is `str | None` on the tolerant model; only attempt
-    # the policy lookup when it's both present and a known Platform value.
-    # An unknown platform string yields no policy (frontend handles null).
+    # Parallelize the three follow-up reads — all are user-scoped reads
+    # with no cross-dependency, so a single round-trip-of-three saves
+    # two network RTTs vs. sequential. `claim.platform` is `str | None`
+    # on the tolerant model; only attempt the policy lookup when it's
+    # both present and a known Platform value. An unknown platform
+    # string yields no policy (frontend handles null).
     policy_platform = _safe_platform_value(claim.platform)
     purchase_id = claim.purchase_id
     purchase_task = db.get_purchase(purchase_id) if purchase_id is not None else _none_async()
     policy_task = db.get_policy(policy_platform) if policy_platform is not None else _none_async()
-    purchase, policy = await asyncio.gather(purchase_task, policy_task)
+    snapshot_task = _find_evidence_snapshot(db, claim)
+    purchase, policy, snapshot = await asyncio.gather(purchase_task, policy_task, snapshot_task)
+
+    evidence_captured_at = (
+        snapshot.checked_at.isoformat()
+        if snapshot is not None and snapshot.checked_at is not None
+        else None
+    )
 
     return {
         "claim": claim.model_dump(mode="json", by_alias=True),
         "purchase": purchase.model_dump(mode="json", by_alias=True) if purchase else None,
         "policy": policy.model_dump(mode="json", by_alias=True) if policy else None,
         "evidence_url": claim.evidence_screenshot_url,
+        "evidence_captured_at": evidence_captured_at,
     }
+
+
+async def _find_evidence_snapshot(
+    db: MongoDBClient,
+    claim: ClaimReadTolerant,
+) -> PriceHistoryReadTolerant | None:
+    """Look up the `PriceHistory` row whose snapshot the claim cites.
+
+    Returns `None` (no error) when the claim has insufficient data to
+    join — null `purchase_id` or null `evidence_screenshot_url` — or
+    when no matching row exists. Read-tolerant variant: a legacy
+    PriceHistory doc with an enum-value the strict schema no longer
+    accepts (e.g. a deprecated `source`) must not break the detail
+    page.
+    """
+    if claim.evidence_screenshot_url is None or claim.purchase_id is None:
+        return None
+    return await db.find_one(
+        "price_history",
+        {
+            "purchase_id": claim.purchase_id,
+            "evidence_screenshot_url": claim.evidence_screenshot_url,
+        },
+        PriceHistoryReadTolerant,
+    )
 
 
 def _safe_platform_value(raw: str | None) -> str | None:

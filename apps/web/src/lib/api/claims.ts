@@ -282,6 +282,17 @@ export type ClaimDetailResponse = {
   purchase: import("@/lib/api/purchases").PurchaseDetailDoc | null;
   policy: PolicyDoc | null;
   evidence_url: string | null;
+  /**
+   * Real `checked_at` from the `PriceHistory` row whose snapshot link
+   * matches `claim.evidence_screenshot_url` (ticket 5.8 / WI-3 — joined
+   * on `(purchase_id, evidence_screenshot_url)` server-side in
+   * `services.claims_service._find_evidence_snapshot`). `null` when the
+   * claim has no evidence link OR no matching row exists (legacy
+   * pre-4.12 claims). The view-model surfaces `null` as an empty
+   * string so the evidence-pane hides the captured-at pill rather than
+   * showing `updated_at` as a proxy.
+   */
+  evidence_captured_at: string | null;
 };
 
 /**
