@@ -279,10 +279,17 @@ def deploy_one(
     # form is what actually works. Secret ref dict format breaks
     # Agent Engine container startup (silent crash, no stderr). Plain
     # string env_vars work (test5 passed in 1.29 verification).
-    mcp_url = get_mongodb_mcp_url(agent_name)
-    env_vars = {
-        "MDB_MCP_URL": mcp_url,
-    }
+    #
+    # Dry-run guard: skip the Cloud Run service lookup on `--dry-run`
+    # so the script works without `terraform apply` having materialized
+    # the MCP services. The factory then sees no MDB_MCP_URL and stays
+    # on its local stdio path, which is the right fall-through for a
+    # plan-only invocation (no real Agent Engine create happens in
+    # dry-run — the deploy_one return is just a "would-create" /
+    # "would-update" planning marker).
+    env_vars: dict[str, str] = {}
+    if not dry_run:
+        env_vars["MDB_MCP_URL"] = get_mongodb_mcp_url(agent_name)
 
     config = {
         "staging_bucket": staging_bucket,

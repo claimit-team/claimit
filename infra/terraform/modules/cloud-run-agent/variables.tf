@@ -98,4 +98,12 @@ variable "probe_path" {
   type        = string
   description = "HTTP path used by startup + liveness probes when probe_type='http'. Ignored when probe_type='tcp'."
   default     = "/health"
+
+  validation {
+    condition = var.probe_type == "tcp" || (
+      length(trimspace(var.probe_path)) > 0 &&
+      startswith(var.probe_path, "/")
+    )
+    error_message = "When probe_type is 'http', probe_path must be a non-empty absolute path (start with '/')."
+  }
 }
