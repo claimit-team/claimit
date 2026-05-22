@@ -42,6 +42,16 @@ class GmailIntegration(BaseModel):
     # same backward-compat treatment as connected_email.
     watch_failed: bool = False
     watch_error_message: str | None = None
+    # Ticket 4.17: cursor for the Gmail ingest pipeline. Advances per
+    # successful push-batch; the next push uses this as the
+    # `startHistoryId` for `users.history.list`. Distinct from
+    # `watch_history_id` (which is the historyId the watch was first
+    # registered against and never moves) so we don't conflate
+    # "where the watch began" with "where ingest has reached". Default
+    # None means: ingest has never advanced past the watch's start
+    # point — the handler falls back to `watch_history_id` for the
+    # first push.
+    last_processed_history_id: str | None = None
 
 
 class SendPreference(BaseModel):
