@@ -304,7 +304,17 @@ def make_get_reasoning_trace(
             "self_eval_attempts_detail": [],
         }
 
-        query_result = await phoenix_query(claim_id)
+        # The shipped phoenix_query (`query_claim_spans`) maps every
+        # exception path to a QueryResult, so a default call shouldn't
+        # raise. Belt-and-suspenders for the DI seam: a test fake or a
+        # future replacement that breaks the contract must NOT take the
+        # whole tool down — we'd lose the claim-doc summary too.
+        try:
+            query_result = await phoenix_query(claim_id)
+        except Exception:
+            logger.exception("get_reasoning_trace phoenix query raised claim_id=%s", claim_id)
+            return payload
+
         payload["phoenix_query_status"] = query_result.status
 
         if query_result.status == "ok":
@@ -317,26 +327,28 @@ def make_get_reasoning_trace(
 
 
 def _aggregate_validator_attempts(spans: list[SpanRecord]) -> list[dict[str, Any]]:
-    """Pluck `validator.validate` spans and group by draft.version.
+    """Pluck `validator.validate` spans, dedupe by draft.version, return
+    them sorted ascending so the LLM can narrate "draft 1 had X issues,
+    draft 2 was clean" without re-sorting.
 
-    Output is sorted by draft_version ascending so the LLM can narrate
-    "draft 1 had X issues, draft 2 was clean" without re-sorting."""
-    attempts: list[dict[str, Any]] = []
+    Dedup is last-write-wins: if Phoenix returns multiple spans for the
+    same draft.version (re-emission on a transient retry, or a future
+    code path that emits twice), we keep the most recent attempt rather
+    than surfacing duplicate "attempts" with identical keys."""
+    by_draft: dict[int, dict[str, Any]] = {}
     for span in spans:
         if span.name != "validator.validate":
             continue
         attrs = span.attributes
         issue_count = _as_int(attrs.get("validator.issue_count"), default=0)
-        attempts.append(
-            {
-                "draft_version": _as_int(attrs.get("draft.version"), default=0),
-                "passed": issue_count == 0,
-                "issue_count": issue_count,
-                "issue_types": _as_list(attrs.get("validator.issue_types")),
-            }
-        )
-    attempts.sort(key=lambda a: a["draft_version"])
-    return attempts
+        draft_version = _as_int(attrs.get("draft.version"), default=0)
+        by_draft[draft_version] = {
+            "draft_version": draft_version,
+            "passed": issue_count == 0,
+            "issue_count": issue_count,
+            "issue_types": _as_list(attrs.get("validator.issue_types")),
+        }
+    return [by_draft[k] for k in sorted(by_draft)]
 
 
 def _aggregate_self_eval_attempts(spans: list[SpanRecord]) -> list[dict[str, Any]]:
@@ -344,28 +356,27 @@ def _aggregate_self_eval_attempts(spans: list[SpanRecord]) -> list[dict[str, Any
 
     Each retry's span carries the rubric scores as individual attributes
     (`self_eval.score.clarity`, ...) plus the aggregate `passed` flag and
-    `failed_dimensions` list. Grouped by `self_eval.retry_count`."""
-    attempts: list[dict[str, Any]] = []
+    `failed_dimensions` list. Deduped by `self_eval.retry_count`
+    (last-write-wins) — see the matching note on `_aggregate_validator_*`."""
+    by_retry: dict[int, dict[str, Any]] = {}
     for span in spans:
         if span.name != "self_evaluate.evaluate":
             continue
         attrs = span.attributes
-        attempts.append(
-            {
-                "retry_count": _as_int(attrs.get("self_eval.retry_count"), default=0),
-                "passed": bool(attrs.get("self_eval.passed", False)),
-                "total_score": _as_int(attrs.get("self_eval.total_score"), default=0),
-                "scores": {
-                    "clarity": _as_int(attrs.get("self_eval.score.clarity"), default=0),
-                    "tone": _as_int(attrs.get("self_eval.score.tone"), default=0),
-                    "accuracy": _as_int(attrs.get("self_eval.score.accuracy"), default=0),
-                    "completeness": _as_int(attrs.get("self_eval.score.completeness"), default=0),
-                },
-                "failed_dimensions": _as_list(attrs.get("self_eval.failed_dimensions")),
-            }
-        )
-    attempts.sort(key=lambda a: a["retry_count"])
-    return attempts
+        retry_count = _as_int(attrs.get("self_eval.retry_count"), default=0)
+        by_retry[retry_count] = {
+            "retry_count": retry_count,
+            "passed": bool(attrs.get("self_eval.passed", False)),
+            "total_score": _as_int(attrs.get("self_eval.total_score"), default=0),
+            "scores": {
+                "clarity": _as_int(attrs.get("self_eval.score.clarity"), default=0),
+                "tone": _as_int(attrs.get("self_eval.score.tone"), default=0),
+                "accuracy": _as_int(attrs.get("self_eval.score.accuracy"), default=0),
+                "completeness": _as_int(attrs.get("self_eval.score.completeness"), default=0),
+            },
+            "failed_dimensions": _as_list(attrs.get("self_eval.failed_dimensions")),
+        }
+    return [by_retry[k] for k in sorted(by_retry)]
 
 
 def _as_int(value: Any, *, default: int) -> int:

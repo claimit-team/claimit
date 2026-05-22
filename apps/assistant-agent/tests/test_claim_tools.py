@@ -540,6 +540,95 @@ async def test_get_reasoning_trace_falls_back_when_phoenix_times_out() -> None:
     assert out["claim_type"] == "type_a_email"
 
 
+async def test_get_reasoning_trace_swallows_exception_from_phoenix_query() -> None:
+    """The shipped `query_claim_spans` maps every failure to a QueryResult,
+    so the default path can't raise. But the `phoenix_query` DI seam is
+    public — a future replacement or a test fake that violates the contract
+    must not take the whole tool down. We'd lose the claim-doc summary too."""
+    claim = _fake_claim()
+    db = _fake_db(claim=claim)
+    phoenix = AsyncMock(side_effect=RuntimeError("phoenix client blew up"))
+
+    tool = make_get_reasoning_trace(
+        user_id=_USER_ID,
+        claim_id=_CLAIM_ID,
+        db_factory=lambda: db,
+        phoenix_query=phoenix,
+    )
+    out = await tool()
+
+    # Falls back to the pre-populated default payload — status stays at
+    # the conservative "unavailable" and the claim-doc fields are intact.
+    assert out["phoenix_query_status"] == "unavailable"
+    assert out["validator_attempts"] == []
+    assert out["self_eval_attempts_detail"] == []
+    assert out["claim_type"] == "type_a_email"
+    assert out["policy_clause_cited"].startswith("30-day")
+
+
+async def test_get_reasoning_trace_dedupes_validator_spans_by_draft_version() -> None:
+    """If Phoenix returns multiple validator.validate spans for the same
+    draft.version (transient re-emit, retry, etc.), the aggregator must
+    fold them into a single entry per attempt — duplicate rows with the
+    same draft_version would confuse the LLM's narration."""
+    claim = _fake_claim()
+    db = _fake_db(claim=claim)
+    spans = [
+        # Older span for draft 1 — should be overwritten by the next one.
+        _validator_span(draft_version=1, issue_count=5, issue_types=["stale"]),
+        _validator_span(draft_version=1, issue_count=2, issue_types=["placeholder", "order_id"]),
+        _validator_span(draft_version=2, issue_count=0, issue_types=[]),
+    ]
+
+    tool = make_get_reasoning_trace(
+        user_id=_USER_ID,
+        claim_id=_CLAIM_ID,
+        db_factory=lambda: db,
+        phoenix_query=_fake_phoenix("ok", spans),
+    )
+    out = await tool()
+
+    attempts = out["validator_attempts"]
+    assert [a["draft_version"] for a in attempts] == [1, 2]
+    assert attempts[0]["issue_count"] == 2  # last-write-wins
+    assert attempts[0]["issue_types"] == ["placeholder", "order_id"]
+
+
+async def test_get_reasoning_trace_dedupes_self_eval_spans_by_retry_count() -> None:
+    claim = _fake_claim()
+    db = _fake_db(claim=claim)
+    spans = [
+        _self_eval_span(
+            retry_count=0,
+            passed=False,
+            total_score=10,
+            scores={"clarity": 2, "tone": 3, "accuracy": 3, "completeness": 2},
+            failed_dimensions=["clarity", "tone", "accuracy", "completeness"],
+        ),
+        # Same retry_count as above — must overwrite.
+        _self_eval_span(
+            retry_count=0,
+            passed=False,
+            total_score=24,
+            scores={"clarity": 5, "tone": 4, "accuracy": 8, "completeness": 7},
+            failed_dimensions=["clarity", "tone"],
+        ),
+    ]
+
+    tool = make_get_reasoning_trace(
+        user_id=_USER_ID,
+        claim_id=_CLAIM_ID,
+        db_factory=lambda: db,
+        phoenix_query=_fake_phoenix("ok", spans),
+    )
+    out = await tool()
+
+    detail = out["self_eval_attempts_detail"]
+    assert len(detail) == 1
+    assert detail[0]["total_score"] == 24
+    assert detail[0]["failed_dimensions"] == ["clarity", "tone"]
+
+
 # ---------------------------------------------------------------------------
 # Closure scope guarantee
 # ---------------------------------------------------------------------------

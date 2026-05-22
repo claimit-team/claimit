@@ -110,10 +110,16 @@ locals {
   # claim: drafts refund claims via Anthropic + Agent Builder; sends them via
   # the user's Gmail (OAuth client); telemetry to Elastic.
   claim_secrets = {
-    MONGODB_URI               = "mongodb-uri"
-    ANTHROPIC_API_KEY         = "anthropic-api-key"
-    ELASTIC_URL               = "elastic-url"
-    ELASTIC_API_KEY           = "elastic-api-key"
+    MONGODB_URI       = "mongodb-uri"
+    ANTHROPIC_API_KEY = "anthropic-api-key"
+    ELASTIC_URL       = "elastic-url"
+    ELASTIC_API_KEY   = "elastic-api-key"
+    # Required for OTel→Phoenix export. Without it, init_phoenix
+    # short-circuits and claim-agent's `validator.validate` /
+    # `self_evaluate.evaluate` spans never reach Phoenix — which means
+    # the assistant's Mode B `get_reasoning_trace` query always falls
+    # back to claim-doc-only context regardless of PHOENIX_PROJECT_NAME.
+    PHOENIX_API_KEY           = "phoenix-api-key"
     GMAIL_OAUTH_CLIENT_ID     = "gmail-oauth-client-id"
     GMAIL_OAUTH_CLIENT_SECRET = "gmail-oauth-client-secret"
   }
