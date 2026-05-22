@@ -48,6 +48,7 @@ def init_phoenix(service_name: str) -> None:
 
     api_key = os.environ.get("PHOENIX_API_KEY")
     endpoint = os.environ.get("PHOENIX_COLLECTOR_ENDPOINT", DEFAULT_ENDPOINT)
+    project_name = os.environ.get("PHOENIX_PROJECT_NAME")
 
     if not api_key:
         logger.warning(
@@ -56,7 +57,16 @@ def init_phoenix(service_name: str) -> None:
         )
         return
 
-    resource = Resource.create({"service.name": service_name})
+    # Phoenix routes spans into projects via the OpenInference resource
+    # attribute. Without it, every service's spans land in the "default"
+    # project, which breaks the read-side (assistant-agent's Mode B
+    # `get_reasoning_trace` queries one specific project). Setting
+    # `PHOENIX_PROJECT_NAME` in the env keeps all agents writing to the
+    # same project so cross-service trace lookup works.
+    resource_attrs: dict[str, str] = {"service.name": service_name}
+    if project_name:
+        resource_attrs["openinference.project.name"] = project_name
+    resource = Resource.create(resource_attrs)
     provider = TracerProvider(resource=resource)
     exporter = OTLPSpanExporter(
         endpoint=endpoint,

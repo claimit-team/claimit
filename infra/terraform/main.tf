@@ -233,6 +233,7 @@ module "claim_agent" {
     GOOGLE_CLOUD_PROJECT      = var.project_id
     GOOGLE_GENAI_USE_VERTEXAI = "true"
     GOOGLE_CLOUD_LOCATION     = var.region
+    PHOENIX_PROJECT_NAME      = "claimit"
   }
   deletion_protection = false
 
@@ -242,12 +243,28 @@ module "claim_agent" {
 module "assistant_agent" {
   source = "./modules/cloud-run-agent"
 
-  project_id          = var.project_id
-  region              = var.region
-  service_name        = "claimit-assistant-agent"
-  image               = var.assistant_agent_image
-  secret_ids          = values(local.assistant_secrets)
-  secret_env_map      = local.assistant_secrets
+  project_id     = var.project_id
+  region         = var.region
+  service_name   = "claimit-assistant-agent"
+  image          = var.assistant_agent_image
+  secret_ids     = values(local.assistant_secrets)
+  secret_env_map = local.assistant_secrets
+  env_vars = {
+    # Query base URL for Phoenix Cloud — distinct from the OTLP collector
+    # path (.../v1/traces) that PHOENIX_COLLECTOR_ENDPOINT points at.
+    # Mode B's get_reasoning_trace tool reads this to query spans for a
+    # claim (ticket 3.24) AND to construct the in-app deep link the user
+    # can click to inspect the trace directly.
+    PHOENIX_BASE_URL = "https://app.phoenix.arize.com/s/claimitbeta"
+    # Project routing — init_phoenix sets this as the OpenInference
+    # `openinference.project.name` resource attribute so spans land in
+    # the `claimit` project (not `default`). The read side queries the
+    # same project name. Until claim-agent / monitor-agent / ingest-
+    # agent also set this, the assistant only sees its OWN spans, not
+    # the claim-agent spans it needs for Mode B explanations — tracked
+    # as a follow-up issue.
+    PHOENIX_PROJECT_NAME = "claimit"
+  }
   deletion_protection = false
 
   depends_on = [google_secret_manager_secret.shared]

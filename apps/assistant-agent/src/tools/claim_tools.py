@@ -29,6 +29,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from claimit_mongodb_models import Claim, MongoDBClient, SendMode
+from claimit_observability import QueryResult, SpanRecord, query_claim_spans
 from claimit_pubsub import (
     TOPIC_CLAIM_REDRAFT_REQUESTED,
     ClaimRedraftRequestedEvent,
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 _ToolResult = dict[str, Any]
 _DBFactory = Callable[[], MongoDBClient]
 _PublishFn = Callable[[str, ClaimRedraftRequestedEvent], Awaitable[str]]
+_PhoenixQueryFn = Callable[[str], Awaitable[QueryResult]]
 
 
 def _matches_user(claim_user_id: Any, expected_user_id: str) -> bool:
@@ -232,25 +234,35 @@ def make_get_reasoning_trace(
     user_id: str,
     claim_id: str,
     db_factory: _DBFactory = MongoDBClient,
+    phoenix_query: _PhoenixQueryFn = query_claim_spans,
 ) -> Callable[[], Awaitable[_ToolResult]]:
     """Build the `get_reasoning_trace` tool bound to (user_id, claim_id).
 
-    Plan A (lightweight): the returned payload is built from fields already
-    on the claim doc — `policy_clause_cited`, `self_eval_score`,
-    `self_eval_attempts`, `trace_id`, `claim_type` — plus a Phoenix UI deep
-    link when `PHOENIX_BASE_URL` is set. We do NOT call Phoenix's HTTP API
-    from inside the agent; adding the dep and runtime config is a bigger
-    architectural commitment than 3.23 should take on. A follow-up ticket
-    can upgrade this to span-level summarisation if the demo team wants it.
+    Reads the claim doc for the always-available fields (claim_type, cited
+    policy clause, trace_id, Phoenix UI deep-link) and queries Phoenix for
+    the per-attempt validator and self-evaluation spans emitted by
+    claim-agent (`validator.validate`, `self_evaluate.evaluate`). The
+    LLM gets back a single payload with `phoenix_query_status` so it can
+    cite specific draft attempts when the trace is available and degrade
+    gracefully to claim-doc-only context when it isn't.
     """
 
     async def get_reasoning_trace() -> _ToolResult:
         """Return a structured 'why this draft looks like this' summary.
 
         Includes the cited policy clause, the claim type the agent chose,
-        the self-evaluation scores from the drafting pass, and (when the
-        environment is configured) a deep link to the Gemini trace in the
-        Phoenix UI for the curious user.
+        per-attempt validator results (issue_count + issue_types per
+        draft.version), per-attempt self-evaluation scores (which
+        dimensions failed each retry), and a deep link to the trace in
+        the Phoenix UI.
+
+        Phoenix availability is reported as `phoenix_query_status`:
+        - "ok"          — spans returned; validator_attempts and
+                          self_eval_attempts are populated.
+        - "pending"     — claim exists but spans haven't been exported
+                          yet (BatchSpanProcessor has a 5s schedule).
+        - "timeout"     — query exceeded the 1.5s budget.
+        - "unavailable" — Phoenix env vars unset or the API rejected us.
         """
         db = db_factory()
         claim = await db.get_claim(claim_id)
@@ -280,13 +292,98 @@ def make_get_reasoning_trace(
                 else claim.self_eval_score
             )
 
-        return {
+        payload: _ToolResult = {
             "claim_type": str(claim.claim_type) if claim.claim_type is not None else None,
             "policy_clause_cited": claim.policy_clause_cited,
             "self_eval_score": self_eval,
             "self_eval_attempts": claim.self_eval_attempts,
             "trace_id": trace_id,
             "phoenix_link": phoenix_link,
+            "phoenix_query_status": "unavailable",
+            "validator_attempts": [],
+            "self_eval_attempts_detail": [],
         }
 
+        query_result = await phoenix_query(claim_id)
+        payload["phoenix_query_status"] = query_result.status
+
+        if query_result.status == "ok":
+            payload["validator_attempts"] = _aggregate_validator_attempts(query_result.spans)
+            payload["self_eval_attempts_detail"] = _aggregate_self_eval_attempts(query_result.spans)
+
+        return payload
+
     return get_reasoning_trace
+
+
+def _aggregate_validator_attempts(spans: list[SpanRecord]) -> list[dict[str, Any]]:
+    """Pluck `validator.validate` spans and group by draft.version.
+
+    Output is sorted by draft_version ascending so the LLM can narrate
+    "draft 1 had X issues, draft 2 was clean" without re-sorting."""
+    attempts: list[dict[str, Any]] = []
+    for span in spans:
+        if span.name != "validator.validate":
+            continue
+        attrs = span.attributes
+        issue_count = _as_int(attrs.get("validator.issue_count"), default=0)
+        attempts.append(
+            {
+                "draft_version": _as_int(attrs.get("draft.version"), default=0),
+                "passed": issue_count == 0,
+                "issue_count": issue_count,
+                "issue_types": _as_list(attrs.get("validator.issue_types")),
+            }
+        )
+    attempts.sort(key=lambda a: a["draft_version"])
+    return attempts
+
+
+def _aggregate_self_eval_attempts(spans: list[SpanRecord]) -> list[dict[str, Any]]:
+    """Pluck `self_evaluate.evaluate` spans into per-retry summaries.
+
+    Each retry's span carries the rubric scores as individual attributes
+    (`self_eval.score.clarity`, ...) plus the aggregate `passed` flag and
+    `failed_dimensions` list. Grouped by `self_eval.retry_count`."""
+    attempts: list[dict[str, Any]] = []
+    for span in spans:
+        if span.name != "self_evaluate.evaluate":
+            continue
+        attrs = span.attributes
+        attempts.append(
+            {
+                "retry_count": _as_int(attrs.get("self_eval.retry_count"), default=0),
+                "passed": bool(attrs.get("self_eval.passed", False)),
+                "total_score": _as_int(attrs.get("self_eval.total_score"), default=0),
+                "scores": {
+                    "clarity": _as_int(attrs.get("self_eval.score.clarity"), default=0),
+                    "tone": _as_int(attrs.get("self_eval.score.tone"), default=0),
+                    "accuracy": _as_int(attrs.get("self_eval.score.accuracy"), default=0),
+                    "completeness": _as_int(attrs.get("self_eval.score.completeness"), default=0),
+                },
+                "failed_dimensions": _as_list(attrs.get("self_eval.failed_dimensions")),
+            }
+        )
+    attempts.sort(key=lambda a: a["retry_count"])
+    return attempts
+
+
+def _as_int(value: Any, *, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_list(value: Any) -> list[Any]:
+    """Tolerate either a real list (phoenix_client already parsed it) or
+    a raw string left over from an unparseable stringified-list attr."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if value is None or value == "":
+        return []
+    return [value]
