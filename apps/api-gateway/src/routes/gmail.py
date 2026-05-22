@@ -248,6 +248,7 @@ async def gmail_disconnect(
         last_processed_message_id=None,
         watch_failed=False,
         watch_error_message=None,
+        last_processed_history_id=None,
     )
     matched = await db.partial_update(
         "users",

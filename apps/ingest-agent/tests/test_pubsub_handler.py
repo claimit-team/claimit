@@ -7,25 +7,57 @@ Two surfaces under test:
 OIDC verification is exercised by setting PUBSUB_AUTH_DISABLED=1 to bypass
 in the envelope-parsing tests, and by patching google.oauth2.id_token in the
 auth-specific tests.
+
+Ticket 4.17 added `db` and `sm_client` Depends to the handler so the
+full ingest pipeline can run. The envelope-shape tests below don't
+care about either — they assert behaviour at parse/decode/ack
+boundaries before the pipeline runs — so the autouse fixture
+substitutes lightweight mocks. End-to-end pipeline coverage lives in
+test_gmail_inbound_pipeline.py (added by the same 4.17 commit batch
+as this fixture).
 """
 
 from __future__ import annotations
 
 import base64
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from src import auth
-from src.main import app
+from src.main import app, get_db, get_sm_client
 
 
 @pytest.fixture(autouse=True)
 def _disable_oidc_in_handler_tests(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default to OIDC disabled. Auth-specific tests below override."""
     monkeypatch.setenv("PUBSUB_AUTH_DISABLED", "1")
+
+
+@pytest.fixture(autouse=True)
+def _mock_handler_dependencies():
+    """Override get_db / get_sm_client so FastAPI's Depends resolution
+    succeeds in the envelope-shape tests.
+
+    The handler returns 200 ack BEFORE the pipeline runs on
+    invalid_envelope / invalid_base64 / invalid_payload paths, and the
+    happy-path test only cares about the final ack — it doesn't assert
+    on what the pipeline does. A MagicMock for db and sm_client lets
+    dependency resolution complete; the handler's outer try/except
+    swallows any pipeline errors and still 200-acks.
+    """
+    mock_db = AsyncMock()
+    # Make find_one async-returnable with None (user-not-found path
+    # short-circuits the pipeline harmlessly).
+    mock_db.find_one = AsyncMock(return_value=None)
+    mock_sm = MagicMock()
+    app.dependency_overrides[get_db] = lambda: mock_db
+    app.dependency_overrides[get_sm_client] = lambda: mock_sm
+    yield
+    app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(get_sm_client, None)
 
 
 def _encode_data(payload: dict[str, str]) -> str:

@@ -645,6 +645,30 @@ def _hashable_receipt_content(email: EmailForExtraction) -> str:
     return "\n---receipt-part---\n".join(parts)
 
 
+async def extract_from_email(email: EmailForExtraction) -> ExtractedPurchaseFields:
+    """Run Gemini against a normalized email and return parsed extraction fields.
+
+    Pure adapter — no dedup, no Mongo write, no confirmation email. Symmetric
+    with `extract_from_blob` for the upload path: both produce an
+    `ExtractedPurchaseFields` that callers feed into `finalize_purchase_
+    extraction`. The 4.17 Gmail ingest handler uses this directly after
+    inserting a sentinel Purchase; the legacy `extract()` (below) wraps this
+    with dedup + payload-build + confirmation-email logic to preserve the
+    pre-4.17 email-path test surface.
+
+    Raises the same surfaces as `extract_from_blob`:
+        ExtractorError: when Gemini times out, returns empty, or otherwise
+            fails. Caller may choose to retry — but for the Gmail ingest
+            path, the recommended posture is to call
+            `finalize_purchase_extraction_failure` on the sentinel doc
+            instead, so the FE doesn't spin forever.
+        pydantic.ValidationError: when Gemini's JSON doesn't match the
+            schema. Same surface as the blob path.
+    """
+    raw_output = await _run_extractor_agent(email)
+    return _parse_extraction_output(raw_output)
+
+
 async def extract(
     email: EmailForExtraction | dict[str, Any],
     *,
@@ -687,8 +711,7 @@ async def extract(
     ):
         raise DuplicateReceiptError(validated_email.receipt_hash)
 
-    raw_output = await _run_extractor_agent(validated_email)
-    extracted = _parse_extraction_output(raw_output)
+    extracted = await extract_from_email(validated_email)
     purchase = Purchase.model_validate(_purchase_payload(validated_email, extracted, policy=policy))
     result = purchase.model_dump(by_alias=True, mode="json")
     await maybe_send_confirmation_email(

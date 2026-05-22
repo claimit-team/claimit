@@ -223,6 +223,7 @@ async def test_disconnect_calls_partial_update_with_cleared_gmail_integration(
             "last_processed_message_id": None,
             "watch_failed": False,
             "watch_error_message": None,
+            "last_processed_history_id": None,
         }
         assert call.kwargs.get("model") is User
     finally:
