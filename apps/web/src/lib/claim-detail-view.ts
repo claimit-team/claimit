@@ -32,6 +32,7 @@ import type {
   ClaimDetailDraftType,
   ClaimDetailWorkflowStatus,
   ClaimEvidence,
+  ClaimPolicy,
   ClaimPurchase,
   DraftVersion,
   OutcomeStatus,
@@ -253,6 +254,23 @@ function buildEvidence(response: ClaimDetailResponse): ClaimEvidence {
 }
 
 /**
+ * Compose the `policy` sub-object the type-aware draft renderers
+ * read. The wire `Policy` block can legitimately be `null` (no policy
+ * row for this platform/category combo); calm fallbacks (empty
+ * string / 0) so renderers can do `if (policy.claim_email !== "")`
+ * without `?.` chains.
+ */
+function buildPolicyBlock(response: ClaimDetailResponse): ClaimPolicy {
+  const { policy } = response;
+  return {
+    claim_email: policy?.claim_email ?? "",
+    claim_url: policy?.claim_url ?? "",
+    claim_phone: policy?.claim_phone ?? "",
+    window_days: policy?.window_days ?? 0,
+  };
+}
+
+/**
  * Compose the `purchase` sub-object the UI expects. Falls back to
  * empty strings / zero so a claim with a deleted (orphan) purchase
  * still renders the page — the defensive `formatDateShort` /
@@ -332,6 +350,7 @@ export function buildClaimDetailViewModel(response: ClaimDetailResponse): ClaimD
     current_version: draftVersions.length === 0 ? 1 : draftVersions.length,
     evidence: buildEvidence(response),
     purchase: buildPurchaseBlock(response),
+    policy: buildPolicyBlock(response),
     ...resolution,
   };
 }

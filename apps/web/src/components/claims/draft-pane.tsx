@@ -2,20 +2,22 @@
 
 import { formatDistanceToNow } from "date-fns";
 import {
+  AlertCircle,
   ArrowLeft,
   Check,
   ChevronDown,
+  ChevronRight,
   Copy,
   ExternalLink,
   Laptop,
   Loader2,
   Mail,
   MessageSquare,
-  Send,
 } from "lucide-react";
 import { type ElementType, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -36,8 +38,29 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { type ClaimDetailDoc, editClaimDraft } from "@/lib/api/claims";
-import type { ClaimDetail, ClaimDetailDraftType, DraftVersion } from "@/lib/claim-detail-types";
+import type {
+  ClaimDetail,
+  ClaimDetailDraftType,
+  ClaimPolicy,
+  DraftVersion,
+} from "@/lib/claim-detail-types";
 import { cn } from "@/lib/utils";
+
+import {
+  deriveEmailSubject,
+  isValidSelfServiceJson,
+  parseChatScript,
+  parseInStoreGuide,
+  parseOrderSummary,
+  parseSelfServiceWalkthrough,
+} from "./draft-parsers";
+
+const FALLBACK_POLICY: ClaimPolicy = {
+  claim_email: "",
+  claim_url: "",
+  claim_phone: "",
+  window_days: 0,
+};
 
 interface DraftPaneProps {
   claim: ClaimDetail;
@@ -47,37 +70,6 @@ interface DraftPaneProps {
 }
 
 type DraftMode = "preview" | "edit";
-
-/**
- * Self-service walkthrough wire shape — the `draft_content` for
- * `claim_type === "self_service"` is `SelfServiceWalkthrough.model_dump_json()`
- * per `apps/claim-agent/src/draft/type_d_self_service.py` L297. WI-3
- * uses this shape for pre-save validation (no rich-form editor in 5.7
- * — the buffer is JSON-as-string); WI-5 reuses it for the preview
- * renderer.
- */
-const SELF_SERVICE_REQUIRED_FIELDS = [
-  "platform_display_name",
-  "order_summary",
-  "steps",
-  "notes",
-  "sub_pattern",
-  "estimated_minutes",
-  "claim_url",
-  "credit_type",
-] as const;
-
-function isValidSelfServiceJson(buffer: string): boolean {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(buffer);
-  } catch {
-    return false;
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
-  const obj = parsed as Record<string, unknown>;
-  return SELF_SERVICE_REQUIRED_FIELDS.every((field) => field in obj);
-}
 
 function PaneHeader({
   title,
@@ -205,114 +197,315 @@ function CopyIconButton({ text }: { text: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Preview renderers (preview-only after WI-3; WI-5 will replace these with
-// parsers pinned to apps/claim-agent/src/draft/*.py output formats)
+// Preview renderers (parsers pinned to apps/claim-agent/src/draft/*.py
+// output formats — see draft-parsers.ts). Each renderer falls back to
+// `<pre>` on parse mismatch so a generator-format drift never crashes
+// the UI nor silently drops content.
 // ---------------------------------------------------------------------------
 
-function EmailDraft({ content }: { content: string }) {
-  const subject = "Price adjustment request";
+function FallbackPre({ content }: { content: string }) {
+  return (
+    <div className="p-4">
+      <div className="mb-2 flex items-start gap-2 rounded-lg border border-semantic-warning/30 bg-semantic-warning/5 p-3 text-semantic-warning text-xs">
+        <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          The draft doesn&apos;t match the expected format for this claim type — showing the raw
+          content below.
+        </span>
+      </div>
+      <pre className="whitespace-pre-wrap rounded-lg border border-neutral-200 bg-neutral-0 p-4 text-neutral-700 text-sm">
+        {content}
+      </pre>
+    </div>
+  );
+}
+
+function EmailDraft({
+  content,
+  policy,
+  orderId,
+}: {
+  content: string;
+  policy: ClaimPolicy;
+  orderId: string;
+}) {
+  // type_a_email.py L138, L146: draft_content is body-only — Claim has
+  // no `subject` field. Derive a display-only subject from the order
+  // id so the To/Subject rows stay informative. Edit buffer
+  // intentionally excludes this string (WI-3).
+  const subject = deriveEmailSubject(orderId);
+  const toAddress = policy.claim_email;
 
   return (
     <div className="space-y-4 p-4">
-      <div className="space-y-2 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
-        <div className="flex items-center gap-2 text-sm">
-          <span className="font-medium text-neutral-500">Subject:</span>
+      <div className="space-y-1.5 rounded-lg border border-neutral-200 bg-neutral-50 p-4 text-sm">
+        {toAddress !== "" ? (
+          <div className="flex items-center gap-2">
+            <span className="w-16 font-medium text-neutral-500">To:</span>
+            <span className="text-neutral-900">{toAddress}</span>
+          </div>
+        ) : null}
+        <div className="flex items-center gap-2">
+          <span className="w-16 font-medium text-neutral-500">Subject:</span>
           <span className="text-neutral-900">{subject}</span>
         </div>
       </div>
       <div className="rounded-lg border border-neutral-200 bg-neutral-0 p-4">
-        <div className="whitespace-pre-wrap text-neutral-700 text-sm">{content}</div>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          type="button"
-          onClick={() => toast.info("Gmail send · mock")}
-        >
-          <Send className="mr-2 h-4 w-4" />
-          Send from your Gmail
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          type="button"
-          onClick={() => toast.success("Copied to clipboard")}
-        >
-          <Copy className="mr-2 h-4 w-4" />
-          Copy
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          type="button"
-          onClick={() => toast.info("Open in Gmail · mock")}
-        >
-          <ExternalLink className="mr-2 h-4 w-4" />
-          Open in Gmail web
-        </Button>
+        {/*
+          Hero render: body uses normal prose font + whitespace-pre-wrap
+          (NOT <pre>). Monospace would read like code next to the To/
+          Subject rows. <pre> is reserved for FallbackPre only.
+        */}
+        <div className="whitespace-pre-wrap text-neutral-700 text-sm leading-relaxed">
+          {content}
+        </div>
       </div>
     </div>
   );
 }
 
 function ChatScriptDraft({ content }: { content: string }) {
-  const segments = content.split(/\n\n/).filter(Boolean);
+  const parsed = parseChatScript(content);
+  const [showEscalation, setShowEscalation] = useState(false);
+
+  if (parsed === null) {
+    return <FallbackPre content={content} />;
+  }
 
   return (
     <div className="space-y-4 p-4">
-      <div className="space-y-3">
-        {segments.map((segment) => {
-          const headerMatch = segment.match(/^\[([^\]]+)\]/);
-          const headerTitle = headerMatch?.[1] ?? "";
-          const body = headerMatch ? segment.slice(headerMatch[0].length).trim() : segment;
+      {parsed.title !== "" ? (
+        <h4 className="font-medium text-neutral-900 text-sm">{parsed.title}</h4>
+      ) : null}
+      <ol className="space-y-2">
+        {parsed.mainSteps.map((step, idx) => (
+          <ChatStepRow key={step} index={idx + 1} text={step} />
+        ))}
+      </ol>
+      {parsed.escalationSteps.length > 0 ? (
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => setShowEscalation((v) => !v)}
+            className="inline-flex items-center gap-1 text-neutral-500 text-xs hover:text-neutral-700"
+          >
+            <ChevronRight
+              className={cn("h-3.5 w-3.5 transition-transform", showEscalation ? "rotate-90" : "")}
+            />
+            If the agent declines or stalls
+          </button>
+          {showEscalation ? (
+            <ol className="space-y-2">
+              {parsed.escalationSteps.map((step, idx) => (
+                <ChatStepRow key={step} index={parsed.mainSteps.length + idx + 1} text={step} />
+              ))}
+            </ol>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
-          return (
-            <div
-              key={`${segment.slice(0, 32)}`}
-              className="group relative rounded-lg border border-neutral-200 bg-neutral-0 p-4"
-            >
-              {headerTitle ? (
-                <div className="mb-2 font-medium text-neutral-500 text-xs uppercase tracking-wide">
-                  {headerTitle}
-                </div>
-              ) : null}
-              <div className="whitespace-pre-wrap text-neutral-700 text-sm">{body}</div>
-              <div className="absolute top-2 right-2 opacity-0 transition-opacity group-hover:opacity-100">
-                <CopyIconButton text={body} />
-              </div>
-            </div>
-          );
-        })}
+function ChatStepRow({ index, text }: { index: number; text: string }) {
+  return (
+    <li className="group relative rounded-lg border border-neutral-200 bg-neutral-0 p-3 pr-12">
+      <div className="mb-1 font-medium text-neutral-500 text-xs">Step {index}</div>
+      <div className="whitespace-pre-wrap text-neutral-700 text-sm">{text}</div>
+      <div className="absolute top-2 right-2 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        <CopyIconButton text={text} />
       </div>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          type="button"
-          onClick={() => toast.success("Copied all")}
+    </li>
+  );
+}
+
+function InStoreGuide({ content, policy }: { content: string; policy: ClaimPolicy }) {
+  const parsed = parseInStoreGuide(content);
+  if (parsed === null) {
+    return <FallbackPre content={content} />;
+  }
+
+  return (
+    <div className="space-y-3 p-4">
+      <h4 className="font-medium text-neutral-900 text-sm">{parsed.title}</h4>
+      {parsed.sections.map((section) => (
+        <div
+          key={section.key}
+          className="space-y-2 rounded-lg border border-neutral-200 bg-neutral-0 p-4"
         >
-          <Copy className="mr-2 h-4 w-4" />
-          Copy all
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          type="button"
-          onClick={() => toast.info("Open chat · mock")}
-        >
-          <ExternalLink className="mr-2 h-4 w-4" />
-          Open retailer chat
-        </Button>
+          <div className="font-medium text-neutral-900 text-sm">{section.heading}</div>
+          {section.paragraphs.length > 0 ? (
+            <div className="space-y-1 text-neutral-700 text-sm">
+              {section.paragraphs.map((p) => (
+                <p key={p} className="whitespace-pre-wrap">
+                  {p}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {section.bullets.length > 0 ? (
+            <ul className="ml-4 list-disc space-y-1 text-neutral-700 text-sm">
+              {section.bullets.map((b) => (
+                <li key={b}>{b}</li>
+              ))}
+            </ul>
+          ) : null}
+          {section.numbered.length > 0 ? (
+            <ol className="ml-4 list-decimal space-y-1 text-neutral-700 text-sm">
+              {section.numbered.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ol>
+          ) : null}
+        </div>
+      ))}
+      {policy.claim_phone !== "" || policy.claim_url !== "" ? (
+        <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-neutral-600 text-xs">
+          {policy.claim_phone !== "" ? (
+            <div>
+              Call ahead: <span className="font-medium text-neutral-800">{policy.claim_phone}</span>
+            </div>
+          ) : null}
+          {policy.claim_url !== "" ? (
+            <div className="mt-1 truncate">
+              Policy:{" "}
+              <a
+                href={policy.claim_url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-brand-primary-500 underline-offset-2 hover:underline"
+              >
+                {policy.claim_url}
+              </a>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SelfServiceWalkthrough({ content }: { content: string }) {
+  const parsed = parseSelfServiceWalkthrough(content);
+  if (parsed === null) {
+    return <FallbackPre content={content} />;
+  }
+  const summary = parseOrderSummary(parsed.order_summary);
+
+  return (
+    <div className="space-y-4 p-4">
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <h4 className="font-medium text-neutral-900 text-sm">{parsed.platform_display_name}</h4>
+          {parsed.estimated_minutes > 0 ? (
+            <Badge variant="outline" className="text-neutral-700 text-xs">
+              ~{parsed.estimated_minutes} min
+            </Badge>
+          ) : null}
+        </div>
+        {summary !== null ? (
+          <div className="space-y-2">
+            <div className="text-neutral-700 text-sm">{summary.product}</div>
+            <div className="flex flex-wrap gap-2">
+              <PriceCallout label="Paid" value={summary.paid} currency={summary.currency} muted />
+              <PriceCallout label="Now" value={summary.now} currency={summary.currency} muted />
+              <PriceCallout
+                label="Save"
+                value={summary.save}
+                currency={summary.currency}
+                highlight
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="text-neutral-700 text-sm">{parsed.order_summary}</div>
+        )}
+      </div>
+
+      {parsed.sub_pattern === "cancel_rebook" ? (
+        <div className="flex items-start gap-2 rounded-lg border border-semantic-warning/30 bg-semantic-warning/5 p-3 text-semantic-warning text-xs">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            This process requires cancelling and rebooking the same itinerary. Your original seat
+            selection may be lost.
+          </span>
+        </div>
+      ) : null}
+
+      <div className="space-y-2 rounded-lg border border-neutral-200 bg-neutral-0 p-4">
+        <div className="font-medium text-neutral-900 text-sm">Steps</div>
+        <ol className="ml-4 list-decimal space-y-2 text-neutral-700 text-sm">
+          {parsed.steps.map((step) => (
+            <li key={step} className="whitespace-pre-wrap">
+              {step}
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      {parsed.notes.length > 0 ? (
+        <div className="space-y-2 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+          <div className="font-medium text-neutral-900 text-sm">Notes</div>
+          <ul className="ml-4 list-disc space-y-1 text-neutral-700 text-sm">
+            {parsed.notes.map((note) => (
+              <li key={note} className="whitespace-pre-wrap">
+                {note}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        {parsed.claim_url !== "" ? (
+          <Button
+            size="sm"
+            render={
+              <a href={parsed.claim_url} target="_blank" rel="noreferrer noopener">
+                <ExternalLink className="mr-2 h-4 w-4" />
+                Open {parsed.platform_display_name}
+              </a>
+            }
+          />
+        ) : null}
+        <span className="text-neutral-500 text-xs">Refund issued as {parsed.credit_type}</span>
       </div>
     </div>
   );
 }
 
-function GenericDraft({ content }: { content: string }) {
+function PriceCallout({
+  label,
+  value,
+  currency,
+  muted = false,
+  highlight = false,
+}: {
+  label: string;
+  value: string;
+  currency: string;
+  muted?: boolean;
+  highlight?: boolean;
+}) {
   return (
-    <div className="p-4">
-      <div className="whitespace-pre-wrap text-neutral-700 text-sm">{content}</div>
+    <div
+      className={cn(
+        "flex flex-col rounded-lg border px-3 py-2 text-xs",
+        highlight
+          ? "border-semantic-success/30 bg-semantic-success/5 text-semantic-success"
+          : muted
+            ? "border-neutral-200 bg-neutral-50 text-neutral-700"
+            : "border-neutral-200 bg-neutral-0 text-neutral-700",
+      )}
+    >
+      <span
+        className={cn("font-medium uppercase tracking-wide", highlight ? "" : "text-neutral-500")}
+      >
+        {label}
+      </span>
+      <span className="font-medium text-sm">
+        {value} {currency}
+      </span>
     </div>
   );
 }
@@ -389,14 +582,25 @@ export function DraftPane({
 
   const Icon = claimTypeIcons[claim.claim_type];
 
+  const policy = claim.policy ?? FALLBACK_POLICY;
   const renderPreview = () => {
+    // editBuffer mirrors selectedVersion (reset via useEffect when
+    // version changes), so preview always reflects the selected
+    // version. On the latest version with active edits, the user sees
+    // their in-progress changes — matches the "live preview" pattern.
     switch (claim.claim_type) {
       case "email":
-        return <EmailDraft content={editBuffer} />;
+        return (
+          <EmailDraft content={editBuffer} policy={policy} orderId={claim.purchase.order_id} />
+        );
       case "chat_script":
         return <ChatScriptDraft content={editBuffer} />;
+      case "in_store_guide":
+        return <InStoreGuide content={editBuffer} policy={policy} />;
+      case "self_service_walkthrough":
+        return <SelfServiceWalkthrough content={editBuffer} />;
       default:
-        return <GenericDraft content={editBuffer} />;
+        return <FallbackPre content={editBuffer} />;
     }
   };
 

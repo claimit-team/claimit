@@ -53,6 +53,19 @@ export interface ClaimPurchase {
   price_paid: number;
 }
 
+/**
+ * The subset of `Policy` the type-aware renderers read. Calm fallbacks
+ * (empty string / 0) when the wire `policy` block is missing — the
+ * renderers gracefully omit rows that have no data rather than
+ * surfacing literal "—" placeholders.
+ */
+export interface ClaimPolicy {
+  claim_email: string;
+  claim_url: string;
+  claim_phone: string;
+  window_days: number;
+}
+
 export interface ClaimDetail {
   claim_id: string;
   status: ClaimDetailWorkflowStatus;
@@ -66,6 +79,17 @@ export interface ClaimDetail {
   current_version: number;
   evidence: ClaimEvidence;
   purchase: ClaimPurchase;
+  /**
+   * Subset of the wire `Policy` doc the type-aware draft renderers
+   * read (To: address for email, claim URL for chat/in_store/self_service
+   * call-to-action buttons, claim phone for in_store "call ahead",
+   * window_days as a reference). The view-model builder always
+   * populates this; optional in the interface so legacy fixtures in
+   * `claim-detail.ts` (a dead-code mock module slated for cleanup)
+   * keep type-checking without forcing a synthetic policy on every
+   * row.
+   */
+  policy?: ClaimPolicy;
   outcome?: OutcomeStatus;
   outcome_amount?: number;
   denial_reason?: string;
