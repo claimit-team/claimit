@@ -232,6 +232,22 @@ def test_claim_redraft_round_trip_json() -> None:
     assert restored.event_id == event.event_id
 
 
+def test_claim_redraft_payload_matches_schema_keys() -> None:
+    """Structural pin on the wire format — locks down every key the
+    serialized payload exposes so an additive field on the model is
+    a deliberate change (this test fails) rather than a silent leak."""
+    event = ClaimRedraftRequestedEvent(**_VALID_REDRAFT_PAYLOAD)
+    body = json.loads(event.model_dump_json())
+    assert set(body) == {
+        "schema_version",
+        "event_id",
+        "emitted_at",
+        "event_type",
+        "requested_by",
+        *_VALID_REDRAFT_PAYLOAD,
+    }
+
+
 def test_claim_redraft_extra_fields_rejected() -> None:
     """EventEnvelope sets extra='forbid', so any unknown field — e.g. a
     consumer's stale `conversation_id` (removed in this refactor) or

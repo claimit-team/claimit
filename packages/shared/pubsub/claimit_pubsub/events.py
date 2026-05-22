@@ -24,6 +24,7 @@ TOPIC_PRICE_DROPPED = "price.dropped"
 # `finalize_purchase_extraction` which then publishes `purchase.ingested`
 # (i.e. this is strictly an upstream event of the existing pipeline).
 TOPIC_PURCHASE_UPLOADED = "purchase.uploaded"
+TOPIC_CLAIM_REDRAFT_REQUESTED = "claim.redraft_requested"
 
 
 def _new_event_id() -> str:
@@ -93,9 +94,6 @@ class PurchaseUploadedEvent(EventEnvelope):
     purchase_id: str
     receipt_storage_url: str
     content_type: Literal["application/pdf", "image/png", "image/jpeg"]
-
-
-TOPIC_CLAIM_REDRAFT_REQUESTED: str = "claim.redraft_requested"
 
 
 class ClaimRedraftRequestedEvent(EventEnvelope):
