@@ -482,7 +482,7 @@ async def handle_auto_send(request: Request) -> dict:
                     current.id,
                 )
                 try:
-                    await db.partial_update(
+                    rolled_back = await db.partial_update(
                         "claims",
                         current.id,
                         {
@@ -492,6 +492,12 @@ async def handle_auto_send(request: Request) -> dict:
                             "auto_send_at": previous_auto_send_at,
                         },
                     )
+                    if not rolled_back:
+                        _log.error(
+                            "Rollback matched no claim after publish failure for claim %s; "
+                            "manual fix required",
+                            current.id,
+                        )
                 except Exception:
                     _log.exception(
                         "Rollback failed after publish failure for claim %s; manual fix required",
