@@ -28,6 +28,7 @@ import { useEffect, useRef } from "react";
 import { auth } from "@/lib/firebase";
 import { generateProactiveOutput, PROACTIVE_EVENT_TYPES } from "@/lib/proactive-templates";
 import { useAuthStore, useUIStore } from "@/store";
+import { useAutoSendBannerStore } from "@/store/auto-send-banner";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 const TOKEN_REFRESH_MS = 50 * 60 * 1000; // 50 min — safely under the 60min Firebase expiry
@@ -45,6 +46,13 @@ export function useProactiveAssistant(): void {
   const userId = useAuthStore((s) => s.user?._id ?? null);
   const isAuthLoading = useAuthStore((s) => s.isLoading);
   const setProactiveEvent = useUIStore((s) => s.setProactiveEvent);
+  // WI-9: same SSE stream fans out into the dashboard auto-send
+  // banner store so newly-queued claims appear live (no 10s polling)
+  // and Sent ✓ flips are driven by the backend claim_submitted event
+  // (H2). Reading these refs at hook-call time is fine — the store
+  // setter identities are stable across re-renders.
+  const addBannerRow = useAutoSendBannerStore((s) => s.addRow);
+  const markBannerSent = useAutoSendBannerStore((s) => s.markSent);
 
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -83,6 +91,7 @@ export function useProactiveAssistant(): void {
         try {
           const frame = JSON.parse(evt.data) as NotificationFrame;
           handleNotificationFrame(frame, setProactiveEvent);
+          handleAutoSendBannerFanout(frame, addBannerRow, markBannerSent);
         } catch {
           // Malformed frame — drop; the stream itself stays open.
         }
@@ -139,7 +148,39 @@ export function useProactiveAssistant(): void {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
       failureCountRef.current = 0;
     };
-  }, [userId, isAuthLoading, setProactiveEvent]);
+  }, [userId, isAuthLoading, setProactiveEvent, addBannerRow, markBannerSent]);
+}
+
+/**
+ * Side-channel of the same SSE frames into the auto-send banner
+ * store. Lives next to handleNotificationFrame so the proactive
+ * panel + banner are fed by exactly ONE EventSource — duplicating
+ * the connection per consumer would double-fire every notification.
+ *
+ * - `claim_queued_auto` → insert a row (idempotent by claimId).
+ * - `claim_submitted`   → flip the matching row to "sent" so the
+ *                         banner shows Sent ✓ before its auto-dismiss
+ *                         timer removes it.
+ * Other events are no-ops here (other handlers consume them).
+ */
+function handleAutoSendBannerFanout(
+  frame: NotificationFrame,
+  addRow: ReturnType<typeof useAutoSendBannerStore.getState>["addRow"],
+  markSent: ReturnType<typeof useAutoSendBannerStore.getState>["markSent"],
+): void {
+  const eventType = frame.event_type;
+  if (eventType !== "claim_queued_auto" && eventType !== "claim_submitted") return;
+  const data = (frame.data ?? {}) as Record<string, unknown>;
+  const claimId = typeof data.claim_id === "string" ? data.claim_id : null;
+  if (!claimId) return;
+  if (eventType === "claim_queued_auto") {
+    const platform = typeof data.platform === "string" ? data.platform : "claim";
+    const autoSendAt = typeof data.auto_send_at === "string" ? data.auto_send_at : null;
+    if (!autoSendAt) return;
+    addRow({ claimId, platform, autoSendAt, state: "queued" });
+    return;
+  }
+  markSent(claimId);
 }
 
 function handleNotificationFrame(

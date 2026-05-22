@@ -15,6 +15,7 @@ import {
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
+import { AutoSendBanner } from "@/components/dashboard/auto-send-banner";
 import { HeroActiveUser } from "@/components/dashboard/hero/active-user";
 import { HeroNewUser } from "@/components/dashboard/hero/new-user";
 import { HeroReclaimExperienced } from "@/components/dashboard/hero/reclaim-experienced";
@@ -38,6 +39,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useDashboardSummary } from "@/hooks/useDashboardSummary";
 import { useMonitoredPurchases } from "@/hooks/useMonitoredPurchases";
 import { usePendingConfirmation } from "@/hooks/usePendingConfirmation";
+import { useQueuedForSendClaims } from "@/hooks/useQueuedForSendClaims";
 import { useReviewDraft } from "@/hooks/useReviewDraft";
 import type { ClaimListItem } from "@/lib/api/claims";
 import type { PurchaseListItem, PurchasesApiError } from "@/lib/api/purchases";
@@ -1015,6 +1017,10 @@ export default function DashboardPage() {
   } = useMonitoredPurchases();
   const { purchases: pendingPurchases } = usePendingConfirmation();
   const { claims: reviewDraftClaims } = useReviewDraft();
+  // Ticket 5.15 / WI-9: hydrate the auto-send banner store with the
+  // current queued_for_send slice. Live updates after this come via
+  // the SSE fanout in useProactiveAssistant (no polling).
+  useQueuedForSendClaims();
 
   const needsAttention: NeedsAttentionItem[] = [
     ...buildConfirmExtractionItems(pendingPurchases),
@@ -1088,6 +1094,8 @@ export default function DashboardPage() {
             {userState !== "new" && !summary && <HeroSkeleton />}
           </>
         )}
+
+        {userState !== "new" && <AutoSendBanner />}
 
         {userState !== "new" && <NeedsAttentionSection items={needsAttention} />}
 
