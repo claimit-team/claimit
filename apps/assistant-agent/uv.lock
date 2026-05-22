@@ -422,13 +422,24 @@ version = "0.1.0"
 source = { directory = "../../packages/shared/mcp" }
 dependencies = [
     { name = "google-adk" },
+    { name = "google-auth" },
+    { name = "httpx" },
     { name = "mcp" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "google-adk", specifier = ">=1.0.0" },
+    { name = "google-auth", specifier = ">=2.29.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
     { name = "mcp", specifier = ">=1.0.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.24.0" },
+    { name = "ruff", specifier = ">=0.6.0" },
 ]
 
 [[package]]

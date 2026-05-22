@@ -13,6 +13,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from claimit_mongodb_models import (
     Claim,
     ClaimOutcome,
+    ClaimType,
     DraftGeneratedBy,
     DraftVersion,
     MongoDBClient,
@@ -24,6 +25,7 @@ from claimit_mongodb_models import (
     write_notification_event,
 )
 from claimit_observability import init_phoenix
+from claimit_pubsub.events import ClaimRedraftRequestedEvent
 from fastapi import FastAPI, Request
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -217,7 +219,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             trace_id=event.event_id,
         )
 
-        async def _dispatch_generator(c: Claim) -> ClaimDraft:
+        async def _dispatch_generator(c: Claim, user_instruction: str | None = None) -> ClaimDraft:
             if claim_plan.draft_generator == "type_a_email":
                 return await generate_email_draft(
                     c,
@@ -226,6 +228,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
                     search_client,
                     user_name=user_name,
                     current_price=event.current_price,
+                    user_instruction=user_instruction,
                 )
             if claim_plan.draft_generator == "type_b_chat":
                 return await generate_chat_script(
@@ -235,6 +238,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
                     search_client,
                     user_name=user_name,
                     current_price=event.current_price,
+                    user_instruction=user_instruction,
                 )
             if claim_plan.draft_generator == "type_c_in_store":
                 return await generate_in_store_guide(
@@ -245,6 +249,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
                     user_name=user_name,
                     current_price=event.current_price,
                     user_location=user.default_location if user else None,
+                    user_instruction=user_instruction,
                 )
             if claim_plan.draft_generator == "type_d_self_service":
                 return await generate_self_service_walkthrough(
@@ -254,6 +259,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
                     search_client,
                     user_name=user_name,
                     current_price=event.current_price,
+                    user_instruction=user_instruction,
                 )
             raise ValueError(f"Unknown generator: {claim_plan.draft_generator}")
 
@@ -315,8 +321,8 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
                 c.id,
                 feedback[:200],
             )
-            # TODO(task-3.21): pass feedback to generator once generators support it
-            return await _dispatch_generator(c)
+            suggestions_text = feedback or None
+            return await _dispatch_generator(c, user_instruction=suggestions_text)
 
         try:
             draft, eval_result, attempts = await evaluate_and_maybe_regenerate(
@@ -497,3 +503,271 @@ async def handle_auto_send(request: Request) -> dict:
             results["errors"] += 1
 
     return results
+
+
+@app.post("/pubsub/claim.redraft_requested", status_code=200)
+async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
+    """Handle Pub/Sub push for claim.redraft_requested events.
+
+    Always returns 200 to ack the message — errors are logged, never retried
+    via a 5xx, to prevent Pub/Sub infinite-retry loops.
+    """
+    try:
+        body_json = await request.json()
+        push_body = _PubSubPushBody.model_validate(body_json)
+        raw_data = base64.b64decode(push_body.message.data)
+        event = ClaimRedraftRequestedEvent.model_validate_json(raw_data)
+
+        db = MongoDBClient()
+
+        claim = await db.get_claim(event.claim_id)
+        if claim is None:
+            _log.error("claim_agent.redraft.claim_not_found claim_id=%s", event.claim_id)
+            return {"status": "error", "reason": "claim_not_found"}
+
+        if str(claim.user_id) != str(event.user_id):
+            _log.error(
+                "claim_agent.redraft.user_mismatch claim_id=%s event_user=%s claim_user=%s",
+                event.claim_id,
+                event.user_id,
+                claim.user_id,
+            )
+            return {"status": "error", "reason": "permission_denied"}
+
+        purchase = await db.get_purchase(claim.purchase_id)
+        if purchase is None:
+            _log.error("claim_agent.redraft.purchase_not_found claim_id=%s", event.claim_id)
+            return {"status": "error", "reason": "purchase_not_found"}
+
+        policy = await db.get_policy(str(claim.platform))
+        if policy is None:
+            _log.error(
+                "claim_agent.redraft.policy_not_found claim_id=%s platform=%s",
+                event.claim_id,
+                claim.platform,
+            )
+            return {"status": "error", "reason": "policy_not_found"}
+
+        user = await db.get_user(claim.user_id)
+        user_name = (user.name or "").strip() or "Valued Customer" if user else "Valued Customer"
+
+        claim_type_routing = {
+            ClaimType.EMAIL: generate_email_draft,
+            ClaimType.CHAT_SCRIPT: generate_chat_script,
+            ClaimType.IN_STORE: generate_in_store_guide,
+            ClaimType.SELF_SERVICE: generate_self_service_walkthrough,
+        }
+        try:
+            claim_type_enum = ClaimType(claim.claim_type)
+        except (ValueError, TypeError):
+            _log.error(
+                "claim_agent.redraft.unknown_claim_type claim_id=%s type=%r",
+                event.claim_id,
+                claim.claim_type,
+            )
+            return {"status": "error", "reason": "unknown_claim_type"}
+
+        generator = claim_type_routing.get(claim_type_enum)
+        if generator is None:
+            return {"status": "error", "reason": "unsupported_claim_type"}
+
+        from search import get_search_adapter
+
+        search_client = get_search_adapter()
+
+        next_version = len(claim.draft_versions or []) + 1
+        current_price = (purchase.price_paid or 0.0) - (claim.claim_amount or 0.0)
+
+        gen_kwargs: dict = dict(
+            user_name=user_name,
+            current_price=current_price,
+            # `user_instruction` is the generator's kwarg (downstream API,
+            # unchanged); the event-side field was renamed to `feedback`
+            # in the PR-#174 schema refactor — more accurate for what the
+            # user sends about the current draft. Don't rename the
+            # generator side unless every draft-type signature is changed
+            # in lockstep; the event→generator mapping happens here.
+            user_instruction=event.feedback,
+        )
+        if claim_type_enum == ClaimType.IN_STORE:
+            gen_kwargs["user_location"] = getattr(user, "default_location", None)
+
+        draft = await generator(claim, purchase, policy, search_client, **gen_kwargs)
+
+        validation = validate(draft, claim, purchase)
+        if not validation.valid:
+            _log.warning(
+                "claim_agent.redraft.validation_failed claim_id=%s issues=%s",
+                event.claim_id,
+                validation.issues,
+            )
+            if (claim.redraft_count or 0) >= 1:
+                await write_notification_event(
+                    db=db,
+                    user_id=event.user_id,
+                    event_type=NotificationEventType.CLAIM_DRAFTED,
+                    entity_type=NotificationEntityType.CLAIM,
+                    entity_id=event.claim_id,
+                    data={
+                        "claim_id": event.claim_id,
+                        "claim_type": claim.claim_type,
+                        "refund_amount": claim.claim_amount,
+                        "platform": claim.platform,
+                        "validation_failed": True,
+                        "validation_issues": validation.issues,
+                        "escalated": True,
+                    },
+                )
+            return {"status": "error", "reason": "validation_failed"}
+
+        async def _redraft_regenerate(
+            current_draft: ClaimDraft, feedback: str, c: object
+        ) -> ClaimDraft:
+            _log.info(
+                "claim_agent.redraft.self_eval_regenerate claim_id=%s feedback=%r",
+                event.claim_id,
+                feedback[:200],
+            )
+            regen_kwargs: dict = dict(
+                user_name=user_name,
+                current_price=current_price,
+                user_instruction="; ".join(p for p in [event.feedback, feedback] if p) or None,
+            )
+            if claim_type_enum == ClaimType.IN_STORE:
+                regen_kwargs["user_location"] = getattr(user, "default_location", None)
+            return await generator(claim, purchase, policy, search_client, **regen_kwargs)
+
+        try:
+            final_draft, eval_result, eval_attempts = await evaluate_and_maybe_regenerate(
+                draft, claim, purchase, policy, regenerate_fn=_redraft_regenerate
+            )
+            if not eval_result.passed:
+                _log.warning(
+                    "claim_agent.redraft claim %s proceeding with failed self_eval after %d attempts",
+                    event.claim_id,
+                    eval_attempts,
+                )
+        except Exception:
+            _log.exception(
+                "self_eval failed for redraft claim %s — proceeding with validated draft",
+                event.claim_id,
+            )
+            final_draft = draft
+            eval_result = None
+            eval_attempts = 0
+
+        now = datetime.now(UTC)
+        new_version = DraftVersion(
+            version=next_version,
+            content=final_draft.draft_content,
+            generated_by=DraftGeneratedBy.ASSISTANT_REDRAFT,
+            at=now,
+        )
+        await db.array_push_and_update(
+            collection="claims",
+            id=event.claim_id,
+            field="draft_versions",
+            element=new_version,
+            element_model=DraftVersion,
+            updates={
+                "draft_content": final_draft.draft_content,
+                "redraft_count": (claim.redraft_count or 0) + 1,
+                "self_eval_score": (
+                    eval_result.scores.model_dump() if eval_result and eval_result.scores else None
+                ),
+                "self_eval_attempts": getattr(claim, "self_eval_attempts", 0) + eval_attempts,
+            },
+        )
+
+        mode = SendMode.APPROVAL if user is None else determine_send_mode(user, claim)
+        notif_id = await write_notification_event(
+            db=db,
+            user_id=event.user_id,
+            event_type=NotificationEventType.CLAIM_DRAFTED,
+            entity_type=NotificationEntityType.CLAIM,
+            entity_id=event.claim_id,
+            data={
+                "claim_id": event.claim_id,
+                "claim_type": str(claim.claim_type),
+                "refund_amount": claim.claim_amount,
+                "send_mode": str(mode),
+                "platform": str(claim.platform),
+            },
+        )
+        if notif_id is None:
+            _log.warning(
+                "Failed to write claim_drafted notification for redraft claim %s", event.claim_id
+            )
+
+        try:
+            platform_enum = Platform(claim.platform)
+        except (ValueError, TypeError):
+            _log.error(
+                "claim_agent.redraft.invalid_platform claim_id=%s platform=%r",
+                event.claim_id,
+                claim.platform,
+            )
+            return {"status": "error", "reason": "invalid_platform"}
+
+        send_override_enum = SendMode(claim.send_override) if claim.send_override else None
+        dispatch_claim = Claim(
+            _id=UUID(str(claim.id)),
+            purchase_id=claim.purchase_id,
+            user_id=claim.user_id,
+            platform=platform_enum,
+            claim_amount=claim.claim_amount or 0.01,
+            currency=claim.currency or "USD",
+            claim_type=claim_type_enum,
+            draft_content=final_draft.draft_content,
+            draft_versions=[new_version],
+            redraft_count=(claim.redraft_count or 0) + 1,
+            policy_clause_cited=claim.policy_clause_cited or "",
+            evidence_screenshot_url=claim.evidence_screenshot_url,
+            send_override=send_override_enum,
+            submitted_at=None,
+            submitted_via=None,
+            outcome=ClaimOutcome.DRAFT_PENDING,
+            outcome_note=None,
+            denial_reason_extracted=None,
+            resolved_at=None,
+            trace_id=claim.trace_id,
+        )
+
+        if mode == SendMode.AUTO:
+            dispatch_claim, auto_send_at = await handle_auto_mode(
+                claim=dispatch_claim,
+                db=db,
+                event_platform_id=str(claim.platform),
+                refund_amount=claim.claim_amount or 0.0,
+                delay_seconds=_parse_delay_seconds(),
+            )
+            await write_notification_event(
+                db=db,
+                user_id=str(event.user_id),
+                event_type=NotificationEventType.CLAIM_QUEUED_AUTO,
+                entity_type=NotificationEntityType.CLAIM,
+                entity_id=event.claim_id,
+                data={
+                    "claim_id": event.claim_id,
+                    "auto_send_at": auto_send_at.isoformat(),
+                    "refund_amount": claim.claim_amount or 0.0,
+                },
+            )
+        else:
+            dispatch_claim = await handle_approval_mode(
+                claim=dispatch_claim,
+                db=db,
+                event_platform_id=str(claim.platform),
+                refund_amount=claim.claim_amount or 0.0,
+            )
+
+        _log.info(
+            "claim_agent.redraft.complete claim_id=%s version=%d",
+            event.claim_id,
+            next_version,
+        )
+        return {"status": "ok"}
+
+    except Exception as exc:
+        _log.exception("Failed to process claim.redraft_requested event")
+        return {"status": "error", "reason": str(exc)}

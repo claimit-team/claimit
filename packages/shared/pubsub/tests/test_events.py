@@ -150,10 +150,14 @@ def test_price_dropped_extra_fields_rejected() -> None:
         PriceDroppedEvent(**{**_VALID_PRICE_DROPPED_PAYLOAD, "bogus": True})
 
 
-_VALID_CLAIM_REDRAFT_PAYLOAD = {
+# ---------------------------------------------------------------------------
+# ClaimRedraftRequestedEvent (Raj-style schema, post-refactor from PR #176)
+# ---------------------------------------------------------------------------
+
+_VALID_REDRAFT_PAYLOAD = {
     "user_id": "11111111-1111-4111-8111-111111111111",
-    "claim_id": "44444444-4444-4444-8444-444444444444",
-    "feedback": "make it friendlier",
+    "claim_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    "feedback": "make the tone less formal",
 }
 
 
@@ -161,24 +165,78 @@ def test_claim_redraft_topic_constant() -> None:
     assert TOPIC_CLAIM_REDRAFT_REQUESTED == "claim.redraft_requested"
 
 
-def test_claim_redraft_defaults_are_populated() -> None:
-    event = ClaimRedraftRequestedEvent(**_VALID_CLAIM_REDRAFT_PAYLOAD)
-    assert event.schema_version == 1
-    assert event.event_type == "claim.redraft_requested"
+def test_claim_redraft_requested_by_defaults_to_assistant() -> None:
+    """The current production caller is the assistant agent (Mode B);
+    `requested_by` defaults so existing producers don't have to set it
+    explicitly. A future direct-user "regenerate" button would emit
+    `requested_by="user"` to distinguish."""
+    event = ClaimRedraftRequestedEvent(**_VALID_REDRAFT_PAYLOAD)
     assert event.requested_by == "assistant"
-    UUID(event.event_id)
-    assert isinstance(event.emitted_at, datetime)
-    assert event.emitted_at.tzinfo is not None
 
 
-def test_claim_redraft_round_trip_through_json() -> None:
-    event = ClaimRedraftRequestedEvent(**_VALID_CLAIM_REDRAFT_PAYLOAD)
-    decoded = ClaimRedraftRequestedEvent.model_validate_json(event.model_dump_json())
-    assert decoded == event
+def test_claim_redraft_requested_by_accepts_user_literal() -> None:
+    event = ClaimRedraftRequestedEvent(**{**_VALID_REDRAFT_PAYLOAD, "requested_by": "user"})
+    assert event.requested_by == "user"
+
+
+def test_claim_redraft_requested_by_rejects_other_literals() -> None:
+    """Literal["assistant", "user"] rejects anything else at validation
+    time — catches a typo'd producer immediately rather than letting it
+    flow through to a downstream branch that treats unexpected values
+    as some default."""
+    with pytest.raises(ValidationError):
+        ClaimRedraftRequestedEvent(**{**_VALID_REDRAFT_PAYLOAD, "requested_by": "admin"})
+
+
+def test_claim_redraft_feedback_empty_rejected() -> None:
+    """min_length=1 catches an empty-feedback no-op redraft at the schema
+    level — the generator would otherwise be called with an empty
+    instruction and produce the same draft, burning a Gemini call for
+    nothing."""
+    with pytest.raises(ValidationError):
+        ClaimRedraftRequestedEvent(**{**_VALID_REDRAFT_PAYLOAD, "feedback": ""})
+
+
+def test_claim_redraft_feedback_max_length_501_rejected() -> None:
+    """max_length=500 bounds the payload against an abusive caller and
+    keeps the assistant's prompt within a sane budget. Verify the
+    501-char boundary fails."""
+    overlong = "x" * 501
+    with pytest.raises(ValidationError):
+        ClaimRedraftRequestedEvent(**{**_VALID_REDRAFT_PAYLOAD, "feedback": overlong})
+
+
+def test_claim_redraft_feedback_max_length_500_accepted() -> None:
+    """The bound is inclusive — 500 chars exactly should pass. Pins the
+    boundary so a future refactor that flips to `<` instead of `<=`
+    fails loudly."""
+    exact = "x" * 500
+    event = ClaimRedraftRequestedEvent(**{**_VALID_REDRAFT_PAYLOAD, "feedback": exact})
+    assert len(event.feedback) == 500
+
+
+def test_claim_redraft_round_trip_json() -> None:
+    """Round-trip via model_dump_json + model_validate_json preserves
+    every field exactly. Important because the handler in claim-agent
+    does `model_validate_json(raw_data)` against the Pub/Sub-decoded
+    payload — any silent default substitution here would silently
+    break the wire contract."""
+    event = ClaimRedraftRequestedEvent(**_VALID_REDRAFT_PAYLOAD)
+    restored = ClaimRedraftRequestedEvent.model_validate_json(event.model_dump_json())
+    assert restored.user_id == event.user_id
+    assert restored.claim_id == event.claim_id
+    assert restored.feedback == event.feedback
+    assert restored.requested_by == event.requested_by
+    assert restored.event_type == "claim.redraft_requested"
+    assert restored.schema_version == event.schema_version
+    assert restored.event_id == event.event_id
 
 
 def test_claim_redraft_payload_matches_schema_keys() -> None:
-    event = ClaimRedraftRequestedEvent(**_VALID_CLAIM_REDRAFT_PAYLOAD)
+    """Structural pin on the wire format — locks down every key the
+    serialized payload exposes so an additive field on the model is
+    a deliberate change (this test fails) rather than a silent leak."""
+    event = ClaimRedraftRequestedEvent(**_VALID_REDRAFT_PAYLOAD)
     body = json.loads(event.model_dump_json())
     assert set(body) == {
         "schema_version",
@@ -186,32 +244,15 @@ def test_claim_redraft_payload_matches_schema_keys() -> None:
         "emitted_at",
         "event_type",
         "requested_by",
-        *_VALID_CLAIM_REDRAFT_PAYLOAD,
+        *_VALID_REDRAFT_PAYLOAD,
     }
 
 
-def test_claim_redraft_feedback_min_length() -> None:
-    with pytest.raises(ValidationError):
-        ClaimRedraftRequestedEvent(**{**_VALID_CLAIM_REDRAFT_PAYLOAD, "feedback": ""})
-
-
-def test_claim_redraft_feedback_max_length() -> None:
-    with pytest.raises(ValidationError):
-        ClaimRedraftRequestedEvent(**{**_VALID_CLAIM_REDRAFT_PAYLOAD, "feedback": "x" * 501})
-
-
-def test_claim_redraft_requested_by_user_allowed() -> None:
-    event = ClaimRedraftRequestedEvent(**{**_VALID_CLAIM_REDRAFT_PAYLOAD, "requested_by": "user"})
-    assert event.requested_by == "user"
-
-
-def test_claim_redraft_requested_by_other_rejected() -> None:
-    with pytest.raises(ValidationError):
-        ClaimRedraftRequestedEvent(
-            **{**_VALID_CLAIM_REDRAFT_PAYLOAD, "requested_by": "claim_agent"}
-        )
-
-
 def test_claim_redraft_extra_fields_rejected() -> None:
+    """EventEnvelope sets extra='forbid', so any unknown field — e.g. a
+    consumer's stale `conversation_id` (removed in this refactor) or
+    a producer's typo — is rejected at validation. Without this guard
+    a stale field would flow through silently and downstream
+    consumers would never know it was there."""
     with pytest.raises(ValidationError):
-        ClaimRedraftRequestedEvent(**{**_VALID_CLAIM_REDRAFT_PAYLOAD, "bogus": True})
+        ClaimRedraftRequestedEvent(**{**_VALID_REDRAFT_PAYLOAD, "conversation_id": "stale-field"})

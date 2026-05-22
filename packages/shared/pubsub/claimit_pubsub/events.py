@@ -97,14 +97,27 @@ class PurchaseUploadedEvent(EventEnvelope):
 
 
 class ClaimRedraftRequestedEvent(EventEnvelope):
-    """Published by the Assistant Agent (Mode B) when a user asks for a redraft.
+    """Published by the Assistant Agent (Mode B) when a user asks to refine a draft.
 
-    Ticket 3.23. Subscriber: claim-agent (handler ships in ticket 3.21).
-    `feedback` is the natural-language steer ("make it friendlier", "shorter",
-    etc.) the user gave; the claim-agent generator consumes it to bias the
-    next draft. `requested_by` distinguishes assistant-mediated redrafts
-    from a hypothetical direct-from-user trigger so the receiver can apply
-    different rate limits or routing if needed.
+    Subscriber: claim-agent `/pubsub/claim.redraft_requested`. Mirrors
+    Attachment 2 §2.6 with field-name + validation refinements from PR #174:
+
+    - `feedback` (was `user_instruction` in the original PR #176 merge) is
+      semantically accurate — what the user sends is feedback ON the
+      current draft (e.g. "make it less formal", "include the policy
+      clause"), not a general instruction. `Field(min_length=1,
+      max_length=500)` prevents empty pushes that would no-op the
+      generator AND bounds the payload size against an abusive caller.
+    - `requested_by: Literal["assistant", "user"]` opens the door to a
+      future direct-user redraft path (e.g. a "regenerate" button in
+      the dashboard that doesn't route through the assistant). Defaults
+      to "assistant" so existing callers don't have to set it.
+
+    `conversation_id` is intentionally omitted in this iteration —
+    Chris's handler in apps/claim-agent/src/main.py reads it nowhere
+    (verified pre-refactor). Ticket 5.9 can add it back as an optional
+    field when the assistant needs to thread conversation context to
+    the draft generator.
     """
 
     event_type: Literal["claim.redraft_requested"] = "claim.redraft_requested"

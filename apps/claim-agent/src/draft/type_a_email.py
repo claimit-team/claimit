@@ -94,6 +94,7 @@ async def generate_email_draft(
     search_client: SearchClient,
     user_name: str = "Valued Customer",
     current_price: float | None = None,
+    user_instruction: str | None = None,
 ) -> ClaimDraft:
     # Validate early — fail before wasting an LLM call
     if not policy.claim_email or not policy.claim_email.strip():
@@ -115,7 +116,9 @@ async def generate_email_draft(
         policy_clause = policy.policy_text_relevant_clause
 
     # 2. Generate email template via Gemini — placeholders only, no real data
-    raw_output = await _run_draft_agent(str(purchase.platform), policy_clause, _build_draft_agent)
+    raw_output = await _run_draft_agent(
+        str(purchase.platform), policy_clause, _build_draft_agent, user_instruction
+    )
     draft_output = _parse_draft_output(raw_output)
 
     # 3. Programmatic placeholder substitution with real values

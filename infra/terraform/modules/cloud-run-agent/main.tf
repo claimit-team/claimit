@@ -102,22 +102,28 @@ resource "google_cloud_run_v2_service" "agent" {
         failure_threshold     = 6
       }
 
-      liveness_probe {
-        dynamic "http_get" {
-          for_each = var.probe_type == "http" ? [1] : []
-          content {
+      # Liveness probe is OMITTED entirely when probe_type="tcp" because
+      # the Cloud Run v2 API rejects tcp_socket in liveness_probe (only
+      # startup_probe accepts both http and tcp). Confirmed live at PR
+      # #175 merge: terraform apply returned 400 "Cloud Run currently
+      # does not support TCP socket in liveness probe" on the new
+      # mongodb-mcp services. Without custom liveness, Cloud Run's
+      # built-in instance-crash + OOM detection still applies — the
+      # gap is only periodic "is the app responsive" probing, which
+      # for stateless MCP servers at demo scale is an acceptable
+      # tradeoff. Follow-up ticket will upgrade to a dual-port HTTP
+      # probe so we get real liveness back; until then, restart-on-
+      # crash is the only auto-remediation for these services.
+      dynamic "liveness_probe" {
+        for_each = var.probe_type == "http" ? [1] : []
+        content {
+          http_get {
             path = var.probe_path
             port = var.container_port
           }
+          period_seconds    = 30
+          failure_threshold = 3
         }
-        dynamic "tcp_socket" {
-          for_each = var.probe_type == "tcp" ? [1] : []
-          content {
-            port = var.container_port
-          }
-        }
-        period_seconds    = 30
-        failure_threshold = 3
       }
     }
   }
