@@ -95,6 +95,12 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
   const [cancelOpen, setCancelOpen] = useState(false);
 
   const handleClickEdit = () => {
+    // Jump to the latest version before flipping to edit mode — older
+    // versions are read-only in DraftPane (it forces preview-only via
+    // a guard `useEffect`), so without this the header's "Edit draft"
+    // would look broken when the user is browsing v1 of a multi-version
+    // draft (CodeRabbit MINOR finding, PR #168).
+    setSelectedVersion(claim.current_version);
     setDraftMode("edit");
   };
   const handleClickApprove = () => setApproveOpen(true);

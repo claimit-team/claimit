@@ -76,6 +76,13 @@ export function useReviewDraft({
       })
       .catch((err: unknown) => {
         if (!mounted) return;
+        // Clear stale rows so the dashboard's "Review draft" cards
+        // disappear on fetch failure — otherwise a transient error
+        // would keep showing previously-fetched cards alongside the
+        // error state (CodeRabbit MAJOR finding, PR #168). The
+        // section is non-blocking by design (see header docstring),
+        // so an empty array + error flag is the correct stale state.
+        setClaims([]);
         if (err instanceof ClaimsApiError) {
           setError(err);
         } else {

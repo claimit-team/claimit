@@ -105,6 +105,15 @@ export function ApproveConfirmDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { title, description } = summaryCopy(claim);
 
+  // Block Escape / backdrop / close-button dismissal while the approve
+  // is in flight so a user can't accidentally tear down the dialog
+  // mid-write and re-trigger the action on reopen (mirrors the
+  // cancel-dialog fix; CodeRabbit MAJOR finding, PR #168).
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (isSubmitting && !nextOpen) return;
+    onOpenChange(nextOpen);
+  };
+
   const handleConfirm = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
@@ -140,7 +149,7 @@ export function ApproveConfirmDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>

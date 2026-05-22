@@ -24,6 +24,25 @@ interface PostApproveBannerProps {
   claim: ClaimDetail;
 }
 
+/**
+ * Guard wire-derived URLs before they're rendered into anchor `href`s.
+ * The detail wire surface accepts any string for `policy.claim_url`
+ * and `SelfServiceWalkthrough.claim_url`; we only want to render
+ * external links that resolve to a real `http(s)://` URL — anything
+ * else (malformed, `javascript:`, relative without origin, …) gets
+ * suppressed so we never inject unsafe schemes into clickable links
+ * (CodeRabbit MAJOR finding, PR #168).
+ */
+function toSafeExternalHref(value: string | null | undefined): string | null {
+  if (!value || value === "") return null;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 export function PostApproveBanner({ claim }: PostApproveBannerProps) {
   if (claim.status !== "submitted") return null;
 
@@ -42,19 +61,20 @@ export function PostApproveBanner({ claim }: PostApproveBannerProps) {
           </span>
         </BannerShell>
       );
-    case "chat_script":
+    case "chat_script": {
+      const chatUrl = toSafeExternalHref(policy?.claim_url);
       return (
         <BannerShell variant="info">
           <span>
             <strong className="font-medium">Approved.</strong> Use the per-step Copy buttons on the
             script to paste one message at a time.
           </span>
-          {policy?.claim_url && policy.claim_url !== "" ? (
+          {chatUrl !== null ? (
             <Button
               size="sm"
               variant="outline"
               render={
-                <a href={policy.claim_url} target="_blank" rel="noreferrer noopener">
+                <a href={chatUrl} target="_blank" rel="noreferrer noopener">
                   <ExternalLink className="mr-2 h-3.5 w-3.5" />
                   Open {claim.platform} chat
                 </a>
@@ -63,6 +83,7 @@ export function PostApproveBanner({ claim }: PostApproveBannerProps) {
           ) : null}
         </BannerShell>
       );
+    }
     case "in_store_guide":
       return (
         <BannerShell variant="info">
@@ -89,18 +110,19 @@ export function PostApproveBanner({ claim }: PostApproveBannerProps) {
           </BannerShell>
         );
       }
+      const selfServiceUrl = toSafeExternalHref(parsed.claim_url);
       return (
         <BannerShell variant="info">
           <span>
             <strong className="font-medium">Approved.</strong> ~{parsed.estimated_minutes} min to
             complete at {parsed.platform_display_name}.
           </span>
-          {parsed.claim_url !== "" ? (
+          {selfServiceUrl !== null ? (
             <Button
               size="sm"
               variant="outline"
               render={
-                <a href={parsed.claim_url} target="_blank" rel="noreferrer noopener">
+                <a href={selfServiceUrl} target="_blank" rel="noreferrer noopener">
                   <ExternalLink className="mr-2 h-3.5 w-3.5" />
                   Open {parsed.platform_display_name}
                 </a>

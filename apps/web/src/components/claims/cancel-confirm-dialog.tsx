@@ -63,14 +63,27 @@ export function CancelConfirmDialog({
   const otherTextareaId = useId();
 
   // Reset form whenever the dialog closes so the next opening starts
-  // clean rather than carrying over a stale "Other" buffer.
+  // clean rather than carrying over a stale "Other" buffer. Do NOT
+  // clear `isSubmitting` here — the close-while-submitting guard below
+  // already blocks the close, but if a host ever force-closes the
+  // dialog (parent state flip) we keep the in-flight flag set until
+  // the awaited handler resets it in its `finally` block. Otherwise an
+  // Escape-then-reopen mid-write could re-enable a second submit
+  // (CodeRabbit MAJOR finding, PR #168).
   useEffect(() => {
     if (!open) {
       setReason("not_worth_it");
       setOtherText("");
-      setIsSubmitting(false);
     }
   }, [open]);
+
+  // Block Escape / backdrop / close-button dismissal while the cancel
+  // is in flight so a user can't accidentally tear down the dialog
+  // mid-write and re-trigger the action on reopen.
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (isSubmitting && !nextOpen) return;
+    onOpenChange(nextOpen);
+  };
 
   // "Other" is genuinely optional — the placeholder copy promises "Optional"
   // (helps us improve recommendations) so the validation has to match
@@ -121,7 +134,7 @@ export function CancelConfirmDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Cancel claim</DialogTitle>
