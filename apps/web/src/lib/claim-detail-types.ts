@@ -91,6 +91,22 @@ export interface ClaimPolicy {
   claim_url: string;
   claim_phone: string;
   window_days: number;
+  /**
+   * External link to the merchant's price-match policy page. Empty
+   * string when no row matches the claim's platform/category combo —
+   * evidence-pane renders the "Read full policy" link conditionally
+   * (passes through `toSafeExternalHref` so a malformed/relative URL
+   * also hides the link). Optional in the interface to keep legacy
+   * mock fixtures type-checking.
+   */
+  policy_url?: string;
+  /**
+   * ISO timestamp of when the policy text was last verified
+   * (ticket 5.8 / WI-4). Empty string when null on the wire — the
+   * evidence-pane hides the "Policy verified …" caption. Optional so
+   * legacy mocks keep type-checking.
+   */
+  last_verified?: string;
 }
 
 export interface ClaimDetail {

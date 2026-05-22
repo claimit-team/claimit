@@ -255,6 +255,12 @@ export type PolicyDoc = {
   claim_url: string | null;
   claim_email: string | null;
   claim_phone: string | null;
+  /**
+   * ISO timestamp of when the policy text was last verified by the
+   * scraper/manual review (ticket 5.8 / WI-4). Rendered as "Policy
+   * verified MMM D, YYYY" under the policy card.
+   */
+  last_verified: string | null;
 };
 
 /**

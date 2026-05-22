@@ -269,6 +269,8 @@ function buildPolicyBlock(response: ClaimDetailResponse): ClaimPolicy {
     claim_url: policy?.claim_url ?? "",
     claim_phone: policy?.claim_phone ?? "",
     window_days: policy?.window_days ?? 0,
+    policy_url: policy?.policy_url ?? "",
+    last_verified: policy?.last_verified ?? "",
   };
 }
 

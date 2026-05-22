@@ -15,13 +15,7 @@ import { type ElementType, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ClaimsApiError, fetchEvidenceBlob } from "@/lib/api/claims";
 import { formatClaimCurrency } from "@/lib/claim-detail";
@@ -245,6 +239,39 @@ function EvidenceScreenshot({ claimId, platform }: { claimId: string; platform: 
   );
 }
 
+/**
+ * "Read full policy" external link. Replaces the old static
+ * in-app Dialog (ticket 5.8 / WI-4) — the merchant's policy text
+ * evolves out-of-band, so the source-of-truth surface is the merchant's
+ * own page, not a frozen Eligibility-requirements bullet list we ship.
+ *
+ * `policy_url` is sanitized via `toSafeExternalHref` so a malformed,
+ * relative, or non-http(s) wire value yields no link rather than
+ * injecting `javascript:` into the anchor. When no safe link, the
+ * link is hidden entirely (preferable to a dead button).
+ */
+function PolicyExternalLink({
+  platform,
+  policyUrl,
+}: {
+  platform: string;
+  policyUrl: string | undefined;
+}) {
+  const safeHref = toSafeExternalHref(policyUrl);
+  if (!safeHref) return null;
+  return (
+    <a
+      href={safeHref}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="inline-flex items-center gap-1 font-medium text-brand-primary-500 text-sm hover:underline"
+    >
+      Read {platform} policy
+      <ExternalLink className="h-3 w-3" aria-hidden />
+    </a>
+  );
+}
+
 export function EvidencePane({ claim, onDoubleClickHeader }: EvidencePaneProps) {
   const { evidence, purchase } = claim;
   const priceDifference = evidence.original_price - evidence.current_price;
@@ -306,40 +333,21 @@ export function EvidencePane({ claim, onDoubleClickHeader }: EvidencePaneProps) 
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <blockquote className="border-brand-primary-500 border-l-2 pl-3 text-neutral-700 text-sm italic">
+              {/* Highlighted cited clause — visual highlight via the
+                  --semantic-warning-bg token (light amber). True ES-snippet
+                  per-token highlighting would need backend support and a
+                  matching wire field; deferred. */}
+              <blockquote className="rounded-r-md border-semantic-warning border-l-4 bg-semantic-warning-bg/30 px-3 py-2 text-neutral-700 text-sm italic">
                 {evidence.policy_clause}
               </blockquote>
 
-              <Dialog>
-                <DialogTrigger
-                  render={
-                    <Button
-                      variant="link"
-                      type="button"
-                      className="h-auto gap-1 p-0 text-brand-primary-500"
-                    />
-                  }
-                >
-                  Read full policy
-                  <ExternalLink className="h-3 w-3" aria-hidden />
-                </DialogTrigger>
-                <DialogContent className="max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle>{claim.platform} price match policy</DialogTitle>
-                  </DialogHeader>
-                  <ScrollArea className="max-h-96">
-                    <div className="space-y-4 pr-4 text-neutral-700 text-sm">
-                      <p>{evidence.policy_clause}</p>
-                      <h4 className="font-medium text-neutral-900">Eligibility requirements</h4>
-                      <ul className="list-disc space-y-1 pl-5">
-                        <li>Keep your receipt or confirmation handy</li>
-                        <li>Show the advertised lower eligible price when you reach out</li>
-                        <li>Follow merchant-specific timing rules for adjustments</li>
-                      </ul>
-                    </div>
-                  </ScrollArea>
-                </DialogContent>
-              </Dialog>
+              <PolicyExternalLink platform={claim.platform} policyUrl={claim.policy?.policy_url} />
+
+              {claim.policy?.last_verified ? (
+                <p className="text-neutral-500 text-xs">
+                  Policy verified {formatDateShort(claim.policy.last_verified)}
+                </p>
+              ) : null}
             </CardContent>
           </Card>
 
