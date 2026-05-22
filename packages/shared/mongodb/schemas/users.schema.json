@@ -19,12 +19,7 @@
           "type": "number"
         }
       },
-      "required": [
-        "city",
-        "state",
-        "lat",
-        "lon"
-      ],
+      "required": ["city", "state", "lat", "lon"],
       "title": "DefaultLocation",
       "type": "object"
     },
@@ -160,12 +155,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "sender",
-        "format_hash",
-        "added_at",
-        "reason"
-      ],
+      "required": ["sender", "format_hash", "added_at", "reason"],
       "title": "IngestionSkiplistEntry",
       "type": "object"
     },
@@ -182,11 +172,7 @@
           "$ref": "#/$defs/LoyaltyTier"
         }
       },
-      "required": [
-        "platform",
-        "member_id",
-        "tier"
-      ],
+      "required": ["platform", "member_id", "tier"],
       "title": "LoyaltyMembership",
       "type": "object"
     },
@@ -241,10 +227,7 @@
           "type": "array"
         }
       },
-      "required": [
-        "web_push",
-        "email"
-      ],
+      "required": ["web_push", "email"],
       "title": "NotificationPrefs",
       "type": "object"
     },
@@ -265,10 +248,7 @@
       "type": "string"
     },
     "SendMode": {
-      "enum": [
-        "approval",
-        "auto"
-      ],
+      "enum": ["approval", "auto"],
       "title": "SendMode",
       "type": "string"
     },
@@ -294,11 +274,7 @@
           "title": "Changed At"
         }
       },
-      "required": [
-        "default_mode",
-        "auto_send_delay_seconds",
-        "changed_at"
-      ],
+      "required": ["default_mode", "auto_send_delay_seconds", "changed_at"],
       "title": "SendPreference",
       "type": "object"
     },
@@ -332,21 +308,12 @@
           "title": "Renewed At"
         }
       },
-      "required": [
-        "tier",
-        "trial_ends",
-        "renewed_at"
-      ],
+      "required": ["tier", "trial_ends", "renewed_at"],
       "title": "Subscription",
       "type": "object"
     },
     "SubscriptionTier": {
-      "enum": [
-        "trial",
-        "free",
-        "pro",
-        "family"
-      ],
+      "enum": ["trial", "free", "pro", "family"],
       "title": "SubscriptionTier",
       "type": "string"
     }
