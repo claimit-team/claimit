@@ -80,21 +80,30 @@ export function CancelConfirmDialog({
     setIsSubmitting(true);
     try {
       await cancelClaim(claim.claim_id, { reason: reasonText });
+      // Cancel write succeeded — apply the optimistic patch + close the
+      // dialog regardless of whether the follow-up refetch lands. A
+      // refetch-only failure does NOT mean the cancel failed; reporting
+      // it as such would mislead the user into a retry on an already-
+      // cancelled claim (CodeRabbit MAJOR finding, PR #168).
       const nowIso = new Date().toISOString();
       applyOptimistic({
         outcome: "user_cancelled",
         outcome_note: reasonText,
         resolved_at: nowIso,
       });
-      await refetch();
+      try {
+        await refetch();
+      } catch {
+        toast.error("Claim cancelled, but refresh failed. Reload to see latest state.");
+      }
       toast.success("Claim cancelled");
       onOpenChange(false);
     } catch (err: unknown) {
+      // Write itself failed — surface the real error and let the user
+      // retry. No optimistic patch was applied so there's nothing to
+      // reconcile.
       const message = err instanceof Error ? err.message : "Could not cancel claim";
       toast.error(message);
-      await refetch().catch(() => {
-        /* surfaced via the toast above */
-      });
     } finally {
       setIsSubmitting(false);
     }

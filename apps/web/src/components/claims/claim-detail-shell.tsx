@@ -77,12 +77,19 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
   }, [claim.current_version]);
 
   // Reset edit buffer to the selected version's content whenever the
-  // version changes OR the wire claim refreshes. After a Save: the
-  // refetched claim's draft_versions[current_version - 1] === the
-  // freshly-saved content, so the buffer naturally lands clean.
+  // version changes OR the selected version's content changes (e.g.
+  // after a Save: refetched draft_versions[current_version - 1] ===
+  // the freshly-saved content, so the buffer naturally lands clean).
+  //
+  // Narrow the dependency to the specific content cell (not the
+  // whole `claim` reference): an unrelated optimistic patch
+  // (e.g. approve flipping `outcome → pending`) changes the claim
+  // reference but MUST NOT clobber in-progress edits in the buffer.
+  // CodeRabbit MAJOR finding, PR #168.
+  const currentDraftContent = claim.draft_versions[selectedVersion - 1]?.content ?? "";
   useEffect(() => {
-    setEditBuffer(claim.draft_versions[selectedVersion - 1]?.content ?? "");
-  }, [selectedVersion, claim]);
+    setEditBuffer(currentDraftContent);
+  }, [currentDraftContent]);
 
   const [approveOpen, setApproveOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);

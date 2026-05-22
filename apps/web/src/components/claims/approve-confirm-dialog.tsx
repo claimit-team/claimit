@@ -111,21 +111,29 @@ export function ApproveConfirmDialog({
     try {
       const body = dirty ? { edited_draft_content: editedDraftContent } : {};
       await approveClaim(claim.claim_id, body);
+      // Approve write succeeded — apply the optimistic patch + close the
+      // dialog regardless of whether the follow-up refetch lands. A
+      // refetch-only failure does NOT mean the approve failed; reporting
+      // it as such would mislead the user into a retry on an already-
+      // submitted claim (CodeRabbit MAJOR finding, PR #168).
       const nowIso = new Date().toISOString();
       applyOptimistic({
         outcome: "pending",
         submitted_at: nowIso,
       });
-      await refetch();
+      try {
+        await refetch();
+      } catch {
+        toast.error("Claim approved, but refresh failed. Reload to see latest state.");
+      }
       toast.success("Claim approved");
       onOpenChange(false);
     } catch (err: unknown) {
+      // Write itself failed — surface the real error and let the user
+      // retry. No optimistic patch was applied so there's nothing to
+      // reconcile.
       const message = err instanceof Error ? err.message : "Could not approve claim";
       toast.error(message);
-      // Reconcile back to server truth — never leave optimistic state.
-      await refetch().catch(() => {
-        /* surfaced via the toast above */
-      });
     } finally {
       setIsSubmitting(false);
     }
