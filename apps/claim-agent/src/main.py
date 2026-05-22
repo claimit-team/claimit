@@ -342,6 +342,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             }
         )
         await db.upsert_claim(final_claim)
+        mode = SendMode.APPROVAL if user is None else determine_send_mode(user, final_claim)
         notif_id = await write_notification_event(
             db=db,
             user_id=event.user_id,
@@ -352,16 +353,12 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
                 "claim_id": str(claim_id),
                 "claim_type": claim_plan.claim_type.value,
                 "refund_amount": event.price_drop_amount,
-                "send_mode": final_claim.send_override.value
-                if final_claim.send_override
-                else "approval",
+                "send_mode": mode.value,
                 "platform": event.platform_id,
             },
         )
         if notif_id is None:
             _log.warning("Failed to write claim_drafted notification for claim %s", claim_id)
-
-        mode = SendMode.APPROVAL if user is None else determine_send_mode(user, final_claim)
 
         if mode == SendMode.AUTO:
             final_claim, auto_send_at = await handle_auto_mode(
