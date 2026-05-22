@@ -315,14 +315,21 @@ async def test_redraft_feedback_passed_to_generator() -> None:
     instruction = "make it friendlier"
     request = _make_mock_request(_pubsub_body(_make_redraft_event(feedback=instruction)))
 
+    # Invoke regenerate_fn once inside the self-eval stub so the inner
+    # _redraft_regenerate closure body actually executes against the real
+    # event/feedback scope. Without this, a stale field reference inside
+    # the closure (e.g. event.user_instruction after the schema rename)
+    # flies under the test radar — exactly the bug a pre-merge grep had
+    # to catch by hand on this branch.
+    async def fake_evaluate(draft, claim, purchase, policy, *, regenerate_fn):
+        await regenerate_fn(draft, "self-eval suggested clearer wording", claim)
+        return (mock_draft, eval_result, 1)
+
     with (
         patch("src.main.MongoDBClient", return_value=mock_db),
         patch("src.main.generate_email_draft", return_value=mock_draft) as mock_gen,
         patch("src.main.validate", return_value=ValidationResult(valid=True)),
-        patch(
-            "src.main.evaluate_and_maybe_regenerate",
-            new=AsyncMock(return_value=(mock_draft, eval_result, 1)),
-        ),
+        patch("src.main.evaluate_and_maybe_regenerate", side_effect=fake_evaluate),
         patch("src.main.write_notification_event", return_value="notif-id"),
         patch("src.main.handle_approval_mode", new=AsyncMock(return_value=MagicMock())),
         patch(
@@ -333,8 +340,16 @@ async def test_redraft_feedback_passed_to_generator() -> None:
     ):
         await handle_claim_redraft_requested(request)
 
-    mock_gen.assert_awaited_once()
-    assert mock_gen.call_args.kwargs.get("user_instruction") == instruction
+    # First call: outer gen_kwargs (event.feedback only).
+    # Second call: inner _redraft_regenerate closure (event.feedback +
+    # self-eval critic feedback joined with "; ").
+    assert mock_gen.await_count == 2
+    first_call_kwargs = mock_gen.await_args_list[0].kwargs
+    assert first_call_kwargs.get("user_instruction") == instruction
+    second_call_kwargs = mock_gen.await_args_list[1].kwargs
+    assert second_call_kwargs.get("user_instruction") == (
+        f"{instruction}; self-eval suggested clearer wording"
+    )
 
 
 # ---------------------------------------------------------------------------

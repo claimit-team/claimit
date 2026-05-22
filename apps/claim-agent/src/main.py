@@ -631,8 +631,7 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
             regen_kwargs: dict = dict(
                 user_name=user_name,
                 current_price=current_price,
-                user_instruction="; ".join(p for p in [event.user_instruction, feedback] if p)
-                or None,
+                user_instruction="; ".join(p for p in [event.feedback, feedback] if p) or None,
             )
             if claim_type_enum == ClaimType.IN_STORE:
                 regen_kwargs["user_location"] = getattr(user, "default_location", None)
