@@ -128,6 +128,13 @@ export default function ClaimDetailPage({ params }: ClaimDetailRouteProps) {
    * a page-level error state. Used by the initial mount effect and by
    * the "Try again" button in the error view. Shares the error-to-state
    * conversion with the original useEffect (DRY).
+   *
+   * Always flips into `{ status: "loading" }` before issuing the fetch
+   * so the retry-button click in the error view gives the user
+   * immediate feedback (Bugbot MEDIUM finding, PR #168). Without this,
+   * the error screen stayed visible during the retry and looked
+   * broken. The initial useEffect also sets loading explicitly — the
+   * double-set is a cheap no-op.
    */
   const loadDetail = useCallback(async () => {
     if (isAuthLoading) return;
@@ -135,6 +142,7 @@ export default function ClaimDetailPage({ params }: ClaimDetailRouteProps) {
       setState({ status: "error", message: "User must be signed in." });
       return;
     }
+    setState({ status: "loading" });
     try {
       await refetch();
     } catch (err: unknown) {
