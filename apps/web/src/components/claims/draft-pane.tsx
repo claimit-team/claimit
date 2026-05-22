@@ -14,7 +14,7 @@ import {
   Mail,
   MessageSquare,
 } from "lucide-react";
-import { type ElementType, useEffect, useMemo, useState } from "react";
+import { type ElementType, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -62,14 +62,28 @@ const FALLBACK_POLICY: ClaimPolicy = {
   window_days: 0,
 };
 
+export type DraftMode = "preview" | "edit";
+
 interface DraftPaneProps {
   claim: ClaimDetail;
   refetch: () => Promise<void>;
   applyOptimistic: (patch: Partial<ClaimDetailDoc>) => void;
+  /**
+   * Controlled draft-mode tab. Lifted to `ClaimDetailShell` in WI-8 so
+   * the header's "Edit draft" button can flip the tab from outside.
+   * Local guard state (pending tab/version dialog) stays in DraftPane
+   * because it represents a user-initiated transition (not external).
+   */
+  draftMode: DraftMode;
+  setDraftMode: (mode: DraftMode) => void;
+  selectedVersion: number;
+  setSelectedVersion: (version: number) => void;
+  editBuffer: string;
+  setEditBuffer: (content: string) => void;
+  /** True when `editBuffer !== draft_versions[selectedVersion - 1].content`. */
+  dirty: boolean;
   onDoubleClickHeader?: () => void;
 }
-
-type DraftMode = "preview" | "edit";
 
 function PaneHeader({
   title,
@@ -539,37 +553,28 @@ export function DraftPane({
   claim,
   refetch,
   applyOptimistic,
+  draftMode,
+  setDraftMode,
+  selectedVersion,
+  setSelectedVersion,
+  editBuffer,
+  setEditBuffer,
+  dirty,
   onDoubleClickHeader,
 }: DraftPaneProps) {
-  const [selectedVersion, setSelectedVersion] = useState(claim.current_version);
   const baseline = claim.draft_versions[selectedVersion - 1]?.content ?? "";
 
-  const [editBuffer, setEditBuffer] = useState(baseline);
-  const [draftMode, setDraftMode] = useState<DraftMode>("preview");
   const [isSaving, setIsSaving] = useState(false);
 
   // Pending-navigation state for the unsaved-changes guard. Each entry
   // captures the navigation the user wanted but is blocked on
   // confirmation. Resolved by either Discard-and-go (apply the pending
-  // change + clear) or Keep-editing (just clear).
+  // change + clear) or Keep-editing (just clear). Stays local to
+  // DraftPane — guard fires only for user-initiated transitions, not
+  // shell-initiated ones (header's "Edit draft" bypasses).
   const [pendingTab, setPendingTab] = useState<DraftMode | null>(null);
   const [pendingVersion, setPendingVersion] = useState<number | null>(null);
 
-  // Snap the latest version + reset buffer whenever the wire claim
-  // refreshes (e.g. after a successful Save the new version lands at
-  // draft_versions[length - 1]).
-  useEffect(() => {
-    setSelectedVersion(claim.current_version);
-  }, [claim.current_version]);
-
-  // Reset edit buffer when the selected version changes (drives both
-  // initial mount and post-save snap-to-latest). Intentionally re-runs
-  // when `claim` identity changes so a fresh refetch resets the buffer.
-  useEffect(() => {
-    setEditBuffer(claim.draft_versions[selectedVersion - 1]?.content ?? "");
-  }, [selectedVersion, claim]);
-
-  const dirty = useMemo(() => editBuffer !== baseline, [editBuffer, baseline]);
   const totalVersions = claim.draft_versions.length;
   const onLatestVersion = selectedVersion === totalVersions;
   // When the user browses an older version, force preview-only — editing
@@ -578,7 +583,7 @@ export function DraftPane({
     if (!onLatestVersion && draftMode === "edit") {
       setDraftMode("preview");
     }
-  }, [onLatestVersion, draftMode]);
+  }, [onLatestVersion, draftMode, setDraftMode]);
 
   const Icon = claimTypeIcons[claim.claim_type];
 

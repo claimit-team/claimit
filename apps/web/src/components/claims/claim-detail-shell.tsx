@@ -22,8 +22,11 @@
 
 import { useEffect, useState } from "react";
 
+import { ApproveConfirmDialog } from "@/components/claims/approve-confirm-dialog";
 import { AssistantPane } from "@/components/claims/assistant-pane";
+import { CancelConfirmDialog } from "@/components/claims/cancel-confirm-dialog";
 import { ClaimHeader } from "@/components/claims/claim-header";
+import type { DraftMode } from "@/components/claims/draft-pane";
 import { DraftPane } from "@/components/claims/draft-pane";
 import { EvidencePane } from "@/components/claims/evidence-pane";
 import { PostApproveBanner } from "@/components/claims/post-approve-banner";
@@ -47,6 +50,48 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
   const [paneMax, setPaneMax] = useState<"draft" | "evidence" | null>(null);
   const [mobileTab, setMobileTab] = useState<"draft" | "evidence" | "assistant">("draft");
   const [tabletTab, setTabletTab] = useState<"evidence" | "assistant">("evidence");
+
+  // ------------------------------------------------------------------
+  // Shared draft-edit state (lifted from DraftPane in WI-8 so the
+  // header's "Approve and send" dialog can include the in-progress
+  // edit buffer as `edited_draft_content` when the user approves
+  // mid-edit). DraftPane is now controlled: tabs + version selector +
+  // edit buffer all route through these setters. The unsaved-changes
+  // guard (pendingTab / pendingVersion) is still local to DraftPane —
+  // a header-initiated edit-mode flip bypasses the guard intentionally
+  // (the "Edit draft" button only renders in `awaiting_approval` which
+  // can't have an in-flight edit-in-progress).
+  // ------------------------------------------------------------------
+  const [draftMode, setDraftMode] = useState<DraftMode>("preview");
+  const [selectedVersion, setSelectedVersion] = useState(claim.current_version);
+  const [editBuffer, setEditBuffer] = useState(
+    claim.draft_versions[claim.current_version - 1]?.content ?? "",
+  );
+  const baseline = claim.draft_versions[selectedVersion - 1]?.content ?? "";
+  const dirty = editBuffer !== baseline;
+
+  // Snap selectedVersion to the wire's latest after refetch (e.g. WI-3
+  // Save lands a v(n+1) row; we want the user looking at that).
+  useEffect(() => {
+    setSelectedVersion(claim.current_version);
+  }, [claim.current_version]);
+
+  // Reset edit buffer to the selected version's content whenever the
+  // version changes OR the wire claim refreshes. After a Save: the
+  // refetched claim's draft_versions[current_version - 1] === the
+  // freshly-saved content, so the buffer naturally lands clean.
+  useEffect(() => {
+    setEditBuffer(claim.draft_versions[selectedVersion - 1]?.content ?? "");
+  }, [selectedVersion, claim]);
+
+  const [approveOpen, setApproveOpen] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+
+  const handleClickEdit = () => {
+    setDraftMode("edit");
+  };
+  const handleClickApprove = () => setApproveOpen(true);
+  const handleClickCancel = () => setCancelOpen(true);
 
   const assistantExpanded = useUIStore((s) => s.claimEmbeddedAssistantExpanded);
   const setEmbeddedExpanded = useUIStore((s) => s.setClaimEmbeddedAssistantExpanded);
@@ -102,6 +147,13 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
             claim={claim}
             refetch={refetch}
             applyOptimistic={applyOptimistic}
+            draftMode={draftMode}
+            setDraftMode={setDraftMode}
+            selectedVersion={selectedVersion}
+            setSelectedVersion={setSelectedVersion}
+            editBuffer={editBuffer}
+            setEditBuffer={setEditBuffer}
+            dirty={dirty}
             onDoubleClickHeader={toggleHorizontalMax}
           />
         </ResizablePanel>
@@ -136,7 +188,18 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
     return (
       <ResizablePanelGroup orientation="horizontal" className="h-full">
         <ResizablePanel defaultSize={50} minSize={30}>
-          <DraftPane claim={claim} refetch={refetch} applyOptimistic={applyOptimistic} />
+          <DraftPane
+            claim={claim}
+            refetch={refetch}
+            applyOptimistic={applyOptimistic}
+            draftMode={draftMode}
+            setDraftMode={setDraftMode}
+            selectedVersion={selectedVersion}
+            setSelectedVersion={setSelectedVersion}
+            editBuffer={editBuffer}
+            setEditBuffer={setEditBuffer}
+            dirty={dirty}
+          />
         </ResizablePanel>
 
         <ResizableHandle withHandle />
@@ -190,7 +253,18 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
           </TabsList>
         </div>
         <TabsContent value="draft" className="m-0 flex-1 overflow-hidden">
-          <DraftPane claim={claim} refetch={refetch} applyOptimistic={applyOptimistic} />
+          <DraftPane
+            claim={claim}
+            refetch={refetch}
+            applyOptimistic={applyOptimistic}
+            draftMode={draftMode}
+            setDraftMode={setDraftMode}
+            selectedVersion={selectedVersion}
+            setSelectedVersion={setSelectedVersion}
+            editBuffer={editBuffer}
+            setEditBuffer={setEditBuffer}
+            dirty={dirty}
+          />
         </TabsContent>
         <TabsContent value="evidence" className="m-0 flex-1 overflow-hidden">
           <EvidencePane claim={claim} />
@@ -204,13 +278,35 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
 
   return (
     <div className="flex h-[calc(100dvh-4rem)] flex-col overflow-hidden">
-      <ClaimHeader claim={claim} refetch={refetch} applyOptimistic={applyOptimistic} />
+      <ClaimHeader
+        claim={claim}
+        onClickEdit={handleClickEdit}
+        onClickCancel={handleClickCancel}
+        onClickApprove={handleClickApprove}
+      />
 
       <PostApproveBanner claim={claim} />
 
       <div className="min-h-0 flex-1 overflow-hidden bg-neutral-50">
         {isDesktop ? renderDesktopLayout() : isTablet ? renderTabletLayout() : renderMobileLayout()}
       </div>
+
+      <ApproveConfirmDialog
+        open={approveOpen}
+        onOpenChange={setApproveOpen}
+        claim={claim}
+        dirty={dirty}
+        editedDraftContent={editBuffer}
+        applyOptimistic={applyOptimistic}
+        refetch={refetch}
+      />
+      <CancelConfirmDialog
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        claim={claim}
+        applyOptimistic={applyOptimistic}
+        refetch={refetch}
+      />
     </div>
   );
 }
