@@ -735,6 +735,7 @@ export function DraftPane({
     setIsSaving(true);
     try {
       const nowIso = new Date().toISOString();
+      const nextVersion = claim.draft_versions.length + 1;
       await editClaimDraft(claim.claim_id, { draft_content: editBuffer });
       // Edit write succeeded — apply the optimistic patch + flip back
       // to preview regardless of whether the follow-up refetch lands.
@@ -759,13 +760,20 @@ export function DraftPane({
             at: dv.created_at,
           })),
           {
-            version: claim.draft_versions.length + 1,
+            version: nextVersion,
             content: editBuffer,
             generated_by: "user_edit",
             at: nowIso,
           },
         ],
       });
+      // Pin selection to the newly-saved version immediately
+      // (CodeRabbit MINOR, PR #168). Otherwise selectedVersion stayed
+      // on the previous one until the refetch resolved; if refetch
+      // failed the pane would land on a stale version that's now
+      // read-only (DraftPane forces preview-only off-latest), even
+      // though the save itself succeeded.
+      setSelectedVersion(nextVersion);
       try {
         await refetch();
       } catch {
@@ -773,8 +781,6 @@ export function DraftPane({
       }
       toast.success("Draft updated");
       setDraftMode("preview");
-      // setSelectedVersion will fire via the useEffect when the refreshed
-      // current_version lands; no explicit set needed here.
     } catch (err: unknown) {
       // Write itself failed — surface the real error and let the user
       // retry. No optimistic patch was applied so there's nothing to

@@ -103,7 +103,18 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
     setSelectedVersion(claim.current_version);
     setDraftMode("edit");
   };
-  const handleClickApprove = () => setApproveOpen(true);
+  const handleClickApprove = () => {
+    // Snap to the latest version before opening the approve dialog
+    // (CodeRabbit MAJOR, PR #168): if the user opened Approve while
+    // browsing a historical version, the dialog would otherwise
+    // submit the latest server draft (because only `dirty` /
+    // `editedDraftContent` are forwarded — and `dirty` is false off-
+    // latest), making the approved content differ from what's on
+    // screen. Pinning selection to current_version aligns the
+    // visible preview with what actually gets submitted.
+    setSelectedVersion(claim.current_version);
+    setApproveOpen(true);
+  };
   const handleClickCancel = () => setCancelOpen(true);
 
   const assistantExpanded = useUIStore((s) => s.claimEmbeddedAssistantExpanded);
