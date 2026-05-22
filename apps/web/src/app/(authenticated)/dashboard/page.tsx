@@ -306,7 +306,7 @@ function ConfirmExtractionCard({
   // targets. The visual treatment is preserved via buttonVariants().
   return (
     <Link
-      href={`/confirm/${purchaseId}`}
+      href={`/confirm/${purchaseId}?from=/dashboard`}
       aria-label={`Confirm purchase: ${platform} · ${title}`}
       className="block rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >

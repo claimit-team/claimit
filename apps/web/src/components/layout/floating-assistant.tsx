@@ -121,7 +121,11 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
           // landing on a 404'd confirm route.
           const purchaseId = extractPurchaseId(proactiveEvent?.data);
           if (purchaseId) {
-            router.push(`/confirm/${encodeURIComponent(purchaseId)}`);
+            // `?from=/dashboard` so the confirm-page Back affordance
+            // returns to the dashboard hero where the proactive
+            // nudge was surfaced. Cancel still exits to /dashboard
+            // too — same target either way for this entry point.
+            router.push(`/confirm/${encodeURIComponent(purchaseId)}?from=/dashboard`);
           } else {
             router.push("/purchases");
           }
