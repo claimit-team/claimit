@@ -10,7 +10,15 @@
  *   - email          → Sending to {policy.claim_email} for the claim amount
  *   - chat_script    → You'll paste the script in {platform} chat
  *   - in_store       → You'll bring this guide to {platform}
- *   - self_service   → Submitting at {policy.claim_url}
+ *   - self_service   → You'll complete this at {platform}
+ *
+ * Description copy is policy-URL-free for self-service: prod
+ * verification surfaced a raw policy.claim_url (e.g. a long
+ * Best Buy support URL) breaking out of the dialog frame and
+ * pushing the footer buttons offscreen. The walkthrough JSON
+ * already carries its own clickable claim_url (rendered by
+ * SelfServiceWalkthrough + PostApproveBanner) so the dialog
+ * doesn't need to repeat the raw URL — platform name suffices.
  *
  * On confirm: POST /api/v1/claims/:id/approve with the current edit
  * buffer if dirty (so a mid-edit approve sends the user's latest
@@ -86,10 +94,7 @@ function summaryCopy(claim: ClaimDetail): { title: string; description: string }
     case "self_service_walkthrough":
       return {
         title: "Approve and send",
-        description:
-          policy?.claim_url && policy.claim_url !== ""
-            ? `Submitting at ${policy.claim_url}. Approving locks the walkthrough in so you can step through it.`
-            : `Approving locks this self-service walkthrough in so you can step through it.`,
+        description: `You'll complete this at ${platform}. Approving locks the walkthrough in so you can step through it.`,
       };
   }
 }
@@ -172,7 +177,13 @@ export function ApproveConfirmDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          {/* `break-words` on the description so any policy-derived dynamic
+              string the copy embeds (e.g. a long policy.claim_email like
+              `customer-care.price-match@somelongdomain.example.com`) wraps
+              inside the dialog instead of pushing the footer buttons past
+              the dialog frame — same prod-verification fix that removed
+              the raw policy.claim_url from the self-service branch. */}
+          <DialogDescription className="break-words">{description}</DialogDescription>
         </DialogHeader>
         {dirty ? (
           <p className="text-neutral-600 text-xs">
