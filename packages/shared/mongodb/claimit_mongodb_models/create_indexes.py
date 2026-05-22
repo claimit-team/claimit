@@ -20,7 +20,27 @@ INDEX_DEFINITIONS: dict[str, list[dict[str, Any]]] = {
     "purchases": [
         {"keys": [("user_id", 1), ("status", 1)]},
         {"keys": [("window_expires", 1)]},
-        {"keys": [("user_id", 1), ("platform", 1), ("order_id", 1)], "unique": True},
+        # Partial unique on the (user_id, platform, order_id) triple.
+        # Real purchases are still deduped — the constraint fires for
+        # any non-empty `order_id`. The api-gateway upload sentinel
+        # AND the extraction-failure rescue path both write
+        # `order_id=""` (no id to extract yet); without the partial
+        # filter a second upload from the same user collides on
+        # (user_id, "amazon", "") because the sentinel default
+        # platform is amazon, and Mongo returns DuplicateKeyError →
+        # 500 from the upload endpoint. The partial keeps real-
+        # purchase dedup intact and lets sentinels / rescued docs
+        # stack until each gets its real `order_id` from finalize.
+        # NOTE on dedup semantics for downstream consumers: this
+        # partial allows multiple (user_id, platform, "") rows AND
+        # multiple (user_id, platform, null) rows — but the strict
+        # `Purchase` model declares `order_id: str` (non-null,
+        # required), so null is a non-issue for prod-written docs.
+        {
+            "keys": [("user_id", 1), ("platform", 1), ("order_id", 1)],
+            "unique": True,
+            "partialFilterExpression": {"order_id": {"$gt": ""}},
+        },
         # Partial unique: only indexes documents with a string receipt_hash so
         # multiple null/missing hashes are allowed.
         {
@@ -78,12 +98,39 @@ async def create_indexes(
                 try:
                     name = await collection.create_index(keys, **kwargs)
                 except OperationFailure as exc:
+                    # OperationFailure code 85 = IndexOptionsConflict (an
+                    # index with the same name/keys exists but with
+                    # different options — e.g. `unique:True` without our
+                    # new `partialFilterExpression`), code 86 =
+                    # IndexKeySpecsConflict. In both cases the old shape
+                    # is incompatible with what we want; drop and
+                    # recreate to converge the live schema with
+                    # INDEX_DEFINITIONS. Idempotent: re-running this
+                    # script after the drop-and-recreate is a no-op
+                    # because the second `create_index` matches the
+                    # existing spec.
+                    code = getattr(exc, "code", None)
                     if (
                         collection_name == "purchases"
                         and keys == [("receipt_hash", 1)]
-                        and getattr(exc, "code", None) in (85, 86)
+                        and code in (85, 86)
                     ):
                         await collection.drop_index("receipt_hash_1")
+                        name = await collection.create_index(keys, **kwargs)
+                    elif (
+                        # Post-5.14 prod-verify: pre-fix the (user_id,
+                        # platform, order_id) triple was a plain unique
+                        # index; this PR converts it to a partial unique
+                        # filtered on `order_id > ""` so the upload
+                        # sentinel and rescue path can coexist. Drop the
+                        # old index name (Mongo's auto-derived
+                        # `user_id_1_platform_1_order_id_1`) and recreate
+                        # with the partial filter.
+                        collection_name == "purchases"
+                        and keys == [("user_id", 1), ("platform", 1), ("order_id", 1)]
+                        and code in (85, 86)
+                    ):
+                        await collection.drop_index("user_id_1_platform_1_order_id_1")
                         name = await collection.create_index(keys, **kwargs)
                     else:
                         raise
