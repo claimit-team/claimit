@@ -249,36 +249,53 @@ function ReviewDraftCard({
   claimType: string;
   windowRemaining: string;
 }) {
+  // Mirror the ConfirmExtractionCard pattern: whole-card is the hit
+  // target (a tap on the platform name / claim-type badge lands at
+  // /claims/:id same as if the trailing "Review draft" CTA were
+  // clicked). Pre-fix the card body had no handler so only the small
+  // trailing Link navigated, leaving the rest of the visibly-clickable
+  // card dead. The trailing CTA stays a styled <span> with
+  // pointer-events-none because nested interactive elements (<Link>
+  // inside <Link>) are invalid HTML and confuse screen readers.
   return (
-    <Card className="border-neutral-200">
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <Badge
-              variant="secondary"
-              className="mb-2 bg-brand-primary-50 text-brand-primary-700 border-0"
-            >
-              Review needed
-            </Badge>
-            <div className="font-medium text-neutral-900 truncate">
-              {platform} · {title}
-            </div>
-            <div className="flex items-center gap-3 mt-2 text-sm text-neutral-600 flex-wrap">
-              <Badge variant="outline" className="text-xs">
-                {snakeToTitleLabel(claimType)}
+    <Link
+      href={`/claims/${claimId}`}
+      aria-label={`Review draft: ${platform} · ${title}`}
+      className="block rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    >
+      <Card className="border-neutral-200 transition-colors hover:bg-neutral-50">
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <Badge
+                variant="secondary"
+                className="mb-2 bg-brand-primary-50 text-brand-primary-700 border-0"
+              >
+                Review needed
               </Badge>
-              <span className="flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5" aria-hidden="true" />
-                {windowRemaining}
-              </span>
+              <div className="font-medium text-neutral-900 truncate">
+                {platform} · {title}
+              </div>
+              <div className="flex items-center gap-3 mt-2 text-sm text-neutral-600 flex-wrap">
+                <Badge variant="outline" className="text-xs">
+                  {snakeToTitleLabel(claimType)}
+                </Badge>
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+                  {windowRemaining}
+                </span>
+              </div>
             </div>
+            <span
+              aria-hidden="true"
+              className={cn(buttonVariants({ size: "sm" }), "pointer-events-none")}
+            >
+              Review draft
+            </span>
           </div>
-          <Link href={`/claims/${claimId}`} className={cn(buttonVariants({ size: "sm" }))}>
-            Review draft
-          </Link>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </Link>
   );
 }
 
