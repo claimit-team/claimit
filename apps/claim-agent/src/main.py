@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -19,6 +20,7 @@ from claimit_mongodb_models import (
     NotificationEventType,
     Platform,
     PurchaseReadTolerant,
+    SendMode,
     write_notification_event,
 )
 from claimit_observability import init_phoenix
@@ -32,6 +34,8 @@ from .draft.type_c_in_store import generate_in_store_guide
 from .draft.type_d_self_service import generate_self_service_walkthrough
 from .orchestrate_eval import evaluate_and_maybe_regenerate
 from .plan import PriceDroppedEvent, plan_claim
+from .send_mode import determine_send_mode, handle_approval_mode, handle_auto_mode
+from .submit_claim import publish_claim_approved, submit_claim
 from .validator import validate
 
 _log = logging.getLogger(__name__)
@@ -69,6 +73,18 @@ def _purchase_degraded_reason(purchase: PurchaseReadTolerant) -> str | None:
     if not purchase.product_name:
         return "null/empty product_name"
     return None
+
+
+def _parse_delay_seconds() -> int:
+    raw = os.getenv("AUTO_SEND_DELAY_SECONDS", "300")
+    try:
+        val = int(raw)
+        if val <= 0:
+            raise ValueError("must be positive")
+        return val
+    except ValueError:
+        _log.warning("Invalid AUTO_SEND_DELAY_SECONDS=%r, defaulting to 300", raw)
+        return 300
 
 
 @asynccontextmanager
@@ -338,6 +354,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             }
         )
         await db.upsert_claim(final_claim)
+        mode = SendMode.APPROVAL if user is None else determine_send_mode(user, final_claim)
         notif_id = await write_notification_event(
             db=db,
             user_id=event.user_id,
@@ -348,18 +365,40 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
                 "claim_id": str(claim_id),
                 "claim_type": claim_plan.claim_type.value,
                 "refund_amount": event.price_drop_amount,
-                "send_mode": final_claim.send_override.value
-                if final_claim.send_override
-                else "approval",
+                "send_mode": mode.value,
                 "platform": event.platform_id,
             },
         )
         if notif_id is None:
             _log.warning("Failed to write claim_drafted notification for claim %s", claim_id)
-        # TODO(task-3.20): write_notification_event claim_queued_auto here
-        # TODO(task-3.20): write_notification_event claim_submitted here
-        # TODO(task-3.20): write_notification_event claim_denied here
-        # TODO(task-3.20): write_notification_event claim_resolved_success here
+
+        if mode == SendMode.AUTO:
+            final_claim, auto_send_at = await handle_auto_mode(
+                claim=final_claim,
+                db=db,
+                event_platform_id=event.platform_id,
+                refund_amount=event.price_drop_amount,
+                delay_seconds=_parse_delay_seconds(),
+            )
+            await write_notification_event(
+                db=db,
+                user_id=str(event.user_id),
+                event_type=NotificationEventType.CLAIM_QUEUED_AUTO,
+                entity_type=NotificationEntityType.CLAIM,
+                entity_id=str(claim_id),
+                data={
+                    "claim_id": str(claim_id),
+                    "auto_send_at": auto_send_at.isoformat(),
+                    "refund_amount": event.price_drop_amount,
+                },
+            )
+        else:
+            final_claim = await handle_approval_mode(
+                claim=final_claim,
+                db=db,
+                event_platform_id=event.platform_id,
+                refund_amount=event.price_drop_amount,
+            )
 
         _log.info(
             "Generated %s draft for claim %s (purchase %s)",
@@ -379,3 +418,82 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             },
         )
         return {"status": "error"}
+
+
+# NOTE(task-3.20): This is an internal endpoint must be wired to a Cloud Scheduler job.
+# Add to infra/terraform/scheduler.tf:
+#
+# resource "google_cloud_scheduler_job" "claim_auto_send" {
+#   name             = "claimit-claim-auto-send"
+#   schedule         = "* * * * *"
+#   time_zone        = "UTC"
+#   attempt_deadline = "60s"
+#   # max_concurrent_dispatches=1 ensures only one run at a time,
+#   # preventing duplicate submissions if a run exceeds 60s.
+#   # The re-read guard in handle_auto_send provides a second layer.
+#   http_target {
+#     http_method = "POST"
+#     uri         = "${module.claim_agent.service_url}/internal/auto-send"
+#     oidc_token {
+#       service_account_email = google_service_account.pubsub_pusher.email
+#       audience              = "${module.claim_agent.service_url}/internal/auto-send"
+#     }
+#   }
+# }
+# This is an [INTERFACE-CHANGE] — tag the PR accordingly.
+@app.post("/internal/auto-send")
+async def handle_auto_send(request: Request) -> dict:
+    now = datetime.now(UTC)
+    db = MongoDBClient()
+
+    # Single-worker model: Cloud Scheduler max_concurrent_dispatches=1
+    # + re-read guard below prevents double-processing.
+    batch_size = int(os.getenv("AUTO_SEND_BATCH_SIZE", "50"))
+    overdue = await db.find_claims(
+        {
+            "outcome": ClaimOutcome.QUEUED_FOR_SEND.value,
+            "auto_send_at": {"$lte": now},
+        },
+        limit=batch_size,
+    )
+
+    results: dict[str, int] = {"processed": 0, "errors": 0}
+    for claim in overdue:
+        try:
+            current = await db.get_claim(claim.id)
+            if current is None or current.outcome != ClaimOutcome.QUEUED_FOR_SEND:
+                continue
+
+            user = await db.get_user(current.user_id)
+            if user is None:
+                _log.error("User not found for claim %s", claim.id)
+                results["errors"] += 1
+                continue
+
+            submit_result = await submit_claim(current, user, db)
+
+            await publish_claim_approved(
+                claim=current,
+                submitted_via=submit_result.submitted_via,
+                approved_by="auto",
+            )
+
+            await write_notification_event(
+                db=db,
+                user_id=str(current.user_id),
+                event_type=NotificationEventType.CLAIM_SUBMITTED,
+                entity_type=NotificationEntityType.CLAIM,
+                entity_id=str(current.id),
+                data={
+                    "claim_id": str(current.id),
+                    "submitted_via": submit_result.submitted_via.value,
+                    "refund_amount": current.claim_amount,
+                },
+            )
+            results["processed"] += 1
+
+        except Exception as exc:
+            _log.exception("Auto-send failed for claim %s: %s", claim.id, exc)
+            results["errors"] += 1
+
+    return results

@@ -145,7 +145,10 @@ SPECS: list[
         int | None,
     ]
 ] = [
-    # PENDING group (DRAFT_PENDING)
+    # PENDING group (DRAFT_PENDING) — one row per ClaimType so the
+    # /claims/:id detail page can demo every renderer (email / chat /
+    # in_store / self_service) end-to-end. 5.7 WI-10 added the in_store
+    # and self_service rows; the email + chat rows pre-date this PR.
     (
         "pending",
         ClaimOutcome.DRAFT_PENDING,
@@ -171,6 +174,34 @@ SPECS: list[
         ClaimType.CHAT_SCRIPT,
         None,
         3,
+        None,
+        None,
+    ),
+    (
+        "pending",
+        ClaimOutcome.DRAFT_PENDING,
+        Platform.TARGET,
+        Category.RETAIL,
+        "KitchenAid Stand Mixer",
+        99.99,
+        19.99,
+        ClaimType.IN_STORE,
+        None,
+        7,
+        None,
+        None,
+    ),
+    (
+        "pending",
+        ClaimOutcome.DRAFT_PENDING,
+        Platform.SOUTHWEST,
+        Category.AIRLINE,
+        "Southwest LAX → MIA flight",
+        500.00,
+        128.00,
+        ClaimType.SELF_SERVICE,
+        None,
+        21,
         None,
         None,
     ),
@@ -276,7 +307,7 @@ SPECS: list[
     ),
 ]
 
-EXPECTED_COUNTS = {"pending": 2, "in_progress": 2, "resolved": 5}
+EXPECTED_COUNTS = {"pending": 4, "in_progress": 2, "resolved": 5}
 
 # ---- Ticket 5.14: pending_confirmation seed rows ----
 # Three sentinel-shaped purchases that drive the /confirm/:id and
@@ -907,6 +938,133 @@ def _build_pending_confirmation_purchase(
     )
 
 
+def _build_draft_content_for_pending(
+    *,
+    claim_type: ClaimType,
+    platform: Platform,
+    product_name: str,
+    price_paid: float,
+    claim_amount: float,
+    order_id: str,
+) -> str:
+    """Realistic per-claim_type draft content for DRAFT_PENDING fixtures.
+
+    Pinned to the output formats emitted by `apps/claim-agent/src/draft/*.py`:
+
+      - email          → body-only prose (subject derived FE-side from
+                          purchase.order_id; type_a_email.py L138, L146)
+      - chat_script    → `{title}\\n\\nStep 1: ...\\n…\\n--- IF AGENT
+                          DECLINES ---\\n\\nStep N: ...`
+                          (type_b_chat.py `_format_chat_script` L100-110)
+      - in_store       → `## ` heading + five `**Bolded**` sections in
+                          fixed order (type_c_in_store.py
+                          `_format_in_store_guide` L72-97)
+      - self_service   → JSON of `SelfServiceWalkthrough` (8 required
+                          fields per type_d_self_service.py L145-153)
+
+    The FE renderers in `apps/web/src/components/claims/draft-parsers.ts`
+    have vitest fixtures that mirror this format — drift between this
+    seed and that parser is what those tests guard against.
+    """
+    paid = f"{price_paid:.2f}"
+    save_amount = f"{claim_amount:.2f}"
+    now_price = f"{price_paid - claim_amount:.2f}"
+    if claim_type == ClaimType.EMAIL:
+        return (
+            f"Hello {platform.value.replace('_', ' ').title()} Customer Care,\n\n"
+            f"I'm writing to request a price match refund on a recent purchase.\n\n"
+            f"Order {order_id} — {product_name} at ${paid}. The current price "
+            f"is ${now_price}, a difference of ${save_amount} within the published "
+            f"price match window.\n\n"
+            f"Could you please refund the ${save_amount} difference to my original "
+            f"payment method? I have the order confirmation and a screenshot of the "
+            f"current price ready to share if you need them.\n\n"
+            f"Thank you,\n[Your name]\n"
+        )
+    if claim_type == ClaimType.CHAT_SCRIPT:
+        platform_label = platform.value.replace("_", " ").title()
+        return (
+            f"{platform_label} Price Match — Order {order_id}\n\n"
+            f"Step 1: Hi! I'd like to request a price match refund on a recent order.\n"
+            f"Step 2: Order number {order_id} — {product_name}.\n"
+            f"Step 3: I paid ${paid} but the current price is ${now_price} — "
+            f"please refund the ${save_amount} difference.\n"
+            f"Step 4: This falls within the published price match window for "
+            f"{platform_label}.\n"
+            f"Step 5: I have a screenshot of the current lower price; I can share "
+            f"it with you here.\n\n"
+            f"--- IF AGENT DECLINES ---\n\n"
+            f"Step 6: Could you please transfer me to a supervisor or open a case "
+            f"for review?\n"
+            f"Step 7: What's the formal submission channel, and can I get a "
+            f"reference number for my records?\n"
+        )
+    if claim_type == ClaimType.IN_STORE:
+        platform_label = platform.value.replace("_", " ").title()
+        return (
+            f"## In-Store Price Match Guide\n\n"
+            f"**What to Say**\n"
+            f"Hi, I'd like to request a {platform_label} price match for an item I "
+            f"bought recently — order {order_id} — that's now listed at a lower "
+            f"price.\n\n"
+            f"**What to Bring**\n"
+            f"- A printed or digital copy of your order confirmation (Order #: "
+            f"{order_id})\n"
+            f"- A screenshot of the current lower price (${now_price})\n\n"
+            f"**Talking Points**\n"
+            f"1. The item was purchased recently — within the published price "
+            f"match window.\n"
+            f"2. I paid ${paid} originally; the current price is ${now_price}.\n"
+            f"3. Per {platform_label}'s Price Match Guarantee, the difference "
+            f"should be refunded to my original payment method.\n\n"
+            f"**Policy Reference**\n"
+            f"{platform_label} Price Match Guarantee — applies to identical items "
+            f"priced lower at {platform_label} within the post-purchase window, "
+            f"refunded to the original tender.\n\n"
+            f"**If Your Claim Is Denied**\n"
+            f"Politely ask for a manager and reference the published price match "
+            f"policy.\n"
+        )
+    if claim_type == ClaimType.SELF_SERVICE:
+        # type_d_self_service.py emits `SelfServiceWalkthrough.model_dump_json()`.
+        # Build the dict here + json.dumps so the structure stays explicit;
+        # FE parser has the matching shape gate in draft-parsers.ts.
+        import json
+
+        platform_display = platform.value.replace("_", " ").title()
+        walkthrough = {
+            "platform_display_name": platform_display,
+            "order_summary": (
+                f"{product_name} | Paid {paid} → Now {now_price} | Save {save_amount} USD"
+            ),
+            "steps": [
+                f"Go to {platform_display}'s self-service portal and locate "
+                f"the order management page",
+                f"Enter your Confirmation #: {order_id} and your name as it appears on the booking",
+                'Open the "Request a price adjustment" or equivalent form',
+                f"Select {product_name} from the order item list",
+                f"Submit the price difference (${save_amount}) request — no "
+                f"further action needed after this step",
+                "You'll receive the credit within 1-2 business days",
+            ],
+            "notes": [
+                "Eligible only on identical items / itineraries; modifications "
+                "may void the guarantee.",
+                f"Credit posts as a refund to the original payment method or as "
+                f"loyalty credit, depending on {platform_display}'s policy.",
+                "Must be completed within the published window for fastest processing.",
+            ],
+            "sub_pattern": "portal_request",
+            "estimated_minutes": 3,
+            "claim_url": f"https://{platform.value}.example.com/self-service",
+            "credit_type": "refund to original payment method",
+        }
+        return json.dumps(walkthrough)
+    # Unknown / future claim_type — fall back to generic placeholder so
+    # the verification block still passes.
+    return "Demo claim draft (seeded for ticket 5.4)."
+
+
 def _build_claim(
     *,
     user_id: UUID,
@@ -918,9 +1076,10 @@ def _build_claim(
     updated_at: datetime,
     submitted_at: datetime | None,
     resolved_at: datetime | None,
+    draft_content_override: str | None = None,
 ) -> Claim:
     submitted_via = None if outcome == ClaimOutcome.DRAFT_PENDING else SubmittedVia.GMAIL_SEND
-    draft_text = "Demo claim draft (seeded for ticket 5.4)."
+    draft_text = draft_content_override or "Demo claim draft (seeded for ticket 5.4)."
     return Claim(
         _id=uuid4(),
         purchase_id=purchase_id,
@@ -1081,6 +1240,21 @@ async def _run() -> int:
             resolved_at = (
                 ts + timedelta(days=resolved_off_days) if resolved_off_days is not None else None
             )
+            # 5.7 WI-10: realistic per-claim_type draft content for the
+            # DRAFT_PENDING fixtures so the /claims/:id renderers can be
+            # demo'd against real generator output formats. Other
+            # outcomes keep the generic placeholder (their draft is no
+            # longer the relevant surface).
+            draft_content_override: str | None = None
+            if outcome == ClaimOutcome.DRAFT_PENDING:
+                draft_content_override = _build_draft_content_for_pending(
+                    claim_type=claim_type,
+                    platform=platform,
+                    product_name=product_name,
+                    price_paid=price_paid,
+                    claim_amount=claim_amount,
+                    order_id=purchase.order_id,
+                )
             claim = _build_claim(
                 user_id=user_id,
                 purchase_id=purchase.id,
@@ -1091,6 +1265,7 @@ async def _run() -> int:
                 updated_at=ts,
                 submitted_at=submitted_at,
                 resolved_at=resolved_at,
+                draft_content_override=draft_content_override,
             )
             purchase_models.append(purchase)
             claim_models.append((group, claim))

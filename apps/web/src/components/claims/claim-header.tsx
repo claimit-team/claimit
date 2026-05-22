@@ -1,19 +1,22 @@
 "use client";
 
 /**
- * /claims/[id] header bar — viewer-only post-real-ification.
+ * /claims/[id] header bar — write actions wired in 5.7.
  *
- * Write actions render as disabled buttons with "coming soon"
- * tooltips. The pattern mirrors PR1's `purchase-page-header.tsx`
- * `DisabledTooltipButton` (a11y-safe: keyboard-focusable, blocks
- * mouse + Enter/Space, surfaces the tooltip explaining the gap).
+ * The header itself is stateless: clicking an action emits an
+ * `onClickX` callback to `ClaimDetailShell`, which owns the dialog
+ * open state + edit buffer + approve/cancel flow. This keeps the
+ * header lean and lets the shell pass `dirty` + `editBuffer` into
+ * the approve dialog so a mid-edit approve includes the unsaved
+ * draft as `edited_draft_content`.
  *
- * TODO(claims-detail-write-actions): wire to:
- *   - POST /api/v1/claims/:id/approve   (Approve and send / Send now)
- *   - POST /api/v1/claims/:id/cancel    (Cancel claim / Cancel)
- *   - PUT  /api/v1/claims/:id/edit      (Edit draft / Review)
- *   - No endpoint yet for "Execute" / "Mark as submitted" / "Try a
- *     different angle" / "View receipt" — punt to follow-up.
+ * Actions per status (mapped via mapOutcomeToWorkflowStatus):
+ *   - awaiting_approval → Edit draft / Cancel claim / Approve and send
+ *   - submitted         → (none — see PostApproveBanner)
+ *   - approved          → Reclaimed $X (view receipt deferred)
+ *   - denied            → denial reason + Try a different angle (deferred)
+ *   - cancelled         → muted cancel reason subtext
+ *   - expired           → none
  */
 
 import { AlertCircle, ArrowLeft, Check, Clock, Edit, Send, XCircle } from "lucide-react";
@@ -21,7 +24,7 @@ import Link from "next/link";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatClaimCurrency, formatClaimRemainingTime } from "@/lib/claim-detail";
 import type { ClaimDetail, ClaimDetailWorkflowStatus } from "@/lib/claim-detail-types";
@@ -29,14 +32,19 @@ import { cn } from "@/lib/utils";
 
 interface ClaimHeaderProps {
   claim: ClaimDetail;
+  /** Header → shell: flip the DraftPane tab to `edit`. */
+  onClickEdit: () => void;
+  /** Header → shell: open the cancel-claim confirm dialog. */
+  onClickCancel: () => void;
+  /** Header → shell: open the approve-and-send confirm dialog. */
+  onClickApprove: () => void;
 }
 
-// Tooltip copy per pending endpoint — kept top-level so future
-// wiring just deletes the constant + flips the button.
-const APPROVE_TODO =
-  "Coming soon — will wire to POST /api/v1/claims/:id/approve in a follow-up PR.";
-const CANCEL_TODO = "Coming soon — will wire to POST /api/v1/claims/:id/cancel in a follow-up PR.";
-const EDIT_TODO = "Coming soon — will wire to PUT /api/v1/claims/:id/edit in a follow-up PR.";
+// Tooltip copy for the two actions still missing backends today.
+// (Approve / Cancel / Edit are wired in 5.7 and no longer need a
+// "coming soon" tooltip.) These two flip when the matching backends
+// land: View receipt → reclaimed-amount receipt URL on Claim; Try a
+// different angle → redraft endpoint (not yet specced).
 const TRY_AGAIN_TODO =
   "Coming soon — claim redrafting flow needs a backend endpoint before wiring.";
 const VIEW_RECEIPT_TODO =
@@ -72,6 +80,10 @@ function StatusBadge({ status }: { status: ClaimDetailWorkflowStatus }) {
       label: "Window Closed",
       className: "bg-neutral-100 text-neutral-500 border-neutral-200",
     },
+    cancelled: {
+      label: "Cancelled",
+      className: "bg-neutral-100 text-neutral-500 border-neutral-200",
+    },
   };
 
   const { label, className } = config[status];
@@ -83,37 +95,39 @@ function StatusBadge({ status }: { status: ClaimDetailWorkflowStatus }) {
   );
 }
 
-export function ClaimHeader({ claim }: ClaimHeaderProps) {
+export function ClaimHeader({
+  claim,
+  onClickEdit,
+  onClickCancel,
+  onClickApprove,
+}: ClaimHeaderProps) {
   const renderActions = () => {
-    // The view-model maps backend `outcome` to UI workflow status per
-    // `mapOutcomeToWorkflowStatus`; `queued_for_send` and
-    // `ready_to_execute` are UI-only intermediate states never emitted
-    // by real data today. Their branches are intentionally absent here
-    // (the `default: null` arm covers them) and will return alongside
-    // the approve-flow follow-up PR.
+    // `queued_for_send` and `ready_to_execute` are UI-only intermediate
+    // states never emitted by real data today; the `default: null` arm
+    // covers them and will gain real branches alongside 5.15's send-
+    // mode wiring.
     switch (claim.status) {
       case "awaiting_approval":
         return (
           <>
-            <DisabledTooltipButton
-              label="Edit draft"
-              icon={<Edit className="mr-2 h-4 w-4" />}
-              tooltip={EDIT_TODO}
+            <Button variant="ghost" size="sm" type="button" onClick={onClickEdit}>
+              <Edit className="mr-2 h-4 w-4" />
+              Edit draft
+            </Button>
+            <Button
               variant="ghost"
-            />
-            <DisabledTooltipButton
-              label="Cancel claim"
-              icon={<XCircle className="mr-2 h-4 w-4" />}
-              tooltip={CANCEL_TODO}
-              variant="ghost"
-              danger
-            />
-            <DisabledTooltipButton
-              label="Approve and send"
-              icon={<Send className="mr-2 h-4 w-4" />}
-              tooltip={APPROVE_TODO}
-              variant="default"
-            />
+              size="sm"
+              type="button"
+              onClick={onClickCancel}
+              className="text-semantic-danger"
+            >
+              <XCircle className="mr-2 h-4 w-4" />
+              Cancel claim
+            </Button>
+            <Button size="sm" type="button" onClick={onClickApprove}>
+              <Send className="mr-2 h-4 w-4" />
+              Approve and send
+            </Button>
           </>
         );
 
@@ -157,6 +171,22 @@ export function ClaimHeader({ claim }: ClaimHeaderProps) {
 
       case "expired":
         return null;
+
+      case "cancelled":
+        // Closed by user action — surface the cancel reason inline so
+        // the user remembers why this claim is sitting on the list as
+        // "Cancelled" rather than "Window Closed". Truncated with
+        // `max-w-[16rem]` + hover-tooltip so a long free-text reason
+        // doesn't push the breadcrumb / actions off-screen on
+        // narrower layouts (CodeRabbit MINOR, PR #168).
+        return claim.cancel_reason !== undefined && claim.cancel_reason !== "" ? (
+          <span
+            className="max-w-[16rem] truncate text-neutral-500 text-sm italic"
+            title={`Cancelled: ${claim.cancel_reason}`}
+          >
+            Cancelled: {claim.cancel_reason}
+          </span>
+        ) : null;
 
       default:
         return null;

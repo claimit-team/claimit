@@ -1,53 +1,122 @@
 "use client";
 
 /**
- * /claims/[id] shell — viewer-only post-real-ification.
+ * /claims/[id] shell — three-pane approval flow (5.7).
  *
- * Write actions are NOT wired here. Approve / Cancel / Edit draft /
- * Send now / Mark submitted / Execute / Mark result render as
- * disabled buttons with "coming soon" tooltips in `ClaimHeader`. A
- * separate immediate follow-up PR will wire these to the real
- * endpoints, avoiding fake-success local-state mutations on real
- * production claims.
+ * The page owns the wire `ClaimDetailResponse` and exposes:
+ *   - `claim`             — the derived `ClaimDetail` view-model
+ *   - `refetch()`         — re-pulls server truth (single source of
+ *                            truth after every write)
+ *   - `applyOptimistic()` — shallow-merges a `Partial<ClaimDetailDoc>`
+ *                            into the wire `claim` so the UI updates
+ *                            before the network round-trip completes
  *
- * TODO(claims-detail-write-actions): wire the disabled actions to:
- *   - POST /api/v1/claims/:id/approve   (header "Approve and send")
- *   - POST /api/v1/claims/:id/cancel    (header "Cancel claim" / "Cancel")
- *   - PUT  /api/v1/claims/:id/edit      (header "Edit draft" / "Review")
- *   - <no endpoint yet>                 (MarkResultSection — manual
- *                                        outcome marking; not rendered
- *                                        on real data until a backend
- *                                        endpoint exists)
+ * The shell threads these through to `ClaimHeader`, `DraftPane`, and
+ * `AssistantPane`. WI-3 (edit/save) and WI-6/7 (approve/cancel)
+ * consume them; WI-2 only sets up the plumbing.
+ *
+ * AssistantPane receives `refetch` but doesn't call it in 5.7 — the
+ * 5.9 seam comment marks where assistant→draft redraft sync will
+ * hook in.
  */
 
 import { useEffect, useState } from "react";
 
+import { ApproveConfirmDialog } from "@/components/claims/approve-confirm-dialog";
 import { AssistantPane } from "@/components/claims/assistant-pane";
+import { CancelConfirmDialog } from "@/components/claims/cancel-confirm-dialog";
 import { ClaimHeader } from "@/components/claims/claim-header";
+import type { DraftMode } from "@/components/claims/draft-pane";
 import { DraftPane } from "@/components/claims/draft-pane";
 import { EvidencePane } from "@/components/claims/evidence-pane";
+import { PostApproveBanner } from "@/components/claims/post-approve-banner";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import type { ClaimDetailDoc } from "@/lib/api/claims";
 import type { ClaimDetail } from "@/lib/claim-detail-types";
 import { useUIStore } from "@/store";
 
 interface ClaimDetailShellProps {
-  /**
-   * The view-model claim (built from `getClaimDetail` ->
-   * `buildClaimDetailViewModel`). Treated as a read-only snapshot;
-   * the shell never mutates it — write actions are disabled until
-   * the follow-up PR wires real endpoints (see top-of-file TODO).
-   */
-  initialClaim: ClaimDetail;
+  /** Derived view-model (built from the page-owned wire response). */
+  claim: ClaimDetail;
+  /** Re-pull server truth; pair with `applyOptimistic` in write paths. */
+  refetch: () => Promise<void>;
+  /** Shallow-merge a partial wire claim and re-derive the VM. */
+  applyOptimistic: (patch: Partial<ClaimDetailDoc>) => void;
 }
 
-export function ClaimDetailShell({ initialClaim }: ClaimDetailShellProps) {
-  const claim = initialClaim;
-
+export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetailShellProps) {
   const [paneMax, setPaneMax] = useState<"draft" | "evidence" | null>(null);
   const [mobileTab, setMobileTab] = useState<"draft" | "evidence" | "assistant">("draft");
   const [tabletTab, setTabletTab] = useState<"evidence" | "assistant">("evidence");
+
+  // ------------------------------------------------------------------
+  // Shared draft-edit state (lifted from DraftPane in WI-8 so the
+  // header's "Approve and send" dialog can include the in-progress
+  // edit buffer as `edited_draft_content` when the user approves
+  // mid-edit). DraftPane is now controlled: tabs + version selector +
+  // edit buffer all route through these setters. The unsaved-changes
+  // guard (pendingTab / pendingVersion) is still local to DraftPane —
+  // a header-initiated edit-mode flip bypasses the guard intentionally
+  // (the "Edit draft" button only renders in `awaiting_approval` which
+  // can't have an in-flight edit-in-progress).
+  // ------------------------------------------------------------------
+  const [draftMode, setDraftMode] = useState<DraftMode>("preview");
+  const [selectedVersion, setSelectedVersion] = useState(claim.current_version);
+  const [editBuffer, setEditBuffer] = useState(
+    claim.draft_versions[claim.current_version - 1]?.content ?? "",
+  );
+  const baseline = claim.draft_versions[selectedVersion - 1]?.content ?? "";
+  const dirty = editBuffer !== baseline;
+
+  // Snap selectedVersion to the wire's latest after refetch (e.g. WI-3
+  // Save lands a v(n+1) row; we want the user looking at that).
+  useEffect(() => {
+    setSelectedVersion(claim.current_version);
+  }, [claim.current_version]);
+
+  // Reset edit buffer to the selected version's content whenever the
+  // version changes OR the selected version's content changes (e.g.
+  // after a Save: refetched draft_versions[current_version - 1] ===
+  // the freshly-saved content, so the buffer naturally lands clean).
+  //
+  // Narrow the dependency to the specific content cell (not the
+  // whole `claim` reference): an unrelated optimistic patch
+  // (e.g. approve flipping `outcome → pending`) changes the claim
+  // reference but MUST NOT clobber in-progress edits in the buffer.
+  // CodeRabbit MAJOR finding, PR #168.
+  const currentDraftContent = claim.draft_versions[selectedVersion - 1]?.content ?? "";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedVersion is intentionally listed alongside currentDraftContent so the buffer also resets across version switches where two versions happen to share identical content (rare but possible after AI regens); without it the effect wouldn't re-fire and stale edits could carry across the flip — CodeRabbit MINOR, PR #168.
+  useEffect(() => {
+    setEditBuffer(currentDraftContent);
+  }, [currentDraftContent, selectedVersion]);
+
+  const [approveOpen, setApproveOpen] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+
+  const handleClickEdit = () => {
+    // Jump to the latest version before flipping to edit mode — older
+    // versions are read-only in DraftPane (it forces preview-only via
+    // a guard `useEffect`), so without this the header's "Edit draft"
+    // would look broken when the user is browsing v1 of a multi-version
+    // draft (CodeRabbit MINOR finding, PR #168).
+    setSelectedVersion(claim.current_version);
+    setDraftMode("edit");
+  };
+  const handleClickApprove = () => {
+    // Snap to the latest version before opening the approve dialog
+    // (CodeRabbit MAJOR, PR #168): if the user opened Approve while
+    // browsing a historical version, the dialog would otherwise
+    // submit the latest server draft (because only `dirty` /
+    // `editedDraftContent` are forwarded — and `dirty` is false off-
+    // latest), making the approved content differ from what's on
+    // screen. Pinning selection to current_version aligns the
+    // visible preview with what actually gets submitted.
+    setSelectedVersion(claim.current_version);
+    setApproveOpen(true);
+  };
+  const handleClickCancel = () => setCancelOpen(true);
 
   const assistantExpanded = useUIStore((s) => s.claimEmbeddedAssistantExpanded);
   const setEmbeddedExpanded = useUIStore((s) => s.setClaimEmbeddedAssistantExpanded);
@@ -99,7 +168,19 @@ export function ClaimDetailShell({ initialClaim }: ClaimDetailShellProps) {
     return (
       <ResizablePanelGroup orientation="horizontal" className="h-full">
         <ResizablePanel defaultSize={defaultSizes[0]} minSize={20}>
-          <DraftPane claim={claim} onDoubleClickHeader={toggleHorizontalMax} />
+          <DraftPane
+            claim={claim}
+            refetch={refetch}
+            applyOptimistic={applyOptimistic}
+            draftMode={draftMode}
+            setDraftMode={setDraftMode}
+            selectedVersion={selectedVersion}
+            setSelectedVersion={setSelectedVersion}
+            editBuffer={editBuffer}
+            setEditBuffer={setEditBuffer}
+            dirty={dirty}
+            onDoubleClickHeader={toggleHorizontalMax}
+          />
         </ResizablePanel>
 
         <ResizableHandle withHandle />
@@ -115,6 +196,7 @@ export function ClaimDetailShell({ initialClaim }: ClaimDetailShellProps) {
             <ResizablePanel defaultSize={rightBottom} minSize={15}>
               <AssistantPane
                 claimId={claim.claim_id}
+                refetch={refetch}
                 onDoubleClickHeader={() => {
                   toggleEmbedded();
                   setPaneMax(null);
@@ -131,7 +213,18 @@ export function ClaimDetailShell({ initialClaim }: ClaimDetailShellProps) {
     return (
       <ResizablePanelGroup orientation="horizontal" className="h-full">
         <ResizablePanel defaultSize={50} minSize={30}>
-          <DraftPane claim={claim} />
+          <DraftPane
+            claim={claim}
+            refetch={refetch}
+            applyOptimistic={applyOptimistic}
+            draftMode={draftMode}
+            setDraftMode={setDraftMode}
+            selectedVersion={selectedVersion}
+            setSelectedVersion={setSelectedVersion}
+            editBuffer={editBuffer}
+            setEditBuffer={setEditBuffer}
+            dirty={dirty}
+          />
         </ResizablePanel>
 
         <ResizableHandle withHandle />
@@ -156,7 +249,7 @@ export function ClaimDetailShell({ initialClaim }: ClaimDetailShellProps) {
               <EvidencePane claim={claim} />
             </TabsContent>
             <TabsContent value="assistant" className="m-0 flex-1 overflow-hidden">
-              <AssistantPane claimId={claim.claim_id} />
+              <AssistantPane claimId={claim.claim_id} refetch={refetch} />
             </TabsContent>
           </Tabs>
         </ResizablePanel>
@@ -185,13 +278,24 @@ export function ClaimDetailShell({ initialClaim }: ClaimDetailShellProps) {
           </TabsList>
         </div>
         <TabsContent value="draft" className="m-0 flex-1 overflow-hidden">
-          <DraftPane claim={claim} />
+          <DraftPane
+            claim={claim}
+            refetch={refetch}
+            applyOptimistic={applyOptimistic}
+            draftMode={draftMode}
+            setDraftMode={setDraftMode}
+            selectedVersion={selectedVersion}
+            setSelectedVersion={setSelectedVersion}
+            editBuffer={editBuffer}
+            setEditBuffer={setEditBuffer}
+            dirty={dirty}
+          />
         </TabsContent>
         <TabsContent value="evidence" className="m-0 flex-1 overflow-hidden">
           <EvidencePane claim={claim} />
         </TabsContent>
         <TabsContent value="assistant" className="m-0 flex-1 overflow-hidden">
-          <AssistantPane claimId={claim.claim_id} />
+          <AssistantPane claimId={claim.claim_id} refetch={refetch} />
         </TabsContent>
       </Tabs>
     );
@@ -199,21 +303,35 @@ export function ClaimDetailShell({ initialClaim }: ClaimDetailShellProps) {
 
   return (
     <div className="flex h-[calc(100dvh-4rem)] flex-col overflow-hidden">
-      <ClaimHeader claim={claim} />
+      <ClaimHeader
+        claim={claim}
+        onClickEdit={handleClickEdit}
+        onClickCancel={handleClickCancel}
+        onClickApprove={handleClickApprove}
+      />
 
-      {/*
-        FIXME(claims-detail-write-actions): MarkResultSection was
-        previously rendered when `claim.status === "submitted"`. It
-        accepted a manual outcome (approved/denied + amount/reason)
-        and mutated local state only — there is no backend endpoint
-        for "manually mark outcome" today, so on real data this
-        would have been a misleading fake action. Re-enable when a
-        real endpoint exists.
-      */}
+      <PostApproveBanner claim={claim} />
 
       <div className="min-h-0 flex-1 overflow-hidden bg-neutral-50">
         {isDesktop ? renderDesktopLayout() : isTablet ? renderTabletLayout() : renderMobileLayout()}
       </div>
+
+      <ApproveConfirmDialog
+        open={approveOpen}
+        onOpenChange={setApproveOpen}
+        claim={claim}
+        dirty={dirty}
+        editedDraftContent={editBuffer}
+        applyOptimistic={applyOptimistic}
+        refetch={refetch}
+      />
+      <CancelConfirmDialog
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        claim={claim}
+        applyOptimistic={applyOptimistic}
+        refetch={refetch}
+      />
     </div>
   );
 }

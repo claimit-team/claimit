@@ -9,7 +9,9 @@
         "expired",
         "user_self_service",
         "user_cancelled",
-        "no_response"
+        "no_response",
+        "awaiting_approval",
+        "queued_for_send"
       ],
       "title": "ClaimOutcome",
       "type": "string"
@@ -75,6 +77,37 @@
       ],
       "title": "Platform",
       "type": "string"
+    },
+    "SelfEvalScore": {
+      "properties": {
+        "clarity": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Clarity",
+          "type": "integer"
+        },
+        "tone": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Tone",
+          "type": "integer"
+        },
+        "accuracy": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Accuracy",
+          "type": "integer"
+        },
+        "completeness": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Completeness",
+          "type": "integer"
+        }
+      },
+      "required": ["clarity", "tone", "accuracy", "completeness"],
+      "title": "SelfEvalScore",
+      "type": "object"
     },
     "SendMode": {
       "enum": ["approval", "auto"],
@@ -180,6 +213,31 @@
         }
       ]
     },
+    "auto_send_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Auto Send At"
+    },
+    "gmail_message_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Gmail Message Id"
+    },
     "submitted_at": {
       "anyOf": [
         {
@@ -248,6 +306,23 @@
         }
       ],
       "title": "Trace Id"
+    },
+    "self_eval_score": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SelfEvalScore"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "self_eval_attempts": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Self Eval Attempts",
+      "type": "integer"
     }
   },
   "required": [

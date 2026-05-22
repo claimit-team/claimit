@@ -43,6 +43,8 @@ export interface Claim {
   policy_clause_cited: string;
   evidence_screenshot_url: string | null;
   send_override: SendMode | null;
+  auto_send_at: ISODateString | null;
+  gmail_message_id: string | null;
   submitted_at: ISODateString | null;
   submitted_via: SubmittedVia | null;
   outcome: ClaimOutcome;

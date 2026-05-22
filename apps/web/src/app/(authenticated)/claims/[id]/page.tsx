@@ -21,14 +21,18 @@
  * pages behave consistently.
  */
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ClaimDetailShell } from "@/components/claims/claim-detail-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ClaimsApiError, getClaimDetail } from "@/lib/api/claims";
-import type { ClaimDetail } from "@/lib/claim-detail-types";
+import {
+  type ClaimDetailDoc,
+  type ClaimDetailResponse,
+  ClaimsApiError,
+  getClaimDetail,
+} from "@/lib/api/claims";
 import { buildClaimDetailViewModel } from "@/lib/claim-detail-view";
 import { useAuthStore } from "@/store";
 
@@ -36,23 +40,146 @@ type ClaimDetailRouteProps = {
   params: Promise<{ id: string }>;
 };
 
+/**
+ * The page owns the *wire* `ClaimDetailResponse` (not the view-model)
+ * so write callers can optimistically patch the underlying `claim`
+ * fields and have the VM auto-derive on the next render. Mirrors the
+ * `/confirm/:id` loader pattern (page owns the wire bundle; children
+ * receive the derived render shape).
+ */
 type LoadState =
   | { status: "loading" }
-  | { status: "ready"; vm: ClaimDetail }
+  | { status: "ready"; wire: ClaimDetailResponse }
   | { status: "notFound" }
   | { status: "error"; message: string };
 
 export default function ClaimDetailPage({ params }: ClaimDetailRouteProps) {
-  // `use(params)` unwraps the Next 15+ Promise-based dynamic-segment
-  // value on the client (matches PR1's purchase detail).
   const { id } = use(params);
   const isAuthLoading = useAuthStore((state) => state.isLoading);
   const userId = useAuthStore((state) => state.user?._id ?? null);
 
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [reloadTick, setReloadTick] = useState(0);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadTick is an intentional refetch trigger; not read inside the effect body
+  /**
+   * Per-instance request-sequence counter. Each `refetch` invocation
+   * increments it and captures the new value; once `getClaimDetail`
+   * resolves, the call only commits state (or re-throws on error) if
+   * its captured sequence still matches `requestSeq.current`. Older
+   * inflight calls become no-ops.
+   *
+   * Guards against (a) the user navigating between two claims quickly
+   * (the old fetch's "ready" landing after the new fetch's "loading"
+   * → wrong claim_id wired to action buttons), and (b) rapid
+   * retry-clicks racing the original load (an old failed retry
+   * flipping state back to "error" after a newer one succeeded).
+   *
+   * Replaces the prior `let mounted = true` cleanup pattern — see
+   * `useReviewDraft` for the sibling hook that retains it. CodeRabbit
+   * MAJOR + Bugbot MEDIUM, PR #168.
+   */
+  const requestSeq = useRef(0);
+
+  /**
+   * Refetch the enriched detail bundle and replace the wire state on
+   * success. Used by write handlers (approve / cancel / edit) to
+   * reconcile optimistic patches with server truth.
+   *
+   * IMPORTANT: re-throws on error and does NOT mutate page state — the
+   * caller decides how to handle a refetch failure. Post-write callers
+   * catch and show a "refresh failed" toast WITHOUT wiping the
+   * optimistic patch from page state; the load-retry path (see
+   * `loadDetail`) wraps the call in its own try/catch and converts the
+   * error back into a full-page error state.
+   *
+   * Bugbot MEDIUM finding (PR #168): the earlier version silently
+   * caught errors and called `setState({ status: "error" })`, which
+   * (a) wiped the optimistic patch on a transient refetch failure
+   * and (b) made the nested try/catch in approve/cancel dialogs dead
+   * code. The user could see a success toast and a full error page
+   * simultaneously. Re-throwing here restores the contract.
+   *
+   * Intentionally does NOT flip back to "loading" — the previous wire
+   * stays visible so the UI doesn't flash a skeleton between
+   * optimistic + server states.
+   */
+  const refetch = useCallback(async () => {
+    if (isAuthLoading) return;
+    if (userId === null) {
+      throw new Error("User must be signed in.");
+    }
+    const seq = ++requestSeq.current;
+    try {
+      const wire = await getClaimDetail(id);
+      // Stale completion — a newer refetch superseded us; drop the
+      // result silently so we don't clobber the newer state.
+      if (seq !== requestSeq.current) return;
+      setState({ status: "ready", wire });
+    } catch (err) {
+      // Same staleness check on the error path: a stale failure must
+      // not flip a newer successful state back to "error" via the
+      // loadDetail catch block.
+      if (seq !== requestSeq.current) return;
+      throw err;
+    }
+  }, [id, isAuthLoading, userId]);
+
+  /**
+   * Load (or retry-load) the detail bundle and convert any failure into
+   * a page-level error state. Used by the initial mount effect and by
+   * the "Try again" button in the error view. Shares the error-to-state
+   * conversion with the original useEffect (DRY).
+   *
+   * Always flips into `{ status: "loading" }` before issuing the fetch
+   * so the retry-button click in the error view gives the user
+   * immediate feedback (Bugbot MEDIUM finding, PR #168). Without this,
+   * the error screen stayed visible during the retry and looked
+   * broken. The initial useEffect also sets loading explicitly — the
+   * double-set is a cheap no-op.
+   */
+  const loadDetail = useCallback(async () => {
+    if (isAuthLoading) return;
+    if (userId === null) {
+      setState({ status: "error", message: "User must be signed in." });
+      return;
+    }
+    setState({ status: "loading" });
+    try {
+      await refetch();
+    } catch (err: unknown) {
+      if (err instanceof ClaimsApiError && err.code === "claim_not_found") {
+        setState({ status: "notFound" });
+        return;
+      }
+      const message =
+        err instanceof ClaimsApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Unknown error";
+      setState({ status: "error", message });
+    }
+  }, [isAuthLoading, refetch, userId]);
+
+  /**
+   * Shallow-merge a `Partial<ClaimDetailDoc>` into the wire `claim`.
+   * The VM re-derives on the next render via `useMemo`. Always paired
+   * with `await refetch()` in `catch` (per WI write contract) so a
+   * failed server write reconciles back to server truth — never
+   * leave optimistic state hanging.
+   */
+  const applyOptimistic = useCallback((patch: Partial<ClaimDetailDoc>) => {
+    setState((prev) => {
+      if (prev.status !== "ready") return prev;
+      return {
+        ...prev,
+        wire: {
+          ...prev.wire,
+          claim: { ...prev.wire.claim, ...patch },
+        },
+      };
+    });
+  }, []);
+
   useEffect(() => {
     if (isAuthLoading) {
       setState({ status: "loading" });
@@ -63,38 +190,19 @@ export default function ClaimDetailPage({ params }: ClaimDetailRouteProps) {
       return;
     }
 
-    let mounted = true;
+    // Mount → loading → loadDetail() converts success/failure into the
+    // appropriate page state. We can't await loadDetail inside the
+    // effect (synchronous), so fire-and-forget; the unmount guard in
+    // refetch's setState is unnecessary because loadDetail itself
+    // checks isAuthLoading / userId before calling refetch.
     setState({ status: "loading" });
+    void loadDetail();
+  }, [isAuthLoading, loadDetail, userId]);
 
-    getClaimDetail(id)
-      .then((response) => {
-        if (!mounted) return;
-        const vm = buildClaimDetailViewModel(response);
-        setState({ status: "ready", vm });
-      })
-      .catch((err: unknown) => {
-        if (!mounted) return;
-        // 404 (missing OR cross-user — the backend returns the same
-        // `claim_not_found` for both to avoid leaking existence) maps
-        // to the not-found state. Other failures (timeout, 5xx,
-        // network) get a retryable error message.
-        if (err instanceof ClaimsApiError && err.code === "claim_not_found") {
-          setState({ status: "notFound" });
-          return;
-        }
-        const message =
-          err instanceof ClaimsApiError
-            ? err.message
-            : err instanceof Error
-              ? err.message
-              : "Unknown error";
-        setState({ status: "error", message });
-      });
-
-    return () => {
-      mounted = false;
-    };
-  }, [id, isAuthLoading, userId, reloadTick]);
+  const vm = useMemo(
+    () => (state.status === "ready" ? buildClaimDetailViewModel(state.wire) : null),
+    [state],
+  );
 
   if (state.status === "loading") {
     return <ClaimDetailSkeleton />;
@@ -103,11 +211,12 @@ export default function ClaimDetailPage({ params }: ClaimDetailRouteProps) {
     return <ClaimDetailNotFound />;
   }
   if (state.status === "error") {
-    return (
-      <ClaimDetailError message={state.message} onRetry={() => setReloadTick((tick) => tick + 1)} />
-    );
+    return <ClaimDetailError message={state.message} onRetry={() => void loadDetail()} />;
   }
-  return <ClaimDetailShell initialClaim={state.vm} />;
+  if (vm === null) {
+    return <ClaimDetailSkeleton />;
+  }
+  return <ClaimDetailShell claim={vm} refetch={refetch} applyOptimistic={applyOptimistic} />;
 }
 
 // ---------------------------------------------------------------------------

@@ -32,6 +32,7 @@ import type {
   ClaimDetailDraftType,
   ClaimDetailWorkflowStatus,
   ClaimEvidence,
+  ClaimPolicy,
   ClaimPurchase,
   DraftVersion,
   OutcomeStatus,
@@ -60,9 +61,11 @@ import type {
  *  - `expired`              -> `expired`
  *  - `no_response`          -> `expired` (UI has no separate label;
  *                              behavior is the same — window closed)
- *  - `user_cancelled`       -> `expired` (CLOSED state — user
- *                              terminated the flow; "submitted" would
- *                              falsely imply still in-flight)
+ *  - `user_cancelled`       -> `cancelled` (NEW in 5.7 — distinct
+ *                              from `expired` so the header can
+ *                              surface the user's cancel reason as
+ *                              muted subtext + a neutral
+ *                              "Cancelled" badge)
  *  - `user_self_service`    -> `expired` (CLOSED — user resolved
  *                              outside the funnel)
  *  - unknown / null         -> `awaiting_approval` (calm default;
@@ -80,9 +83,10 @@ export function mapOutcomeToWorkflowStatus(
       return "approved";
     case "denied":
       return "denied";
+    case "user_cancelled":
+      return "cancelled";
     case "expired":
     case "no_response":
-    case "user_cancelled":
     case "user_self_service":
       return "expired";
     default:
@@ -201,6 +205,7 @@ function mapDraftVersions(claim: ClaimDetailDoc): DraftVersion[] {
       version: dv.version ?? idx + 1,
       content: dv.content ?? "",
       created_at: dv.at ?? "",
+      generated_by: dv.generated_by,
     }));
   }
   if (claim.draft_content !== null && claim.draft_content !== "") {
@@ -209,6 +214,9 @@ function mapDraftVersions(claim: ClaimDetailDoc): DraftVersion[] {
         version: 1,
         content: claim.draft_content,
         created_at: claim.updated_at ?? "",
+        // Synthesized fallback when the wire array is empty — assume
+        // the (single) version came from the agent.
+        generated_by: "agent",
       },
     ];
   }
@@ -249,6 +257,23 @@ function buildEvidence(response: ClaimDetailResponse): ClaimEvidence {
 }
 
 /**
+ * Compose the `policy` sub-object the type-aware draft renderers
+ * read. The wire `Policy` block can legitimately be `null` (no policy
+ * row for this platform/category combo); calm fallbacks (empty
+ * string / 0) so renderers can do `if (policy.claim_email !== "")`
+ * without `?.` chains.
+ */
+function buildPolicyBlock(response: ClaimDetailResponse): ClaimPolicy {
+  const { policy } = response;
+  return {
+    claim_email: policy?.claim_email ?? "",
+    claim_url: policy?.claim_url ?? "",
+    claim_phone: policy?.claim_phone ?? "",
+    window_days: policy?.window_days ?? 0,
+  };
+}
+
+/**
  * Compose the `purchase` sub-object the UI expects. Falls back to
  * empty strings / zero so a claim with a deleted (orphan) purchase
  * still renders the page — the defensive `formatDateShort` /
@@ -273,11 +298,15 @@ function buildResolutionFields(claim: ClaimDetailDoc): {
   outcome: OutcomeStatus;
   outcome_amount?: number;
   denial_reason?: string;
+  cancel_reason?: string;
 } {
   const outcome = mapTerminalOutcome(claim.outcome);
-  const out: { outcome: OutcomeStatus; outcome_amount?: number; denial_reason?: string } = {
-    outcome,
-  };
+  const out: {
+    outcome: OutcomeStatus;
+    outcome_amount?: number;
+    denial_reason?: string;
+    cancel_reason?: string;
+  } = { outcome };
   if (outcome === "approved" && claim.claim_amount !== null) {
     // No separate "reclaimed amount" field on the API yet — the
     // claimed amount is the faithful proxy for "Reclaimed $X" copy
@@ -287,6 +316,13 @@ function buildResolutionFields(claim: ClaimDetailDoc): {
   if (outcome === "denied") {
     const reason = claim.denial_reason_extracted ?? claim.outcome_note ?? null;
     if (reason !== null && reason !== "") out.denial_reason = reason;
+  }
+  if (
+    claim.outcome === "user_cancelled" &&
+    claim.outcome_note !== null &&
+    claim.outcome_note !== ""
+  ) {
+    out.cancel_reason = claim.outcome_note;
   }
   return out;
 }
@@ -328,6 +364,7 @@ export function buildClaimDetailViewModel(response: ClaimDetailResponse): ClaimD
     current_version: draftVersions.length === 0 ? 1 : draftVersions.length,
     evidence: buildEvidence(response),
     purchase: buildPurchaseBlock(response),
+    policy: buildPolicyBlock(response),
     ...resolution,
   };
 }

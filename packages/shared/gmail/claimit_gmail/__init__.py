@@ -14,15 +14,27 @@ Public surface:
   with no error channel (e.g., the OAuth-callback BackgroundTask in
   api-gateway, which would otherwise lose the exception entirely).
 
-- `WatchRegistrationError` — the typed exception raised by `_or_raise`.
-  Carries a `terminal_message` attribute that's safe to render in the
-  user-facing settings UI.
+- `exchange_refresh_for_access(sm_client, user)` — load the user's Gmail
+  refresh token from Secret Manager and mint a short-lived access token.
+  Shared by `register_watch_or_raise` (this package) and the 4.17 Gmail
+  ingest handler in ingest-agent, which calls Gmail history.list and
+  messages.get with the same OAuth client identity.
+
+- `WatchRegistrationError` — the typed exception raised by `_or_raise`
+  and by `exchange_refresh_for_access`. Carries a `terminal_message`
+  attribute that's safe to render in the user-facing settings UI.
 """
 
-from .watch import WatchRegistrationError, register_watch_or_raise, register_watch_safe
+from .watch import (
+    WatchRegistrationError,
+    exchange_refresh_for_access,
+    register_watch_or_raise,
+    register_watch_safe,
+)
 
 __all__ = [
     "WatchRegistrationError",
+    "exchange_refresh_for_access",
     "register_watch_or_raise",
     "register_watch_safe",
 ]

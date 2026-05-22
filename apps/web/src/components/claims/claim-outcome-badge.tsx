@@ -60,6 +60,14 @@ const OUTCOME_DISPLAY: Record<
     label: "No response",
     variant: "outline",
   },
+  awaiting_approval: {
+    label: "Awaiting Approval",
+    variant: "outline",
+  },
+  queued_for_send: {
+    label: "Sending Soon",
+    variant: "secondary",
+  },
 };
 
 /**

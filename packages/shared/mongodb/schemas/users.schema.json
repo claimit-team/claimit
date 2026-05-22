@@ -104,6 +104,23 @@
             }
           ],
           "title": "Last Processed Message Id"
+        },
+        "watch_failed": {
+          "default": false,
+          "title": "Watch Failed",
+          "type": "boolean"
+        },
+        "watch_error_message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Watch Error Message"
         }
       },
       "required": [

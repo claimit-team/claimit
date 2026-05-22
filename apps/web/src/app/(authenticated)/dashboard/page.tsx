@@ -38,6 +38,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useDashboardSummary } from "@/hooks/useDashboardSummary";
 import { useMonitoredPurchases } from "@/hooks/useMonitoredPurchases";
 import { usePendingConfirmation } from "@/hooks/usePendingConfirmation";
+import { useReviewDraft } from "@/hooks/useReviewDraft";
+import type { ClaimListItem } from "@/lib/api/claims";
 import type { PurchaseListItem, PurchasesApiError } from "@/lib/api/purchases";
 import { formatWindowRemaining, snakeToTitleLabel } from "@/lib/claims-status";
 import { getListStatusBadge, isMonitoringDegraded } from "@/lib/purchase-status";
@@ -53,18 +55,14 @@ type UserState = "new" | "active" | "reclaim_experienced";
 const mockDashboardData = {
   // Ticket 5.14 B8: `confirm_extraction` cards now come from the real
   // `pending_confirmation` purchase list (see `usePendingConfirmation`
-  // + `buildConfirmExtractionItems`). The mock review_draft + update
-  // _needed entries below remain as PR2 placeholders — those have
-  // their own tickets and aren't in scope here.
+  // + `buildConfirmExtractionItems`).
+  // 5.7 WI-9: `review_draft` cards now come from the real
+  // `outcome=draft_pending` claim list (see `useReviewDraft` +
+  // `buildReviewDraftItems`).
+  // The mock `update_needed` entry below stays as a placeholder until
+  // a backend signal exists for "we need an update on this submitted
+  // claim" (no endpoint today).
   needsAttention: [
-    {
-      type: "review_draft" as const,
-      claimId: "claim_001",
-      platform: "Best Buy",
-      title: "Sony WH-1000XM5",
-      claimType: "chat_script",
-      windowRemaining: "11 days remaining",
-    },
     {
       type: "update_needed" as const,
       claimId: "claim_002",
@@ -251,36 +249,53 @@ function ReviewDraftCard({
   claimType: string;
   windowRemaining: string;
 }) {
+  // Mirror the ConfirmExtractionCard pattern: whole-card is the hit
+  // target (a tap on the platform name / claim-type badge lands at
+  // /claims/:id same as if the trailing "Review draft" CTA were
+  // clicked). Pre-fix the card body had no handler so only the small
+  // trailing Link navigated, leaving the rest of the visibly-clickable
+  // card dead. The trailing CTA stays a styled <span> with
+  // pointer-events-none because nested interactive elements (<Link>
+  // inside <Link>) are invalid HTML and confuse screen readers.
   return (
-    <Card className="border-neutral-200">
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <Badge
-              variant="secondary"
-              className="mb-2 bg-brand-primary-50 text-brand-primary-700 border-0"
-            >
-              Review needed
-            </Badge>
-            <div className="font-medium text-neutral-900 truncate">
-              {platform} · {title}
-            </div>
-            <div className="flex items-center gap-3 mt-2 text-sm text-neutral-600 flex-wrap">
-              <Badge variant="outline" className="text-xs">
-                {claimType === "chat_script" ? "Chat script" : claimType}
+    <Link
+      href={`/claims/${claimId}`}
+      aria-label={`Review draft: ${platform} · ${title}`}
+      className="block rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    >
+      <Card className="border-neutral-200 transition-colors hover:bg-neutral-50">
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <Badge
+                variant="secondary"
+                className="mb-2 bg-brand-primary-50 text-brand-primary-700 border-0"
+              >
+                Review needed
               </Badge>
-              <span className="flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5" aria-hidden="true" />
-                {windowRemaining}
-              </span>
+              <div className="font-medium text-neutral-900 truncate">
+                {platform} · {title}
+              </div>
+              <div className="flex items-center gap-3 mt-2 text-sm text-neutral-600 flex-wrap">
+                <Badge variant="outline" className="text-xs">
+                  {snakeToTitleLabel(claimType)}
+                </Badge>
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+                  {windowRemaining}
+                </span>
+              </div>
             </div>
+            <span
+              aria-hidden="true"
+              className={cn(buttonVariants({ size: "sm" }), "pointer-events-none")}
+            >
+              Review draft
+            </span>
           </div>
-          <Link href={`/claims/${claimId}`} className={cn(buttonVariants({ size: "sm" }))}>
-            Review draft
-          </Link>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </Link>
   );
 }
 
@@ -496,13 +511,63 @@ type ConfirmExtractionItem = {
   lowConfidenceFields: string[];
 };
 
-type ReviewDraftItem = (typeof mockDashboardData.needsAttention)[number] & {
+/**
+ * `review_draft` cards come from `outcome=draft_pending` claims via
+ * `useReviewDraft`; an explicit type now that the source no longer
+ * lives in `mockDashboardData`.
+ */
+type ReviewDraftItem = {
   type: "review_draft";
+  claimId: string;
+  platform: string;
+  title: string;
+  claimType: string;
+  windowRemaining: string;
 };
 type UpdateNeededItem = (typeof mockDashboardData.needsAttention)[number] & {
   type: "update_needed";
 };
 type NeedsAttentionItem = ReviewDraftItem | UpdateNeededItem | ConfirmExtractionItem;
+
+/**
+ * `best_buy` → `Best Buy` (Title Case). `snakeToTitleLabel` is
+ * sentence-case (`Best buy`) and would visually disagree with the
+ * detail page's `safePlatformLabel` helper, so we duplicate the
+ * Title-Case logic locally rather than re-import (Bugbot LOW, PR
+ * #168 — dashboard / detail casing mismatch).
+ */
+function toPlatformLabel(raw: string | null | undefined): string {
+  if (raw === null || raw === undefined || raw === "") return "";
+  return raw
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+/**
+ * Map an `outcome=draft_pending` claim row to the dashboard's
+ * `ReviewDraftCard` shape. Falls back to neutral defaults so a
+ * partial / read-tolerant row never crashes the section.
+ */
+function buildReviewDraftItems(claims: ClaimListItem[]): ReviewDraftItem[] {
+  return claims
+    .filter(
+      // Empty-string `_id` would generate a broken `/claims/` link
+      // and unstable React key — reject alongside null/undefined
+      // (CodeRabbit MINOR, PR #168).
+      (c): c is ClaimListItem & { _id: string } =>
+        typeof c._id === "string" && c._id.trim().length > 0,
+    )
+    .map((c) => ({
+      type: "review_draft" as const,
+      claimId: c._id,
+      platform: toPlatformLabel(c.platform),
+      title: c.product_name ?? "Untitled claim",
+      claimType: typeof c.claim_type === "string" ? c.claim_type : "email",
+      windowRemaining: formatWindowRemaining(c.window_expires),
+    }));
+}
 
 /**
  * Map a `pending_confirmation` purchase row to the
@@ -949,9 +1014,11 @@ export default function DashboardPage() {
     error: monitoredError,
   } = useMonitoredPurchases();
   const { purchases: pendingPurchases } = usePendingConfirmation();
+  const { claims: reviewDraftClaims } = useReviewDraft();
 
   const needsAttention: NeedsAttentionItem[] = [
     ...buildConfirmExtractionItems(pendingPurchases),
+    ...buildReviewDraftItems(reviewDraftClaims),
     ...mockNeedsAttention,
   ];
 
