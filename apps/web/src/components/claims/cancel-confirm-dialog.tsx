@@ -72,11 +72,22 @@ export function CancelConfirmDialog({
     }
   }, [open]);
 
-  const submitDisabled = isSubmitting || (reason === "other" && otherText.trim() === "");
+  // "Other" is genuinely optional — the placeholder copy promises "Optional"
+  // (helps us improve recommendations) so the validation has to match
+  // (CodeRabbit minor finding, PR #168). When the user picks "Other" but
+  // leaves the textarea blank, fall back to the literal label "Other" so
+  // the backend still stores a non-empty `outcome_note`.
+  const submitDisabled = isSubmitting;
 
   const handleConfirm = async () => {
     if (submitDisabled) return;
-    const reasonText = reason === "other" ? otherText.trim() : REASON_LABELS[reason];
+    const trimmedOther = otherText.trim();
+    const reasonText =
+      reason === "other"
+        ? trimmedOther === ""
+          ? REASON_LABELS.other
+          : trimmedOther
+        : REASON_LABELS[reason];
     setIsSubmitting(true);
     try {
       await cancelClaim(claim.claim_id, { reason: reasonText });

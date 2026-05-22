@@ -294,7 +294,8 @@ function ChatScriptDraft({ content }: { content: string }) {
       ) : null}
       <ol className="space-y-2">
         {parsed.mainSteps.map((step, idx) => (
-          <ChatStepRow key={step} index={idx + 1} text={step} />
+          // biome-ignore lint/suspicious/noArrayIndexKey: composite `${idx}-${slice}` key — fixes duplicate-content collision per CodeRabbit minor.
+          <ChatStepRow key={`main-${idx}-${step.slice(0, 24)}`} index={idx + 1} text={step} />
         ))}
       </ol>
       {parsed.escalationSteps.length > 0 ? (
@@ -311,9 +312,18 @@ function ChatScriptDraft({ content }: { content: string }) {
           </button>
           {showEscalation ? (
             <ol className="space-y-2">
-              {parsed.escalationSteps.map((step, idx) => (
-                <ChatStepRow key={step} index={parsed.mainSteps.length + idx + 1} text={step} />
-              ))}
+              {parsed.escalationSteps.map((step, idx) => {
+                // Composite key `${idx}-${slice}` fixes duplicate-content
+                // collisions (CodeRabbit minor). List isn't reordered.
+                const escalationKey = `escalation-${idx}-${step.slice(0, 24)}`;
+                return (
+                  <ChatStepRow
+                    key={escalationKey}
+                    index={parsed.mainSteps.length + idx + 1}
+                    text={step}
+                  />
+                );
+              })}
             </ol>
           ) : null}
         </div>
@@ -343,37 +353,46 @@ function InStoreGuide({ content, policy }: { content: string; policy: ClaimPolic
   return (
     <div className="space-y-3 p-4">
       <h4 className="font-medium text-neutral-900 text-sm">{parsed.title}</h4>
-      {parsed.sections.map((section) => (
-        <div
-          key={section.key}
-          className="space-y-2 rounded-lg border border-neutral-200 bg-neutral-0 p-4"
-        >
-          <div className="font-medium text-neutral-900 text-sm">{section.heading}</div>
-          {section.paragraphs.length > 0 ? (
-            <div className="space-y-1 text-neutral-700 text-sm">
-              {section.paragraphs.map((p) => (
-                <p key={p} className="whitespace-pre-wrap">
-                  {p}
-                </p>
-              ))}
-            </div>
-          ) : null}
-          {section.bullets.length > 0 ? (
-            <ul className="ml-4 list-disc space-y-1 text-neutral-700 text-sm">
-              {section.bullets.map((b) => (
-                <li key={b}>{b}</li>
-              ))}
-            </ul>
-          ) : null}
-          {section.numbered.length > 0 ? (
-            <ol className="ml-4 list-decimal space-y-1 text-neutral-700 text-sm">
-              {section.numbered.map((n) => (
-                <li key={n}>{n}</li>
-              ))}
-            </ol>
-          ) : null}
-        </div>
-      ))}
+      {parsed.sections.map((section, sIdx) => {
+        // Composite key `${sIdx}-${section.key}` disambiguates any
+        // >5-section parser-drift cases (CodeRabbit minor). List isn't
+        // reordered, generator emits a fixed 5-section sequence.
+        const sectionKey = `${sIdx}-${section.key}`;
+        return (
+          <div
+            key={sectionKey}
+            className="space-y-2 rounded-lg border border-neutral-200 bg-neutral-0 p-4"
+          >
+            <div className="font-medium text-neutral-900 text-sm">{section.heading}</div>
+            {section.paragraphs.length > 0 ? (
+              <div className="space-y-1 text-neutral-700 text-sm">
+                {section.paragraphs.map((p, pIdx) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: composite `${sIdx}-${pIdx}-${slice}` key — fixes duplicate-content collision per CodeRabbit minor.
+                  <p key={`p-${sIdx}-${pIdx}-${p.slice(0, 24)}`} className="whitespace-pre-wrap">
+                    {p}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+            {section.bullets.length > 0 ? (
+              <ul className="ml-4 list-disc space-y-1 text-neutral-700 text-sm">
+                {section.bullets.map((b, bIdx) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: composite `${sIdx}-${bIdx}-${slice}` key — fixes duplicate-content collision per CodeRabbit minor.
+                  <li key={`b-${sIdx}-${bIdx}-${b.slice(0, 24)}`}>{b}</li>
+                ))}
+              </ul>
+            ) : null}
+            {section.numbered.length > 0 ? (
+              <ol className="ml-4 list-decimal space-y-1 text-neutral-700 text-sm">
+                {section.numbered.map((n, nIdx) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: composite `${sIdx}-${nIdx}-${slice}` key — fixes duplicate-content collision per CodeRabbit minor.
+                  <li key={`n-${sIdx}-${nIdx}-${n.slice(0, 24)}`}>{n}</li>
+                ))}
+              </ol>
+            ) : null}
+          </div>
+        );
+      })}
       {policy.claim_phone !== "" || policy.claim_url !== "" ? (
         <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-neutral-600 text-xs">
           {policy.claim_phone !== "" ? (
@@ -450,8 +469,9 @@ function SelfServiceWalkthrough({ content }: { content: string }) {
       <div className="space-y-2 rounded-lg border border-neutral-200 bg-neutral-0 p-4">
         <div className="font-medium text-neutral-900 text-sm">Steps</div>
         <ol className="ml-4 list-decimal space-y-2 text-neutral-700 text-sm">
-          {parsed.steps.map((step) => (
-            <li key={step} className="whitespace-pre-wrap">
+          {parsed.steps.map((step, idx) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: composite `${idx}-${slice}` key — fixes duplicate-content collision per CodeRabbit minor.
+            <li key={`step-${idx}-${step.slice(0, 24)}`} className="whitespace-pre-wrap">
               {step}
             </li>
           ))}
@@ -462,8 +482,9 @@ function SelfServiceWalkthrough({ content }: { content: string }) {
         <div className="space-y-2 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
           <div className="font-medium text-neutral-900 text-sm">Notes</div>
           <ul className="ml-4 list-disc space-y-1 text-neutral-700 text-sm">
-            {parsed.notes.map((note) => (
-              <li key={note} className="whitespace-pre-wrap">
+            {parsed.notes.map((note, idx) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: composite `${idx}-${slice}` key — fixes duplicate-content collision per CodeRabbit minor.
+              <li key={`note-${idx}-${note.slice(0, 24)}`} className="whitespace-pre-wrap">
                 {note}
               </li>
             ))}
@@ -577,7 +598,12 @@ export function DraftPane({
   const [pendingVersion, setPendingVersion] = useState<number | null>(null);
 
   const totalVersions = claim.draft_versions.length;
-  const onLatestVersion = selectedVersion === totalVersions;
+  // Treat the no-versions edge (e.g. an upstream agent failure left the
+  // claim with `draft_versions === []`) as "on latest" so the
+  // "Back to latest" affordance never appears (Bugbot LOW finding, PR
+  // #168). The empty-draft Alert in `renderPreview` already covers the
+  // user-facing message; the header navigation stays calm.
+  const onLatestVersion = totalVersions === 0 || selectedVersion === totalVersions;
   // When the user browses an older version, force preview-only — editing
   // an older version is not a supported rollback flow in 5.7.
   useEffect(() => {
@@ -701,9 +727,15 @@ export function DraftPane({
           ...claim.draft_versions.map((dv) => ({
             version: dv.version,
             content: dv.content,
-            // The wire shape uses `at`; the VM consumes `created_at`.
-            // Round-trip via refetch will normalize; placeholder here.
-            generated_by: null,
+            // PRESERVE the prior version's authorship (`generated_by`)
+            // through the optimistic patch — even though the refetch
+            // immediately replaces this with server truth, erasing it
+            // for the sub-second window would briefly hide the
+            // "AI draft" / "You edited" badges in the version dropdown
+            // (Bugbot LOW finding, PR #168).
+            // The wire shape uses `at`; the VM consumes `created_at`,
+            // so round-trip via refetch normalises both.
+            generated_by: dv.generated_by ?? null,
             at: dv.created_at,
           })),
           {

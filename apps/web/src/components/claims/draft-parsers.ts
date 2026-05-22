@@ -109,8 +109,14 @@ export type InStoreSectionKey = (typeof IN_STORE_SECTION_KEYS)[number];
 export interface InStoreSection {
   /** The bolded section label as emitted by the generator, e.g. "What to Bring". */
   heading: string;
-  /** Stable identifier; lookup-by-key when the heading text drifts. */
-  key: InStoreSectionKey;
+  /**
+   * Stable identifier — one of the 5 canonical `InStoreSectionKey`
+   * values for indexes 0-4, or an index-derived `extra_{idx}` fallback
+   * for any section beyond the canonical 5. The widened type ensures
+   * unique keys across the parser output even if the generator drifts
+   * to more sections.
+   */
+  key: InStoreSectionKey | `extra_${number}`;
   /** Bullet list items (preserved without the leading `- `). */
   bullets: string[];
   /** Numbered list items (preserved without the leading `1. `). */
@@ -160,6 +166,12 @@ export function parseInStoreGuide(content: string): InStoreGuideParsed | null {
   // the generator's fixed 5-section order via IN_STORE_SECTION_KEYS;
   // if the generator emits fewer (rare/legacy), trailing keys are
   // dropped — parser still succeeds.
+  //
+  // If the generator ever drifts to MORE than 5 sections the trailing
+  // sections get a per-index fallback `extra_${idx}` so the section
+  // keys stay unique (CodeRabbit minor finding, PR #168: previously
+  // every overflow section reused "policy_reference"). Callers should
+  // still treat `IN_STORE_SECTION_KEYS` as the canonical first-5 set.
   const parsedSections: InStoreSection[] = sections.map((s, idx) => {
     const bullets: string[] = [];
     const numbered: string[] = [];
@@ -177,7 +189,7 @@ export function parseInStoreGuide(content: string): InStoreGuideParsed | null {
     }
     return {
       heading: s.heading,
-      key: IN_STORE_SECTION_KEYS[idx] ?? "policy_reference",
+      key: IN_STORE_SECTION_KEYS[idx] ?? `extra_${idx}`,
       bullets,
       numbered,
       paragraphs,
