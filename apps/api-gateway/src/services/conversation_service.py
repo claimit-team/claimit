@@ -18,6 +18,10 @@ from claimit_mongodb_models.client import MongoDBClient
 from claimit_mongodb_models.conversation import Conversation, ConversationMessage, ToolCall
 from claimit_mongodb_models.enums import ConversationMode, ConversationStatus, MessageRole
 
+from ..middleware.errors import ApiError
+from .claims_service import _load_owned_claim
+from .mode_b_client import stream_mode_b_response
+
 logger = logging.getLogger(__name__)
 
 # Resource names are in the form
@@ -289,7 +293,34 @@ async def stream_agent_response(
     once with a fresh session (bounded by `_SESSION_RETRY_LIMIT`).
     """
 
-    # -------- Phase 1: setup --------
+    if conversation.mode == ConversationMode.CLAIM_FOCUSED:
+        if conversation.claim_id is None:
+            yield {
+                "event": "done",
+                "data": json.dumps({"error": "This conversation is missing a claim context."}),
+            }
+            return
+        try:
+            await _load_owned_claim(db, conversation.claim_id, user_id)
+        except ApiError:
+            yield {
+                "event": "done",
+                "data": json.dumps({"error": "Claim not found or access denied."}),
+            }
+            return
+
+        # Prior turns only — the current user message was appended by the route.
+        history = list(conversation.messages[:-1]) if conversation.messages else []
+        async for frame in stream_mode_b_response(
+            user_id,
+            conversation.claim_id,
+            user_message,
+            history,
+        ):
+            yield frame
+        return
+
+    # -------- Phase 1: setup (Mode A / general) --------
     try:
         remote_agent, session_id = await _ensure_agent_and_session(db, conversation, user_id)
     except ValueError as e:
@@ -312,11 +343,8 @@ async def stream_agent_response(
         }
         return
 
-    # -------- Phase 2: build prompt --------
-    prefix = ""
-    if conversation.mode == ConversationMode.CLAIM_FOCUSED and conversation.claim_id:
-        prefix = f"[Context: user is viewing claim {conversation.claim_id}] "
-    prompt = prefix + user_message
+    # -------- Phase 2: build prompt (general / Vertex) --------
+    prompt = user_message
 
     stream_kwargs: dict[str, Any] = {"user_id": str(user_id), "message": prompt}
     if session_id:

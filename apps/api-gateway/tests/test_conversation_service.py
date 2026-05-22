@@ -303,26 +303,33 @@ async def test_stream_function_response_yields_tool_result_event(
 
 
 @pytest.mark.asyncio
-async def test_stream_claim_focused_adds_context_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CLAIMIT_ASSISTANT_AGENT_ID", "fake-resource-name")
+async def test_stream_claim_focused_routes_to_mode_b_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ASSISTANT_AGENT_URL", "https://assistant.example")
     db = _make_db()
     conv = _make_conversation(
         mode=ConversationMode.CLAIM_FOCUSED, claim_id=CLAIM_ID, agent_session_id="sess"
     )
 
-    captured: dict[str, str] = {}
+    async def _fake_mode_b(*args, **kwargs):
+        yield {"event": "text_chunk", "data": json.dumps({"text": "claim help"})}
+        yield {"event": "done", "data": "{}"}
 
-    async def _fake_stream(**kwargs):
-        captured["message"] = kwargs["message"]
-        return
-        yield  # marks this as an async generator
+    with (
+        patch("src.services.claims_service._load_owned_claim", new_callable=AsyncMock),
+        patch(
+            "src.services.conversation_service.stream_mode_b_response",
+            side_effect=_fake_mode_b,
+        ),
+        patch("vertexai.agent_engines.get") as mock_get,
+    ):
+        events = [e async for e in stream_agent_response(db, USER_ID, conv, "check my claim")]
 
-    mock_agent = _mock_agent(stream_fn=_fake_stream)
-    with patch("vertexai.agent_engines.get", return_value=mock_agent):
-        _events = [e async for e in stream_agent_response(db, USER_ID, conv, "check my claim")]
-
-    assert "claim" in captured["message"].lower()
-    assert str(CLAIM_ID) in captured["message"]
+    mock_get.assert_not_called()
+    assert any(e["event"] == "text_chunk" for e in events)
+    texts = [json.loads(e["data"])["text"] for e in events if e["event"] == "text_chunk"]
+    assert "claim help" in texts
 
 
 # ---------------------------------------------------------------------------
