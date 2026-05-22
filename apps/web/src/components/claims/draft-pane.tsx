@@ -6,43 +6,74 @@ import {
   Copy,
   ExternalLink,
   Laptop,
+  Loader2,
   Mail,
   MessageSquare,
   Send,
 } from "lucide-react";
-import { type ElementType, useEffect, useState } from "react";
+import { type ElementType, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import type { ClaimDetailDoc } from "@/lib/api/claims";
+import { type ClaimDetailDoc, editClaimDraft } from "@/lib/api/claims";
 import type { ClaimDetail, ClaimDetailDraftType } from "@/lib/claim-detail-types";
 import { cn } from "@/lib/utils";
 
 interface DraftPaneProps {
   claim: ClaimDetail;
-  /**
-   * Re-pull server truth. Consumed by WI-3 (edit/save) after the PUT
-   * /edit completes; accepted here so the prop interface is stable
-   * across the WI-2 plumbing commit.
-   */
   refetch: () => Promise<void>;
-  /**
-   * Shallow-merge a partial wire claim. Consumed by WI-3 to push the
-   * new draft version into the wire state before the network round-trip.
-   */
   applyOptimistic: (patch: Partial<ClaimDetailDoc>) => void;
   onDoubleClickHeader?: () => void;
+}
+
+type DraftMode = "preview" | "edit";
+
+/**
+ * Self-service walkthrough wire shape — the `draft_content` for
+ * `claim_type === "self_service"` is `SelfServiceWalkthrough.model_dump_json()`
+ * per `apps/claim-agent/src/draft/type_d_self_service.py` L297. WI-3
+ * uses this shape for pre-save validation (no rich-form editor in 5.7
+ * — the buffer is JSON-as-string); WI-5 reuses it for the preview
+ * renderer.
+ */
+const SELF_SERVICE_REQUIRED_FIELDS = [
+  "platform_display_name",
+  "order_summary",
+  "steps",
+  "notes",
+  "sub_pattern",
+  "estimated_minutes",
+  "claim_url",
+  "credit_type",
+] as const;
+
+function isValidSelfServiceJson(buffer: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(buffer);
+  } catch {
+    return false;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+  const obj = parsed as Record<string, unknown>;
+  return SELF_SERVICE_REQUIRED_FIELDS.every((field) => field in obj);
 }
 
 function PaneHeader({
@@ -118,46 +149,13 @@ function CopyIconButton({ text }: { text: string }) {
   );
 }
 
-function EmailDraft({
-  content,
-  isEditing,
-  onContentChange,
-}: {
-  content: string;
-  isEditing: boolean;
-  onContentChange: (content: string) => void;
-}) {
+// ---------------------------------------------------------------------------
+// Preview renderers (preview-only after WI-3; WI-5 will replace these with
+// parsers pinned to apps/claim-agent/src/draft/*.py output formats)
+// ---------------------------------------------------------------------------
+
+function EmailDraft({ content }: { content: string }) {
   const subject = "Price adjustment request";
-
-  const [editSubject, setEditSubject] = useState(subject);
-  const [editBody, setEditBody] = useState(content);
-
-  if (isEditing) {
-    return (
-      <div className="space-y-4 p-4">
-        <div className="space-y-2">
-          <Label htmlFor="subject">Subject</Label>
-          <Input
-            id="subject"
-            value={editSubject}
-            onChange={(e) => setEditSubject(e.target.value)}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="body">Body</Label>
-          <Textarea
-            id="body"
-            value={editBody}
-            onChange={(e) => {
-              setEditBody(e.target.value);
-              onContentChange(e.target.value);
-            }}
-            className="min-h-64 font-mono text-sm"
-          />
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-4 p-4">
@@ -203,32 +201,8 @@ function EmailDraft({
   );
 }
 
-function ChatScriptDraft({
-  content,
-  isEditing,
-  onContentChange,
-}: {
-  content: string;
-  isEditing: boolean;
-  onContentChange: (content: string) => void;
-}) {
+function ChatScriptDraft({ content }: { content: string }) {
   const segments = content.split(/\n\n/).filter(Boolean);
-  const [editContent, setEditContent] = useState(content);
-
-  if (isEditing) {
-    return (
-      <div className="p-4">
-        <Textarea
-          value={editContent}
-          onChange={(e) => {
-            setEditContent(e.target.value);
-            onContentChange(e.target.value);
-          }}
-          className="min-h-80 font-mono text-sm"
-        />
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-4 p-4">
@@ -280,32 +254,17 @@ function ChatScriptDraft({
   );
 }
 
-function GenericDraft({
-  content,
-  isEditing,
-  onContentChange,
-}: {
-  content: string;
-  isEditing: boolean;
-  onContentChange: (content: string) => void;
-}) {
-  if (isEditing) {
-    return (
-      <div className="p-4">
-        <Textarea
-          value={content}
-          onChange={(e) => onContentChange(e.target.value)}
-          className="min-h-80 font-mono text-sm"
-        />
-      </div>
-    );
-  }
+function GenericDraft({ content }: { content: string }) {
   return (
     <div className="p-4">
       <div className="whitespace-pre-wrap text-neutral-700 text-sm">{content}</div>
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Pane
+// ---------------------------------------------------------------------------
 
 const claimTypeIcons: Record<ClaimDetailDraftType, ElementType> = {
   email: Mail,
@@ -321,41 +280,165 @@ const claimTypeLabels: Record<ClaimDetailDraftType, string> = {
   self_service_walkthrough: "Self-Service Walkthrough",
 };
 
+const SELF_SERVICE_PLACEHOLDER_TEXTAREA_HINT =
+  "Self-service drafts are stored as JSON. Validate before saving — invalid JSON cannot render.";
+
+const EDIT_TEXTAREA_HINT_BY_TYPE: Partial<Record<ClaimDetailDraftType, string>> = {
+  self_service_walkthrough: SELF_SERVICE_PLACEHOLDER_TEXTAREA_HINT,
+};
+
 export function DraftPane({
   claim,
-  refetch: _refetch,
-  applyOptimistic: _applyOptimistic,
+  refetch,
+  applyOptimistic,
   onDoubleClickHeader,
 }: DraftPaneProps) {
   const [selectedVersion, setSelectedVersion] = useState(claim.current_version);
   const baseline = claim.draft_versions[selectedVersion - 1]?.content ?? "";
 
-  const [localContent, setLocalContent] = useState(baseline);
+  const [editBuffer, setEditBuffer] = useState(baseline);
+  const [draftMode, setDraftMode] = useState<DraftMode>("preview");
+  const [isSaving, setIsSaving] = useState(false);
 
+  // Pending-navigation state for the unsaved-changes guard. Each entry
+  // captures the navigation the user wanted but is blocked on
+  // confirmation. Resolved by either Discard-and-go (apply the pending
+  // change + clear) or Keep-editing (just clear).
+  const [pendingTab, setPendingTab] = useState<DraftMode | null>(null);
+  const [pendingVersion, setPendingVersion] = useState<number | null>(null);
+
+  // Snap the latest version + reset buffer whenever the wire claim
+  // refreshes (e.g. after a successful Save the new version lands at
+  // draft_versions[length - 1]).
   useEffect(() => {
-    setLocalContent(claim.draft_versions[selectedVersion - 1]?.content ?? "");
+    setSelectedVersion(claim.current_version);
+  }, [claim.current_version]);
+
+  // Reset edit buffer when the selected version changes (drives both
+  // initial mount and post-save snap-to-latest). Intentionally re-runs
+  // when `claim` identity changes so a fresh refetch resets the buffer.
+  useEffect(() => {
+    setEditBuffer(claim.draft_versions[selectedVersion - 1]?.content ?? "");
   }, [selectedVersion, claim]);
+
+  const dirty = useMemo(() => editBuffer !== baseline, [editBuffer, baseline]);
 
   const Icon = claimTypeIcons[claim.claim_type];
 
-  const renderDraftContent = (isEditing: boolean) => {
-    const body = localContent;
-
+  const renderPreview = () => {
     switch (claim.claim_type) {
       case "email":
-        return (
-          <EmailDraft content={body} isEditing={isEditing} onContentChange={setLocalContent} />
-        );
+        return <EmailDraft content={editBuffer} />;
       case "chat_script":
-        return (
-          <ChatScriptDraft content={body} isEditing={isEditing} onContentChange={setLocalContent} />
-        );
+        return <ChatScriptDraft content={editBuffer} />;
       default:
-        return (
-          <GenericDraft content={body} isEditing={isEditing} onContentChange={setLocalContent} />
-        );
+        return <GenericDraft content={editBuffer} />;
     }
   };
+
+  // Confirm dialog open when there's a pending blocked navigation.
+  const guardOpen = pendingTab !== null || pendingVersion !== null;
+
+  const clearPending = () => {
+    setPendingTab(null);
+    setPendingVersion(null);
+  };
+
+  const handleTabChange = (next: string) => {
+    const nextMode = next === "edit" ? "edit" : "preview";
+    if (nextMode === draftMode) return;
+    if (dirty && draftMode === "edit") {
+      setPendingTab(nextMode);
+      return;
+    }
+    setDraftMode(nextMode);
+  };
+
+  const handleVersionChange = (version: number) => {
+    if (version === selectedVersion) return;
+    if (dirty) {
+      setPendingVersion(version);
+      return;
+    }
+    setSelectedVersion(version);
+  };
+
+  const applyPending = () => {
+    if (pendingTab !== null) setDraftMode(pendingTab);
+    if (pendingVersion !== null) setSelectedVersion(pendingVersion);
+    // The setSelectedVersion useEffect resets editBuffer for us; force a
+    // baseline reset for the tab-only case (no version change).
+    if (pendingVersion === null) {
+      setEditBuffer(baseline);
+    }
+    clearPending();
+  };
+
+  const handleDiscard = () => {
+    setEditBuffer(baseline);
+    setDraftMode("preview");
+  };
+
+  const handleSave = async () => {
+    if (!dirty || isSaving) return;
+
+    // Pre-save validation for self-service: the buffer is JSON-as-string
+    // (apps/claim-agent/src/draft/type_d_self_service.py emits
+    // SelfServiceWalkthrough.model_dump_json()). Reject malformed JSON or
+    // missing fields so a hand-edit doesn't corrupt the draft into a
+    // permanent <pre> fallback state.
+    if (claim.claim_type === "self_service_walkthrough" && !isValidSelfServiceJson(editBuffer)) {
+      toast.error("Invalid walkthrough format — fix the JSON before saving");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const nowIso = new Date().toISOString();
+      await editClaimDraft(claim.claim_id, { draft_content: editBuffer });
+      // Optimistic patch: extend draft_versions with a v(n+1) row so the
+      // preview snaps to the just-saved content immediately. The refetch
+      // below replaces this with server truth (single source of truth)
+      // but the in-flight UI never flashes the old content.
+      applyOptimistic({
+        draft_content: editBuffer,
+        draft_versions: [
+          ...claim.draft_versions.map((dv) => ({
+            version: dv.version,
+            content: dv.content,
+            // The wire shape uses `at`; the VM consumes `created_at`.
+            // Round-trip via refetch will normalize; placeholder here.
+            generated_by: null,
+            at: dv.created_at,
+          })),
+          {
+            version: claim.draft_versions.length + 1,
+            content: editBuffer,
+            generated_by: "user_edit",
+            at: nowIso,
+          },
+        ],
+      });
+      await refetch();
+      toast.success("Draft updated");
+      setDraftMode("preview");
+      // setSelectedVersion will fire via the useEffect when the refreshed
+      // current_version lands; no explicit set needed here.
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Could not save draft";
+      toast.error(message);
+      // Reconcile back to server truth so the optimistic patch (which
+      // didn't include a server-assigned id / final timestamps) doesn't
+      // linger. WI-11 polishes the re-enable UX.
+      await refetch().catch(() => {
+        /* ignore — surfaced via the toast above */
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const editHint = EDIT_TEXTAREA_HINT_BY_TYPE[claim.claim_type];
 
   return (
     <div className="flex h-full flex-col bg-neutral-0">
@@ -369,13 +452,15 @@ export function DraftPane({
         <VersionDropdown
           currentVersion={selectedVersion}
           totalVersions={claim.draft_versions.length}
-          onVersionChange={(v) => {
-            setSelectedVersion(v);
-          }}
+          onVersionChange={handleVersionChange}
         />
       </div>
 
-      <Tabs defaultValue="preview" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <Tabs
+        value={draftMode}
+        onValueChange={handleTabChange}
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
+      >
         <div className="border-neutral-200 border-b px-4">
           <TabsList variant="default" className="h-10 bg-transparent">
             <TabsTrigger value="preview" className="data-active:bg-neutral-100">
@@ -387,15 +472,75 @@ export function DraftPane({
           </TabsList>
         </div>
 
-        <ScrollArea className="min-h-0 flex-1">
-          <TabsContent value="preview" className="m-0">
-            {renderDraftContent(false)}
-          </TabsContent>
-          <TabsContent value="edit" className="m-0">
-            {renderDraftContent(true)}
-          </TabsContent>
-        </ScrollArea>
+        <TabsContent value="preview" className="m-0 min-h-0 flex-1 overflow-hidden">
+          <ScrollArea className="h-full">{renderPreview()}</ScrollArea>
+        </TabsContent>
+
+        <TabsContent value="edit" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden">
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="p-4">
+              {editHint ? <p className="mb-2 text-neutral-500 text-xs">{editHint}</p> : null}
+              <Textarea
+                value={editBuffer}
+                onChange={(e) => setEditBuffer(e.target.value)}
+                className="min-h-80 font-mono text-sm"
+                aria-label={`Edit ${claimTypeLabels[claim.claim_type]} content`}
+                disabled={isSaving}
+              />
+            </div>
+          </ScrollArea>
+          <div className="flex items-center justify-end gap-2 border-neutral-200 border-t bg-neutral-50 px-4 py-3">
+            <Button
+              size="sm"
+              variant="ghost"
+              type="button"
+              onClick={handleDiscard}
+              disabled={!dirty || isSaving}
+            >
+              Discard
+            </Button>
+            <Button
+              size="sm"
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={!dirty || isSaving}
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                "Save changes"
+              )}
+            </Button>
+          </div>
+        </TabsContent>
       </Tabs>
+
+      <Dialog
+        open={guardOpen}
+        onOpenChange={(open) => {
+          if (!open) clearPending();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Discard unsaved edits?</DialogTitle>
+            <DialogDescription>
+              You have unsaved changes in the draft. Continuing will discard them.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" type="button" onClick={clearPending}>
+              Keep editing
+            </Button>
+            <Button variant="destructive" type="button" onClick={applyPending}>
+              Discard
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
