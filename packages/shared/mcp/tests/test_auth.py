@@ -193,3 +193,68 @@ def test_concurrent_refresh_dedupes_to_single_fetch() -> None:
     assert all(h == "Bearer shared-tok" for h in tokens_seen)
     # ...but fetch_id_token was called exactly once (deduplicated).
     assert fetch_call_count[0] == 1
+
+
+# ---------------------------------------------------------------------------
+# Pickle safety (Agent Engine deploy path)
+# ---------------------------------------------------------------------------
+
+
+def test_auth_is_cloudpickle_safe_for_agent_engine_deploy() -> None:
+    """Regression: ADK's deploy path cloudpickles the whole McpToolset,
+    which reaches this auth instance through the httpx_client_factory
+    closure. A live threading.Lock attribute used to break that with
+    "cannot pickle '_thread.lock' object" — see the hotfix that
+    moved the lock behind _get_lock + __getstate__/__setstate__."""
+    import cloudpickle
+
+    auth = GoogleIDTokenAuth(audience=_AUDIENCE)
+    # Force the cached-token branch to exercise non-default state too.
+    auth._token = "stub-token"
+    auth._expires_at = 9_999_999_999.0
+    # Touch the lock so the live instance has one; the round-trip must
+    # still strip it without complaining.
+    auth._get_lock()
+
+    restored = cloudpickle.loads(cloudpickle.dumps(auth))
+
+    assert restored._audience == _AUDIENCE
+    assert restored._token == "stub-token"
+    assert restored._expires_at == 9_999_999_999.0
+    # Lock must work on the restored instance — lazy recreation, not a no-op.
+    with restored._get_lock():
+        pass
+
+
+def test_get_lock_returns_same_instance_under_concurrent_first_calls() -> None:
+    """Regression: prevents 'two threads → two different Lock instances'
+    race in _get_lock. Concurrent first-callers must all get the same
+    Lock so _refresh actually serializes — a read-then-write pattern
+    would let the second writer clobber the first, leaving different
+    threads holding different locks. dict.setdefault is atomic under
+    CPython's GIL and closes that gap.
+
+    The Barrier forces all 8 threads to release simultaneously, so they
+    all enter _get_lock before any one of them returns — the contended
+    path is what the test is verifying."""
+    auth = GoogleIDTokenAuth(audience=_AUDIENCE)
+    locks: list[threading.Lock] = []
+    locks_lock = threading.Lock()
+    barrier = threading.Barrier(8)
+
+    def collect() -> None:
+        barrier.wait()  # release all 8 threads simultaneously
+        lock = auth._get_lock()
+        with locks_lock:
+            locks.append(lock)
+
+    threads = [threading.Thread(target=collect) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(locks) == 8
+    # All 8 threads must have gotten the same Lock instance.
+    assert all(lock is locks[0] for lock in locks)
+    assert len({id(lock) for lock in locks}) == 1
