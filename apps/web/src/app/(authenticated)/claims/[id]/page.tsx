@@ -21,7 +21,7 @@
  * pages behave consistently.
  */
 
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ClaimDetailShell } from "@/components/claims/claim-detail-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -61,6 +61,25 @@ export default function ClaimDetailPage({ params }: ClaimDetailRouteProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
 
   /**
+   * Per-instance request-sequence counter. Each `refetch` invocation
+   * increments it and captures the new value; once `getClaimDetail`
+   * resolves, the call only commits state (or re-throws on error) if
+   * its captured sequence still matches `requestSeq.current`. Older
+   * inflight calls become no-ops.
+   *
+   * Guards against (a) the user navigating between two claims quickly
+   * (the old fetch's "ready" landing after the new fetch's "loading"
+   * → wrong claim_id wired to action buttons), and (b) rapid
+   * retry-clicks racing the original load (an old failed retry
+   * flipping state back to "error" after a newer one succeeded).
+   *
+   * Replaces the prior `let mounted = true` cleanup pattern — see
+   * `useReviewDraft` for the sibling hook that retains it. CodeRabbit
+   * MAJOR + Bugbot MEDIUM, PR #168.
+   */
+  const requestSeq = useRef(0);
+
+  /**
    * Refetch the enriched detail bundle and replace the wire state on
    * success. Used by write handlers (approve / cancel / edit) to
    * reconcile optimistic patches with server truth.
@@ -88,8 +107,20 @@ export default function ClaimDetailPage({ params }: ClaimDetailRouteProps) {
     if (userId === null) {
       throw new Error("User must be signed in.");
     }
-    const wire = await getClaimDetail(id);
-    setState({ status: "ready", wire });
+    const seq = ++requestSeq.current;
+    try {
+      const wire = await getClaimDetail(id);
+      // Stale completion — a newer refetch superseded us; drop the
+      // result silently so we don't clobber the newer state.
+      if (seq !== requestSeq.current) return;
+      setState({ status: "ready", wire });
+    } catch (err) {
+      // Same staleness check on the error path: a stale failure must
+      // not flip a newer successful state back to "error" via the
+      // loadDetail catch block.
+      if (seq !== requestSeq.current) return;
+      throw err;
+    }
   }, [id, isAuthLoading, userId]);
 
   /**
