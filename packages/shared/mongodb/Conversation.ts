@@ -33,4 +33,5 @@ export interface Conversation {
   created_at: ISODateString;
   last_message_at: ISODateString;
   archived_at: ISODateString | null;
+  agent_session_id?: string | null;
 }

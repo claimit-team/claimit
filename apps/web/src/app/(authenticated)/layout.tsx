@@ -26,6 +26,7 @@ import { UploadDialog } from "@/components/upload/upload-dialog";
 import { useProactiveAssistant } from "@/hooks/useProactiveAssistant";
 import { useUnreadCount } from "@/hooks/useUnreadCount";
 import { signOutUser } from "@/lib/auth-actions";
+import { useShowReconnectingChip } from "@/lib/sse/connection-status";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useUIStore } from "@/store";
 
@@ -87,6 +88,16 @@ function ThemeChips() {
         );
       })}
     </div>
+  );
+}
+
+function SseReconnectChip() {
+  const show = useShowReconnectingChip();
+  if (!show) return null;
+  return (
+    <Badge variant="secondary" className="text-neutral-500 text-xs">
+      Reconnecting…
+    </Badge>
   );
 }
 
@@ -189,6 +200,7 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
           <div className="flex items-center gap-3">
             {!isAssistant ? (
               <>
+                <SseReconnectChip />
                 <ThemeToggle />
 
                 <Link
