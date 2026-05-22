@@ -27,13 +27,15 @@ import { useEffect, useRef } from "react";
 
 import { auth } from "@/lib/firebase";
 import { generateProactiveOutput, PROACTIVE_EVENT_TYPES } from "@/lib/proactive-templates";
+import { computeBackoffMs } from "@/lib/sse/backoff";
+import { useSseConnectionStore } from "@/lib/sse/connection-status";
 import { useAuthStore, useUIStore } from "@/store";
 import { useAutoSendBannerStore } from "@/store/auto-send-banner";
+import { useClaimDetailRefetchStore } from "@/store/claim-detail-refetch";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 const TOKEN_REFRESH_MS = 50 * 60 * 1000; // 50 min — safely under the 60min Firebase expiry
-const BACKOFF_BASE_MS = 1000;
-const BACKOFF_MAX_MS = 30_000;
+const SEEN_NOTIFICATION_MAX = 500;
 
 type NotificationFrame = {
   _id?: string;
@@ -42,17 +44,27 @@ type NotificationFrame = {
   data?: unknown;
 };
 
+/** FIFO-capped dedup set for notification `_id` values (ticket 5.11). */
+const seenNotificationIds: string[] = [];
+
+function rememberNotificationId(id: string): boolean {
+  if (seenNotificationIds.includes(id)) return false;
+  seenNotificationIds.push(id);
+  if (seenNotificationIds.length > SEEN_NOTIFICATION_MAX) {
+    seenNotificationIds.shift();
+  }
+  return true;
+}
+
 export function useProactiveAssistant(): void {
   const userId = useAuthStore((s) => s.user?._id ?? null);
   const isAuthLoading = useAuthStore((s) => s.isLoading);
   const setProactiveEvent = useUIStore((s) => s.setProactiveEvent);
-  // WI-9: same SSE stream fans out into the dashboard auto-send
-  // banner store so newly-queued claims appear live (no 10s polling)
-  // and Sent ✓ flips are driven by the backend claim_submitted event
-  // (H2). Reading these refs at hook-call time is fine — the store
-  // setter identities are stable across re-renders.
   const addBannerRow = useAutoSendBannerStore((s) => s.addRow);
   const markBannerSent = useAutoSendBannerStore((s) => s.markSent);
+  const setSseConnected = useSseConnectionStore((s) => s.setConnected);
+  const setSseDisconnected = useSseConnectionStore((s) => s.setDisconnected);
+  const resetSseConnection = useSseConnectionStore((s) => s.reset);
 
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -63,8 +75,6 @@ export function useProactiveAssistant(): void {
     if (isAuthLoading) return;
     if (!userId) return;
     if (!API_BASE_URL) {
-      // Misconfigured client — silently skip. The notifications page
-      // already surfaces the same misconfiguration as a visible error.
       return;
     }
 
@@ -78,6 +88,7 @@ export function useProactiveAssistant(): void {
       try {
         token = await currentUser.getIdToken();
       } catch {
+        setSseDisconnected();
         scheduleReconnect();
         return;
       }
@@ -90,24 +101,22 @@ export function useProactiveAssistant(): void {
       source.addEventListener("notification", (evt: MessageEvent) => {
         try {
           const frame = JSON.parse(evt.data) as NotificationFrame;
+          if (frame._id && !rememberNotificationId(frame._id)) {
+            return;
+          }
           handleNotificationFrame(frame, setProactiveEvent);
           handleAutoSendBannerFanout(frame, addBannerRow, markBannerSent);
+          handleClaimDraftedFanout(frame);
         } catch {
           // Malformed frame — drop; the stream itself stays open.
         }
       });
 
       source.addEventListener("error", () => {
-        // `error` fires on both transient blips and permanent closures;
-        // EventSource itself will retry, but we layer our own controlled
-        // backoff + token refresh on top because Firebase tokens expire.
         if (cancelled) return;
+        setSseDisconnected();
         source.close();
         sourceRef.current = null;
-        // The previous connect()'s refresh timer is now stale — it would
-        // close-and-reconnect a connection that doesn't exist anymore, or
-        // worse, a NEW one our backoff is about to open. Cancel it so
-        // there's exactly one timeline owning the next reconnect.
         if (refreshTimerRef.current) {
           clearTimeout(refreshTimerRef.current);
           refreshTimerRef.current = null;
@@ -117,10 +126,9 @@ export function useProactiveAssistant(): void {
 
       source.addEventListener("open", () => {
         failureCountRef.current = 0;
+        setSseConnected();
       });
 
-      // Schedule a token refresh — close + reconnect every 50 min so we
-      // never see a 401 from an expired token mid-stream.
       refreshTimerRef.current = setTimeout(() => {
         if (cancelled) return;
         source.close();
@@ -132,7 +140,7 @@ export function useProactiveAssistant(): void {
     function scheduleReconnect(): void {
       if (cancelled) return;
       const attempt = failureCountRef.current++;
-      const delay = Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_MAX_MS);
+      const delay = computeBackoffMs(attempt, { baseMs: 1000, maxMs: 30_000 });
       reconnectTimerRef.current = setTimeout(() => {
         void connect();
       }, delay);
@@ -147,22 +155,20 @@ export function useProactiveAssistant(): void {
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
       failureCountRef.current = 0;
+      resetSseConnection();
     };
-  }, [userId, isAuthLoading, setProactiveEvent, addBannerRow, markBannerSent]);
+  }, [
+    userId,
+    isAuthLoading,
+    setProactiveEvent,
+    addBannerRow,
+    markBannerSent,
+    setSseConnected,
+    setSseDisconnected,
+    resetSseConnection,
+  ]);
 }
 
-/**
- * Side-channel of the same SSE frames into the auto-send banner
- * store. Lives next to handleNotificationFrame so the proactive
- * panel + banner are fed by exactly ONE EventSource — duplicating
- * the connection per consumer would double-fire every notification.
- *
- * - `claim_queued_auto` → insert a row (idempotent by claimId).
- * - `claim_submitted`   → flip the matching row to "sent" so the
- *                         banner shows Sent ✓ before its auto-dismiss
- *                         timer removes it.
- * Other events are no-ops here (other handlers consume them).
- */
 function handleAutoSendBannerFanout(
   frame: NotificationFrame,
   addRow: ReturnType<typeof useAutoSendBannerStore.getState>["addRow"],
@@ -183,15 +189,20 @@ function handleAutoSendBannerFanout(
   markSent(claimId);
 }
 
+function handleClaimDraftedFanout(frame: NotificationFrame): void {
+  if (frame.event_type !== "claim_drafted") return;
+  const data = (frame.data ?? {}) as Record<string, unknown>;
+  const claimId = typeof data.claim_id === "string" ? data.claim_id : null;
+  if (!claimId) return;
+  void useClaimDetailRefetchStore.getState().triggerRefetch(claimId);
+}
+
 function handleNotificationFrame(
   frame: NotificationFrame,
   setProactiveEvent: ReturnType<typeof useUIStore.getState>["setProactiveEvent"],
 ): void {
   const eventType = frame.event_type;
   if (!eventType || !PROACTIVE_EVENT_TYPES.has(eventType)) {
-    // Notifications that don't map to a proactive template still drive
-    // the header bell unread count (via useUnreadCount poll) — they
-    // simply don't auto-open the assistant panel.
     return;
   }
   const notificationId = frame._id;

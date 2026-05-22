@@ -40,6 +40,32 @@ class SendMessageRequest(BaseModel):
     content: str
 
 
+def _accumulate_stream_event(
+    event: dict[str, str],
+    *,
+    collected_text: list[str],
+    collected_tool_calls: list[dict],
+) -> None:
+    event_type = event.get("event")
+    data = event.get("data", "")
+    if event_type == "text_chunk":
+        try:
+            parsed = json.loads(data)
+            text = parsed.get("text")
+            if isinstance(text, str) and text:
+                collected_text.append(text)
+        except json.JSONDecodeError:
+            pass
+    elif event_type == "tool_call":
+        try:
+            parsed = json.loads(data)
+            tool = parsed.get("tool")
+            if tool:
+                collected_tool_calls.append({"tool": tool, "input": parsed.get("input", {}) or {}})
+        except json.JSONDecodeError:
+            pass
+
+
 @router.get("")
 async def list_conversations_endpoint(
     user: Annotated[User, Depends(get_current_user)],
@@ -89,17 +115,30 @@ async def send_message(
 
         conv = await append_message(db, conv, MessageRole.USER, body.content)
 
-        collected_text = ""
-        # db is passed so the service can lazy-backfill agent_session_id
-        # via partial_update when a pre-feature conversation streams.
+        text_parts: list[str] = []
+        raw_tool_calls: list[dict] = []
+        done_error: str | None = None
+        event: dict | None = None
+
         agent_stream = stream_agent_response(db, user.id, conv, body.content)
 
         while True:
             try:
                 event = await asyncio.wait_for(agent_stream.__anext__(), timeout=15.0)
                 yield event
+                _accumulate_stream_event(
+                    event,
+                    collected_text=text_parts,
+                    collected_tool_calls=raw_tool_calls,
+                )
                 if event.get("event") == "done":
-                    collected_text = json.loads(event["data"]).get("final_message", "")
+                    try:
+                        done_payload = json.loads(event.get("data", "{}"))
+                        err = done_payload.get("error")
+                        if isinstance(err, str) and err:
+                            done_error = err
+                    except json.JSONDecodeError:
+                        pass
                     break
             except StopAsyncIteration:
                 break
@@ -111,26 +150,34 @@ async def send_message(
                 yield {"event": "done", "data": json.dumps({"error": str(e)})}
                 break
 
-        if collected_text:
-            try:
-                done_payload = json.loads(event["data"]) if event.get("event") == "done" else {}
-                raw_tool_calls = done_payload.get("tool_calls", [])
-                tool_calls_to_save = [
-                    ToolCall(
-                        tool=tc["tool"],
-                        input=tc.get("input", {}),
-                        output_summary="",
-                        at=datetime.now(UTC),
-                    )
-                    for tc in raw_tool_calls
-                    if tc.get("tool")
-                ] or None
-                await append_message(
-                    db, conv, MessageRole.ASSISTANT, collected_text, tool_calls_to_save
+        if done_error:
+            return
+
+        assistant_text = "".join(text_parts).strip()
+        if not assistant_text and not raw_tool_calls:
+            return
+
+        try:
+            tool_calls_to_save = [
+                ToolCall(
+                    tool=tc["tool"],
+                    input=tc.get("input", {}),
+                    output_summary="",
+                    at=datetime.now(UTC),
                 )
-            except Exception:
-                logger.exception(
-                    "Failed to persist assistant reply for conversation %s", conversation_id
-                )
+                for tc in raw_tool_calls
+                if tc.get("tool")
+            ] or None
+            await append_message(
+                db,
+                conv,
+                MessageRole.ASSISTANT,
+                assistant_text,
+                tool_calls_to_save,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to persist assistant reply for conversation %s", conversation_id
+            )
 
     return EventSourceResponse(event_generator())

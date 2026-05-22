@@ -270,6 +270,15 @@ module "assistant_agent" {
     # the claim-agent spans it needs for Mode B explanations — tracked
     # as a follow-up issue.
     PHOENIX_PROJECT_NAME = "claimit"
+    # Mode B ADK runner + Pub/Sub publish (request_redraft).
+    GOOGLE_CLOUD_PROJECT      = var.project_id
+    GOOGLE_GENAI_USE_VERTEXAI = "true"
+    GOOGLE_CLOUD_LOCATION     = var.region
+    GCP_PROJECT_ID            = var.project_id
+    # api-gateway SA email for internal OIDC verification — account_id
+    # matches cloud-run-agent module naming; avoids a module-order cycle
+    # (assistant_agent is declared before api_gateway in this file).
+    GATEWAY_SA_EMAIL = "claimit-api-gateway@${var.project_id}.iam.gserviceaccount.com"
   }
   deletion_protection = false
 
@@ -327,6 +336,8 @@ module "api_gateway" {
     # qualified `projects/<project>/topics/gmail-inbound` path Gmail
     # expects in the watch request body.
     GMAIL_INBOUND_TOPIC = google_pubsub_topic.gmail_inbound.id
+    # Ticket 5.9: claim_focused chat → assistant-agent Cloud Run Mode B.
+    ASSISTANT_AGENT_URL = module.assistant_agent.service_url
   }
   deletion_protection = false
 

@@ -27,6 +27,13 @@ import { auth } from "@/lib/firebase";
 import type { UIMessage, UIToolCall } from "@/types/assistant";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+/** 3× the server's 15s heartbeat interval (conversations route). */
+const STREAM_STALL_MS = 45_000;
+
+type SendMessageResult = {
+  toolNames: string[];
+  error?: string;
+};
 
 type UseAssistantStreamResult = {
   /** Final + in-progress messages, in chronological order. */
@@ -35,11 +42,13 @@ type UseAssistantStreamResult = {
   streaming: boolean;
   /** Last error (network, auth, broker). Cleared on next sendMessage. */
   error: string | null;
-  sendMessage: (conversationId: string, content: string) => Promise<void>;
+  sendMessage: (conversationId: string, content: string) => Promise<SendMessageResult | undefined>;
   /** Aborts the in-flight stream if any. */
   cancel: () => void;
   /** Wipes the local message buffer — call when switching conversations. */
   reset: () => void;
+  /** True when the current stream has stalled waiting for server frames. */
+  stalled: boolean;
   /**
    * Pre-populate the buffer with server-persisted messages (e.g. when
    * the user picks an existing conversation from history).
@@ -50,6 +59,7 @@ type UseAssistantStreamResult = {
 export function useAssistantStream(): UseAssistantStreamResult {
   const [messages, setMessages] = useState<UIMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
+  const [stalled, setStalled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -78,15 +88,15 @@ export function useAssistantStream(): UseAssistantStreamResult {
   }, []);
 
   const sendMessage = useCallback(
-    async (conversationId: string, content: string): Promise<void> => {
+    async (conversationId: string, content: string): Promise<SendMessageResult | undefined> => {
       if (!API_BASE_URL) {
         setError("NEXT_PUBLIC_API_BASE_URL is not configured.");
-        return;
+        return { toolNames: [], error: "NEXT_PUBLIC_API_BASE_URL is not configured." };
       }
       const currentUser = auth.currentUser;
       if (!currentUser) {
         setError("User must be signed in.");
-        return;
+        return { toolNames: [], error: "User must be signed in." };
       }
 
       // Any previous in-flight request gets cancelled when a new send
@@ -117,7 +127,11 @@ export function useAssistantStream(): UseAssistantStreamResult {
       };
       setMessages((prev) => [...prev, userMessage, assistantPlaceholder]);
       setStreaming(true);
+      setStalled(false);
       setError(null);
+
+      const turnToolNames: string[] = [];
+      let turnError: string | undefined;
 
       let token: string;
       try {
@@ -126,7 +140,7 @@ export function useAssistantStream(): UseAssistantStreamResult {
         setError("Failed to load auth token.");
         setStreaming(false);
         markAssistantError(setMessages, assistantId, "auth failed");
-        return;
+        return { toolNames: [], error: "Failed to load auth token." };
       }
 
       let response: Response;
@@ -149,12 +163,15 @@ export function useAssistantStream(): UseAssistantStreamResult {
           // Caller-initiated cancellation; not an error.
           markAssistantError(setMessages, assistantId, "cancelled");
           setStreaming(false);
-          return;
+          return { toolNames: turnToolNames, error: "cancelled" };
         }
         setError(e instanceof Error ? e.message : "Network error");
         markAssistantError(setMessages, assistantId, "network failed");
         setStreaming(false);
-        return;
+        return {
+          toolNames: turnToolNames,
+          error: e instanceof Error ? e.message : "Network error",
+        };
       }
 
       if (!response.ok) {
@@ -197,21 +214,26 @@ export function useAssistantStream(): UseAssistantStreamResult {
         // we already extracted above.
         markAssistantError(setMessages, assistantId, errorMsg);
         setStreaming(false);
-        return;
+        return { toolNames: turnToolNames, error: errorMsg };
       }
       if (!response.body) {
         setError("Stream response had no body.");
         markAssistantError(setMessages, assistantId, "no response body");
         setStreaming(false);
-        return;
+        return { toolNames: turnToolNames, error: "Stream response had no body." };
       }
 
       try {
         await readSSEStream(response.body, controller.signal, {
+          stallMs: STREAM_STALL_MS,
+          onStall: () => setStalled(true),
+          onActivity: () => setStalled(false),
+          onHeartbeat: () => setStalled(false),
           onTextChunk: (chunk) => {
             setMessages((prev) => appendToAssistant(prev, assistantId, chunk));
           },
           onToolCall: (call) => {
+            turnToolNames.push(call.tool);
             setMessages((prev) => addToolCallToAssistant(prev, assistantId, call));
           },
           onToolResult: (toolName, summary) => {
@@ -219,12 +241,7 @@ export function useAssistantStream(): UseAssistantStreamResult {
           },
           onDone: (errorMsg) => {
             if (errorMsg) {
-              // The server uses the `done` frame to signal both happy
-              // completion and terminal failures (e.g. "Conversation not
-              // found", "Access denied", agent stream exceptions). When
-              // the done payload carries an `error` field, surface it
-              // and mark the assistant bubble as failed so the user sees
-              // a clear failure state rather than an empty reply.
+              turnError = errorMsg;
               setError(errorMsg);
               markAssistantError(setMessages, assistantId, errorMsg);
             } else {
@@ -244,15 +261,18 @@ export function useAssistantStream(): UseAssistantStreamResult {
         }
       } finally {
         setStreaming(false);
+        setStalled(false);
         if (abortRef.current === controller) {
           abortRef.current = null;
         }
       }
+
+      return { toolNames: turnToolNames, error: turnError };
     },
     [],
   );
 
-  return { messages, streaming, error, sendMessage, cancel, reset, hydrate };
+  return { messages, streaming, stalled, error, sendMessage, cancel, reset, hydrate };
 }
 
 // ---------------------------------------------------------------------------
@@ -263,14 +283,12 @@ interface FrameHandlers {
   onTextChunk: (chunk: string) => void;
   onToolCall: (call: { tool: string; input: Record<string, unknown> }) => void;
   onToolResult: (tool: string, output_summary: string) => void;
-  /**
-   * Fired when the server emits `event: done`. The optional `errorMsg`
-   * carries the value of `done.data.error` if present — the api-gateway
-   * uses the same done frame for happy completion and for terminal
-   * failures (conversation_not_found, access_denied, agent crash).
-   */
   onDone: (errorMsg?: string) => void;
   onUnknown: (eventType: string, data: string) => void;
+  onHeartbeat?: () => void;
+  onStall?: () => void;
+  onActivity?: () => void;
+  stallMs?: number;
 }
 
 async function readSSEStream(
@@ -281,6 +299,29 @@ async function readSSEStream(
   const reader = body.getReader();
   const decoder = new TextDecoder("utf-8");
   let buffer = "";
+  let stallTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearStallTimer = () => {
+    if (stallTimer !== null) {
+      clearTimeout(stallTimer);
+      stallTimer = null;
+    }
+  };
+
+  const armStallTimer = () => {
+    clearStallTimer();
+    if (!handlers.stallMs || !handlers.onStall) return;
+    stallTimer = setTimeout(() => {
+      handlers.onStall?.();
+    }, handlers.stallMs);
+  };
+
+  const noteActivity = () => {
+    handlers.onActivity?.();
+    armStallTimer();
+  };
+
+  armStallTimer();
 
   try {
     while (true) {
@@ -289,23 +330,18 @@ async function readSSEStream(
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
 
-      // Frames are separated by a blank line. Handle both \r\n\r\n and \n\n.
       while (true) {
         const frameEnd = findFrameEnd(buffer);
         if (frameEnd === -1) break;
         const frameRaw = buffer.slice(0, frameEnd);
-        // Consume the frame + its terminator.
         buffer = buffer.slice(frameEnd + frameTerminatorLength(buffer, frameEnd));
-        // `done` is a terminal event — anything the server sends after
-        // it (extra heartbeats, stale frames, garbage) should not be
-        // processed. dispatchFrame returns `true` only for the done
-        // case, signaling early exit from the outer read loop. The
-        // `finally` block below still runs and releases the reader.
+        noteActivity();
         const terminal = dispatchFrame(frameRaw, handlers);
         if (terminal) return;
       }
     }
   } finally {
+    clearStallTimer();
     reader.releaseLock();
   }
 }
@@ -380,11 +416,6 @@ function dispatchFrame(raw: string, handlers: FrameHandlers): boolean {
       return false;
     }
     case "done": {
-      // The server may attach a terminal error to the done frame —
-      // {"error": "Conversation not found"} or similar. Extract it so
-      // the caller can render a clear failure rather than an empty
-      // assistant reply. Malformed JSON falls through to the
-      // success-shaped path; nothing user-facing changes.
       let errorMsg: string | undefined;
       try {
         const parsed = JSON.parse(data) as { error?: string };
@@ -396,6 +427,10 @@ function dispatchFrame(raw: string, handlers: FrameHandlers): boolean {
       }
       handlers.onDone(errorMsg);
       return true;
+    }
+    case "heartbeat": {
+      handlers.onHeartbeat?.();
+      return false;
     }
     default:
       handlers.onUnknown(eventType, data);

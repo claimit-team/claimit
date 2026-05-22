@@ -34,7 +34,7 @@ import {
   getClaimDetail,
 } from "@/lib/api/claims";
 import { buildClaimDetailViewModel } from "@/lib/claim-detail-view";
-import { useAuthStore } from "@/store";
+import { useAuthStore, useClaimDetailRefetchStore } from "@/store";
 
 type ClaimDetailRouteProps = {
   params: Promise<{ id: string }>;
@@ -122,6 +122,14 @@ export default function ClaimDetailPage({ params }: ClaimDetailRouteProps) {
       throw err;
     }
   }, [id, isAuthLoading, userId]);
+
+  const registerRefetch = useClaimDetailRefetchStore((s) => s.register);
+  const unregisterRefetch = useClaimDetailRefetchStore((s) => s.unregister);
+
+  useEffect(() => {
+    registerRefetch(id, refetch);
+    return () => unregisterRefetch(id);
+  }, [id, refetch, registerRefetch, unregisterRefetch]);
 
   /**
    * Load (or retry-load) the detail bundle and convert any failure into

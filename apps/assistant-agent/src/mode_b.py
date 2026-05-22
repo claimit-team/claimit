@@ -18,19 +18,19 @@ Tool routing design:
   typed Pydantic responses, claim-id immutability by construction, and
   Python-level ownership checks for the write tool.
 
-Production traffic path (deferred to ticket 5.9):
-- The deploy story for Mode B (api-gateway → Vertex AI Agent Engine
-  with claim_id injected via session context) lands with the approval
-  UI Assistant pane. This module's `handle_message` is the AC-required
-  local entry point; the deploy path will reuse `create_mode_b_agent`
-  once 5.9 sets up the session-scoped claim_id injection it needs.
+Production traffic path (ticket 5.9):
+- api-gateway routes `claim_focused` chat to the assistant-agent Cloud
+  Run service, which calls `handle_message` in-process. Each HTTP
+  request creates a fresh InMemorySessionService; prior turns are
+  replayed from the gateway-supplied `history` list.
 """
 
 from __future__ import annotations
 
 import inspect
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
@@ -81,6 +81,29 @@ You are scoped to a single claim — the one the user is currently reviewing in 
 """
 
 
+@dataclass(frozen=True)
+class HistoryMessage:
+    """Prior conversation turn supplied by api-gateway on each request."""
+
+    role: str
+    content: str
+
+
+def _format_history_prefix(history: Sequence[HistoryMessage] | None) -> str:
+    """Build a transcript prefix so multi-turn context survives stateless HTTP.
+
+    Each Cloud Run request creates a fresh ADK session; replaying prior
+    turns as a structured prefix is the reliable cross-request memory path.
+    """
+    if not history:
+        return ""
+    lines = ["[Prior conversation — respond to the latest user message only:]"]
+    for msg in history:
+        label = "User" if msg.role == "user" else "Assistant"
+        lines.append(f"{label}: {msg.content}")
+    return "\n".join(lines) + "\n\n"
+
+
 def create_mode_b_agent(*, user_id: str, claim_id: str) -> Agent:
     """Build a Mode B agent bound to a specific (user_id, claim_id).
 
@@ -112,6 +135,8 @@ async def handle_message(
     user_id: str,
     claim_id: str,
     message: str,
+    *,
+    history: Sequence[HistoryMessage] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Process a user message in Mode B (claim-focused).
 
@@ -129,7 +154,11 @@ async def handle_message(
         user_id: Authenticated user's ID. Bound to all four tools.
         claim_id: The active claim's ID. Bound to all four tools.
         message: The user's message text — passed through verbatim.
+        history: Prior turns from MongoDB, replayed as a transcript prefix.
     """
+    history_prefix = _format_history_prefix(history)
+    prompt_text = f"{history_prefix}{message}" if history_prefix else message
+
     session_service = InMemorySessionService()
     session_id = f"mode-b-{uuid4()}"
     await _maybe_await(
@@ -150,7 +179,7 @@ async def handle_message(
 
     new_message = types.Content(
         role="user",
-        parts=[types.Part.from_text(text=message)],
+        parts=[types.Part.from_text(text=prompt_text)],
     )
 
     # Track whether we have emitted a terminating frame so the `finally`
