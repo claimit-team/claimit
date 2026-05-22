@@ -25,19 +25,36 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from uuid import UUID
 
-from claimit_mongodb_models import MongoDBClient, PurchaseStatus
+from claimit_gmail import WatchRegistrationError, exchange_refresh_for_access
+from claimit_mongodb_models import (
+    MongoDBClient,
+    Purchase,
+    PurchaseStatus,
+    User,
+    compute_format_hash,
+)
 from claimit_observability import init_phoenix
 from fastapi import Depends, FastAPI, Request
 from google.cloud import secretmanager
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .auth import verify_pubsub_oidc
-from .extractor import ALLOWED_BLOB_MIME_TYPES, ExtractorError, extract_from_blob
+from .classifier import classify
+from .dedup import hash_receipt
+from .extractor import (
+    ALLOWED_BLOB_MIME_TYPES,
+    ExtractorError,
+    extract_from_blob,
+    extract_from_email,
+)
 from .finalize import (
     FinalizeError,
     finalize_purchase_extraction,
     finalize_purchase_extraction_failure,
 )
+from .gmail_api import GmailApiError, GmailAuthError, history_list, messages_get
+from .gmail_parser import GmailParseError, parse_gmail_message
+from .gmail_purchase_factory import insert_gmail_sentinel_purchase
 from .renewal import run_renewal_sweep
 from .storage import ReceiptObjectMissingError, ReceiptsReader, parse_gs_uri
 
@@ -280,12 +297,331 @@ async def renew_watches(
     return await run_renewal_sweep(db, sm_client)
 
 
+# Per-push hard cap on the number of Gmail messages this handler will
+# process inline. Each message costs ~10-25s end-to-end (Gmail API +
+# classifier Gemini call + extractor Gemini call + Mongo writes), and
+# Pub/Sub's ack deadline on `gmail-inbound-to-ingest` is 60s. Capping at
+# 5 keeps the worst case under the deadline. Messages beyond the cap
+# are lost in this first cut — the cursor advances to the push's
+# historyId so the next push picks up from there. A follow-up ticket
+# can refine this to per-record cursor advancement so nothing gets
+# dropped silently.
+_GMAIL_INBOUND_PROCESS_CAP = 5
+
+
+async def _process_gmail_inbound(
+    db: MongoDBClient,
+    sm_client: secretmanager.SecretManagerServiceClient,
+    email_address: str,
+    history_id: str,
+) -> None:
+    """Drive the Gmail ingest pipeline for one push delivery.
+
+    Flow:
+      1. Look up the User by `gmail_integration.connected_email`.
+      2. Pick the starting cursor (`last_processed_history_id` or, on
+         first delivery, `watch_history_id`).
+      3. Mint a short-lived OAuth access token.
+      4. Call `users.history.list?startHistoryId=<cursor>` — first page
+         only.
+      5. Flatten `messagesAdded` across the returned history records;
+         cap at `_GMAIL_INBOUND_PROCESS_CAP`.
+      6. For each message: fetch via `users.messages.get`, parse to
+         `EmailForExtraction`, classify, dedup by `receipt_hash`,
+         insert sentinel Purchase, run `extract_from_email`,
+         `finalize_purchase_extraction` (or rescue on extract
+         failure).
+      7. Advance `last_processed_history_id` to the push's historyId.
+
+    Never raises out — all per-message errors are caught + logged + the
+    sweep moves on. The handler wraps the whole thing in another
+    try/except as defense-in-depth so anything that escapes here
+    (e.g., Mongo network failure) still results in a 200 ack.
+    """
+    # 1. User lookup.
+    user = await db.find_one("users", {"gmail_integration.connected_email": email_address}, User)
+    if user is None:
+        _log.warning(
+            "gmail.user_not_found email=%s history_id=%s",
+            _mask_email(email_address),
+            history_id,
+        )
+        return
+
+    # 2. Starting cursor. `last_processed_history_id` is the steady-
+    # state value the previous run of this handler advanced to.
+    # `watch_history_id` is what 4.15 wrote when the watch was first
+    # registered — the fallback for the very first push.
+    start_history_id = (
+        user.gmail_integration.last_processed_history_id or user.gmail_integration.watch_history_id
+    )
+    if start_history_id is None:
+        _log.warning(
+            "gmail.no_starting_cursor user_id=%s — watch may not be registered yet",
+            user.id,
+        )
+        return
+
+    # 3. Mint an access token. `exchange_refresh_for_access` raises
+    # `WatchRegistrationError` on any failure mode (missing OAuth
+    # client env, Secret Manager unreachable, refresh-token grant
+    # rejected by Google). All of these are terminal for this push —
+    # nothing the handler can retry inline, the cursor doesn't
+    # advance, and the next push gets the same start_history_id.
+    try:
+        access_token = await exchange_refresh_for_access(sm_client, user)
+    except WatchRegistrationError as err:
+        _log.warning(
+            "gmail.token_mint_failed user_id=%s reason=%s",
+            user.id,
+            err.terminal_message,
+        )
+        return
+
+    # 4. history.list — first page only (the _GMAIL_INBOUND_PROCESS_CAP
+    # would clip anything past the page anyway in this first cut).
+    try:
+        history_response = await history_list(access_token, start_history_id)
+    except GmailAuthError as err:
+        # The token we just minted got a 401 — likely a stale-grant
+        # race (user revoked between exchange_refresh and history.list).
+        # Same outcome as a hard token-mint failure: no cursor
+        # advance, surface in logs.
+        _log.warning(
+            "gmail.history_list_auth_failed user_id=%s reason=%s",
+            user.id,
+            err,
+        )
+        return
+    except GmailApiError as err:
+        _log.warning(
+            "gmail.history_list_failed user_id=%s status=%d message=%s",
+            user.id,
+            err.status_code,
+            err.message,
+        )
+        return
+
+    # 5. Flatten messagesAdded across history records.
+    message_ids: list[str] = []
+    for record in history_response.get("history") or []:
+        for added in record.get("messagesAdded") or []:
+            msg_id = added.get("message", {}).get("id")
+            if msg_id:
+                message_ids.append(msg_id)
+
+    if not message_ids:
+        _log.info(
+            "gmail.no_new_messages user_id=%s start_history_id=%s push_history_id=%s",
+            user.id,
+            start_history_id,
+            history_id,
+        )
+        # Still advance the cursor — an empty history.list response means
+        # Gmail has nothing new for us relative to start_history_id, but
+        # the push's historyId is a more recent watermark so the next
+        # push starts from a closer point.
+        await db.partial_update(
+            "users",
+            user.id,
+            {"gmail_integration.last_processed_history_id": history_id},
+        )
+        return
+
+    batch = message_ids[:_GMAIL_INBOUND_PROCESS_CAP]
+    overflow = len(message_ids) - len(batch)
+    if overflow > 0:
+        _log.warning(
+            "gmail.over_cap user_id=%s total=%d processing=%d remaining=%d",
+            user.id,
+            len(message_ids),
+            len(batch),
+            overflow,
+        )
+
+    # 6. Per-message processing. Each iteration's failures are
+    # contained so a single bad message doesn't strand the rest of
+    # the batch.
+    processed = ingested = skipped_not_order = skipped_duplicate = failed = 0
+    for msg_id in batch:
+        try:
+            # 6a. Fetch the full message envelope.
+            try:
+                msg = await messages_get(access_token, msg_id)
+            except (GmailApiError, GmailAuthError) as err:
+                _log.warning(
+                    "gmail.messages_get_failed user_id=%s msg_id=%s err=%s",
+                    user.id,
+                    msg_id,
+                    err,
+                )
+                failed += 1
+                continue
+
+            # 6b. Parse to EmailForExtraction. GmailParseError is
+            # structural — same delivery would always fail this way.
+            try:
+                email = parse_gmail_message(msg, user_id=user.id)
+            except GmailParseError as err:
+                _log.warning(
+                    "gmail.parse_failed user_id=%s msg_id=%s err=%s",
+                    user.id,
+                    msg_id,
+                    err,
+                )
+                failed += 1
+                continue
+
+            # 6c. Classify. Non-order → skip (no sentinel insert).
+            # Skiplist hit means "user already dismissed this sender's
+            # format" (ticket 3.7); also counts as not-order.
+            classification = classify(email, skiplist=user.ingestion_skiplist)
+            if not classification.is_order:
+                _log.info(
+                    "gmail.classified_not_order user_id=%s msg_id=%s skiplist_hit=%s confidence=%s",
+                    user.id,
+                    msg_id,
+                    classification.skiplist_hit,
+                    classification.confidence,
+                )
+                skipped_not_order += 1
+                continue
+
+            # 6d. Dedup. Same email could have been processed via a
+            # prior push (Pub/Sub redelivery, watch re-registration
+            # window overlap, …). receipt_hash is computed from the
+            # normalized email body so the same Gmail message id and
+            # the same body content both produce the same hash.
+            receipt_hash = hash_receipt(email.body_text)
+            existing = await db.find_one(
+                "purchases",
+                {"user_id": user.id, "receipt_hash": receipt_hash},
+                Purchase,
+            )
+            if existing is not None:
+                _log.info(
+                    "gmail.duplicate_receipt user_id=%s msg_id=%s existing_purchase_id=%s",
+                    user.id,
+                    msg_id,
+                    existing.id,
+                )
+                skipped_duplicate += 1
+                continue
+
+            # 6e. Insert sentinel.
+            format_hash = compute_format_hash(email.sender, email.body_text)
+            purchase_id = await insert_gmail_sentinel_purchase(
+                db=db,
+                user_id=user.id,
+                email=email,
+                receipt_hash=receipt_hash,
+                format_hash=format_hash,
+            )
+
+            # 6f. Run Gemini extraction. On ANY failure (timeout,
+            # malformed model output, validation error, etc.), call
+            # the rescue helper so the sentinel doesn't sit at
+            # overall_min=0.0 forever — the FE confirm loader treats
+            # that as "still analyzing" and would spin indefinitely.
+            try:
+                extracted = await extract_from_email(email)
+            except Exception:
+                _log.exception(
+                    "gmail.extract_failed user_id=%s msg_id=%s purchase_id=%s — calling rescue",
+                    user.id,
+                    msg_id,
+                    purchase_id,
+                )
+                try:
+                    await finalize_purchase_extraction_failure(db=db, purchase_id=purchase_id)
+                except Exception:
+                    _log.exception(
+                        "gmail.rescue_failed user_id=%s msg_id=%s purchase_id=%s",
+                        user.id,
+                        msg_id,
+                        purchase_id,
+                    )
+                failed += 1
+                continue
+
+            # 6g. Finalize — partial_update the sentinel with the
+            # extracted fields, publish purchase.ingested, write the
+            # low_confidence_extract NotificationEvent if status =
+            # pending_confirmation. FinalizeError here means the doc
+            # is gone OR was partial-updated; either way calling the
+            # rescue would double-clobber, so we just log.
+            try:
+                await finalize_purchase_extraction(
+                    db=db, purchase_id=purchase_id, extracted=extracted
+                )
+                ingested += 1
+            except FinalizeError as err:
+                _log.warning(
+                    "gmail.finalize_failed user_id=%s msg_id=%s purchase_id=%s err=%s",
+                    user.id,
+                    msg_id,
+                    purchase_id,
+                    err,
+                )
+                failed += 1
+                continue
+        except Exception:
+            # Defense-in-depth: anything we didn't anticipate (e.g.,
+            # Mongo network blip during the dedup find_one) still
+            # counts as a failure but doesn't take the batch down.
+            _log.exception(
+                "gmail.message_processing_unexpected_error user_id=%s msg_id=%s",
+                user.id,
+                msg_id,
+            )
+            failed += 1
+            continue
+        finally:
+            processed += 1
+
+    # 7. Advance cursor. Per the plan, first cut uses the push's
+    # historyId as the new cursor (Gmail's "latest as of when this
+    # push fired" watermark). Messages beyond the N=5 cap are lost
+    # in this iteration — a follow-up ticket can switch to
+    # per-record advancement to avoid that.
+    try:
+        await db.partial_update(
+            "users",
+            user.id,
+            {"gmail_integration.last_processed_history_id": history_id},
+        )
+    except Exception:
+        _log.exception(
+            "gmail.cursor_advance_failed user_id=%s history_id=%s",
+            user.id,
+            history_id,
+        )
+
+    _log.info(
+        "gmail.batch_complete user_id=%s processed=%d ingested=%d "
+        "skipped_not_order=%d skipped_duplicate=%d failed=%d "
+        "overflow=%d new_cursor=%s",
+        user.id,
+        processed,
+        ingested,
+        skipped_not_order,
+        skipped_duplicate,
+        failed,
+        overflow,
+        history_id,
+    )
+
+
 @app.post(
     "/pubsub/gmail-inbound",
     status_code=200,
     dependencies=[Depends(verify_pubsub_oidc)],
 )
-async def handle_gmail_inbound(request: Request) -> dict[str, str]:
+async def handle_gmail_inbound(
+    request: Request,
+    db: MongoDBClient = Depends(get_db),
+    sm_client: secretmanager.SecretManagerServiceClient = Depends(get_sm_client),
+) -> dict[str, str]:
     """Pub/Sub push handler for Gmail new-message notifications.
 
     Always returns 200 to ack — parse failures and downstream errors get
@@ -294,9 +630,11 @@ async def handle_gmail_inbound(request: Request) -> dict[str, str]:
     time. The dead-letter policy (5 attempts) catches genuinely poisoned
     messages; everything else either succeeds or is logged + dropped.
 
-    The history.list / messages.get pipeline is ticket 4.17 — for now we
-    just parse and log so we have evidence Pub/Sub is delivering as
-    expected once the subscription is live in prod.
+    Once the envelope is parsed, the actual ingest work — user lookup,
+    history.list, messages.get, classify, extract, finalize, cursor
+    advance — lives in `_process_gmail_inbound` so the handler stays
+    focused on the Pub/Sub-shaped concerns (envelope parsing, ack
+    discipline) and the orchestration is unit-testable in isolation.
     """
     try:
         body = _PubSubPushBody.model_validate(await request.json())
@@ -343,10 +681,25 @@ async def handle_gmail_inbound(request: Request) -> dict[str, str]:
         payload.historyId,
     )
 
-    # TODO(ticket 4.17): users.history.list since
-    # User.gmail_integration.last_processed_message_id (or, on first delivery,
-    # gmail_integration.watch_history_id) → messages.get → extractor → write
-    # Purchase + publish purchase.ingested.
+    # Drive the ingest pipeline. `_process_gmail_inbound` is responsible
+    # for its own error containment — every per-message failure is
+    # logged and the sweep moves on. We still wrap the call here as
+    # belt-and-suspenders so anything that escapes (e.g., a Mongo
+    # connection failure on the very first find_one) still returns 200.
+    try:
+        await _process_gmail_inbound(
+            db=db,
+            sm_client=sm_client,
+            email_address=payload.emailAddress,
+            history_id=payload.historyId,
+        )
+    except Exception:
+        _log.exception(
+            "gmail.process_unexpected_error message_id=%s email=%s history_id=%s",
+            body.message.message_id,
+            _mask_email(payload.emailAddress),
+            payload.historyId,
+        )
     return {"status": "ack"}
 
 
