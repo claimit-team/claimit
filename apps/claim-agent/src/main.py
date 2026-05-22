@@ -75,6 +75,18 @@ def _purchase_degraded_reason(purchase: PurchaseReadTolerant) -> str | None:
     return None
 
 
+def _parse_delay_seconds() -> int:
+    raw = os.getenv("AUTO_SEND_DELAY_SECONDS", "300")
+    try:
+        val = int(raw)
+        if val <= 0:
+            raise ValueError("must be positive")
+        return val
+    except ValueError:
+        _log.warning("Invalid AUTO_SEND_DELAY_SECONDS=%r, defaulting to 300", raw)
+        return 300
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     init_phoenix("claimit-claim-agent")
@@ -366,7 +378,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
                 db=db,
                 event_platform_id=event.platform_id,
                 refund_amount=event.price_drop_amount,
-                delay_seconds=int(os.getenv("AUTO_SEND_DELAY_SECONDS", "300")),
+                delay_seconds=_parse_delay_seconds(),
             )
             await write_notification_event(
                 db=db,

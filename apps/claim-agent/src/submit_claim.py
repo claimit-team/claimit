@@ -72,9 +72,7 @@ async def submit_claim(
         submitted_via = SubmittedVia.SELF_SERVICE_LINK
         gmail_message_id = None
     else:
-        _log.error("Unknown claim_type %r for claim %s", claim.claim_type, claim.id)
-        submitted_via = SubmittedVia.GMAIL_SEND
-        gmail_message_id = None
+        raise ValueError(f"Unhandled claim_type {claim.claim_type!r} for claim {claim.id}")
 
     submitted_at = datetime.now(UTC)
 
