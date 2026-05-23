@@ -124,13 +124,12 @@ export function useConversations({ mode }: UseConversationsArgs = {}): UseConver
 
   const renameConversation = useCallback(
     async (id: string, title: string): Promise<void> => {
-      const snapshot = conversationsRef.current;
       setConversations((prev) => prev.map((c) => (c._id === id ? { ...c, title } : c)));
       try {
         await updateConversation(id, { title });
         refetch();
       } catch (err) {
-        setConversations(snapshot);
+        refetch();
         setError(toApiError(err));
         throw err;
       }
@@ -140,13 +139,12 @@ export function useConversations({ mode }: UseConversationsArgs = {}): UseConver
 
   const archiveConversation = useCallback(
     async (id: string): Promise<void> => {
-      const snapshot = conversationsRef.current;
       setConversations((prev) => prev.filter((c) => c._id !== id));
       try {
         await updateConversation(id, { status: "archived" });
         refetch();
       } catch (err) {
-        setConversations(snapshot);
+        refetch();
         setError(toApiError(err));
         throw err;
       }
@@ -156,13 +154,12 @@ export function useConversations({ mode }: UseConversationsArgs = {}): UseConver
 
   const deleteConversation = useCallback(
     async (id: string): Promise<void> => {
-      const snapshot = conversationsRef.current;
       setConversations((prev) => prev.filter((c) => c._id !== id));
       try {
         await deleteConversationApi(id);
         refetch();
       } catch (err) {
-        setConversations(snapshot);
+        refetch();
         setError(toApiError(err));
         throw err;
       }

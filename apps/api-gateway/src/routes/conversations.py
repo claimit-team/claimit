@@ -135,7 +135,12 @@ async def patch_conversation_endpoint(
         if not matched:
             raise ApiError("conversation_not_found", "Conversation not found", status_code=404)
 
-    updated = await get_conversation_for_user(db, conversation_id, user.id)
+    try:
+        updated = await get_conversation_for_user(db, conversation_id, user.id)
+    except (ValueError, PermissionError):
+        raise ApiError(
+            "conversation_not_found", "Conversation not found", status_code=404
+        ) from None
     return {"conversation": updated.model_dump(mode="json", by_alias=True)}
 
 
