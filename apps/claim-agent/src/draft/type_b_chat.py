@@ -119,18 +119,8 @@ async def generate_chat_script(
     current_price: float | None = None,
     user_instruction: str | None = None,
 ) -> ClaimDraft:
-    query = f"{purchase.platform} price match guarantee refund eligibility"
-    try:
-        results = await search_client.search_policies(query=query, limit=1)
-    except Exception:
-        _log.warning("Policy search failed, using fallback clause", exc_info=True)
-        results = []
-    if results:
-        policy_clause = results[0].get(
-            "policy_text_relevant_clause", policy.policy_text_relevant_clause
-        )
-    else:
-        policy_clause = policy.policy_text_relevant_clause
+    _ = search_client
+    policy_clause = policy.policy_text_relevant_clause
 
     raw_output = await _run_draft_agent(
         str(purchase.platform), policy_clause, _build_chat_script_agent, user_instruction

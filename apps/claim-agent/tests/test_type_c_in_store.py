@@ -228,6 +228,34 @@ async def test_generate_in_store_guide_with_location() -> None:
 
 
 @pytest.mark.asyncio
+async def test_clause_scoping_ignores_cross_platform_search() -> None:
+    loaded_clause = "Walmart in-store loaded clause."
+    purchase = _make_purchase()
+    claim = _make_claim(purchase)
+    policy = _make_policy(clause=loaded_clause)
+    mock_search = _mock_search_client("Target search clause must be ignored.")
+
+    with (
+        patch("src.draft.type_c_in_store._run_draft_agent", new_callable=AsyncMock) as mock_runner,
+        patch(
+            "src.draft.type_c_in_store.find_nearest_store", new_callable=AsyncMock
+        ) as mock_places,
+    ):
+        mock_runner.return_value = _MOCK_IN_STORE_OUTPUT
+        mock_places.return_value = None
+        draft = await generate_in_store_guide(
+            claim,
+            purchase,
+            policy,
+            mock_search,
+            user_name="Jane Smith",
+        )
+
+    assert draft.policy_clause_cited == loaded_clause
+    mock_search.search_policies.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_generate_in_store_guide_no_location_fallback() -> None:
     """Draft is generated without calling find_nearest_store when user_location is None."""
     purchase = _make_purchase()

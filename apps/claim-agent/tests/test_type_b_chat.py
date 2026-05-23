@@ -203,8 +203,8 @@ async def test_best_buy_scenario() -> None:
     assert "BB-2024-789123" in draft.draft_content
     assert "BB-2024-789123" in draft.subject
     assert draft.platform == "best_buy"
-    assert draft.policy_clause_cited == search_clause
-    mock_search.search_policies.assert_awaited_once()
+    assert draft.policy_clause_cited == fallback_clause
+    mock_search.search_policies.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -229,8 +229,8 @@ async def test_target_scenario() -> None:
     assert "TGT-2024-456789" in draft.draft_content
     assert draft.platform == "target"
     assert draft.refund_amount == 30.0
-    assert draft.policy_clause_cited == search_clause
-    mock_search.search_policies.assert_awaited_once()
+    assert draft.policy_clause_cited == fallback_clause
+    mock_search.search_policies.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -254,8 +254,24 @@ async def test_best_buy_high_value_scenario() -> None:
     _assert_clean_draft(draft, claim)
     assert draft.refund_amount == 200.0
     assert "BB-2024-HIGH-001" in draft.draft_content
-    assert draft.policy_clause_cited == search_clause
-    mock_search.search_policies.assert_awaited_once()
+    assert draft.policy_clause_cited == fallback_clause
+    mock_search.search_policies.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_clause_scoping_ignores_cross_platform_search() -> None:
+    loaded_clause = "Best Buy loaded policy clause."
+    purchase = _make_purchase(Platform.BEST_BUY, price_paid=200.0, order_id="BB-SCOPE-001")
+    claim = _make_claim(purchase, claim_amount=30.0)
+    policy = _make_policy(Platform.BEST_BUY, loaded_clause)
+    mock_search = _mock_search_client("Target competitor clause from search.")
+
+    with patch("src.draft.type_b_chat._run_draft_agent", new_callable=AsyncMock) as mock_runner:
+        mock_runner.return_value = _MOCK_TEMPLATE
+        draft = await generate_chat_script(claim, purchase, policy, mock_search)
+
+    assert draft.policy_clause_cited == loaded_clause
+    mock_search.search_policies.assert_not_awaited()
 
 
 @pytest.mark.asyncio

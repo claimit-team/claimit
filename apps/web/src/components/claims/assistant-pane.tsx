@@ -11,7 +11,7 @@ import { useAssistantStream } from "@/hooks/useAssistantStream";
 import { useConversations } from "@/hooks/useConversations";
 import { cn } from "@/lib/utils";
 import { useClaimDetailRefetchStore } from "@/store/claim-detail-refetch";
-import { REDRAFT_TIMEOUT_MS, useClaimRedraftProgressStore } from "@/store/claim-redraft-progress";
+import { useClaimRedraftProgressStore } from "@/store/claim-redraft-progress";
 import type { UIMessage, UIToolCall, WireConversationMessage } from "@/types/assistant";
 
 interface AssistantPaneProps {

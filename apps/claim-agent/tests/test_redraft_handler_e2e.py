@@ -30,15 +30,14 @@ _NOW = datetime(2026, 3, 15, 12, 0, 0, tzinfo=UTC)
 
 _MOCK_TEMPLATE = json.dumps(
     {
-        "subject": "Price Match Refund Request — Booking {{ORDER_ID}}",
+        "subject": "Price Match Refund Request — Order {{ORDER_ID}}",
         "email_body": (
-            "Dear {{USER_NAME}},\n\n"
-            "I am writing to request a price match refund for my booking {{ORDER_ID}}, "
-            "covering the period {{CHECK_IN_DATE}} through {{CHECKOUT_DATE}}.\n\n"
-            "At the time of booking I paid {{ORIGINAL_PRICE}}, but the same room is now "
-            "available at {{CURRENT_PRICE}}. I respectfully request a refund of {{REFUND_AMOUNT}}.\n\n"
+            "Hello {{MERCHANT_NAME}} Customer Care,\n\n"
+            "I'm writing to request a price match refund on a recent purchase.\n\n"
+            "Order {{ORDER_ID}} — {{PRODUCT_NAME}} at {{ORIGINAL_PRICE}}. The current price is "
+            "{{CURRENT_PRICE}}, a difference of {{REFUND_AMOUNT}} within the published price-match window.\n\n"
             "Pursuant to your policy: {{POLICY_CITATION}}\n\n"
-            "Thank you for your assistance.\n\nSincerely,\n{{USER_NAME}}"
+            "Thank you,\n{{USER_NAME}}"
         ),
     }
 )
