@@ -166,7 +166,7 @@ class GoogleIDTokenAuth(httpx.Auth):
                     decoded.get("aud"),
                     decoded.get("email"),
                 )
-        except Exception as exc:  # noqa: BLE001 — debug code, log+swallow
+        except Exception as exc:
             import logging as _logging
 
             _logging.getLogger("claimit_mcp.oidc_debug").warning(
