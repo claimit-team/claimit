@@ -10,9 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
-from claimit_mongodb_models import DraftGeneratedBy, SelfEvalScore
+from claimit_mongodb_models import DraftGeneratedBy
 from src.main import handle_claim_redraft_requested
-from src.self_evaluate import SelfEvalResult
 from src.validator import ValidationResult
 
 _USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -91,8 +90,14 @@ def _make_mock_db(claim: MagicMock | None = None) -> AsyncMock:
     db.get_purchase.return_value = purchase
     db.get_policy.return_value = policy
     db.get_user.return_value = user
+    db.find_one.return_value = None
+    db.try_insert_idempotency_record = AsyncMock(return_value=True)
+    db.update_idempotency_record = AsyncMock(return_value=None)
+    db.atomic_append_draft_version = AsyncMock(return_value=2)
     db.array_push.return_value = True
+    db.array_push_and_update.return_value = None
     db.partial_update.return_value = True
+    db.upsert_notification_event.return_value = "notif-id"
     return db
 
 
@@ -100,19 +105,6 @@ def _make_mock_request(body: dict) -> AsyncMock:
     req = AsyncMock()
     req.json.return_value = body
     return req
-
-
-def _make_eval_result(passed: bool = True) -> SelfEvalResult:
-    return SelfEvalResult(
-        passed=passed,
-        total_score=32,
-        scores=SelfEvalScore(clarity=8, tone=8, accuracy=8, completeness=8),
-        failed_dimensions=[],
-        dimension_feedback={},
-        improvement_suggestions={},
-        draft_version="1",
-        model_used="gemini-2.5-flash",
-    )
 
 
 def _make_mock_draft(content: str = "Refined email draft content.") -> MagicMock:
@@ -135,7 +127,6 @@ async def test_redraft_happy_path_email() -> None:
     mock_draft = _make_mock_draft()
     mock_search = MagicMock()
     mock_search.get_search_adapter.return_value = AsyncMock()
-    eval_result = _make_eval_result()
 
     request = _make_mock_request(_pubsub_body(_make_redraft_event()))
 
@@ -143,10 +134,6 @@ async def test_redraft_happy_path_email() -> None:
         patch("src.main.MongoDBClient", return_value=mock_db),
         patch("src.main.generate_email_draft", return_value=mock_draft),
         patch("src.main.validate", return_value=ValidationResult(valid=True)),
-        patch(
-            "src.main.evaluate_and_maybe_regenerate",
-            new=AsyncMock(return_value=(mock_draft, eval_result, 1)),
-        ),
         patch("src.main.write_notification_event", return_value="notif-id"),
         patch(
             "src.main.handle_approval_mode", new=AsyncMock(return_value=MagicMock())
@@ -160,10 +147,10 @@ async def test_redraft_happy_path_email() -> None:
         result = await handle_claim_redraft_requested(request)
 
     assert result == {"status": "ok"}
-    mock_db.array_push_and_update.assert_awaited_once()
-    updates = mock_db.array_push_and_update.await_args.kwargs["updates"]
-    assert updates["redraft_count"] == 1
-    assert updates["draft_content"] == mock_draft.draft_content
+    mock_db.atomic_append_draft_version.assert_awaited_once()
+    append_kwargs = mock_db.atomic_append_draft_version.await_args.kwargs
+    assert append_kwargs["content"] == mock_draft.draft_content
+    assert append_kwargs["generated_by"] == DraftGeneratedBy.ASSISTANT_REDRAFT
     assert mock_approval.await_count + mock_auto.await_count == 1
 
 
@@ -187,7 +174,6 @@ async def test_redraft_happy_path_all_claim_types(claim_type: str, generator_pat
     mock_draft = _make_mock_draft()
     mock_search = MagicMock()
     mock_search.get_search_adapter.return_value = AsyncMock()
-    eval_result = _make_eval_result()
 
     request = _make_mock_request(_pubsub_body(_make_redraft_event()))
 
@@ -195,10 +181,6 @@ async def test_redraft_happy_path_all_claim_types(claim_type: str, generator_pat
         patch("src.main.MongoDBClient", return_value=mock_db),
         patch(generator_patch, return_value=mock_draft) as mock_gen,
         patch("src.main.validate", return_value=ValidationResult(valid=True)),
-        patch(
-            "src.main.evaluate_and_maybe_regenerate",
-            new=AsyncMock(return_value=(mock_draft, eval_result, 1)),
-        ),
         patch("src.main.write_notification_event", return_value="notif-id"),
         patch("src.main.handle_approval_mode", new=AsyncMock(return_value=MagicMock())),
         patch(
@@ -260,7 +242,7 @@ async def test_redraft_validation_failure() -> None:
         result = await handle_claim_redraft_requested(request)
 
     assert result == {"status": "error", "reason": "validation_failed"}
-    mock_db.array_push.assert_not_awaited()
+    mock_db.atomic_append_draft_version.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -310,26 +292,14 @@ async def test_redraft_feedback_passed_to_generator() -> None:
     mock_draft = _make_mock_draft()
     mock_search = MagicMock()
     mock_search.get_search_adapter.return_value = AsyncMock()
-    eval_result = _make_eval_result()
 
     instruction = "make it friendlier"
     request = _make_mock_request(_pubsub_body(_make_redraft_event(feedback=instruction)))
-
-    # Invoke regenerate_fn once inside the self-eval stub so the inner
-    # _redraft_regenerate closure body actually executes against the real
-    # event/feedback scope. Without this, a stale field reference inside
-    # the closure (e.g. event.user_instruction after the schema rename)
-    # flies under the test radar — exactly the bug a pre-merge grep had
-    # to catch by hand on this branch.
-    async def fake_evaluate(draft, claim, purchase, policy, *, regenerate_fn):
-        await regenerate_fn(draft, "self-eval suggested clearer wording", claim)
-        return (mock_draft, eval_result, 1)
 
     with (
         patch("src.main.MongoDBClient", return_value=mock_db),
         patch("src.main.generate_email_draft", return_value=mock_draft) as mock_gen,
         patch("src.main.validate", return_value=ValidationResult(valid=True)),
-        patch("src.main.evaluate_and_maybe_regenerate", side_effect=fake_evaluate),
         patch("src.main.write_notification_event", return_value="notif-id"),
         patch("src.main.handle_approval_mode", new=AsyncMock(return_value=MagicMock())),
         patch(
@@ -340,16 +310,8 @@ async def test_redraft_feedback_passed_to_generator() -> None:
     ):
         await handle_claim_redraft_requested(request)
 
-    # First call: outer gen_kwargs (event.feedback only).
-    # Second call: inner _redraft_regenerate closure (event.feedback +
-    # self-eval critic feedback joined with "; ").
-    assert mock_gen.await_count == 2
-    first_call_kwargs = mock_gen.await_args_list[0].kwargs
-    assert first_call_kwargs.get("user_instruction") == instruction
-    second_call_kwargs = mock_gen.await_args_list[1].kwargs
-    assert second_call_kwargs.get("user_instruction") == (
-        f"{instruction}; self-eval suggested clearer wording"
-    )
+    mock_gen.assert_awaited_once()
+    assert mock_gen.await_args.kwargs.get("user_instruction") == instruction
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +328,6 @@ async def test_redraft_email_null_policy_email_succeeds() -> None:
     mock_draft = _make_mock_draft()
     mock_search = MagicMock()
     mock_search.get_search_adapter.return_value = AsyncMock()
-    eval_result = _make_eval_result()
 
     request = _make_mock_request(_pubsub_body(_make_redraft_event()))
 
@@ -374,10 +335,6 @@ async def test_redraft_email_null_policy_email_succeeds() -> None:
         patch("src.main.MongoDBClient", return_value=mock_db),
         patch("src.main.generate_email_draft", return_value=mock_draft),
         patch("src.main.validate", return_value=ValidationResult(valid=True)),
-        patch(
-            "src.main.evaluate_and_maybe_regenerate",
-            new=AsyncMock(return_value=(mock_draft, eval_result, 1)),
-        ),
         patch("src.main.write_notification_event", return_value="notif-id"),
         patch("src.main.handle_approval_mode", new=AsyncMock(return_value=MagicMock())),
         patch(
@@ -389,7 +346,7 @@ async def test_redraft_email_null_policy_email_succeeds() -> None:
         result = await handle_claim_redraft_requested(request)
 
     assert result == {"status": "ok"}
-    mock_db.array_push_and_update.assert_awaited_once()
+    mock_db.atomic_append_draft_version.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -399,7 +356,6 @@ async def test_redraft_appends_version_not_replaces() -> None:
     mock_draft = _make_mock_draft()
     mock_search = MagicMock()
     mock_search.get_search_adapter.return_value = AsyncMock()
-    eval_result = _make_eval_result()
 
     request = _make_mock_request(_pubsub_body(_make_redraft_event()))
 
@@ -407,10 +363,6 @@ async def test_redraft_appends_version_not_replaces() -> None:
         patch("src.main.MongoDBClient", return_value=mock_db),
         patch("src.main.generate_email_draft", return_value=mock_draft),
         patch("src.main.validate", return_value=ValidationResult(valid=True)),
-        patch(
-            "src.main.evaluate_and_maybe_regenerate",
-            new=AsyncMock(return_value=(mock_draft, eval_result, 1)),
-        ),
         patch("src.main.write_notification_event", return_value="notif-id"),
         patch("src.main.handle_approval_mode", new=AsyncMock(return_value=MagicMock())),
         patch(
@@ -422,11 +374,32 @@ async def test_redraft_appends_version_not_replaces() -> None:
         result = await handle_claim_redraft_requested(request)
 
     assert result == {"status": "ok"}
-    mock_db.array_push_and_update.assert_awaited_once()
+    mock_db.atomic_append_draft_version.assert_awaited_once()
     mock_db.upsert_claim.assert_not_awaited()
-    pushed_element = mock_db.array_push_and_update.await_args.kwargs["element"]
-    assert pushed_element.version == 2
-    assert pushed_element.generated_by == DraftGeneratedBy.ASSISTANT_REDRAFT
+    append_kwargs = mock_db.atomic_append_draft_version.await_args.kwargs
+    assert append_kwargs["generated_by"] == DraftGeneratedBy.ASSISTANT_REDRAFT
+
+
+@pytest.mark.asyncio
+async def test_redraft_already_processed_is_idempotent() -> None:
+    mock_claim = _make_mock_claim(claim_type="email")
+    mock_db = _make_mock_db(mock_claim)
+    mock_db.try_insert_idempotency_record = AsyncMock(return_value=False)
+    mock_search = MagicMock()
+    mock_search.get_search_adapter.return_value = AsyncMock()
+
+    request = _make_mock_request(_pubsub_body(_make_redraft_event()))
+
+    with (
+        patch("src.main.MongoDBClient", return_value=mock_db),
+        patch("src.main.generate_email_draft", new=AsyncMock()) as mock_gen,
+        patch.dict(sys.modules, {"search": mock_search}),
+    ):
+        result = await handle_claim_redraft_requested(request)
+
+    assert result == {"status": "ok", "reason": "already_processed"}
+    mock_gen.assert_not_awaited()
+    mock_db.atomic_append_draft_version.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -441,7 +414,6 @@ async def test_redraft_publishes_claim_drafted_event() -> None:
     mock_draft = _make_mock_draft()
     mock_search = MagicMock()
     mock_search.get_search_adapter.return_value = AsyncMock()
-    eval_result = _make_eval_result()
 
     request = _make_mock_request(_pubsub_body(_make_redraft_event()))
 
@@ -449,10 +421,6 @@ async def test_redraft_publishes_claim_drafted_event() -> None:
         patch("src.main.MongoDBClient", return_value=mock_db),
         patch("src.main.generate_email_draft", return_value=mock_draft),
         patch("src.main.validate", return_value=ValidationResult(valid=True)),
-        patch(
-            "src.main.evaluate_and_maybe_regenerate",
-            new=AsyncMock(return_value=(mock_draft, eval_result, 1)),
-        ),
         patch("src.main.write_notification_event", return_value="notif-id"),
         patch("src.send_mode.publish_event", new=AsyncMock()) as mock_publish,
         patch.dict(sys.modules, {"search": mock_search}),

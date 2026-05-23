@@ -38,6 +38,7 @@ from .draft.type_c_in_store import generate_in_store_guide
 from .draft.type_d_self_service import generate_self_service_walkthrough
 from .orchestrate_eval import evaluate_and_maybe_regenerate
 from .plan import PriceDroppedEvent, plan_claim
+from .redraft_idempotency import mark_redraft_event_done, try_claim_redraft_event
 from .send_mode import determine_send_mode, handle_approval_mode, handle_auto_mode
 from .submit_claim import publish_claim_approved, submit_claim
 from .validator import validate
@@ -672,11 +673,18 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
         if generator is None:
             return {"status": "error", "reason": "unsupported_claim_type"}
 
+        if not await try_claim_redraft_event(db, event_id=event.event_id, claim_id=event.claim_id):
+            _log.info(
+                "claim_agent.redraft.already_processed claim_id=%s event_id=%s",
+                event.claim_id,
+                event.event_id,
+            )
+            return {"status": "ok", "reason": "already_processed"}
+
         from search import get_search_adapter
 
         search_client = get_search_adapter()
 
-        next_version = len(claim.draft_versions or []) + 1
         current_price = (purchase.price_paid or 0.0) - (claim.claim_amount or 0.0)
 
         gen_kwargs: dict = dict(
@@ -721,64 +729,28 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
                 )
             return {"status": "error", "reason": "validation_failed"}
 
-        async def _redraft_regenerate(
-            current_draft: ClaimDraft, feedback: str, c: object
-        ) -> ClaimDraft:
-            _log.info(
-                "claim_agent.redraft.self_eval_regenerate claim_id=%s feedback=%r",
-                event.claim_id,
-                feedback[:200],
-            )
-            regen_kwargs: dict = dict(
-                user_name=user_name,
-                current_price=current_price,
-                user_instruction="; ".join(p for p in [event.feedback, feedback] if p) or None,
-            )
-            if claim_type_enum == ClaimType.IN_STORE:
-                regen_kwargs["user_location"] = getattr(user, "default_location", None)
-            return await generator(claim, purchase, policy, search_client, **regen_kwargs)
-
-        try:
-            final_draft, eval_result, eval_attempts = await evaluate_and_maybe_regenerate(
-                draft, claim, purchase, policy, regenerate_fn=_redraft_regenerate
-            )
-            if not eval_result.passed:
-                _log.warning(
-                    "claim_agent.redraft claim %s proceeding with failed self_eval after %d attempts",
-                    event.claim_id,
-                    eval_attempts,
-                )
-        except Exception:
-            _log.exception(
-                "self_eval failed for redraft claim %s — proceeding with validated draft",
-                event.claim_id,
-            )
-            final_draft = draft
-            eval_result = None
-            eval_attempts = 0
+        _log.info("claim_agent.redraft.skip_self_eval claim_id=%s", event.claim_id)
+        final_draft = draft
 
         now = datetime.now(UTC)
+        next_version = await db.atomic_append_draft_version(
+            "claims",
+            event.claim_id,
+            content=final_draft.draft_content,
+            generated_by=DraftGeneratedBy.ASSISTANT_REDRAFT,
+            at=now,
+            extra_updates={
+                "self_eval_score": None,
+                "self_eval_attempts": getattr(claim, "self_eval_attempts", 0),
+            },
+        )
         new_version = DraftVersion(
             version=next_version,
             content=final_draft.draft_content,
             generated_by=DraftGeneratedBy.ASSISTANT_REDRAFT,
             at=now,
         )
-        await db.array_push_and_update(
-            collection="claims",
-            id=event.claim_id,
-            field="draft_versions",
-            element=new_version,
-            element_model=DraftVersion,
-            updates={
-                "draft_content": final_draft.draft_content,
-                "redraft_count": (claim.redraft_count or 0) + 1,
-                "self_eval_score": (
-                    eval_result.scores.model_dump() if eval_result and eval_result.scores else None
-                ),
-                "self_eval_attempts": getattr(claim, "self_eval_attempts", 0) + eval_attempts,
-            },
-        )
+        await mark_redraft_event_done(db, event_id=event.event_id, version=next_version)
 
         mode = SendMode.APPROVAL if user is None else determine_send_mode(user, claim)
         notif_id = await write_notification_event(

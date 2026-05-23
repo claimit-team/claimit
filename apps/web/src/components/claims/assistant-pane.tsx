@@ -11,11 +11,14 @@ import { useAssistantStream } from "@/hooks/useAssistantStream";
 import { useConversations } from "@/hooks/useConversations";
 import { cn } from "@/lib/utils";
 import { useClaimDetailRefetchStore } from "@/store/claim-detail-refetch";
+import { REDRAFT_TIMEOUT_MS, useClaimRedraftProgressStore } from "@/store/claim-redraft-progress";
 import type { UIMessage, UIToolCall, WireConversationMessage } from "@/types/assistant";
 
 interface AssistantPaneProps {
   /** Claim id this conversation is scoped to. */
   claimId: string;
+  /** Latest draft version on the claim — used to start redraft progress tracking. */
+  currentVersion?: number;
   /**
    * 5.9 seam: assistant redraft will call `refetch()` here to sync
    * the draft pane after a successful assistant-driven draft mutation.
@@ -125,8 +128,13 @@ function MessageBubble({ message }: { message: UIMessage }) {
   );
 }
 
-export function AssistantPane({ claimId, onDoubleClickHeader }: AssistantPaneProps) {
+export function AssistantPane({
+  claimId,
+  currentVersion = 1,
+  onDoubleClickHeader,
+}: AssistantPaneProps) {
   const triggerClaimRefetch = useClaimDetailRefetchStore((s) => s.triggerRefetch);
+  const startRegenerating = useClaimRedraftProgressStore((s) => s.startRegenerating);
   const {
     conversations,
     isLoading: convLoading,
@@ -199,6 +207,9 @@ export function AssistantPane({ claimId, onDoubleClickHeader }: AssistantPanePro
   const runSend = async (text: string) => {
     if (!text.trim() || streaming || !activeId) return;
     const result = await sendMessage(activeId, text.trim());
+    if (result && !result.error && result.toolNames.includes("request_redraft")) {
+      startRegenerating(claimId, currentVersion);
+    }
     if (result && !result.error && result.toolNames.includes("update_send_override")) {
       await triggerClaimRefetch(claimId);
     }

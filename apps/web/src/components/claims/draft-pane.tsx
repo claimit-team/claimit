@@ -84,6 +84,10 @@ interface DraftPaneProps {
   setEditBuffer: (content: string) => void;
   /** True when `editBuffer !== draft_versions[selectedVersion - 1].content`. */
   dirty: boolean;
+  /** Semi-opaque overlay while assistant redraft is in flight. */
+  isRegenerating?: boolean;
+  /** 45s timeout elapsed without a new draft version. */
+  regeneratingTimedOut?: boolean;
   onDoubleClickHeader?: () => void;
 }
 
@@ -605,6 +609,8 @@ export function DraftPane({
   editBuffer,
   setEditBuffer,
   dirty,
+  isRegenerating = false,
+  regeneratingTimedOut = false,
   onDoubleClickHeader,
 }: DraftPaneProps) {
   const baseline = claim.draft_versions[selectedVersion - 1]?.content ?? "";
@@ -868,50 +874,73 @@ export function DraftPane({
           </TabsList>
         </div>
 
-        <TabsContent value="preview" className="m-0 min-h-0 flex-1 overflow-hidden">
-          <ScrollArea className="h-full">{renderPreview()}</ScrollArea>
-        </TabsContent>
-
-        <TabsContent value="edit" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden">
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="p-4">
-              {editHint ? <p className="mb-2 text-neutral-500 text-xs">{editHint}</p> : null}
-              <Textarea
-                value={editBuffer}
-                onChange={(e) => setEditBuffer(e.target.value)}
-                className="min-h-80 font-mono text-sm"
-                aria-label={`Edit ${claimTypeLabels[claim.claim_type]} content`}
-                disabled={isSaving}
-              />
-            </div>
-          </ScrollArea>
-          <div className="flex items-center justify-end gap-2 border-neutral-200 border-t bg-neutral-50 px-4 py-3">
-            <Button
-              size="sm"
-              variant="ghost"
-              type="button"
-              onClick={handleDiscard}
-              disabled={!dirty || isSaving}
-            >
-              Discard
-            </Button>
-            <Button
-              size="sm"
-              type="button"
-              onClick={() => void handleSave()}
-              disabled={!dirty || isSaving}
-            >
-              {isSaving ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving…
-                </>
-              ) : (
-                "Save changes"
-              )}
-            </Button>
+        {regeneratingTimedOut ? (
+          <div className="border-neutral-200 border-b px-4 py-2">
+            <Alert variant="default">
+              <AlertCircle className="size-4" />
+              <AlertTitle>Taking longer than expected</AlertTitle>
+              <AlertDescription>Refresh to check for an updated draft.</AlertDescription>
+            </Alert>
           </div>
-        </TabsContent>
+        ) : null}
+
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          <TabsContent value="preview" className="m-0 min-h-0 flex-1 overflow-hidden">
+            <ScrollArea className="h-full">{renderPreview()}</ScrollArea>
+          </TabsContent>
+
+          <TabsContent value="edit" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden">
+            <ScrollArea className="min-h-0 flex-1">
+              <div className="p-4">
+                {editHint ? <p className="mb-2 text-neutral-500 text-xs">{editHint}</p> : null}
+                <Textarea
+                  value={editBuffer}
+                  onChange={(e) => setEditBuffer(e.target.value)}
+                  className="min-h-80 font-mono text-sm"
+                  aria-label={`Edit ${claimTypeLabels[claim.claim_type]} content`}
+                  disabled={isSaving}
+                />
+              </div>
+            </ScrollArea>
+            <div className="flex items-center justify-end gap-2 border-neutral-200 border-t bg-neutral-50 px-4 py-3">
+              <Button
+                size="sm"
+                variant="ghost"
+                type="button"
+                onClick={handleDiscard}
+                disabled={!dirty || isSaving}
+              >
+                Discard
+              </Button>
+              <Button
+                size="sm"
+                type="button"
+                onClick={() => void handleSave()}
+                disabled={!dirty || isSaving}
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving…
+                  </>
+                ) : (
+                  "Save changes"
+                )}
+              </Button>
+            </div>
+          </TabsContent>
+
+          {isRegenerating ? (
+            <div
+              className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-neutral-0/80 backdrop-blur-[1px]"
+              aria-live="polite"
+              aria-busy="true"
+            >
+              <Loader2 className="h-8 w-8 animate-spin text-neutral-600" />
+              <p className="font-medium text-neutral-700 text-sm">Regenerating draft…</p>
+            </div>
+          ) : null}
+        </div>
       </Tabs>
 
       <Dialog

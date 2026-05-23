@@ -32,6 +32,7 @@ import { useSseConnectionStore } from "@/lib/sse/connection-status";
 import { useAuthStore, useUIStore } from "@/store";
 import { useAutoSendBannerStore } from "@/store/auto-send-banner";
 import { useClaimDetailRefetchStore } from "@/store/claim-detail-refetch";
+import { useClaimRedraftProgressStore } from "@/store/claim-redraft-progress";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 const TOKEN_REFRESH_MS = 50 * 60 * 1000; // 50 min — safely under the 60min Firebase expiry
@@ -195,6 +196,7 @@ function handleClaimDraftedFanout(frame: NotificationFrame): void {
   const claimId = typeof data.claim_id === "string" ? data.claim_id : null;
   if (!claimId) return;
   void useClaimDetailRefetchStore.getState().triggerRefetch(claimId);
+  useClaimRedraftProgressStore.getState().clearRegenerating(claimId);
 }
 
 function handleNotificationFrame(

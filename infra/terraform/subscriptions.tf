@@ -100,9 +100,10 @@ locals {
       path     = "/pubsub/claim.approved"
     }
     "claim.redraft_requested-claim-agent-sub" = {
-      topic    = "claim.redraft_requested"
-      endpoint = module.claim_agent.service_url
-      path     = "/pubsub/claim.redraft_requested"
+      topic                = "claim.redraft_requested"
+      endpoint             = module.claim_agent.service_url
+      path                 = "/pubsub/claim.redraft_requested"
+      ack_deadline_seconds = 180
     }
   }
 }
@@ -114,7 +115,7 @@ resource "google_pubsub_subscription" "push" {
   topic   = google_pubsub_topic.main[each.value.topic].id
   project = var.project_id
 
-  ack_deadline_seconds       = 60
+  ack_deadline_seconds       = lookup(each.value, "ack_deadline_seconds", 60)
   message_retention_duration = "604800s" # 7 days
 
   push_config {
