@@ -246,4 +246,10 @@ async def send_message(
                 "Failed to persist assistant reply for conversation %s", conversation_id
             )
 
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(
+        event_generator(),
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
