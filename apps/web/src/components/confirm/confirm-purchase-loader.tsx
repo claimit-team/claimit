@@ -51,7 +51,7 @@ import { getPurchaseDetail, type PurchaseDetailDoc, PurchasesApiError } from "@/
 const POLL_INTERVAL_MS = 1500;
 const POLL_CAP_MS = 45_000;
 
-const REVIEWABLE_STATUSES: ReadonlySet<string | null> = new Set([
+const REVIEWABLE_STATUSES: ReadonlySet<string> = new Set([
   "pending_confirmation",
   "pending_user_edit",
 ]);
@@ -76,7 +76,7 @@ type LoadState =
  * and goes straight to the stale-guard.
  */
 function isAwaitingExtraction(purchase: PurchaseDetailDoc): boolean {
-  if (!REVIEWABLE_STATUSES.has(purchase.status)) return false;
+  if (!REVIEWABLE_STATUSES.has(purchase.status ?? "")) return false;
   const overallMin = purchase.extraction_confidence?.overall_min;
   return overallMin === 0 || overallMin === null || overallMin === undefined;
 }
@@ -128,7 +128,7 @@ export function ConfirmPurchaseLoader({ purchaseId }: { purchaseId: string }) {
       // claimed, etc.) belongs on detail.
       // Use `router.replace` rather than `push` so the browser back
       // button doesn't bounce the user right back here.
-      if (!REVIEWABLE_STATUSES.has(purchase.status)) {
+      if (!REVIEWABLE_STATUSES.has(purchase.status ?? "")) {
         routerRef.current.replace(`/purchases/${purchase._id}`);
         return { done: true };
       }

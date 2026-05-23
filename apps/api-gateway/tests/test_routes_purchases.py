@@ -1406,7 +1406,9 @@ async def test_confirm_purchase_no_policy_leaves_window_untouched(client: AsyncC
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", ["monitoring", "claimed", "dismissed", "expired"])
+@pytest.mark.parametrize(
+    "status", ["monitoring", "monitoring_degraded", "claimed", "dismissed", "expired"]
+)
 async def test_confirm_purchase_rejects_wrong_status(client: AsyncClient, status: str) -> None:
     """Only `pending_confirmation` and `pending_user_edit` are reviewable.
 
