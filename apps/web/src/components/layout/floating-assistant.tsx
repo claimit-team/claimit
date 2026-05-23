@@ -12,6 +12,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 
+import { MarkdownMessage } from "@/components/assistant/markdown-message";
 import { ProactiveCard } from "@/components/assistant/proactive-card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -382,15 +383,19 @@ function FloatingPanel({ onActionClick }: { onActionClick: (a: string) => void }
                       : "bg-neutral-50 text-neutral-900 ring-neutral-200",
                   )}
                 >
-                  <p className="whitespace-pre-wrap break-words">
-                    {m.content}
-                    {m.streaming && m.role === "assistant" ? (
-                      <Loader2
-                        aria-hidden
-                        className="ml-1 inline-block h-3 w-3 animate-spin text-neutral-500 align-middle"
-                      />
-                    ) : null}
-                  </p>
+                  {m.role === "assistant" ? (
+                    <>
+                      <MarkdownMessage text={m.content} animate={m.streaming} />
+                      {m.streaming ? (
+                        <Loader2
+                          aria-hidden
+                          className="ml-1 inline-block h-3 w-3 animate-spin text-neutral-500 align-middle"
+                        />
+                      ) : null}
+                    </>
+                  ) : (
+                    <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                  )}
                   {m.tool_calls && m.tool_calls.length > 0 ? (
                     <p className="mt-1.5 text-[11px] uppercase tracking-wide text-brand-primary-700/70">
                       Tools · {m.tool_calls.map((t) => t.tool).join(", ")}

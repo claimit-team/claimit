@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { MarkdownMessage } from "@/components/assistant/markdown-message";
 import { ProactiveCard } from "@/components/assistant/proactive-card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -308,6 +309,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
   const [renameValue, setRenameValue] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const prevActiveIdRef = useRef<string | null>(null);
 
   const activeConversations = useMemo(
     () => conversations.filter((c) => c.status === "active"),
@@ -324,12 +326,13 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
   const unknownId = Boolean(conversationId) && !active && !convLoading;
 
   useEffect(() => {
-    if (active) {
-      hydrate(wireToUI(active.messages));
-    } else {
-      reset();
-    }
-  }, [active, hydrate, reset]);
+    if (streaming) return;
+    const id = active?._id ?? null;
+    if (id === prevActiveIdRef.current) return;
+    prevActiveIdRef.current = id;
+    if (active) hydrate(wireToUI(active.messages));
+    else reset();
+  }, [active, hydrate, reset, streaming]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `messages` is the intentional trigger for the scroll effect even though the body doesn't read it
   useEffect(() => {
@@ -522,15 +525,19 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
                       Tools · {msg.tool_calls.map((t) => t.tool).join(", ")}
                     </p>
                   )}
-                  <p className="whitespace-pre-wrap break-words">
-                    {msg.content}
-                    {msg.streaming && msg.role === "assistant" ? (
-                      <Loader2
-                        aria-hidden
-                        className="ml-1 inline-block h-3 w-3 animate-spin text-neutral-500 align-middle"
-                      />
-                    ) : null}
-                  </p>
+                  {msg.role === "assistant" ? (
+                    <>
+                      <MarkdownMessage text={msg.content} animate={msg.streaming} />
+                      {msg.streaming ? (
+                        <Loader2
+                          aria-hidden
+                          className="ml-1 inline-block h-3 w-3 animate-spin text-neutral-500 align-middle"
+                        />
+                      ) : null}
+                    </>
+                  ) : (
+                    <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                  )}
                 </div>
                 {msg.error ? (
                   <span className="text-[11px] text-semantic-danger mt-1">{msg.error}</span>
