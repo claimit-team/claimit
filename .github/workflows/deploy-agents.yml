@@ -125,6 +125,16 @@ jobs:
           uv build --wheel --out-dir dist
           ls -la dist/
 
+      # Ticket 5.10 Plan B: assistant_agent's agent.py imports
+      # claimit_mongodb_models.MongoDBClient directly (bypasses MCP).
+      # scripts/deploy_agents.py:get_models_wheel_path() expects this
+      # wheel at packages/shared/mongodb/dist/.
+      - name: Build claimit_mongodb_models wheel
+        working-directory: packages/shared/mongodb
+        run: |
+          uv build --wheel --out-dir dist
+          ls -la dist/
+
       - name: Deploy agents
         env:
           GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
@@ -140,6 +150,7 @@ jobs:
             --with "google-cloud-secret-manager>=2.0.0" \
             --with "google-cloud-run>=0.10.0" \
             --with-editable "packages/shared/mcp" \
+            --with-editable "packages/shared/mongodb" \
             python scripts/deploy_agents.py
 
   verify-agents:
@@ -176,6 +187,16 @@ jobs:
           uv build --wheel --out-dir dist
           ls -la dist/
 
+      # Ticket 5.10 Plan B: assistant_agent's agent.py imports
+      # claimit_mongodb_models.MongoDBClient directly (bypasses MCP).
+      # scripts/deploy_agents.py:get_models_wheel_path() expects this
+      # wheel at packages/shared/mongodb/dist/.
+      - name: Build claimit_mongodb_models wheel
+        working-directory: packages/shared/mongodb
+        run: |
+          uv build --wheel --out-dir dist
+          ls -la dist/
+
       - name: Verify
         env:
           GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
@@ -191,6 +212,7 @@ jobs:
             --with "google-cloud-secret-manager>=2.0.0" \
             --with "google-cloud-run>=0.10.0" \
             --with-editable "packages/shared/mcp" \
+            --with-editable "packages/shared/mongodb" \
             python scripts/deploy_agents.py --verify-only
 
   notify-failure:

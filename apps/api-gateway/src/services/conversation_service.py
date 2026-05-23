@@ -349,8 +349,10 @@ async def stream_agent_response(
     stream_kwargs: dict[str, Any] = {"user_id": str(user_id), "message": prompt}
     if session_id:
         stream_kwargs["session_id"] = session_id
+    stream_kwargs["run_config"] = {"streaming_mode": "sse"}
 
     collected_text = ""
+    final_text = ""
     collected_tool_calls: list[dict[str, Any]] = []
     stream_started_at = time.monotonic()
 
@@ -413,12 +415,21 @@ async def stream_agent_response(
                         return
                     continue
 
+                is_partial = (
+                    bool(event.get("partial"))
+                    if isinstance(event, dict)
+                    else bool(getattr(event, "partial", False))
+                )
+
                 for part in parts:
                     p = _part_to_dict(part)
                     text = p.get("text")
                     if text:
-                        collected_text += text
-                        yield {"event": "text_chunk", "data": json.dumps({"text": text})}
+                        if is_partial:
+                            collected_text += text
+                            yield {"event": "text_chunk", "data": json.dumps({"text": text})}
+                        else:
+                            final_text = text
                         continue
                     fc = p.get("function_call")
                     if fc is not None:
@@ -449,7 +460,10 @@ async def stream_agent_response(
                 continue
 
         # Stream ended normally.
-        if not collected_text.strip() and not collected_tool_calls:
+        if not collected_text and final_text:
+            collected_text = final_text
+            yield {"event": "text_chunk", "data": json.dumps({"text": final_text})}
+        if not (collected_text or final_text).strip() and not collected_tool_calls:
             # Empty response — avoid the dreaded silent assistant bubble.
             fallback = "I wasn't able to generate a response. Could you rephrase your question?"
             yield {"event": "text_chunk", "data": json.dumps({"text": fallback})}
@@ -525,7 +539,7 @@ async def stream_agent_response(
 
     except Exception:
         logger.error("Unexpected stream error", exc_info=True)
-        if collected_text or collected_tool_calls:
+        if collected_text or final_text or collected_tool_calls:
             yield {
                 "event": "done",
                 "data": json.dumps(

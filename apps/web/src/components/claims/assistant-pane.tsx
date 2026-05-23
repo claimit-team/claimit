@@ -3,6 +3,7 @@
 import { AlertCircle, Bot, Loader2, Send, Sparkles, User } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 
+import { MarkdownMessage } from "@/components/assistant/markdown-message";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -96,15 +97,19 @@ function MessageBubble({ message }: { message: UIMessage }) {
           isAssistant ? "bg-neutral-100 text-neutral-900" : "bg-brand-primary-500 text-white",
         )}
       >
-        <p className="whitespace-pre-wrap text-sm leading-relaxed">
-          {message.content}
-          {message.streaming && isAssistant && !runningTool ? (
-            <Loader2
-              aria-hidden
-              className="ml-1 inline-block h-3 w-3 animate-spin text-neutral-500 align-middle"
-            />
-          ) : null}
-        </p>
+        {isAssistant ? (
+          <>
+            <MarkdownMessage text={message.content} animate={message.streaming} />
+            {message.streaming && !runningTool ? (
+              <Loader2
+                aria-hidden
+                className="ml-1 inline-block h-3 w-3 animate-spin text-neutral-500 align-middle"
+              />
+            ) : null}
+          </>
+        ) : (
+          <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
+        )}
         {runningTool ? (
           <Badge variant="secondary" className="mt-2 text-neutral-500 text-xs">
             Running {runningTool}…
@@ -167,6 +172,7 @@ export function AssistantPane({
 
   useEffect(() => {
     if (convLoading) return;
+    if (streaming) return;
     const existing = conversations.find((c) => c.claim_id === claimId);
     if (existing) {
       setActiveId(existing._id);
@@ -189,7 +195,16 @@ export function AssistantPane({
         setCreating(false);
       }
     })();
-  }, [conversations, convLoading, claimId, creating, createError, createConversation, hydrate]);
+  }, [
+    conversations,
+    convLoading,
+    claimId,
+    creating,
+    createError,
+    createConversation,
+    hydrate,
+    streaming,
+  ]);
 
   useEffect(() => {
     return () => {

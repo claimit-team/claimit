@@ -235,8 +235,9 @@ async def test_stream_text_parts_yield_text_chunk_events(monkeypatch: pytest.Mon
     conv = _make_conversation(agent_session_id="existing-sess")
 
     async def _fake_stream(**kwargs):
-        yield {"content": {"parts": [{"text": "Hello "}]}}
-        yield {"content": {"parts": [{"text": "world"}]}}
+        yield {"partial": True, "content": {"parts": [{"text": "Hello "}]}}
+        yield {"partial": True, "content": {"parts": [{"text": "world"}]}}
+        yield {"partial": False, "content": {"parts": [{"text": "Hello world"}]}}
 
     mock_agent = _mock_agent(stream_fn=_fake_stream)
     with patch("vertexai.agent_engines.get", return_value=mock_agent):
@@ -250,6 +251,55 @@ async def test_stream_text_parts_yield_text_chunk_events(monkeypatch: pytest.Mon
     done_events = [e for e in events if e["event"] == "done"]
     assert len(done_events) == 1
     assert json.loads(done_events[0]["data"]) == {}
+
+
+@pytest.mark.asyncio
+async def test_stream_sse_partial_deltas_no_final_duplicate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CLAIMIT_ASSISTANT_AGENT_ID", "fake-resource-name")
+    db = _make_db()
+    conv = _make_conversation(agent_session_id="existing-sess")
+    captured_kwargs: dict = {}
+
+    async def _fake_stream(**kwargs):
+        captured_kwargs.update(kwargs)
+        yield {"partial": True, "content": {"parts": [{"text": "A"}]}}
+        yield {"partial": True, "content": {"parts": [{"text": "B"}]}}
+        yield {"partial": True, "content": {"parts": [{"text": "C"}]}}
+        yield {"partial": False, "content": {"parts": [{"text": "ABC"}]}}
+
+    mock_agent = _mock_agent(stream_fn=_fake_stream)
+    with patch("vertexai.agent_engines.get", return_value=mock_agent):
+        events = [e async for e in stream_agent_response(db, USER_ID, conv, "hi")]
+
+    assert captured_kwargs.get("run_config") == {"streaming_mode": "sse"}
+    text_chunks = [e for e in events if e["event"] == "text_chunk"]
+    assert len(text_chunks) == 3
+    texts = [json.loads(e["data"])["text"] for e in text_chunks]
+    assert texts == ["A", "B", "C"]
+    assert "ABC" not in texts
+    assert "".join(texts) == "ABC"
+
+
+@pytest.mark.asyncio
+async def test_stream_sse_no_partials_fallback_single_chunk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CLAIMIT_ASSISTANT_AGENT_ID", "fake-resource-name")
+    db = _make_db()
+    conv = _make_conversation(agent_session_id="existing-sess")
+
+    async def _fake_stream(**kwargs):
+        yield {"partial": False, "content": {"parts": [{"text": "ABC"}]}}
+
+    mock_agent = _mock_agent(stream_fn=_fake_stream)
+    with patch("vertexai.agent_engines.get", return_value=mock_agent):
+        events = [e async for e in stream_agent_response(db, USER_ID, conv, "hi")]
+
+    text_chunks = [e for e in events if e["event"] == "text_chunk"]
+    assert len(text_chunks) == 1
+    assert json.loads(text_chunks[0]["data"])["text"] == "ABC"
 
 
 @pytest.mark.asyncio
@@ -515,7 +565,7 @@ async def test_stream_partial_response_plus_error_yields_partial_warning(
     conv = _make_conversation(agent_session_id="sess")
 
     async def _crashes_mid_stream(**kwargs):
-        yield {"content": {"parts": [{"text": "Here's what I found: "}]}}
+        yield {"partial": True, "content": {"parts": [{"text": "Here's what I found: "}]}}
         raise RuntimeError("upstream connection reset")
 
     mock_agent = _mock_agent(stream_fn=_crashes_mid_stream)
@@ -659,7 +709,7 @@ async def test_stream_client_disconnect_propagates_silently(
     async def _long_stream(**kwargs):
         # Yield enough events that we can interrupt before completion.
         for i in range(10):
-            yield {"content": {"parts": [{"text": f"chunk-{i} "}]}}
+            yield {"partial": True, "content": {"parts": [{"text": f"chunk-{i} "}]}}
 
     mock_agent = _mock_agent(stream_fn=_long_stream)
     with patch("vertexai.agent_engines.get", return_value=mock_agent):
