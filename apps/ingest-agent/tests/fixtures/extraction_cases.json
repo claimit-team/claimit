@@ -333,5 +333,42 @@
         "category": 0.98
       }
     }
+  },
+  {
+    "name": "best_buy_multi_item_receipt",
+    "email": {
+      "user_id": "11111111-1111-4111-8111-111111111111",
+      "sender": "Best Buy <orders@bestbuy.com>",
+      "subject": "Receipt 200002162609577",
+      "snippet": "MacBook + USB-C adapter + member certificate",
+      "body_text": "Order 200002162609577. MB 12.0 SKU MF855LL/A $872.44. USB-C TO USB ADAPTER-AM $19.34. MY BEST BUY CERTIFICATE $0.65. COUPON CPN BNDL EA -$29.35. Subtotal $891.78 Tax $80.27 Total $972.05."
+    },
+    "extracted": {
+      "platform": "best_buy",
+      "category": "retail",
+      "product_name": "MB 12.0",
+      "product_id": "MF855LL/A",
+      "product_url": null,
+      "variant": null,
+      "price_paid": 872.44,
+      "purchase_date": "2024-01-01T12:00:00Z",
+      "purchase_date_basis": "order_date",
+      "order_id": "200002162609577",
+      "member_tier_at_purchase": null,
+      "line_items_detected": 2,
+      "extraction_confidence": {
+        "platform": 0.99,
+        "price": 0.3,
+        "overall_min": 0.3,
+        "order_id": 0.99,
+        "product_name": 0.95,
+        "product_id": 0.96,
+        "price_paid": 0.3,
+        "purchase_date": 0.0,
+        "member_tier_at_purchase": null,
+        "variant": null,
+        "category": 0.98
+      }
+    }
   }
 ]

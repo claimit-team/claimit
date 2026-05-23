@@ -208,6 +208,84 @@ def test_extract_uses_product_id_fallback_when_absent(monkeypatch: pytest.Monkey
     assert result["extraction_confidence"]["overall_min"] == 0.95
 
 
+def test_extract_routes_multi_item_to_pending_user_edit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A model output with line_items_detected > 1 must route to pending_user_edit
+    even when every confidence score is high — the picked price is for ONE item
+    out of many and the user must confirm or pick a different line. See issue #183.
+    """
+    payload = _sample_extracted_payload()
+    payload["line_items_detected"] = 4
+    # The model already self-downgraded price_paid confidence per the prompt
+    # rule (<= 0.4). The defensive in-code clamp should leave this untouched.
+    payload["extraction_confidence"]["price_paid"] = 0.3
+
+    async def fake_run_agent(_email: EmailForExtraction) -> str:
+        return json.dumps(payload)
+
+    monkeypatch.setattr(extractor, "_run_extractor_agent", fake_run_agent)
+
+    result = asyncio.run(extract(_sample_email()))
+
+    assert result["status"] == "pending_user_edit"
+    assert result["extraction_confidence"]["price_paid"] == 0.3
+    # Transient extractor-only field must never reach the Purchase payload.
+    assert "line_items_detected" not in result
+
+
+def test_extract_clamps_multi_item_price_confidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the model returns line_items_detected > 1 but a high price_paid
+    confidence, the in-code defensive clamp must downgrade it to <= 0.4.
+    """
+    payload = _sample_extracted_payload()
+    payload["line_items_detected"] = 2
+    payload["extraction_confidence"]["price_paid"] = 0.99  # over-confident
+
+    async def fake_run_agent(_email: EmailForExtraction) -> str:
+        return json.dumps(payload)
+
+    monkeypatch.setattr(extractor, "_run_extractor_agent", fake_run_agent)
+
+    result = asyncio.run(extract(_sample_email()))
+
+    assert result["status"] == "pending_user_edit"
+    assert result["extraction_confidence"]["price_paid"] == 0.4
+    # overall_min should now reflect the downgraded price_paid.
+    assert result["extraction_confidence"]["overall_min"] <= 0.4
+    # Transient extractor-only field must never reach the Purchase payload.
+    assert "line_items_detected" not in result
+
+
+def test_extracted_purchase_fields_defaults_line_items_to_one() -> None:
+    """Schema must accept payloads that omit line_items_detected — every
+    existing email-path fixture omits the field, so it must default to 1.
+    """
+    payload = _sample_extracted_payload()
+    payload.pop("line_items_detected", None)
+    extracted = ExtractedPurchaseFields.model_validate(payload)
+    assert extracted.line_items_detected == 1
+
+
+def test_resolve_status_multi_item_overrides_high_confidence() -> None:
+    """_resolve_status(multi_item=True) must return pending_user_edit
+    regardless of confidence, mirroring the fallback_used branch.
+    """
+    high_conf = {
+        "platform": 1.0,
+        "price": 1.0,
+        "overall_min": 1.0,
+        "price_paid": 0.3,
+        "order_id": 1.0,
+        "purchase_date": 1.0,
+    }
+    assert extractor._resolve_status(False, high_conf, multi_item=True) == "pending_user_edit"
+    # Single-item path still derives status from confidence.
+    assert extractor._resolve_status(False, high_conf, multi_item=False) == "pending_confirmation"
+
+
 def test_extract_raises_for_malformed_json(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_run_agent(_email: EmailForExtraction) -> str:
         return "probably a purchase"

@@ -99,15 +99,28 @@ Extraction rules:
 - price_paid is the final amount paid or charged by the customer in USD.
 - member_price_at_purchase and non_member_price_at_purchase are only populated when the receipt explicitly shows member/non-member comparison prices.
 - member_tier_at_purchase is null unless a loyalty tier is explicitly present.
-- variant is null unless color, size, capacity, room/fare variant, or similar variant is explicit.
+- variant must reference the same product line as product_name. Do not pull text from an adjacent row, spec block, or marketing copy. If you cannot point to the variant text on the same line as the chosen product, emit null.
 - product_url is null unless a product or booking URL is present.
 - retail category-specific hotel/airline fields must be null.
 
+Multi-item receipts:
+- line_items_detected is the count of distinct purchasable product lines on the receipt. Exclude tax, shipping, fees, coupons, gift-card lines, store-credit lines, and member certificates.
+- If line_items_detected == 1, price_paid is that single item's price.
+- If line_items_detected > 1, pick the HIGHEST-PRICED item as product_name / product_id / variant, set price_paid to that ITEM's price (NOT the grand total or subtotal), and set extraction_confidence.price_paid to at most 0.4. The downstream pipeline will route the purchase to user edit so the user can correct or pick a different line.
+
+Purchase date:
+- If a purchase / order / transaction date is visibly printed on the receipt or email, extract it and set extraction_confidence.purchase_date >= 0.9.
+- If no date is visible anywhere, emit 2024-01-01T12:00:00Z as a placeholder and set extraction_confidence.purchase_date to 0.0. Do not guess a year from context. The downstream pipeline will route the purchase to user confirmation when this confidence is below threshold.
+
 Confidence rules:
-- Provide confidence values from 0.0 to 1.0 for every field you extract and every nullable field when there is evidence for absence.
+- Provide confidence values from 0.0 to 1.0 for every field you extract.
 - price is the same confidence as price_paid.
 - overall_min is the minimum confidence among material required extracted fields.
 - Use lower confidence for OCR ambiguity, forwarded emails, missing itemization, or conflicting totals.
+
+Confidence for nullable fields (member_price_at_purchase, non_member_price_at_purchase, member_tier_at_purchase, variant, product_id, product_url):
+- If the receipt EXPLICITLY shows the absence (e.g. a "Non-member price" block proving no member discount applies; a clear product header with no variant listed): emit null for the value and 1.0 for the confidence.
+- If the receipt has NO INFORMATION either way (no member-pricing block at all; no variant column at all): emit null for the value and null for the confidence. Do NOT claim 1.0 confidence in absence when there is no evidence either way.
 
 Respond with ONLY a JSON object matching the schema. No prose and no markdown fences.
 """.strip()
@@ -169,6 +182,13 @@ class ExtractedPurchaseFields(BaseModel):
     purchase_date_basis: PurchaseDateBasisValue
     order_id: str = Field(min_length=1)
     member_tier_at_purchase: str | None = None
+    # Transient extractor-only field. Not persisted to the Mongo Purchase
+    # document; consumed by `_compute_status_and_confidence` in finalize.py
+    # to route multi-item receipts to `pending_user_edit` so the user can
+    # pick the correct line. The default of 1 keeps every existing email-path
+    # extraction case (which always describes a single product) working
+    # without prompt or schema changes downstream.
+    line_items_detected: int = Field(default=1, ge=1)
     extraction_confidence: ExtractedFieldConfidence
 
     @field_validator("price_paid", mode="after")
@@ -537,19 +557,28 @@ def _confidence_payload(confidence: ExtractedFieldConfidence) -> dict[str, float
     return payload
 
 
-def _resolve_status(fallback_used: bool, confidence: dict[str, float | None]) -> str:
+def _resolve_status(
+    fallback_used: bool,
+    confidence: dict[str, float | None],
+    *,
+    multi_item: bool = False,
+) -> str:
     """Pick the initial purchase status based on extraction outcome.
 
     Priority order (highest wins):
-      1. `pending_user_edit` — product_id was missing and we synthesized a fallback;
-         user must edit before monitoring can be useful.
+      1. `pending_user_edit` — either product_id was missing and we synthesized a
+         fallback, OR the receipt itemized more than one purchasable line. Both
+         cases require the user to edit before monitoring can be useful: a
+         fallback product_id is unmonitorable, and a multi-item receipt means
+         `price_paid` is for ONE picked line out of many — the user must
+         confirm which line (or correct the price) before we monitor anything.
       2. `pending_confirmation` — a critical field (platform, price_paid, order_id,
          purchase_date) scored strictly below the configured threshold per master
          doc 5.1; the user must confirm before monitoring starts.
       3. `monitoring` — all critical fields cleared the threshold; auto-start
          monitoring.
     """
-    if fallback_used:
+    if fallback_used or multi_item:
         return "pending_user_edit"
     agg = compute_overall_min(confidence)
     if agg["critical_field_below_threshold"] is not None:
@@ -588,7 +617,13 @@ def _purchase_payload(
         confidence["product_id"] = FALLBACK_PRODUCT_ID_CONFIDENCE
         _merge_confidence_aggregate(confidence)
 
-    status = _resolve_status(fallback_used, confidence)
+    multi_item = extracted.line_items_detected > 1
+    if multi_item:
+        existing = confidence.get("price_paid")
+        confidence["price_paid"] = min(existing if existing is not None else 1.0, 0.4)
+        _merge_confidence_aggregate(confidence)
+
+    status = _resolve_status(fallback_used, confidence, multi_item=multi_item)
     window_days = compute_window_days(
         policy, member_tier_at_purchase=extracted.member_tier_at_purchase
     )

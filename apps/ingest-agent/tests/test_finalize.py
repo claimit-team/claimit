@@ -124,6 +124,8 @@ def _extracted(
     purchase_date: datetime | None = None,
     product_id: str | None = "W123",
     order_id_extra_confidence: float | None = None,
+    line_items_detected: int = 1,
+    price_paid_confidence: float = 0.98,
 ) -> ExtractedPurchaseFields:
     pd = purchase_date or datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
     confidence: dict[str, Any] = {
@@ -133,7 +135,7 @@ def _extracted(
         "order_id": order_id_extra_confidence if order_id_extra_confidence is not None else 0.99,
         "product_name": 0.97,
         "product_id": 0.96,
-        "price_paid": 0.98,
+        "price_paid": price_paid_confidence,
         "purchase_date": 0.95,
         "category": 0.98,
     }
@@ -156,6 +158,7 @@ def _extracted(
             "purchase_date_basis": "order_date",
             "order_id": "A123",
             "member_tier_at_purchase": member_tier,
+            "line_items_detected": line_items_detected,
             "extraction_confidence": confidence,
         }
     )
@@ -254,6 +257,79 @@ async def test_finalize_writes_low_confidence_notification_for_pending(
     assert "order_id" in notif_doc.data["low_confidence_fields"]
     assert "overall_min" not in notif_doc.data["low_confidence_fields"]
     assert "price" not in notif_doc.data["low_confidence_fields"]
+
+
+@pytest.mark.asyncio
+async def test_finalize_routes_multi_item_to_pending_user_edit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Multi-item receipts (line_items_detected > 1) MUST route to
+    `pending_user_edit` regardless of high confidence scores, because
+    `price_paid` is for ONE picked line and downstream monitoring would
+    price-match the wrong number. See issue #183 finding #1.
+
+    Side effects of this routing today (intentionally matching the
+    fallback_used → pending_user_edit branch):
+      - `pending_user_edit` is NOT in PUBLISHABLE_STATUSES → no
+        purchase.ingested event (monitor-agent stays idle).
+      - LOW_CONFIDENCE_EXTRACT notification only fires for
+        `pending_confirmation` → no proactive notification here.
+    """
+    purchase = _purchase_doc()
+    # Simulate the issue's Best Buy receipt: 4 itemized lines, model picks
+    # the MacBook ($872.44) but with a defensive low price_paid confidence
+    # per the prompt rule. All OTHER confidences high.
+    extracted = _extracted(
+        line_items_detected=4,
+        price_paid=872.44,
+        price_paid_confidence=0.3,
+        overall_min=0.3,
+    )
+    db = _mock_db(purchase=purchase, policy=_policy(window_days=15))
+    publish = AsyncMock(return_value="msg-1")
+    monkeypatch.setattr(finalize, "publish_event", publish)
+
+    await finalize_purchase_extraction(db=db, purchase_id=PURCHASE_ID, extracted=extracted)
+
+    update_dict = db.partial_update.await_args.args[2]
+    assert update_dict["status"] == "pending_user_edit"
+    assert update_dict["price_paid"] == 872.44
+    # Defensive clamp leaves an already-low confidence alone.
+    assert update_dict["extraction_confidence"]["price_paid"] == 0.3
+    # No purchase.ingested for pending_user_edit — monitor-agent must
+    # NOT see this until the user picks the right line.
+    publish.assert_not_awaited()
+    # No proactive low-confidence notification either — pending_user_edit
+    # uses a different surface (the dashboard "needs attention" row from
+    # the status itself, not a NotificationEvent).
+    db.upsert_notification_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_finalize_clamps_overconfident_multi_item_price(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the model returns line_items_detected > 1 but a high price_paid
+    confidence (ignoring the prompt rule), the in-code defensive clamp
+    must downgrade it to <= 0.4 and re-aggregate overall_min.
+    """
+    purchase = _purchase_doc()
+    extracted = _extracted(
+        line_items_detected=2,
+        price_paid=872.44,
+        price_paid_confidence=0.99,
+        overall_min=0.99,
+    )
+    db = _mock_db(purchase=purchase, policy=_policy(window_days=15))
+    publish = AsyncMock(return_value="msg-1")
+    monkeypatch.setattr(finalize, "publish_event", publish)
+
+    await finalize_purchase_extraction(db=db, purchase_id=PURCHASE_ID, extracted=extracted)
+
+    update_dict = db.partial_update.await_args.args[2]
+    assert update_dict["status"] == "pending_user_edit"
+    assert update_dict["extraction_confidence"]["price_paid"] == 0.4
+    assert update_dict["extraction_confidence"]["overall_min"] <= 0.4
 
 
 @pytest.mark.asyncio
