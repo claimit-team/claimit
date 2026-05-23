@@ -10,6 +10,7 @@ from claimit_mongodb_models import Claim, Purchase
 from claimit_observability import get_tracer, span_with_attributes
 
 from .draft.models import ClaimDraft
+from .enum_compat import enum_to_str
 
 _log = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ def validate(draft: ClaimDraft, claim: Claim, purchase: Purchase) -> ValidationR
         "validator.validate",
         {
             "claim.id": str(claim.id),
-            "claim.type": claim.claim_type.value,
+            "claim.type": enum_to_str(claim.claim_type),
             "draft.version": draft.draft_version,
         },
     ) as span:

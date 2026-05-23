@@ -60,6 +60,12 @@ def test_valid_draft_passes() -> None:
     assert result.issues == []
 
 
+def test_validate_accepts_str_claim_type_from_mongo_read() -> None:
+    claim = _make_claim(claim_type="email")
+    result = validate(_make_draft(), claim, _make_purchase())
+    assert result.valid is True
+
+
 # ---------------------------------------------------------------------------
 # Check 1 — Unresolved placeholders
 # ---------------------------------------------------------------------------
