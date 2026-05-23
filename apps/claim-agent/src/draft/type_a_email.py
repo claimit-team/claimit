@@ -209,7 +209,10 @@ async def generate_email_draft(
     _ = search_client  # API compatibility; clause comes from loaded policy only.
     to_address = resolve_claim_email(str(purchase.platform), policy)
     policy_clause = policy.policy_text_relevant_clause
-    category = Category(policy.category)
+    try:
+        category = Category(policy.category)
+    except (ValueError, TypeError) as exc:
+        raise DraftGenerationError(f"Unsupported policy category: {policy.category!r}") from exc
     merchant_name = resolve_merchant_name(str(purchase.platform))
 
     raw_output = await _run_draft_agent(
