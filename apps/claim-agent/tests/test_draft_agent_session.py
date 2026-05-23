@@ -191,7 +191,14 @@ def test_draft_instruction_placeholder_registry_covers_all_prompt_tokens() -> No
 @pytest.mark.asyncio
 async def test_run_draft_agent_seeds_session_state_without_key_error() -> None:
     """Real _run_draft_agent + ADK session setup; only Runner.run_async is mocked."""
-    with patch("src.draft._shared.Runner", _FakeRunner):
+    create_session_mock = AsyncMock(return_value=None)
+    with (
+        patch(
+            "src.draft._shared.InMemorySessionService.create_session",
+            create_session_mock,
+        ),
+        patch("src.draft._shared.Runner", _FakeRunner),
+    ):
         result = await _run_draft_agent(
             "best_buy",
             "Price match within 15 days.",
@@ -199,6 +206,7 @@ async def test_run_draft_agent_seeds_session_state_without_key_error() -> None:
         )
 
     assert result == _MOCK_TEMPLATE
+    assert create_session_mock.await_args.kwargs["state"] == DRAFT_INSTRUCTION_PLACEHOLDER_STATE
 
 
 @pytest.mark.asyncio
@@ -212,8 +220,17 @@ async def test_generate_email_draft_best_buy_with_real_adk_session_path() -> Non
     empty_search = AsyncMock()
     empty_search.search_policies.return_value = []
 
-    with patch("src.draft._shared.Runner", _FakeRunner):
+    create_session_mock = AsyncMock(return_value=None)
+    with (
+        patch(
+            "src.draft._shared.InMemorySessionService.create_session",
+            create_session_mock,
+        ),
+        patch("src.draft._shared.Runner", _FakeRunner),
+    ):
         draft = await generate_email_draft(claim, purchase, policy, empty_search)
+
+    assert create_session_mock.await_args.kwargs["state"] == DRAFT_INSTRUCTION_PLACEHOLDER_STATE
 
     assert "{{" not in draft.draft_content
     assert "{{" not in draft.subject
