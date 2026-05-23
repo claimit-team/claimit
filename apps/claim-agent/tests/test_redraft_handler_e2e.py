@@ -21,7 +21,6 @@ from claimit_mongodb_models import (
     SendMode,
 )
 from src.main import handle_claim_redraft_requested
-from src.self_evaluate import PASS_THRESHOLD
 
 _USER_ID = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 _CLAIM_ID = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
@@ -43,31 +42,6 @@ _MOCK_TEMPLATE = json.dumps(
         ),
     }
 )
-
-
-def _self_eval_response() -> str:
-    return json.dumps(
-        {
-            "rubric_scores": {
-                "clarity": PASS_THRESHOLD,
-                "tone": PASS_THRESHOLD,
-                "accuracy": PASS_THRESHOLD,
-                "completeness": PASS_THRESHOLD,
-            },
-            "dimension_feedback": {
-                "clarity": "Clear and direct.",
-                "tone": "Professional tone.",
-                "accuracy": "All facts correct.",
-                "completeness": "All required fields present.",
-            },
-            "improvement_suggestions": {
-                "clarity": "",
-                "tone": "",
-                "accuracy": "",
-                "completeness": "",
-            },
-        }
-    )
 
 
 class _FakeFinalEvent:
@@ -92,14 +66,6 @@ class _FakeDraftRunner:
 
     async def run_async(self, **_kwargs: object):
         yield _FakeFinalEvent(_MOCK_TEMPLATE)
-
-
-class _FakeSelfEvalRunner:
-    def __init__(self, **_kwargs: object) -> None:
-        pass
-
-    async def run_async(self, **_kwargs: object):
-        yield _FakeFinalEvent(_self_eval_response())
 
 
 def _make_redraft_event(feedback: str = "make it friendlier") -> dict:
@@ -244,6 +210,9 @@ def _make_mock_db(
     db.get_policy.return_value = policy
     db.get_user.return_value = user
     db.find_one.return_value = None
+    db.try_insert_idempotency_record = AsyncMock(return_value=True)
+    db.update_idempotency_record = AsyncMock(return_value=None)
+    db.atomic_append_draft_version = AsyncMock(return_value=2)
     db.array_push_and_update.return_value = True
     db.partial_update.return_value = True
     db.upsert_notification_event.return_value = "notif-e2e-001"
@@ -274,7 +243,6 @@ async def test_redraft_handler_e2e_best_buy_email_from_mongo_shaped_claim() -> N
     with (
         patch("src.main.MongoDBClient", return_value=mock_db),
         patch("src.draft._shared.Runner", _FakeDraftRunner),
-        patch("src.self_evaluate.Runner", _FakeSelfEvalRunner),
         patch("src.send_mode.publish_event", new=AsyncMock()) as mock_publish,
         patch.dict(sys.modules, {"search": mock_search}),
     ):
@@ -282,14 +250,11 @@ async def test_redraft_handler_e2e_best_buy_email_from_mongo_shaped_claim() -> N
 
     assert result == {"status": "ok"}
 
-    mock_db.array_push_and_update.assert_awaited_once()
-    push_kwargs = mock_db.array_push_and_update.await_args.kwargs
-    new_version = push_kwargs["element"]
-    assert new_version.version == 2
-    assert new_version.generated_by == DraftGeneratedBy.ASSISTANT_REDRAFT
-    assert _ORDER_ID in new_version.content
-    assert "{{" not in new_version.content
-    assert push_kwargs["updates"]["redraft_count"] == 1
+    mock_db.atomic_append_draft_version.assert_awaited_once()
+    append_kwargs = mock_db.atomic_append_draft_version.await_args.kwargs
+    assert append_kwargs["generated_by"] == DraftGeneratedBy.ASSISTANT_REDRAFT
+    assert _ORDER_ID in append_kwargs["content"]
+    assert "{{" not in append_kwargs["content"]
 
     mock_db.upsert_notification_event.assert_awaited_once()
     notif_doc = mock_db.upsert_notification_event.await_args.args[0]

@@ -21,6 +21,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 import { ApproveConfirmDialog } from "@/components/claims/approve-confirm-dialog";
 import { AssistantPane } from "@/components/claims/assistant-pane";
@@ -36,6 +37,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import type { ClaimDetailDoc } from "@/lib/api/claims";
 import type { ClaimDetail } from "@/lib/claim-detail-types";
 import { useUIStore } from "@/store";
+import { REDRAFT_TIMEOUT_MS, useClaimRedraftProgressStore } from "@/store/claim-redraft-progress";
 
 interface ClaimDetailShellProps {
   /** Derived view-model (built from the page-owned wire response). */
@@ -69,6 +71,35 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
   );
   const baseline = claim.draft_versions[selectedVersion - 1]?.content ?? "";
   const dirty = editBuffer !== baseline;
+
+  const redraftProgress = useClaimRedraftProgressStore((s) => s.getProgress(claim.claim_id));
+  const clearRegenerating = useClaimRedraftProgressStore((s) => s.clearRegenerating);
+  const markTimedOut = useClaimRedraftProgressStore((s) => s.markTimedOut);
+  const isRegenerating = redraftProgress !== undefined && !redraftProgress.timedOut;
+  const regeneratingTimedOut = redraftProgress?.timedOut ?? false;
+
+  useEffect(() => {
+    if (!redraftProgress || redraftProgress.timedOut) return;
+    if (claim.current_version > redraftProgress.baselineVersion) {
+      clearRegenerating(claim.claim_id);
+      toast.success("Draft updated");
+      return;
+    }
+    const remaining = redraftProgress.startedAt + REDRAFT_TIMEOUT_MS - Date.now();
+    const timer = window.setTimeout(
+      () => {
+        markTimedOut(claim.claim_id);
+      },
+      Math.max(remaining, 0),
+    );
+    return () => window.clearTimeout(timer);
+  }, [claim.claim_id, claim.current_version, clearRegenerating, markTimedOut, redraftProgress]);
+
+  useEffect(() => {
+    if (isRegenerating && draftMode === "edit") {
+      setDraftMode("preview");
+    }
+  }, [isRegenerating, draftMode]);
 
   // Snap selectedVersion to the wire's latest after refetch (e.g. WI-3
   // Save lands a v(n+1) row; we want the user looking at that).
@@ -179,6 +210,8 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
             editBuffer={editBuffer}
             setEditBuffer={setEditBuffer}
             dirty={dirty}
+            isRegenerating={isRegenerating}
+            regeneratingTimedOut={regeneratingTimedOut}
             onDoubleClickHeader={toggleHorizontalMax}
           />
         </ResizablePanel>
@@ -196,6 +229,7 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
             <ResizablePanel defaultSize={rightBottom} minSize={15}>
               <AssistantPane
                 claimId={claim.claim_id}
+                currentVersion={claim.current_version}
                 refetch={refetch}
                 onDoubleClickHeader={() => {
                   toggleEmbedded();
@@ -224,6 +258,8 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
             editBuffer={editBuffer}
             setEditBuffer={setEditBuffer}
             dirty={dirty}
+            isRegenerating={isRegenerating}
+            regeneratingTimedOut={regeneratingTimedOut}
           />
         </ResizablePanel>
 
@@ -249,7 +285,11 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
               <EvidencePane claim={claim} />
             </TabsContent>
             <TabsContent value="assistant" className="m-0 flex-1 overflow-hidden">
-              <AssistantPane claimId={claim.claim_id} refetch={refetch} />
+              <AssistantPane
+                claimId={claim.claim_id}
+                currentVersion={claim.current_version}
+                refetch={refetch}
+              />
             </TabsContent>
           </Tabs>
         </ResizablePanel>
@@ -289,13 +329,19 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
             editBuffer={editBuffer}
             setEditBuffer={setEditBuffer}
             dirty={dirty}
+            isRegenerating={isRegenerating}
+            regeneratingTimedOut={regeneratingTimedOut}
           />
         </TabsContent>
         <TabsContent value="evidence" className="m-0 flex-1 overflow-hidden">
           <EvidencePane claim={claim} />
         </TabsContent>
         <TabsContent value="assistant" className="m-0 flex-1 overflow-hidden">
-          <AssistantPane claimId={claim.claim_id} refetch={refetch} />
+          <AssistantPane
+            claimId={claim.claim_id}
+            currentVersion={claim.current_version}
+            refetch={refetch}
+          />
         </TabsContent>
       </Tabs>
     );

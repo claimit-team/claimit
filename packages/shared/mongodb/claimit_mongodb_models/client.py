@@ -23,11 +23,14 @@ from uuid import UUID
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pydantic import TypeAdapter, ValidationError
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 from .base import BaseDocument
 from .claim import Claim
 from .claim_read_tolerant import ClaimReadTolerant
 from .conversation import Conversation
+from .enums import DraftGeneratedBy
 from .notification_event import NotificationEvent
 from .policy import Policy
 from .price_history import PriceHistory
@@ -408,6 +411,95 @@ class MongoDBClient:
             raise DocumentNotFoundError(
                 f"No document with _id={uid!r} in collection {collection!r}."
             )
+
+    async def try_insert_idempotency_record(
+        self,
+        collection: str,
+        record_id: str,
+        payload: dict[str, Any],
+    ) -> bool:
+        """Insert a dedup record. Returns True on first insert, False on duplicate key."""
+        doc = {"_id": record_id, **payload}
+        try:
+            await self._db[collection].insert_one(doc)
+            return True
+        except DuplicateKeyError:
+            return False
+
+    async def update_idempotency_record(
+        self,
+        collection: str,
+        record_id: str,
+        updates: dict[str, Any],
+    ) -> None:
+        await self._db[collection].update_one({"_id": record_id}, {"$set": updates})
+
+    async def atomic_append_draft_version(
+        self,
+        collection: str,
+        id: str | UUID,
+        *,
+        content: str,
+        generated_by: DraftGeneratedBy,
+        at: datetime,
+        extra_updates: dict[str, Any] | None = None,
+    ) -> int:
+        """Atomically append a draft version using $size+1 server-side numbering."""
+        if extra_updates and "_id" in extra_updates:
+            raise ValueError("`extra_updates` may not contain '_id'.")
+
+        generated_by_str = (
+            generated_by.value if isinstance(generated_by, DraftGeneratedBy) else str(generated_by)
+        )
+        new_entry = {
+            "version": "$_next_version",
+            "content": content,
+            "generated_by": generated_by_str,
+            "at": at,
+        }
+        set_fields: dict[str, Any] = {
+            "draft_versions": {
+                "$concatArrays": [
+                    {"$ifNull": ["$draft_versions", []]},
+                    [new_entry],
+                ]
+            },
+            "draft_content": content,
+            "redraft_count": {"$add": [{"$ifNull": ["$redraft_count", 0]}, 1]},
+            "updated_at": datetime.now(UTC),
+        }
+        if extra_updates:
+            for key in ("draft_versions", "draft_content", "redraft_count"):
+                if key in extra_updates:
+                    raise ValueError(f"`extra_updates` may not override {key!r}.")
+            set_fields.update(extra_updates)
+
+        pipeline = [
+            {
+                "$set": {
+                    "_next_version": {"$add": [{"$size": {"$ifNull": ["$draft_versions", []]}}, 1]}
+                }
+            },
+            {"$set": set_fields},
+            {"$unset": "_next_version"},
+        ]
+
+        uid = _coerce_uuid(id)
+        result = await self._db[collection].find_one_and_update(
+            {"_id": uid},
+            pipeline,
+            return_document=ReturnDocument.AFTER,
+        )
+        if result is None:
+            raise DocumentNotFoundError(
+                f"No document with _id={uid!r} in collection {collection!r}."
+            )
+        versions = result.get("draft_versions") or []
+        if not versions:
+            raise DocumentNotFoundError(
+                f"atomic_append_draft_version left no draft_versions on {uid!r}."
+            )
+        return int(versions[-1]["version"])
 
     async def update_many(
         self,

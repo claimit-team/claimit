@@ -31,6 +31,13 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 const STREAM_STALL_MS = 45_000;
 const EMPTY_ASSISTANT_FALLBACK =
   "I couldn't load full details right now. Check the claim record above or try again in a moment.";
+const REDRAFT_ASSISTANT_FALLBACK = "Queued — regenerating your draft…";
+
+function emptyFallbackForTools(toolNames: string[]): string {
+  return toolNames.includes("request_redraft")
+    ? REDRAFT_ASSISTANT_FALLBACK
+    : EMPTY_ASSISTANT_FALLBACK;
+}
 
 type SendMessageResult = {
   toolNames: string[];
@@ -231,7 +238,7 @@ export function useAssistantStream(): UseAssistantStreamResult {
           onStall: () => {
             setStalled(true);
             setMessages((prev) =>
-              finalizeAssistantTurn(prev, assistantId, EMPTY_ASSISTANT_FALLBACK),
+              finalizeAssistantTurn(prev, assistantId, emptyFallbackForTools(turnToolNames)),
             );
           },
           onActivity: () => setStalled(false),
@@ -254,7 +261,7 @@ export function useAssistantStream(): UseAssistantStreamResult {
               setMessages((prev) => settlePendingToolCalls(prev, assistantId));
             } else {
               setMessages((prev) =>
-                finalizeAssistantTurn(prev, assistantId, EMPTY_ASSISTANT_FALLBACK),
+                finalizeAssistantTurn(prev, assistantId, emptyFallbackForTools(turnToolNames)),
               );
             }
           },
