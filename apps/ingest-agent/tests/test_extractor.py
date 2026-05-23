@@ -230,6 +230,8 @@ def test_extract_routes_multi_item_to_pending_user_edit(
 
     assert result["status"] == "pending_user_edit"
     assert result["extraction_confidence"]["price_paid"] == 0.3
+    # Transient extractor-only field must never reach the Purchase payload.
+    assert "line_items_detected" not in result
 
 
 def test_extract_clamps_multi_item_price_confidence(
@@ -253,6 +255,8 @@ def test_extract_clamps_multi_item_price_confidence(
     assert result["extraction_confidence"]["price_paid"] == 0.4
     # overall_min should now reflect the downgraded price_paid.
     assert result["extraction_confidence"]["overall_min"] <= 0.4
+    # Transient extractor-only field must never reach the Purchase payload.
+    assert "line_items_detected" not in result
 
 
 def test_extracted_purchase_fields_defaults_line_items_to_one() -> None:

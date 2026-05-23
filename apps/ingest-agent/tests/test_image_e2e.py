@@ -209,6 +209,11 @@ def test_handler_image_single_item_happy_path(
     image_bytes = _image_bytes()
 
     async def fake_extract(*, data: bytes, mime_type: str) -> ExtractedPurchaseFields:
+        # Pin the call shape on this path too — the multi-item test
+        # already does this; mirroring it here catches regressions where
+        # the handler stops handing the right bytes or mime through.
+        assert data == image_bytes
+        assert mime_type == "image/jpeg"
         return _single_item_extracted()
 
     publish = AsyncMock(return_value="msg-finalize")

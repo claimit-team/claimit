@@ -355,7 +355,7 @@
       "purchase_date_basis": "order_date",
       "order_id": "200002162609577",
       "member_tier_at_purchase": null,
-      "line_items_detected": 4,
+      "line_items_detected": 2,
       "extraction_confidence": {
         "platform": 0.99,
         "price": 0.3,
