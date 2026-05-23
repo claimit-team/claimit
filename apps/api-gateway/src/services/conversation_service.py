@@ -415,7 +415,11 @@ async def stream_agent_response(
                         return
                     continue
 
-                is_partial = bool(event.get("partial")) if isinstance(event, dict) else False
+                is_partial = (
+                    bool(event.get("partial"))
+                    if isinstance(event, dict)
+                    else bool(getattr(event, "partial", False))
+                )
 
                 for part in parts:
                     p = _part_to_dict(part)
