@@ -78,7 +78,7 @@ function pendingToolName(message: UIMessage): string | null {
 
 function MessageBubble({ message }: { message: UIMessage }) {
   const isAssistant = message.role === "assistant";
-  const runningTool = isAssistant ? pendingToolName(message) : null;
+  const runningTool = isAssistant && message.streaming ? pendingToolName(message) : null;
 
   return (
     <div className={cn("flex gap-3", isAssistant ? "justify-start" : "justify-end")}>

@@ -99,11 +99,6 @@ locals {
       endpoint = module.claim_agent.service_url
       path     = "/pubsub/claim.approved"
     }
-    "claim.resolved-claim-agent-sub" = {
-      topic    = "claim.resolved"
-      endpoint = module.claim_agent.service_url
-      path     = "/pubsub/claim.resolved"
-    }
     "claim.redraft_requested-claim-agent-sub" = {
       topic    = "claim.redraft_requested"
       endpoint = module.claim_agent.service_url

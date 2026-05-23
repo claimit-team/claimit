@@ -9,7 +9,7 @@
   "covers_competitor_drops": true,
   "claim_type": "email",
   "claim_url": "https://www.dell.com/en-us/lp/price-match-guarantee",
-  "claim_email": null,
+  "claim_email": "pricematch@dell.com",
   "claim_phone": null,
   "loyalty_required": false,
   "award_ticket_eligible": null,

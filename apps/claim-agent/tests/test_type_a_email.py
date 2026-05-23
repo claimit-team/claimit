@@ -127,7 +127,7 @@ def _make_claim(purchase: Purchase, claim_amount: float = 50.0) -> Claim:
 
 def _make_policy(
     platform: Platform,
-    claim_email: str,
+    claim_email: str | None,
     clause: str,
 ) -> Policy:
     return Policy(
@@ -164,14 +164,14 @@ def _mock_search_client(clause: str) -> AsyncMock:
 # ─── Shared assertions ────────────────────────────────────────────────────────
 
 
-def _assert_clean_draft(draft: ClaimDraft, claim: Claim, policy: Policy) -> None:
+def _assert_clean_draft(draft: ClaimDraft, claim: Claim, expected_to: str) -> None:
     assert "{{" not in draft.draft_content, "Unreplaced placeholder in draft_content"
     assert "{{" not in draft.subject, "Unreplaced placeholder in subject"
     assert draft.claim_type == "email"
     assert draft.refund_amount == claim.claim_amount
     assert draft.policy_clause_cited
     assert draft.subject
-    assert draft.to_address == policy.claim_email
+    assert draft.to_address == expected_to
 
 
 # ─── Scenarios ───────────────────────────────────────────────────────────────
@@ -195,7 +195,7 @@ async def test_hilton_scenario() -> None:
             claim, purchase, policy, mock_search, user_name="Jane Smith"
         )
 
-    _assert_clean_draft(draft, claim, policy)
+    _assert_clean_draft(draft, claim, policy.claim_email or "")
     assert "HILTON-789012" in draft.draft_content
     assert "HILTON-789012" in draft.subject
     assert draft.platform == "hilton"
@@ -219,7 +219,7 @@ async def test_marriott_scenario() -> None:
             claim, purchase, policy, mock_search, user_name="Robert Chen"
         )
 
-    _assert_clean_draft(draft, claim, policy)
+    _assert_clean_draft(draft, claim, policy.claim_email or "")
     assert "MARRIOTT-456789" in draft.draft_content
     assert draft.platform == "marriott"
     assert draft.refund_amount == 70.0
@@ -245,7 +245,7 @@ async def test_hilton_suite_scenario() -> None:
             claim, purchase, policy, mock_search, user_name="Alice Johnson"
         )
 
-    _assert_clean_draft(draft, claim, policy)
+    _assert_clean_draft(draft, claim, policy.claim_email or "")
     assert draft.refund_amount == 150.0
     assert "HILTON-SUITE-9999" in draft.draft_content
 
@@ -311,17 +311,36 @@ async def test_invalid_gemini_schema() -> None:
 
 
 @pytest.mark.asyncio
-async def test_missing_claim_email_fails_early() -> None:
-    """generate_email_draft raises DraftGenerationError before calling LLM if claim_email is None."""
-    purchase = _make_purchase(Platform.HILTON, price_paid=300.0, order_id="HILTON-001")
+async def test_best_buy_null_claim_email_uses_platform_default() -> None:
+    """Missing policy.claim_email falls back to the known best_buy default."""
+    clause = "Best Buy price match within 15 days."
+    purchase = _make_purchase(Platform.BEST_BUY, price_paid=399.99, order_id="BBY-001")
     claim = _make_claim(purchase, claim_amount=50.0)
-    policy = _make_policy(Platform.HILTON, None, "Some clause.")  # type: ignore[arg-type]
-    mock_search = _mock_search_client("Some clause.")
+    policy = _make_policy(Platform.BEST_BUY, None, clause)
+    mock_search = _mock_search_client(clause)
 
     with patch("src.draft.type_a_email._run_draft_agent", new_callable=AsyncMock) as mock_runner:
-        with pytest.raises(DraftGenerationError):
-            await generate_email_draft(claim, purchase, policy, mock_search)
-        mock_runner.assert_not_called()
+        mock_runner.return_value = _MOCK_TEMPLATE
+        draft = await generate_email_draft(claim, purchase, policy, mock_search)
+
+    assert draft.to_address == "pricematch@bestbuy.com"
+    assert "{{" not in draft.draft_content
+
+
+@pytest.mark.asyncio
+async def test_unknown_platform_null_claim_email_uses_generic_fallback() -> None:
+    """Unlisted platforms degrade to a generic claim email instead of raising."""
+    clause = "Generic price match clause."
+    purchase = _make_purchase(Platform.AMERICAN, price_paid=100.0, order_id="UNK-001")
+    claim = _make_claim(purchase, claim_amount=10.0)
+    policy = _make_policy(Platform.AMERICAN, None, clause)
+    mock_search = _mock_search_client(clause)
+
+    with patch("src.draft.type_a_email._run_draft_agent", new_callable=AsyncMock) as mock_runner:
+        mock_runner.return_value = _MOCK_TEMPLATE
+        draft = await generate_email_draft(claim, purchase, policy, mock_search)
+
+    assert draft.to_address == "priceadjustments@american.example.com"
 
 
 @pytest.mark.asyncio

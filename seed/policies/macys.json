@@ -9,7 +9,7 @@
   "covers_competitor_drops": true,
   "claim_type": "email",
   "claim_url": "https://www.macys.com/customer-service/articles/how-can-i-get-a-price-adjustment",
-  "claim_email": null,
+  "claim_email": "pricematch@macys.com",
   "claim_phone": null,
   "loyalty_required": false,
   "award_ticket_eligible": null,

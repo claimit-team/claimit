@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -113,6 +114,13 @@ class _PubSubMessage(BaseModel):
 class _PubSubPushBody(BaseModel):
     message: _PubSubMessage
     subscription: str = ""
+
+
+async def _decode_pubsub_push_data(request: Request) -> dict:
+    """Decode a Pub/Sub push envelope into a JSON event dict."""
+    body = _PubSubPushBody.model_validate(await request.json())
+    raw_data = base64.b64decode(body.message.data)
+    return json.loads(raw_data.decode("utf-8"))
 
 
 @app.get("/health")
@@ -424,6 +432,72 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             },
         )
         return {"status": "error"}
+
+
+@app.post("/pubsub/claim.approved", status_code=200)
+async def handle_claim_approved(request: Request) -> dict[str, str]:
+    """Handle Pub/Sub push for claim.approved — submit pending claims.
+
+    Gateway publishes a rich trigger payload when the user approves a draft;
+    auto-send publishes a post-submit notification after inline submit.
+    Idempotency skips duplicates so auto-send notifications do not
+    double-submit.
+
+    Always returns 200 to ack the message.
+    """
+    try:
+        payload = await _decode_pubsub_push_data(request)
+        claim_id = payload.get("claim_id")
+        user_id = payload.get("user_id")
+        if not claim_id or not user_id:
+            _log.error("claim_agent.approved.missing_fields payload=%r", payload)
+            return {"status": "error", "reason": "missing_fields"}
+
+        db = MongoDBClient()
+        claim = await db.get_claim(str(claim_id))
+        if claim is None:
+            _log.error("claim_agent.approved.claim_not_found claim_id=%s", claim_id)
+            return {"status": "error", "reason": "claim_not_found"}
+
+        if str(claim.user_id) != str(user_id):
+            _log.error(
+                "claim_agent.approved.user_mismatch claim_id=%s event_user=%s claim_user=%s",
+                claim_id,
+                user_id,
+                claim.user_id,
+            )
+            return {"status": "error", "reason": "permission_denied"}
+
+        if claim.submitted_via is not None:
+            _log.info(
+                "claim_agent.approved.skip_already_submitted claim_id=%s submitted_via=%s",
+                claim_id,
+                claim.submitted_via,
+            )
+            return {"status": "skipped", "reason": "already_submitted"}
+
+        if claim.outcome != ClaimOutcome.PENDING.value:
+            _log.info(
+                "claim_agent.approved.skip_not_pending claim_id=%s outcome=%r",
+                claim_id,
+                claim.outcome,
+            )
+            return {"status": "skipped", "reason": "not_pending"}
+
+        user = await db.get_user(claim.user_id)
+        if user is None:
+            _log.error(
+                "claim_agent.approved.user_not_found claim_id=%s user_id=%s", claim_id, user_id
+            )
+            return {"status": "error", "reason": "user_not_found"}
+
+        await submit_claim(claim, user, db)
+        _log.info("claim_agent.approved.submitted claim_id=%s", claim_id)
+        return {"status": "ok"}
+
+    except Exception as exc:
+        _log.exception("Failed to process claim.approved event")
+        return {"status": "error", "reason": str(exc)}
 
 
 # Auto-send cron handler — wired to a Cloud Scheduler job in

@@ -358,6 +358,41 @@ async def test_redraft_feedback_passed_to_generator() -> None:
 
 
 @pytest.mark.asyncio
+async def test_redraft_email_null_policy_email_succeeds() -> None:
+    """Redraft succeeds when policy.claim_email is null (Type A fallback)."""
+    mock_claim = _make_mock_claim(claim_type="email", redraft_count=0, draft_versions=1)
+    mock_db = _make_mock_db(mock_claim)
+    mock_db.get_policy.return_value.claim_email = None
+    mock_draft = _make_mock_draft()
+    mock_search = MagicMock()
+    mock_search.get_search_adapter.return_value = AsyncMock()
+    eval_result = _make_eval_result()
+
+    request = _make_mock_request(_pubsub_body(_make_redraft_event()))
+
+    with (
+        patch("src.main.MongoDBClient", return_value=mock_db),
+        patch("src.main.generate_email_draft", return_value=mock_draft),
+        patch("src.main.validate", return_value=ValidationResult(valid=True)),
+        patch(
+            "src.main.evaluate_and_maybe_regenerate",
+            new=AsyncMock(return_value=(mock_draft, eval_result, 1)),
+        ),
+        patch("src.main.write_notification_event", return_value="notif-id"),
+        patch("src.main.handle_approval_mode", new=AsyncMock(return_value=MagicMock())),
+        patch(
+            "src.main.handle_auto_mode",
+            new=AsyncMock(return_value=(MagicMock(), MagicMock())),
+        ),
+        patch.dict(sys.modules, {"search": mock_search}),
+    ):
+        result = await handle_claim_redraft_requested(request)
+
+    assert result == {"status": "ok"}
+    mock_db.array_push_and_update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_redraft_appends_version_not_replaces() -> None:
     mock_claim = _make_mock_claim(claim_type="email", draft_versions=1)
     mock_db = _make_mock_db(mock_claim)
