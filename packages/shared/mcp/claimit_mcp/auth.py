@@ -137,7 +137,43 @@ class GoogleIDTokenAuth(httpx.Auth):
     def sync_auth_flow(
         self, request: httpx.Request
     ) -> Generator[httpx.Request, httpx.Response, None]:
-        request.headers["Authorization"] = f"Bearer {self._bearer()}"
+        token = self._bearer()
+
+        # DEBUG (5.10 layer 4 diagnosis): decode the JWT *without* signature
+        # verification and log iss/sub/aud/email so we can identify which
+        # runtime SA Agent Engine actually uses. We've granted run.invoker
+        # to four candidate SAs (compute default, claimit-assistant-agent,
+        # gcp-sa-aiplatform-re, gcp-sa-aiplatform) and Cloud Run still
+        # returns 403 — meaning the runtime is signed by a fifth, unknown
+        # identity. The `email` claim on a Google-minted OIDC token names
+        # the principal directly. REMOVE this block in the follow-up PR
+        # once we've granted run.invoker to the correct SA. All imports
+        # are inline to keep the removal a single contiguous delete.
+        try:
+            import base64
+            import json as _json
+            import logging as _logging
+
+            parts = token.split(".")
+            if len(parts) >= 2:
+                payload = parts[1]
+                payload += "=" * ((4 - len(payload) % 4) % 4)
+                decoded = _json.loads(base64.urlsafe_b64decode(payload))
+                _logging.getLogger("claimit_mcp.oidc_debug").warning(
+                    "OIDC_TOKEN_DEBUG: iss=%r sub=%r aud=%r email=%r",
+                    decoded.get("iss"),
+                    decoded.get("sub"),
+                    decoded.get("aud"),
+                    decoded.get("email"),
+                )
+        except Exception as exc:
+            import logging as _logging
+
+            _logging.getLogger("claimit_mcp.oidc_debug").warning(
+                "OIDC_TOKEN_DEBUG_DECODE_FAIL: %s", exc
+            )
+
+        request.headers["Authorization"] = f"Bearer {token}"
         yield request
 
     # httpx.Auth's async path defaults to dispatching `sync_auth_flow` in
