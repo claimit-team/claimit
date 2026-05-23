@@ -19,11 +19,10 @@ PLATFORM_CLAIM_EMAILS: dict[str, str] = {
     "best_buy": "pricematch@bestbuy.com",
     "delta": "refunds@delta.com",
     "hilton": "reservations@hilton.com",
-    "marriott": "guestservices@marriott.com",
+    "marriott": "BestRateGuarantee@marriott.com",
     "southwest": "pricematch@southwest.com",
     "target": "pricematch@target.com",
     "united": "refunds@united.com",
-    "walmart": "pricematch@walmart.com",
     "alaska": "pricematch@alaskaair.com",
     "costco": "pricematch@costco.com",
     "crutchfield": "support@crutchfield.com",
@@ -33,10 +32,7 @@ PLATFORM_CLAIM_EMAILS: dict[str, str] = {
     "ihg": "pricematch@ihg.com",
     "jetblue": "pricematch@jetblue.com",
     "lowes": "pricematch@lowes.com",
-    "macys": "pricematch@macys.com",
-    "newegg": "support@newegg.com",
-    "nordstrom": "pricematch@nordstrom.com",
-    "wyndham": "pricematch@wyndhamhotels.com",
+    "wyndham": "bestrates@wyndham.com",
 }
 
 _GENERIC_DOMAIN = "example.com"

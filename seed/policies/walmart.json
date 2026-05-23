@@ -9,7 +9,7 @@
   "covers_competitor_drops": false,
   "claim_type": "email",
   "claim_url": "https://www.walmart.com/help/article/walmart-price-match-policy/6295d9e1a501489b9aa40a60c899b288",
-  "claim_email": "pricematch@walmart.com",
+  "claim_email": null,
   "claim_phone": null,
   "loyalty_required": false,
   "award_ticket_eligible": null,
