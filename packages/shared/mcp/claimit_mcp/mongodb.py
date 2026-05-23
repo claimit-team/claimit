@@ -103,17 +103,24 @@ def _http_toolset(mcp_url: str) -> McpToolset:
 
     audience = mcp_url.rstrip("/")
     connection_url = f"{audience}{_MCP_HTTP_PATH}"
-    auth = GoogleIDTokenAuth(audience=audience)
+    oidc_auth = GoogleIDTokenAuth(audience=audience)
 
     def client_factory(
         headers: httpx.Headers | None = None,
         timeout: httpx.Timeout | None = None,
-        auth_param: httpx.Auth | None = None,
+        auth: httpx.Auth | None = None,
     ) -> httpx.AsyncClient:
-        # ADK's mcp session manager passes baseline headers + timeout +
-        # auth via the factory. Our `auth` wins — if ADK supplied one,
-        # we override (the MCP client itself doesn't need to know about
-        # the bearer header; that's our transport-layer concern).
+        # ADK's mcp session manager calls this factory with kwargs named
+        # `headers`, `timeout`, `auth` — the `auth` kwarg matches
+        # httpx.AsyncClient's own parameter name, so we accept it under
+        # that exact name (renaming it caused TypeError at session
+        # creation, ticket 5.10 hotfix #3). The kwarg `auth` here
+        # shadows the closure capture deliberately; the OIDC auth we
+        # actually want to install is bound to `oidc_auth` above, and
+        # we always use it — ADK's `auth` (typically None) is ignored
+        # because OIDC is a transport-layer concern the MCP client
+        # itself doesn't need to know about.
+        del auth  # explicit: we intentionally do not honor ADK's auth here
         return httpx.AsyncClient(
             headers=headers or {},
             timeout=timeout
@@ -123,7 +130,7 @@ def _http_toolset(mcp_url: str) -> McpToolset:
                 write=_HTTP_READ_TIMEOUT_SECONDS,
                 pool=_HTTP_CONNECT_TIMEOUT_SECONDS,
             ),
-            auth=auth,
+            auth=oidc_auth,
         )
 
     return McpToolset(
