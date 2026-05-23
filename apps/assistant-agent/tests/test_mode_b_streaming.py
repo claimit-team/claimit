@@ -73,4 +73,6 @@ async def test_handle_message_sse_no_partials_fallback_single_chunk() -> None:
 
     text_chunks = [json.loads(f["data"])["text"] for f in frames if f["event"] == "text_chunk"]
     assert text_chunks == ["ABC"]
-    assert any(f["event"] == "done" for f in frames)
+    done_idx = next(i for i, f in enumerate(frames) if f["event"] == "done")
+    text_idx = next(i for i, f in enumerate(frames) if f["event"] == "text_chunk")
+    assert text_idx < done_idx

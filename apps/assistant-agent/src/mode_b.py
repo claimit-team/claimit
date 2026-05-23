@@ -192,6 +192,7 @@ async def handle_message(
     done_sent = False
     streamed_text = False
     final_text = ""
+    pending_done = False
     import json
 
     try:
@@ -243,11 +244,13 @@ async def handle_message(
                     }
 
             if hasattr(event, "is_final_response") and event.is_final_response():
-                done_sent = True
-                yield {"event": "done", "data": "{}"}
+                pending_done = True
 
         if not streamed_text and final_text:
             yield {"event": "text_chunk", "data": json.dumps({"text": final_text})}
+        if pending_done:
+            done_sent = True
+            yield {"event": "done", "data": "{}"}
     finally:
         if not done_sent:
             yield {"event": "done", "data": "{}"}
