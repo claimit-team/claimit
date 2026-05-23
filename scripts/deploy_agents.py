@@ -57,10 +57,16 @@ AGENT_MODULES = [
 
 DEFAULT_LOCATION = "us-east1"
 # cloudpickle and pydantic must be explicit — SDK does not auto-add them.
+# motor: ticket 5.10 Plan B — assistant_agent's agent.py now imports
+# `claimit_mongodb_models.MongoDBClient` which depends on motor. The
+# claimit_mongodb_models wheel is installed --no-deps (see
+# installation_scripts/install_claimit_mcp.sh), so motor must be pulled
+# in via ADK_REQUIREMENTS instead.
 ADK_REQUIREMENTS = [
     "google-cloud-aiplatform[agent_engines,adk]",
     "cloudpickle",
     "pydantic",
+    "motor>=3.6.0",
 ]
 AGENT_FRAMEWORK = "google-adk"
 VERIFY_PROMPT = "Say hello"
@@ -172,6 +178,52 @@ def get_mcp_wheel_path() -> str:
     except Exception as ze:
         print(f"  [DEBUG] Wheel inspect failed: {ze}")
     return candidates[-1]  # latest version (alphabetic sort works for semver)
+
+
+def get_models_wheel_path() -> str:
+    """Find the freshly-built claimit_mongodb_models wheel for extra_packages.
+
+    Ticket 5.10 Plan B: assistant_agent's agent.py now imports
+    `claimit_mongodb_models.MongoDBClient` directly. The wheel is built
+    by CI (deploy-agents.yml) via `uv build --wheel` in
+    packages/shared/mongodb/ and must be present so the Reasoning Engine
+    container can pip-install it via installation_scripts/install_claimit_mcp.sh
+    before cloudpickle.loads() resolves the import on agent restore.
+    """
+    pattern = "packages/shared/mongodb/dist/claimit_mongodb_models-*-py3-none-any.whl"
+    candidates = sorted(glob.glob(pattern))
+    if not candidates:
+        raise FileNotFoundError(
+            f"claimit_mongodb_models wheel not found at {pattern}. "
+            "CI must run 'uv build --wheel' in packages/shared/mongodb/ "
+            "before this script."
+        )
+    whl = candidates[-1]
+    print(f"  [DEBUG] Models wheel path: {whl}")
+    print(f"  [DEBUG] Models wheel size: {os.path.getsize(whl)} bytes")
+    return whl
+
+
+def get_mongodb_uri_for_agent_engine() -> str:
+    """Read the Atlas connection string from Secret Manager for agent runtime.
+
+    Ticket 5.10 Plan B: assistant_agent connects to MongoDB directly
+    from the Agent Engine container instead of going through the
+    Cloud Run MCP service. The MONGODB_URI must therefore be present
+    in the deployed agent's env_vars.
+
+    SecretRef dict format in env_vars crashes Agent Engine container
+    startup silently (verified during 1.29 — see comment at deploy_one
+    around env_vars setup), so we resolve the secret value at deploy
+    time and inject it as a plain string. The Secret Manager secret
+    name "mongodb-uri" is wired in infra/terraform/main.tf (line ~94)
+    and is the same secret Cloud Run services already consume.
+    """
+    project = get_project_id()
+    secret_name = f"projects/{project}/secrets/mongodb-uri/versions/latest"
+    sm_client = secretmanager.SecretManagerServiceClient()
+    response = sm_client.access_secret_version(name=secret_name)
+    return response.payload.data.decode("utf-8")
 
 
 def get_mongodb_mcp_url(agent_name: str) -> str:
@@ -308,6 +360,14 @@ def deploy_one(
     env_vars: dict[str, str] = {}
     if not dry_run:
         env_vars["MDB_MCP_URL"] = get_mongodb_mcp_url(agent_name)
+        # Ticket 5.10 Plan B: assistant_agent talks to MongoDB directly
+        # (bypasses the Cloud Run MCP service). It needs MONGODB_URI in
+        # the Agent Engine runtime env so claimit_mongodb_models.MongoDBClient
+        # can connect on first tool call. Other agents still go through
+        # MCP and don't read MONGODB_URI — scope the injection to avoid
+        # leaking the secret value into agents that don't use it.
+        if agent_name == "assistant_agent":
+            env_vars["MONGODB_URI"] = get_mongodb_uri_for_agent_engine()
 
     config = {
         "staging_bucket": staging_bucket,
@@ -330,6 +390,7 @@ def deploy_one(
         #     reverse check (extra_pkg under subdir but not declared) is fine.
         "extra_packages": [
             get_mcp_wheel_path(),
+            get_models_wheel_path(),
             "installation_scripts/install_claimit_mcp.sh",
         ],
         "build_options": {
@@ -566,6 +627,8 @@ def main() -> int:
     # List files that will be packaged
     print("[DEBUG] Files for extra_packages:")
     for f in glob.glob("packages/shared/mcp/dist/*.whl"):
+        print(f"  [DEBUG]   {f} ({os.path.getsize(f)} bytes)")
+    for f in glob.glob("packages/shared/mongodb/dist/*.whl"):
         print(f"  [DEBUG]   {f} ({os.path.getsize(f)} bytes)")
     for f in glob.glob("installation_scripts/*.sh"):
         print(f"  [DEBUG]   {f} ({os.path.getsize(f)} bytes, mode={oct(os.stat(f).st_mode)[-3:]})")
