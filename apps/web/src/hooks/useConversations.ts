@@ -17,7 +17,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ConversationsApiError,
   createConversation as createApi,
+  deleteConversation as deleteConversationApi,
   listConversations,
+  updateConversation,
 } from "@/lib/api/conversations";
 import { useAuthStore } from "@/store";
 import type { Conversation, ConversationMode } from "@/types/assistant";
@@ -35,8 +37,19 @@ type UseConversationsResult = {
   error: ConversationsApiError | null;
   selectConversation: (id: string | null) => void;
   createConversation: (mode: ConversationMode, claimId?: string) => Promise<Conversation>;
+  renameConversation: (id: string, title: string) => Promise<void>;
+  archiveConversation: (id: string) => Promise<void>;
+  deleteConversation: (id: string) => Promise<void>;
   refetch: () => void;
 };
+
+function toApiError(err: unknown): ConversationsApiError {
+  if (err instanceof ConversationsApiError) return err;
+  return new ConversationsApiError(
+    "unknown_error",
+    err instanceof Error ? err.message : "Unknown error",
+  );
+}
 
 export function useConversations({ mode }: UseConversationsArgs = {}): UseConversationsResult {
   const userId = useAuthStore((state) => state.user?._id ?? null);
@@ -75,16 +88,7 @@ export function useConversations({ mode }: UseConversationsArgs = {}): UseConver
       })
       .catch((err: unknown) => {
         if (!mounted) return;
-        if (err instanceof ConversationsApiError) {
-          setError(err);
-        } else {
-          setError(
-            new ConversationsApiError(
-              "unknown_error",
-              err instanceof Error ? err.message : "Unknown error",
-            ),
-          );
-        }
+        setError(toApiError(err));
       })
       .finally(() => {
         if (!mounted) return;
@@ -118,6 +122,51 @@ export function useConversations({ mode }: UseConversationsArgs = {}): UseConver
     [],
   );
 
+  const renameConversation = useCallback(
+    async (id: string, title: string): Promise<void> => {
+      setConversations((prev) => prev.map((c) => (c._id === id ? { ...c, title } : c)));
+      try {
+        await updateConversation(id, { title });
+        refetch();
+      } catch (err) {
+        refetch();
+        setError(toApiError(err));
+        throw err;
+      }
+    },
+    [refetch],
+  );
+
+  const archiveConversation = useCallback(
+    async (id: string): Promise<void> => {
+      setConversations((prev) => prev.filter((c) => c._id !== id));
+      try {
+        await updateConversation(id, { status: "archived" });
+        refetch();
+      } catch (err) {
+        refetch();
+        setError(toApiError(err));
+        throw err;
+      }
+    },
+    [refetch],
+  );
+
+  const deleteConversation = useCallback(
+    async (id: string): Promise<void> => {
+      setConversations((prev) => prev.filter((c) => c._id !== id));
+      try {
+        await deleteConversationApi(id);
+        refetch();
+      } catch (err) {
+        refetch();
+        setError(toApiError(err));
+        throw err;
+      }
+    },
+    [refetch],
+  );
+
   const currentConversation =
     currentId === null ? null : (conversations.find((c) => c._id === currentId) ?? null);
 
@@ -129,6 +178,9 @@ export function useConversations({ mode }: UseConversationsArgs = {}): UseConver
     error,
     selectConversation,
     createConversation,
+    renameConversation,
+    archiveConversation,
+    deleteConversation,
     refetch,
   };
 }
