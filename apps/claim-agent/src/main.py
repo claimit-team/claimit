@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -31,6 +32,7 @@ from fastapi import Depends, FastAPI, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import verify_pubsub_oidc
+from .draft._shared import warm_up_draft_model
 from .draft.models import ClaimDraft
 from .draft.type_a_email import generate_email_draft
 from .draft.type_b_chat import generate_chat_script
@@ -95,6 +97,7 @@ def _parse_delay_seconds() -> int:
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     init_phoenix("claimit-claim-agent")
+    _app.state.warmup_task = asyncio.create_task(warm_up_draft_model())
     yield
 
 

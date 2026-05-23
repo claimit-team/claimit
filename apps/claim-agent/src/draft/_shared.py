@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import re
 from collections.abc import Callable
 from typing import Any
@@ -16,7 +17,9 @@ from google.genai import types
 
 MODEL_NAME = "gemini-2.5-flash"
 APP_NAME = "claimit-claim-draft"
-DRAFT_TIMEOUT_SECONDS = 30
+DRAFT_TIMEOUT_SECONDS = 90
+
+_log = logging.getLogger(__name__)
 
 _PARAGRAPH_MANDATE = (
     "Use blank lines (\\n\\n) between paragraphs (salutation, body paragraphs, closing). "
@@ -247,3 +250,35 @@ async def _run_draft_agent(
 
 def paragraph_mandate() -> str:
     return _PARAGRAPH_MANDATE
+
+
+async def warm_up_draft_model() -> None:
+    """Fire one trivial ADK→genai→Vertex call on startup so the first REAL draft
+    generation isn't the cold one (token + model spin-up + TLS). Best-effort:
+    never raises."""
+    try:
+        session_service = InMemorySessionService()
+        session_id = f"warmup-{uuid4()}"
+        user_id = "warmup"
+        await _maybe_await(
+            session_service.create_session(
+                app_name=APP_NAME,
+                user_id=user_id,
+                session_id=session_id,
+            )
+        )
+        runner = Runner(
+            app_name=APP_NAME,
+            agent=Agent(name="warmup", model=MODEL_NAME, instruction="Reply with OK."),
+            session_service=session_service,
+        )
+        message = types.Content(role="user", parts=[types.Part.from_text(text="ping")])
+        async with asyncio.timeout(DRAFT_TIMEOUT_SECONDS):
+            async for _event in runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=message,
+            ):
+                pass
+    except Exception:  # warm-up is best-effort, must not crash startup
+        _log.debug("draft model warm-up failed (non-fatal)", exc_info=True)
