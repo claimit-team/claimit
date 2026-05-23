@@ -72,6 +72,18 @@ _ALLOWED_CORRECTABLE_FIELDS: frozenset[str] = frozenset(
     }
 )
 
+# Statuses that surface the review/correction form. The ingest extractor
+# routes low-confidence extractions to `pending_confirmation` and
+# multi-item / synthesized-product-id receipts to `pending_user_edit`;
+# both submit through the same /confirm and /dismiss endpoints and
+# transition to `monitoring` (or `dismissed`) from here.
+_REVIEWABLE_STATUSES: frozenset[str] = frozenset(
+    {
+        PurchaseStatus.PENDING_CONFIRMATION.value,
+        PurchaseStatus.PENDING_USER_EDIT.value,
+    }
+)
+
 _ALLOWED_UPLOAD_CONTENT_TYPES: dict[str, IngestionSource] = {
     "application/pdf": IngestionSource.UPLOAD_PDF,
     "image/png": IngestionSource.UPLOAD_IMAGE,
@@ -275,15 +287,20 @@ async def confirm_purchase(
 
     Raises:
         ApiError(not_found, 404) if purchase is missing or not owned.
-        ApiError(invalid_status, 409) if status is not pending_confirmation.
+        ApiError(invalid_status, 409) if status is not one of the
+            reviewable states (`pending_confirmation`, `pending_user_edit`).
         ApiError(invalid_field, 400) if corrected_fields contains a
             system-managed or unknown key.
     """
     purchase = await get_purchase_for_user(db, user.id, purchase_id)
 
     # `purchase.status` is `str | None` on the tolerant model — compare
-    # to the canonical enum value, not the enum instance.
-    if purchase.status != PurchaseStatus.PENDING_CONFIRMATION.value:
+    # to the canonical enum values, not the enum instances. Both
+    # `pending_confirmation` (low-confidence extraction) and
+    # `pending_user_edit` (multi-item / synthesized product_id from the
+    # ingest extractor) flow through the same review form and submit
+    # path here; everything else is terminal or already monitoring.
+    if purchase.status not in _REVIEWABLE_STATUSES:
         raise ApiError(
             "invalid_status",
             f"Purchase cannot be confirmed from status '{purchase.status}'",
@@ -430,7 +447,7 @@ async def dismiss_purchase(
     """
     purchase = await get_purchase_for_user(db, user.id, purchase_id)
 
-    if purchase.status != PurchaseStatus.PENDING_CONFIRMATION.value:
+    if purchase.status not in _REVIEWABLE_STATUSES:
         raise ApiError(
             "invalid_status",
             f"Purchase cannot be dismissed from status '{purchase.status}'",

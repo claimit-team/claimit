@@ -7,12 +7,16 @@
  *   - no search/filter UI;
  *   - non-blocking error state — the dashboard never blocks render.
  *
- * Scoped to `status=pending_confirmation` only (i.e. uploads whose
- * Gemini extraction landed below the 0.95 overall_min threshold, or
- * who are still awaiting extraction with sentinel scores). When the
- * call fails or returns zero, the dashboard maps that to the same
- * "nothing here" empty in `NeedsAttentionSection` — we'd rather
- * under-surface than render a fake error inside a multi-card section.
+ * Scoped to `status=pending_confirmation` and `status=pending_user_edit`
+ * (i.e. uploads whose Gemini extraction landed below the 0.95 overall_min
+ * threshold, are still awaiting extraction with sentinel scores, OR were
+ * routed to `pending_user_edit` by the ingest extractor because the
+ * receipt itemized multiple purchasable lines / a product_id had to be
+ * synthesized from the order_id). Both surface in "Needs your attention"
+ * and route to the same `/confirm/:id` review form. When the call fails
+ * or returns zero, the dashboard maps that to the same "nothing here"
+ * empty in `NeedsAttentionSection` — we'd rather under-surface than
+ * render a fake error inside a multi-card section.
  */
 
 "use client";
@@ -67,7 +71,7 @@ export function usePendingConfirmation({
     setIsLoading(true);
     setError(null);
 
-    listPurchases({ status: ["pending_confirmation"], limit })
+    listPurchases({ status: ["pending_confirmation", "pending_user_edit"], limit })
       .then((page) => {
         if (!mounted) return;
         setPurchases(page.purchases);
