@@ -27,9 +27,10 @@ from claimit_mongodb_models import (
 )
 from claimit_observability import init_phoenix
 from claimit_pubsub.events import ClaimRedraftRequestedEvent
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from .auth import verify_pubsub_oidc
 from .draft.models import ClaimDraft
 from .draft.type_a_email import generate_email_draft
 from .draft.type_b_chat import generate_chat_script
@@ -434,7 +435,11 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         return {"status": "error"}
 
 
-@app.post("/pubsub/claim.approved", status_code=200)
+@app.post(
+    "/pubsub/claim.approved",
+    status_code=200,
+    dependencies=[Depends(verify_pubsub_oidc)],
+)
 async def handle_claim_approved(request: Request) -> dict[str, str]:
     """Handle Pub/Sub push for claim.approved — submit pending claims.
 
@@ -495,9 +500,9 @@ async def handle_claim_approved(request: Request) -> dict[str, str]:
         _log.info("claim_agent.approved.submitted claim_id=%s", claim_id)
         return {"status": "ok"}
 
-    except Exception as exc:
+    except Exception:
         _log.exception("Failed to process claim.approved event")
-        return {"status": "error", "reason": str(exc)}
+        return {"status": "error", "reason": "internal_error"}
 
 
 # Auto-send cron handler — wired to a Cloud Scheduler job in
