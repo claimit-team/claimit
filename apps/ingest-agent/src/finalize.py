@@ -86,7 +86,18 @@ def _compute_status_and_confidence(
         confidence["product_id"] = FALLBACK_PRODUCT_ID_CONFIDENCE
         _merge_confidence_aggregate(confidence)
 
-    status = _resolve_status(fallback_used, confidence)
+    # Defensive: when the receipt itemizes more than one purchasable line,
+    # the model is instructed to set price_paid to the picked item's price
+    # and confidence <= 0.4. Enforce the same ceiling in code so an
+    # over-confident model output still routes through user edit, AND so
+    # the low-confidence proactive notification path fires on price_paid.
+    multi_item = extracted.line_items_detected > 1
+    if multi_item:
+        existing = confidence.get("price_paid")
+        confidence["price_paid"] = min(existing if existing is not None else 1.0, 0.4)
+        _merge_confidence_aggregate(confidence)
+
+    status = _resolve_status(fallback_used, confidence, multi_item=multi_item)
     return status, confidence, product_id, fallback_used
 
 

@@ -205,3 +205,7 @@ test_results.txt
 # never committed.
 **/_test_live_*.py
 **/_live_test_*.txt
+
+# Local receipt used by apps/ingest-agent/scripts/ocr_smoke.py — real
+# order ID + item prices, never commit. See issue #183.
+/best_buy_receipt.jpeg
