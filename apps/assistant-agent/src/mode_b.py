@@ -36,6 +36,7 @@ from typing import Any
 from uuid import uuid4
 
 from google.adk import Agent
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.tools import FunctionTool
@@ -189,26 +190,64 @@ async def handle_message(
     # or the consumer drops the generator early. Without this, an
     # exception inside the Runner leaves SSE consumers waiting forever.
     done_sent = False
+    streamed_text = False
+    final_text = ""
+    import json
+
     try:
         async for event in runner.run_async(
             user_id=user_id,
             session_id=session_id,
             new_message=new_message,
+            run_config=RunConfig(streaming_mode=StreamingMode.SSE),
         ):
-            sse_event = _adk_event_to_sse_dict(event)
-            yield sse_event
+            is_partial = getattr(event, "partial", False)
+            content = getattr(event, "content", None)
+            parts = getattr(content, "parts", None) or []
 
-            # Final events that carry text/tool parts get translated as
-            # text_chunk/etc.; the consumer would otherwise never see an
-            # explicit terminator. Track that we sent one so `finally`
-            # doesn't double-emit.
-            if (
-                sse_event.get("event") != "done"
-                and hasattr(event, "is_final_response")
-                and event.is_final_response()
-            ):
+            for part in parts:
+                text = getattr(part, "text", None)
+                if text:
+                    if is_partial:
+                        yield {"event": "text_chunk", "data": json.dumps({"text": text})}
+                        streamed_text = True
+                    else:
+                        final_text = text
+                    continue
+
+                function_call = getattr(part, "function_call", None)
+                if function_call is not None:
+                    yield {
+                        "event": "tool_call",
+                        "data": json.dumps(
+                            {
+                                "tool": getattr(function_call, "name", None),
+                                "input": dict(getattr(function_call, "args", {}) or {}),
+                            }
+                        ),
+                    }
+                    continue
+
+                function_response = getattr(part, "function_response", None)
+                if function_response is not None:
+                    yield {
+                        "event": "tool_result",
+                        "data": json.dumps(
+                            {
+                                "tool": getattr(function_response, "name", None),
+                                "output_summary": str(getattr(function_response, "response", ""))[
+                                    :200
+                                ],
+                            }
+                        ),
+                    }
+
+            if hasattr(event, "is_final_response") and event.is_final_response():
                 done_sent = True
                 yield {"event": "done", "data": "{}"}
+
+        if not streamed_text and final_text:
+            yield {"event": "text_chunk", "data": json.dumps({"text": final_text})}
     finally:
         if not done_sent:
             yield {"event": "done", "data": "{}"}
