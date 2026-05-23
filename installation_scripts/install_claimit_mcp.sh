@@ -57,12 +57,29 @@ install_wheel_into_venv() {
 install_wheel_into_venv "claimit_mcp" "claimit_mcp-*-py3-none-any.whl"
 
 # claimit_mongodb_models is required by assistant_agent's direct MongoDB
-# path. Missing-wheel is non-fatal for now (the other three agents do
-# not import it) so a deploy that forgot to build the wheel still gets
-# ingest/monitor/claim up — but assistant_agent will fail at unpickle
-# with ModuleNotFoundError, which is the louder signal we want.
+# path. The wheel is added to extra_packages unconditionally by
+# scripts/deploy_agents.py (same wheel ships to every agent's container);
+# the other three agents don't import the module so its presence is
+# harmless for them. A missing wheel therefore always indicates a CI
+# break (deploy-agents.yml's `uv build --wheel` step didn't run, or
+# get_models_wheel_path() picked a wrong glob), not a per-agent
+# optionality — fail loudly here instead of letting assistant_agent
+# silently fail at unpickle with ModuleNotFoundError.
+#
+# AGENT_NAME-scoped variant considered (CodeRabbit Finding 2 first draft)
+# and dropped: the install script runs at container build time across all
+# agents with the same source file and no per-agent env var, so a
+# conditional on AGENT_NAME would never fire as intended.
+#
+# NOTE (CodeRabbit Finding 1, deferred): `find . | head -1` is order-
+# nondeterministic if multiple matching wheels are extracted. Acceptable
+# for now — CI builds exactly one wheel per build — but worth tightening
+# when more than one mongodb-models version could legitimately coexist.
 if find . -name 'claimit_mongodb_models-*-py3-none-any.whl' 2>/dev/null | grep -q .; then
     install_wheel_into_venv "claimit_mongodb_models" "claimit_mongodb_models-*-py3-none-any.whl"
 else
-    echo "WARNING: claimit_mongodb_models wheel not in extra_packages — assistant_agent will fail to load" >&2
+    echo "ERROR: claimit_mongodb_models wheel missing from extra_packages — refusing to deploy" >&2
+    echo "Searched from: $(pwd)" >&2
+    find . -name '*.whl' 2>/dev/null >&2 || true
+    exit 1
 fi
