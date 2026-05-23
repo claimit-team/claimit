@@ -27,6 +27,7 @@ Production traffic path (ticket 5.9):
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from collections.abc import AsyncIterator, Sequence
@@ -51,6 +52,7 @@ logger = logging.getLogger(__name__)
 
 _APP_NAME = "claimit-assistant-mode-b"
 _MODEL_NAME = "gemini-2.5-flash"
+_WARMUP_TIMEOUT_SECONDS = 90
 
 MODE_B_SYSTEM_PROMPT = """You are the ClaimIt Assistant in claim-focused mode.
 
@@ -268,3 +270,34 @@ async def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await value
     return value
+
+
+async def warm_up_mode_b_model() -> None:
+    """Fire one trivial ADK→genai→Vertex call on startup so the first REAL
+    Mode B turn isn't the cold one. Best-effort: never raises."""
+    try:
+        session_service = InMemorySessionService()
+        session_id = f"warmup-{uuid4()}"
+        user_id = "warmup"
+        await _maybe_await(
+            session_service.create_session(
+                app_name=_APP_NAME,
+                user_id=user_id,
+                session_id=session_id,
+            )
+        )
+        runner = Runner(
+            app_name=_APP_NAME,
+            agent=Agent(name="warmup", model=_MODEL_NAME, instruction="Reply with OK."),
+            session_service=session_service,
+        )
+        message = types.Content(role="user", parts=[types.Part.from_text(text="ping")])
+        async with asyncio.timeout(_WARMUP_TIMEOUT_SECONDS):
+            async for _event in runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=message,
+            ):
+                pass
+    except Exception:  # warm-up is best-effort, must not crash startup
+        logger.debug("mode B model warm-up failed (non-fatal)", exc_info=True)

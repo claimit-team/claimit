@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -14,12 +15,13 @@ from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
 from .auth import verify_gateway_oidc
-from .mode_b import HistoryMessage, handle_message
+from .mode_b import HistoryMessage, handle_message, warm_up_mode_b_model
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     init_phoenix("claimit-assistant-agent")
+    _app.state.warmup_task = asyncio.create_task(warm_up_mode_b_model())
     yield
 
 

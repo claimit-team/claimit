@@ -241,6 +241,10 @@ module "claim_agent" {
     GOOGLE_CLOUD_LOCATION     = var.region
     PHOENIX_PROJECT_NAME      = "claimit"
   }
+  # Keep one warm instance so the genai/Vertex connection warmed at startup
+  # (warm_up_*_model) survives idle — otherwise scale-to-zero re-colds it and the
+  # first redraft after idle hits the 30s+ cold-call latency again.
+  min_instances       = 1
   deletion_protection = false
 
   depends_on = [google_secret_manager_secret.shared]
@@ -280,6 +284,10 @@ module "assistant_agent" {
     # (assistant_agent is declared before api_gateway in this file).
     GATEWAY_SA_EMAIL = "claimit-api-gateway@${var.project_id}.iam.gserviceaccount.com"
   }
+  # Keep one warm instance so the genai/Vertex connection warmed at startup
+  # (warm_up_*_model) survives idle — otherwise scale-to-zero re-colds it and the
+  # first redraft after idle hits the 30s+ cold-call latency again.
+  min_instances       = 1
   deletion_protection = false
 
   depends_on = [google_secret_manager_secret.shared]
