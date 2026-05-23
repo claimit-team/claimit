@@ -149,28 +149,39 @@ class GoogleIDTokenAuth(httpx.Auth):
         # the principal directly. REMOVE this block in the follow-up PR
         # once we've granted run.invoker to the correct SA. All imports
         # are inline to keep the removal a single contiguous delete.
+        #
+        # Output goes to stderr via print() rather than logging.getLogger
+        # because a previous iteration (PR #192) used a custom logger
+        # ("claimit_mcp.oidc_debug") that has no handler attached in the
+        # Agent Engine runtime — propagation to root dropped silently and
+        # the line never appeared in Cloud Logging. stderr is captured
+        # unconditionally by the container runtime regardless of Python
+        # logging configuration.
         try:
             import base64
             import json as _json
-            import logging as _logging
+            import sys as _sys
 
             parts = token.split(".")
             if len(parts) >= 2:
                 payload = parts[1]
                 payload += "=" * ((4 - len(payload) % 4) % 4)
                 decoded = _json.loads(base64.urlsafe_b64decode(payload))
-                _logging.getLogger("claimit_mcp.oidc_debug").warning(
-                    "OIDC_TOKEN_DEBUG: iss=%r sub=%r aud=%r email=%r",
-                    decoded.get("iss"),
-                    decoded.get("sub"),
-                    decoded.get("aud"),
-                    decoded.get("email"),
+                print(
+                    f"OIDC_TOKEN_DEBUG: iss={decoded.get('iss')!r} "
+                    f"sub={decoded.get('sub')!r} "
+                    f"aud={decoded.get('aud')!r} "
+                    f"email={decoded.get('email')!r}",
+                    file=_sys.stderr,
+                    flush=True,
                 )
         except Exception as exc:
-            import logging as _logging
+            import sys as _sys
 
-            _logging.getLogger("claimit_mcp.oidc_debug").warning(
-                "OIDC_TOKEN_DEBUG_DECODE_FAIL: %s", exc
+            print(
+                f"OIDC_TOKEN_DEBUG_DECODE_FAIL: {exc}",
+                file=_sys.stderr,
+                flush=True,
             )
 
         request.headers["Authorization"] = f"Bearer {token}"
