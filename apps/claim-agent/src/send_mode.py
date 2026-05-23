@@ -16,6 +16,8 @@ from claimit_mongodb_models.user import User
 from claimit_pubsub.events import EventEnvelope
 from claimit_pubsub.publisher import publish_event
 
+from .enum_compat import enum_to_str
+
 # TODO(task-3.20): move these constants to claimit_pubsub.events
 TOPIC_CLAIM_DRAFTED = "claim.drafted"
 TOPIC_CLAIM_APPROVED = "claim.approved"
@@ -106,7 +108,7 @@ async def handle_auto_mode(
         user_id=str(claim.user_id),
         claim_id=str(claim.id),
         purchase_id=str(claim.purchase_id),
-        claim_type=claim.claim_type.value,
+        claim_type=enum_to_str(claim.claim_type),
         refund_amount=refund_amount,
         currency=claim.currency,
         send_mode="auto",
