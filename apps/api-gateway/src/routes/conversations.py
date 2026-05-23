@@ -10,15 +10,16 @@ from typing import Annotated
 from uuid import UUID
 
 from claimit_mongodb_models.client import MongoDBClient
-from claimit_mongodb_models.conversation import ToolCall
+from claimit_mongodb_models.conversation import Conversation, ToolCall
 from claimit_mongodb_models.enums import ConversationMode, ConversationStatus, MessageRole
 from claimit_mongodb_models.user import User
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from ..deps import get_db
 from ..middleware.auth import get_current_user
+from ..middleware.errors import ApiError
 from ..services.conversation_service import (
     append_message,
     create_conversation,
@@ -38,6 +39,11 @@ class CreateConversationRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content: str
+
+
+class PatchConversationRequest(BaseModel):
+    title: str | None = None
+    status: ConversationStatus | None = None
 
 
 def _accumulate_stream_event(
@@ -94,6 +100,61 @@ async def create_conversation_endpoint(
         return {"conversation": conv.model_dump(mode="json", by_alias=True)}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)) from e
+
+
+@router.patch("/{conversation_id}")
+async def patch_conversation_endpoint(
+    conversation_id: UUID,
+    body: PatchConversationRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[MongoDBClient, Depends(get_db)],
+) -> dict:
+    try:
+        await get_conversation_for_user(db, conversation_id, user.id)
+    except (ValueError, PermissionError):
+        raise ApiError(
+            "conversation_not_found", "Conversation not found", status_code=404
+        ) from None
+
+    updates: dict = {}
+    if body.title is not None:
+        t = body.title.strip()
+        if not t:
+            raise ApiError("invalid_title", "Title cannot be empty", status_code=422)
+        updates["title"] = t[:200]
+    if body.status is not None:
+        updates["status"] = body.status.value
+        updates["archived_at"] = (
+            datetime.now(UTC) if body.status == ConversationStatus.ARCHIVED else None
+        )
+
+    if updates:
+        matched = await db.partial_update(
+            "conversations", conversation_id, updates, model=Conversation
+        )
+        if not matched:
+            raise ApiError("conversation_not_found", "Conversation not found", status_code=404)
+
+    updated = await get_conversation_for_user(db, conversation_id, user.id)
+    return {"conversation": updated.model_dump(mode="json", by_alias=True)}
+
+
+@router.delete("/{conversation_id}", status_code=204)
+async def delete_conversation_endpoint(
+    conversation_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[MongoDBClient, Depends(get_db)],
+) -> Response:
+    try:
+        await get_conversation_for_user(db, conversation_id, user.id)
+    except (ValueError, PermissionError):
+        raise ApiError(
+            "conversation_not_found", "Conversation not found", status_code=404
+        ) from None
+    deleted = await db.delete("conversations", conversation_id)
+    if not deleted:
+        raise ApiError("conversation_not_found", "Conversation not found", status_code=404)
+    return Response(status_code=204)
 
 
 @router.post("/{conversation_id}/messages")

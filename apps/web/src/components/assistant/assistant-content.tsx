@@ -1,13 +1,29 @@
 "use client";
 
-import { AlertCircle, Loader2, Menu } from "lucide-react";
+import { AlertCircle, Loader2, Menu, MoreHorizontal, Search } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import { ProactiveCard } from "@/components/assistant/proactive-card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
@@ -78,15 +94,189 @@ function groupConversations(
 }
 
 function deriveTitle(c: Conversation): string {
-  if (c.title && c.title !== "New Conversation") return c.title;
-  const firstUser = c.messages.find((m) => m.role === "user");
-  if (firstUser) return firstUser.content.slice(0, 60);
-  return c.mode === "claim_focused" ? "Claim conversation" : "New conversation";
+  const label = c.title;
+  if (c.title === "New Conversation" && c.messages?.length) {
+    const firstUser = c.messages.find((m) => m.role === "user");
+    if (firstUser) {
+      const text = firstUser.content;
+      return text.length > 40 ? `${text.slice(0, 40)}…` : text;
+    }
+  }
+  return label;
 }
 
-function derivePreview(c: Conversation): string {
-  if (c.messages.length === 0) return "No messages yet";
-  return c.messages[c.messages.length - 1].content.slice(0, 90);
+function derivePreview(c: Conversation): string | null {
+  if (!c.messages?.length) return null;
+  const last = c.messages[c.messages.length - 1].content;
+  return last.length > 60 ? `${last.slice(0, 60)}…` : last;
+}
+
+type ConversationRowProps = {
+  conversation: Conversation;
+  displayTitle: string;
+  isActive: boolean;
+  onSelect: (id: string) => void;
+  onRename: (c: Conversation) => void;
+  onArchive: (id: string) => void;
+  onDelete: (c: Conversation) => void;
+};
+
+function ConversationRow({
+  conversation,
+  displayTitle,
+  isActive,
+  onSelect,
+  onRename,
+  onArchive,
+  onDelete,
+}: ConversationRowProps) {
+  const preview = derivePreview(conversation);
+
+  return (
+    <li className="group relative">
+      <Link
+        href={`/assistant/${conversation._id}`}
+        onClick={() => onSelect(conversation._id)}
+        className={cn(
+          "flex flex-col gap-0.5 rounded-lg px-3 py-2 pr-10 text-sm transition-colors",
+          isActive
+            ? "bg-brand-primary-50 text-brand-primary-700"
+            : "text-neutral-800 hover:bg-neutral-100",
+        )}
+      >
+        <span className="truncate font-medium leading-snug">{displayTitle}</span>
+        {preview ? <span className="truncate text-xs text-neutral-500">{preview}</span> : null}
+        <span className="text-[11px] text-neutral-400">
+          {formatTimestamp(conversation.last_message_at)}
+        </span>
+      </Link>
+      <div
+        className={cn(
+          "absolute right-1 top-1/2 -translate-y-1/2",
+          isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+        )}
+      >
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            type="button"
+            className="rounded-md p-1.5 text-neutral-500 hover:bg-neutral-200 hover:text-neutral-800"
+            aria-label={`Actions for ${displayTitle}`}
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <MoreHorizontal className="h-4 w-4" aria-hidden />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.stopPropagation();
+                onRename(conversation);
+              }}
+            >
+              Rename
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.stopPropagation();
+                onArchive(conversation._id);
+              }}
+            >
+              Archive
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-semantic-danger"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(conversation);
+              }}
+            >
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </li>
+  );
+}
+
+type ConversationListProps = {
+  conversations: Conversation[];
+  currentId: string | null;
+  searchQuery: string;
+  isLoading: boolean;
+  onSearchChange: (q: string) => void;
+  onSelect: (id: string) => void;
+  onRename: (c: Conversation) => void;
+  onArchive: (id: string) => void;
+  onDelete: (c: Conversation) => void;
+};
+
+function ConversationList({
+  conversations,
+  currentId,
+  searchQuery,
+  isLoading,
+  onSearchChange,
+  onSelect,
+  onRename,
+  onArchive,
+  onDelete,
+}: ConversationListProps) {
+  const groupedList = useMemo(() => groupConversations(conversations), [conversations]);
+
+  return (
+    <div className="flex flex-col gap-3 px-3 py-4">
+      <div className="relative px-0">
+        <Search
+          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400"
+          aria-hidden
+        />
+        <Input
+          value={searchQuery}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Search conversations…"
+          aria-label="Search conversations"
+          className="pl-9"
+        />
+      </div>
+      {isLoading && conversations.length === 0 ? (
+        <div className="flex items-center gap-2 px-3 text-sm text-neutral-500">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          Loading conversations…
+        </div>
+      ) : groupedList.length === 0 ? (
+        <p className="px-3 text-sm text-neutral-500">
+          {searchQuery.trim()
+            ? "No matching conversations."
+            : "No conversations yet — start one below."}
+        </p>
+      ) : (
+        <div className="space-y-6">
+          {groupedList.map(({ label, items }) => (
+            <div key={label}>
+              <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                {label}
+              </p>
+              <ul className="space-y-1">
+                {items.map((c) => (
+                  <ConversationRow
+                    key={c._id}
+                    conversation={c}
+                    displayTitle={deriveTitle(c)}
+                    isActive={c._id === currentId}
+                    onSelect={onSelect}
+                    onRename={onRename}
+                    onArchive={onArchive}
+                    onDelete={onDelete}
+                  />
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function AssistantContent({ conversationId }: { conversationId: string | null }) {
@@ -96,6 +286,9 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
     isLoading: convLoading,
     error: convError,
     createConversation,
+    renameConversation,
+    archiveConversation,
+    deleteConversation,
   } = useConversations({ mode: "general" });
   const {
     messages,
@@ -108,18 +301,26 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
 
   const [draft, setDraft] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
-  // Sentinel at the bottom of the message list. scrollIntoView walks up
-  // to find the actual scroll parent (the shadcn ScrollArea Viewport),
-  // unlike scrollTop on a wrapper div which was a silent no-op inside
-  // the Viewport hierarchy.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  const activeConversations = useMemo(
+    () => conversations.filter((c) => c.status === "active"),
+    [conversations],
+  );
+
+  const filteredConversations = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return activeConversations;
+    return activeConversations.filter((c) => deriveTitle(c).toLowerCase().includes(q));
+  }, [activeConversations, searchQuery]);
 
   const active = conversationId ? conversations.find((c) => c._id === conversationId) : undefined;
   const unknownId = Boolean(conversationId) && !active && !convLoading;
 
-  // Hydrate local stream buffer with the active conversation's persisted
-  // messages whenever the active conversation changes. The stream
-  // continues to layer streaming messages on top.
   useEffect(() => {
     if (active) {
       hydrate(wireToUI(active.messages));
@@ -132,8 +333,6 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [messages]);
-
-  const groupedList = useMemo(() => groupConversations(conversations), [conversations]);
 
   async function sendDraftIfPossible() {
     const text = draft.trim();
@@ -160,48 +359,54 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
     }
   };
 
-  const conversationLinks: ReactNode = (
-    <div className="px-3 py-4 space-y-6">
-      {convLoading && conversations.length === 0 ? (
-        <div className="flex items-center gap-2 px-3 text-sm text-neutral-500">
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-          Loading conversations…
-        </div>
-      ) : groupedList.length === 0 ? (
-        <p className="px-3 text-sm text-neutral-500">No conversations yet — start one below.</p>
-      ) : (
-        groupedList.map(({ label, items }) => (
-          <div key={label}>
-            <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-              {label}
-            </p>
-            <ul className="space-y-1">
-              {items.map((c) => (
-                <li key={c._id}>
-                  <Link
-                    href={`/assistant/${c._id}`}
-                    onClick={() => setHistoryOpen(false)}
-                    className={cn(
-                      "flex flex-col gap-0.5 rounded-lg px-3 py-2 text-sm transition-colors",
-                      c._id === conversationId
-                        ? "bg-brand-primary-50 text-brand-primary-900"
-                        : "text-neutral-800 hover:bg-neutral-100",
-                    )}
-                  >
-                    <span className="truncate font-medium leading-snug">{deriveTitle(c)}</span>
-                    <span className="truncate text-xs text-neutral-500">{derivePreview(c)}</span>
-                    <span className="text-[11px] text-neutral-400">
-                      {formatTimestamp(c.last_message_at)}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))
-      )}
-    </div>
-  );
+  const handleSelectConversation = (_id: string) => {
+    setHistoryOpen(false);
+  };
+
+  const handleRenameOpen = (c: Conversation) => {
+    setRenameTarget(c);
+    setRenameValue(deriveTitle(c));
+  };
+
+  const handleRenameSave = async () => {
+    if (!renameTarget) return;
+    const value = renameValue.trim();
+    if (!value) return;
+    try {
+      await renameConversation(renameTarget._id, value);
+      toast.success("Conversation renamed");
+      setRenameTarget(null);
+    } catch {
+      toast.error("Couldn't update conversation");
+    }
+  };
+
+  const handleArchive = async (id: string) => {
+    try {
+      await archiveConversation(id);
+      toast.success("Conversation archived");
+      if (id === conversationId) {
+        router.push("/assistant");
+      }
+    } catch {
+      toast.error("Couldn't update conversation");
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    const id = deleteTarget._id;
+    try {
+      await deleteConversation(id);
+      toast.success("Conversation deleted");
+      setDeleteTarget(null);
+      if (id === conversationId) {
+        router.push("/assistant");
+      }
+    } catch {
+      toast.error("Couldn't update conversation");
+    }
+  };
 
   let mainPaneContent: ReactNode;
 
@@ -368,9 +573,20 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
     );
   }
 
+  const listProps = {
+    conversations: filteredConversations,
+    currentId: conversationId,
+    searchQuery,
+    isLoading: convLoading,
+    onSearchChange: setSearchQuery,
+    onSelect: handleSelectConversation,
+    onRename: handleRenameOpen,
+    onArchive: handleArchive,
+    onDelete: setDeleteTarget,
+  };
+
   return (
     <div className="flex h-[calc(100dvh-4rem)] w-full overflow-hidden bg-neutral-50">
-      {/* Desktop conversation list */}
       <aside className="hidden min-h-0 w-[280px] shrink-0 border-r border-neutral-200 bg-neutral-0 md:flex md:flex-col">
         <div className="flex items-center gap-2 border-b border-neutral-200 p-4">
           <Button
@@ -389,7 +605,9 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
             <AlertDescription>{convError.message}</AlertDescription>
           </Alert>
         ) : null}
-        <ScrollArea className="min-h-0 flex-1">{conversationLinks}</ScrollArea>
+        <ScrollArea className="min-h-0 flex-1">
+          <ConversationList {...listProps} />
+        </ScrollArea>
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -419,7 +637,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
                     New chat
                   </Button>
                 </div>
-                {conversationLinks}
+                <ConversationList {...listProps} />
               </ScrollArea>
             </SheetContent>
           </Sheet>
@@ -443,6 +661,50 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
 
         <div className="flex min-h-0 flex-1 flex-col">{mainPaneContent}</div>
       </div>
+
+      <Dialog open={renameTarget !== null} onOpenChange={(open) => !open && setRenameTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename conversation</DialogTitle>
+          </DialogHeader>
+          <Input
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            aria-label="Conversation title"
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setRenameTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={!renameValue.trim()}
+              onClick={() => void handleRenameSave()}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete conversation?</DialogTitle>
+            <DialogDescription>
+              This conversation will be permanently deleted. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" onClick={() => void handleDeleteConfirm()}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -105,7 +105,16 @@ async function _request<T>(path: string, init: RequestInit, failureMessage: stri
     throw new ConversationsApiError(code, message);
   }
 
-  return (await response.json()) as T;
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const text = await response.text();
+  if (!text.trim()) {
+    return undefined as T;
+  }
+
+  return JSON.parse(text) as T;
 }
 
 export async function listConversations(
@@ -171,6 +180,29 @@ export async function getConversation(conversationId: string): Promise<Conversat
     );
   }
   return found;
+}
+
+export async function updateConversation(
+  id: string,
+  body: { title?: string; status?: "active" | "archived" },
+): Promise<Conversation> {
+  const raw = await _request<{ conversation: Conversation }>(
+    `/api/v1/conversations/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(body) },
+    "Conversation update failed",
+  );
+  if (!raw?.conversation) {
+    throw new ConversationsApiError("invalid_response", "Conversation update returned no body.");
+  }
+  return raw.conversation;
+}
+
+export async function deleteConversation(id: string): Promise<void> {
+  await _request<void>(
+    `/api/v1/conversations/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+    "Conversation delete failed",
+  );
 }
 
 /**
