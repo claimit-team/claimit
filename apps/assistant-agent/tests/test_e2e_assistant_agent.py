@@ -232,9 +232,7 @@ async def _run_agent(agent_module: Any, user_id: str, message: str) -> list[dict
 
 
 @pytest.mark.asyncio
-async def test_llm_invokes_get_all_purchases_for_user(
-    agent_module: Any, demo_user_id: str
-) -> None:
+async def test_llm_invokes_get_all_purchases_for_user(agent_module: Any, demo_user_id: str) -> None:
     """Prompt the assistant naturally and confirm the model picked the
     tool (no user_id leaked through args — ADK should strip tool_context
     from the LLM-facing declaration)."""
@@ -254,9 +252,7 @@ async def test_llm_invokes_get_all_purchases_for_user(
 
 
 @pytest.mark.asyncio
-async def test_tool_returns_purchases_for_demo_user(
-    agent_module: Any, demo_user_id: str
-) -> None:
+async def test_tool_returns_purchases_for_demo_user(agent_module: Any, demo_user_id: str) -> None:
     """The tool result should be a non-empty list of purchase docs.
     Confirms ToolContext.user_id reached the helper AND Mongo returned
     real data for the seed user."""
@@ -272,7 +268,9 @@ async def test_tool_returns_purchases_for_demo_user(
     response = tool_results[0]["response"]
     # ADK wraps the tool's return value. Common shapes: {"result": [...]} or the list directly.
     payload = response.get("result", response) if isinstance(response, dict) else response
-    assert isinstance(payload, list), f"Expected list payload, got {type(payload).__name__}: {payload!r}"
+    assert isinstance(payload, list), (
+        f"Expected list payload, got {type(payload).__name__}: {payload!r}"
+    )
     assert payload, "Demo user has zero purchases — seed data missing or filter wrong"
 
     first = payload[0]
@@ -282,9 +280,7 @@ async def test_tool_returns_purchases_for_demo_user(
 
 
 @pytest.mark.asyncio
-async def test_final_response_mentions_purchase_data(
-    agent_module: Any, demo_user_id: str
-) -> None:
+async def test_final_response_mentions_purchase_data(agent_module: Any, demo_user_id: str) -> None:
     """The model should weave at least one real purchase keyword into
     its final reply. Lenient match — model phrasing varies turn-to-turn
     but the seed data has these distinctive product/platform names."""
