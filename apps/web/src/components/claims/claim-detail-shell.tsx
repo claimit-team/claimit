@@ -37,7 +37,11 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import type { ClaimDetailDoc } from "@/lib/api/claims";
 import type { ClaimDetail } from "@/lib/claim-detail-types";
 import { useUIStore } from "@/store";
-import { REDRAFT_TIMEOUT_MS, useClaimRedraftProgressStore } from "@/store/claim-redraft-progress";
+import {
+  normalizeClaimId,
+  REDRAFT_TIMEOUT_MS,
+  useClaimRedraftProgressStore,
+} from "@/store/claim-redraft-progress";
 
 interface ClaimDetailShellProps {
   /** Derived view-model (built from the page-owned wire response). */
@@ -72,19 +76,26 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
   const baseline = claim.draft_versions[selectedVersion - 1]?.content ?? "";
   const dirty = editBuffer !== baseline;
 
-  const redraftProgress = useClaimRedraftProgressStore((s) => s.getProgress(claim.claim_id));
+  const claimIdKey = normalizeClaimId(claim.claim_id);
+  const redraftProgress = useClaimRedraftProgressStore((s) => s.byClaimId[claimIdKey]);
   const clearRegenerating = useClaimRedraftProgressStore((s) => s.clearRegenerating);
   const markTimedOut = useClaimRedraftProgressStore((s) => s.markTimedOut);
   const isRegenerating = redraftProgress !== undefined && !redraftProgress.timedOut;
   const regeneratingTimedOut = redraftProgress?.timedOut ?? false;
 
   useEffect(() => {
-    if (!redraftProgress || redraftProgress.timedOut) return;
-    if (claim.current_version > redraftProgress.baselineVersion) {
+    if (!redraftProgress) return;
+    const versionAdvanced =
+      claim.current_version > redraftProgress.baselineVersion ||
+      claim.draft_versions.length > redraftProgress.baselineVersion;
+    if (versionAdvanced) {
       clearRegenerating(claim.claim_id);
-      toast.success("Draft updated");
+      if (!redraftProgress.timedOut) {
+        toast.success("Draft updated");
+      }
       return;
     }
+    if (redraftProgress.timedOut) return;
     const remaining = redraftProgress.startedAt + REDRAFT_TIMEOUT_MS - Date.now();
     const timer = window.setTimeout(
       () => {
@@ -93,7 +104,14 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
       Math.max(remaining, 0),
     );
     return () => window.clearTimeout(timer);
-  }, [claim.claim_id, claim.current_version, clearRegenerating, markTimedOut, redraftProgress]);
+  }, [
+    claim.claim_id,
+    claim.current_version,
+    claim.draft_versions.length,
+    clearRegenerating,
+    markTimedOut,
+    redraftProgress,
+  ]);
 
   useEffect(() => {
     if (isRegenerating && draftMode === "edit") {

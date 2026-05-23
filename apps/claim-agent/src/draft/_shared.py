@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
+from claimit_mongodb_models.enums import Category
 from google.adk import Agent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -15,6 +17,11 @@ from google.genai import types
 MODEL_NAME = "gemini-2.5-flash"
 APP_NAME = "claimit-claim-draft"
 DRAFT_TIMEOUT_SECONDS = 30
+
+_PARAGRAPH_MANDATE = (
+    "Use blank lines (\\n\\n) between paragraphs (salutation, body paragraphs, closing). "
+    "Never output a single run-on paragraph."
+)
 
 # ADK resolves `{{TOKEN}}` in agent instructions to `{TOKEN}` and injects from
 # session.state. Seed identity mappings so the model sees literal `{{TOKEN}}`
@@ -29,6 +36,11 @@ DRAFT_INSTRUCTION_PLACEHOLDER_STATE: dict[str, str] = {
     "USER_NAME": "{{USER_NAME}}",
     "POLICY_CITATION": "{{POLICY_CITATION}}",
     "PRODUCT_NAME": "{{PRODUCT_NAME}}",
+    "PURCHASE_DATE": "{{PURCHASE_DATE}}",
+    "WINDOW_END_DATE": "{{WINDOW_END_DATE}}",
+    "TRAVEL_DATE": "{{TRAVEL_DATE}}",
+    "RETURN_DATE": "{{RETURN_DATE}}",
+    "MERCHANT_NAME": "{{MERCHANT_NAME}}",
     "STORE_ADDRESS": "{{STORE_ADDRESS}}",
     "STORE_HOURS": "{{STORE_HOURS}}",
     "STORE_PHONE": "{{STORE_PHONE}}",
@@ -67,6 +79,18 @@ def _strip_json_fence(raw: str) -> str:
     return "\n".join(lines).strip()
 
 
+def _normalize_draft_prose(text: str) -> str:
+    """Conservative post-LLM formatting — no intra-word splitting."""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.rstrip() for line in normalized.split("\n")]
+    result = "\n".join(lines)
+    if "\n" not in result.strip() and len(result) > 120:
+        parts = re.split(r"(?<=\.)\s+", result)
+        if len(parts) > 1:
+            result = "\n\n".join(part.strip() for part in parts if part.strip())
+    return result
+
+
 def _fill_placeholders(
     text: str,
     *,
@@ -94,12 +118,72 @@ def _fill_placeholders(
     return text
 
 
+def _fill_email_placeholders(
+    text: str,
+    *,
+    category: Category | str,
+    order_id: str,
+    original_price: str,
+    current_price: str,
+    refund_amount: str,
+    user_name: str,
+    policy_citation: str,
+    merchant_name: str,
+    product_name: str = "",
+    purchase_date: str = "",
+    window_end_date: str = "",
+    check_in_date: str = "",
+    checkout_date: str = "",
+    travel_date: str = "",
+    return_date: str = "",
+) -> str:
+    cat = Category(category) if not isinstance(category, Category) else category
+    replacements: dict[str, str] = {
+        "{{ORDER_ID}}": order_id,
+        "{{ORIGINAL_PRICE}}": original_price,
+        "{{CURRENT_PRICE}}": current_price,
+        "{{REFUND_AMOUNT}}": refund_amount,
+        "{{USER_NAME}}": user_name,
+        "{{POLICY_CITATION}}": policy_citation,
+        "{{MERCHANT_NAME}}": merchant_name,
+    }
+    if cat == Category.RETAIL:
+        replacements.update(
+            {
+                "{{PRODUCT_NAME}}": product_name,
+                "{{PURCHASE_DATE}}": purchase_date,
+                "{{WINDOW_END_DATE}}": window_end_date,
+            }
+        )
+    elif cat == Category.HOTEL:
+        replacements.update(
+            {
+                "{{CHECK_IN_DATE}}": check_in_date,
+                "{{CHECKOUT_DATE}}": checkout_date,
+            }
+        )
+    elif cat == Category.AIRLINE:
+        replacements.update(
+            {
+                "{{TRAVEL_DATE}}": travel_date,
+                "{{RETURN_DATE}}": return_date,
+            }
+        )
+    for token, value in replacements.items():
+        text = text.replace(token, value)
+    return text
+
+
 def _build_user_message(
     platform: str,
     policy_clause: str,
     user_instruction: str | None = None,
+    *,
+    category: str | None = None,
 ) -> str:
     payload: dict[str, str] = {"platform": platform, "policy_clause": policy_clause}
+    if category is not None:
+        payload["category"] = category
     if user_instruction is not None:
         payload["user_instruction"] = user_instruction
     return json.dumps(payload, ensure_ascii=False)
@@ -110,6 +194,8 @@ async def _run_draft_agent(
     policy_clause: str,
     build_agent: Callable[[], Agent],
     user_instruction: str | None = None,
+    *,
+    category: str | None = None,
 ) -> str | None:
     session_service = InMemorySessionService()
     session_id = f"draft-{uuid4()}"
@@ -133,7 +219,12 @@ async def _run_draft_agent(
         role="user",
         parts=[
             types.Part.from_text(
-                text=_build_user_message(platform, policy_clause, user_instruction)
+                text=_build_user_message(
+                    platform,
+                    policy_clause,
+                    user_instruction,
+                    category=category,
+                )
             )
         ],
     )
@@ -152,3 +243,7 @@ async def _run_draft_agent(
         raise DraftGenerationError(f"Draft generation timed out for session {session_id}") from exc
 
     return final_text
+
+
+def paragraph_mandate() -> str:
+    return _PARAGRAPH_MANDATE

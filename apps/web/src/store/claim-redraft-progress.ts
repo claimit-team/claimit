@@ -16,48 +16,59 @@ type RedraftProgress = {
 };
 
 type ClaimRedraftProgressState = {
-  byClaimId: Map<string, RedraftProgress>;
+  byClaimId: Record<string, RedraftProgress>;
   startRegenerating: (claimId: string, baselineVersion: number) => void;
   clearRegenerating: (claimId: string) => void;
   markTimedOut: (claimId: string) => void;
   isRegenerating: (claimId: string) => boolean;
   isTimedOut: (claimId: string) => boolean;
-  getProgress: (claimId: string) => RedraftProgress | undefined;
 };
 
+export function normalizeClaimId(claimId: string): string {
+  return claimId.trim().toLowerCase();
+}
+
 export const useClaimRedraftProgressStore = create<ClaimRedraftProgressState>((set, get) => ({
-  byClaimId: new Map(),
-  startRegenerating: (claimId, baselineVersion) =>
+  byClaimId: {},
+  startRegenerating: (claimId, baselineVersion) => {
+    const key = normalizeClaimId(claimId);
+    set((state) => ({
+      byClaimId: {
+        ...state.byClaimId,
+        [key]: {
+          startedAt: Date.now(),
+          baselineVersion,
+          timedOut: false,
+        },
+      },
+    }));
+  },
+  clearRegenerating: (claimId) => {
+    const key = normalizeClaimId(claimId);
     set((state) => {
-      const next = new Map(state.byClaimId);
-      next.set(claimId, {
-        startedAt: Date.now(),
-        baselineVersion,
-        timedOut: false,
-      });
-      return { byClaimId: next };
-    }),
-  clearRegenerating: (claimId) =>
+      if (!(key in state.byClaimId)) return state;
+      const { [key]: _removed, ...rest } = state.byClaimId;
+      return { byClaimId: rest };
+    });
+  },
+  markTimedOut: (claimId) => {
+    const key = normalizeClaimId(claimId);
     set((state) => {
-      if (!state.byClaimId.has(claimId)) return state;
-      const next = new Map(state.byClaimId);
-      next.delete(claimId);
-      return { byClaimId: next };
-    }),
-  markTimedOut: (claimId) =>
-    set((state) => {
-      const current = state.byClaimId.get(claimId);
+      const current = state.byClaimId[key];
       if (!current) return state;
-      const next = new Map(state.byClaimId);
-      next.set(claimId, { ...current, timedOut: true });
-      return { byClaimId: next };
-    }),
+      return {
+        byClaimId: {
+          ...state.byClaimId,
+          [key]: { ...current, timedOut: true },
+        },
+      };
+    });
+  },
   isRegenerating: (claimId) => {
-    const progress = get().byClaimId.get(claimId);
+    const progress = get().byClaimId[normalizeClaimId(claimId)];
     return progress !== undefined && !progress.timedOut;
   },
-  isTimedOut: (claimId) => get().byClaimId.get(claimId)?.timedOut ?? false,
-  getProgress: (claimId) => get().byClaimId.get(claimId),
+  isTimedOut: (claimId) => get().byClaimId[normalizeClaimId(claimId)]?.timedOut ?? false,
 }));
 
 export { REDRAFT_TIMEOUT_MS };

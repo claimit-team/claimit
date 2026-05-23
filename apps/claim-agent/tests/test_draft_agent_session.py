@@ -23,6 +23,7 @@ from claimit_mongodb_models import (
     PurchaseDateBasis,
     PurchaseStatus,
 )
+from claimit_mongodb_models.enums import Category
 from src.draft import type_a_email, type_b_chat, type_c_in_store
 from src.draft._shared import DRAFT_INSTRUCTION_PLACEHOLDER_STATE, _run_draft_agent
 from src.draft.type_a_email import generate_email_draft
@@ -35,15 +36,14 @@ _WINDOW_EXPIRES = datetime(2026, 4, 25, tzinfo=UTC)
 
 _MOCK_TEMPLATE = json.dumps(
     {
-        "subject": "Price Match Refund Request — Booking {{ORDER_ID}}",
+        "subject": "Price Match Refund Request — Order {{ORDER_ID}}",
         "email_body": (
-            "Dear {{USER_NAME}},\n\n"
-            "I am writing to request a price match refund for my booking {{ORDER_ID}}, "
-            "covering the period {{CHECK_IN_DATE}} through {{CHECKOUT_DATE}}.\n\n"
-            "At the time of booking I paid {{ORIGINAL_PRICE}}, but the same room is now "
-            "available at {{CURRENT_PRICE}}. I respectfully request a refund of {{REFUND_AMOUNT}}.\n\n"
+            "Hello {{MERCHANT_NAME}} Customer Care,\n\n"
+            "I'm writing to request a price match refund on a recent purchase.\n\n"
+            "Order {{ORDER_ID}} — {{PRODUCT_NAME}} at {{ORIGINAL_PRICE}}. The current price is "
+            "{{CURRENT_PRICE}}, a difference of {{REFUND_AMOUNT}}.\n\n"
             "Pursuant to your policy: {{POLICY_CITATION}}\n\n"
-            "Thank you for your assistance.\n\nSincerely,\n{{USER_NAME}}"
+            "Thank you,\n{{USER_NAME}}"
         ),
     }
 )
@@ -75,7 +75,9 @@ class _FakeRunner:
 
 def _instruction_prompts() -> list[str]:
     return [
-        type_a_email.DRAFT_SYSTEM_PROMPT,
+        type_a_email.retail_email_prompt(),
+        type_a_email.hotel_email_prompt(),
+        type_a_email.airline_email_prompt(),
         type_b_chat.CHAT_SCRIPT_SYSTEM_PROMPT,
         type_c_in_store.IN_STORE_GUIDE_SYSTEM_PROMPT,
     ]
@@ -202,7 +204,8 @@ async def test_run_draft_agent_seeds_session_state_without_key_error() -> None:
         result = await _run_draft_agent(
             "best_buy",
             "Price match within 15 days.",
-            type_a_email._build_draft_agent,
+            lambda: type_a_email._build_draft_agent(Category.RETAIL),
+            category="retail",
         )
 
     assert result == _MOCK_TEMPLATE

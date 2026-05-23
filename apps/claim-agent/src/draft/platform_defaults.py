@@ -13,6 +13,30 @@ from claimit_mongodb_models import Policy
 
 _log = logging.getLogger(__name__)
 
+# Human-readable merchant names for draft salutations ({{MERCHANT_NAME}}).
+PLATFORM_DISPLAY_NAMES: dict[str, str] = {
+    "amazon": "Amazon",
+    "american": "American Airlines",
+    "alaska": "Alaska Airlines",
+    "best_buy": "Best Buy",
+    "costco": "Costco",
+    "crutchfield": "Crutchfield",
+    "delta": "Delta",
+    "dell": "Dell",
+    "hilton": "Hilton",
+    "home_depot": "Home Depot",
+    "hyatt": "Hyatt",
+    "ihg": "IHG",
+    "jetblue": "JetBlue",
+    "lowes": "Lowe's",
+    "marriott": "Marriott",
+    "southwest": "Southwest",
+    "target": "Target",
+    "united": "United",
+    "walmart": "Walmart",
+    "wyndham": "Wyndham",
+}
+
 # Realistic support inboxes for seeded email platforms and demo fixtures.
 PLATFORM_CLAIM_EMAILS: dict[str, str] = {
     "amazon": "price-adjustments@amazon.com",
@@ -40,6 +64,15 @@ _GENERIC_DOMAIN = "example.com"
 
 def _normalize_platform_key(platform: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", platform.strip().lower()).strip("_")
+
+
+def resolve_merchant_name(platform: str) -> str:
+    """Return a display name for draft salutations ({{MERCHANT_NAME}})."""
+    platform_key = _normalize_platform_key(platform)
+    known = PLATFORM_DISPLAY_NAMES.get(platform_key)
+    if known:
+        return known
+    return platform_key.replace("_", " ").title()
 
 
 def resolve_claim_email(platform: str, policy: Policy) -> str:

@@ -6,7 +6,11 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from claimit_mongodb_models import Policy
-from src.draft.platform_defaults import PLATFORM_CLAIM_EMAILS, resolve_claim_email
+from src.draft.platform_defaults import (
+    PLATFORM_CLAIM_EMAILS,
+    resolve_claim_email,
+    resolve_merchant_name,
+)
 
 
 def _policy(claim_email: str | None, *, platform: str = "hilton") -> Policy:
@@ -48,3 +52,12 @@ def test_resolve_generic_fallback() -> None:
         resolve_claim_email("unknown_merchant", _policy(None))
         == "priceadjustments@unknown_merchant.example.com"
     )
+
+
+def test_resolve_merchant_name_known_platform() -> None:
+    assert resolve_merchant_name("best_buy") == "Best Buy"
+    assert resolve_merchant_name("hilton") == "Hilton"
+
+
+def test_resolve_merchant_name_unknown_platform_title_cases() -> None:
+    assert resolve_merchant_name("unknown_merchant") == "Unknown Merchant"

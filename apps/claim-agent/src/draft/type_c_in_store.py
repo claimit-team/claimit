@@ -155,18 +155,8 @@ async def generate_in_store_guide(
     user_location: DefaultLocation | None = None,
     user_instruction: str | None = None,
 ) -> ClaimDraft:
-    query = f"{purchase.platform} price match in-store refund policy"
-    try:
-        results = await search_client.search_policies(query=query, limit=1)
-    except Exception:
-        _log.warning("Policy search failed, using fallback clause", exc_info=True)
-        results = []
-    if results:
-        policy_clause = (
-            results[0].get("policy_text_relevant_clause") or policy.policy_text_relevant_clause
-        )
-    else:
-        policy_clause = policy.policy_text_relevant_clause
+    _ = search_client
+    policy_clause = policy.policy_text_relevant_clause
 
     store_info: StoreInfo | None = None
     if user_location is not None and not (user_location.lat == 0 and user_location.lon == 0):
