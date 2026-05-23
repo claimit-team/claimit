@@ -55,7 +55,12 @@ export function MarkdownMessage({ text, animate = false }: { text: string; anima
       return;
     }
     const id = setInterval(() => {
-      setRevealed((r) => nextRevealCount(r, textRef.current.length));
+      setRevealed((r) => {
+        const target = textRef.current.length;
+        const next = nextRevealCount(r, target);
+        if (target > 0 && next >= target) clearInterval(id);
+        return next;
+      });
     }, 16);
     return () => clearInterval(id);
   }, [shouldAnimate]);
