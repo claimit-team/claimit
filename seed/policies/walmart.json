@@ -16,7 +16,7 @@
   "bundle_exclusions": false,
   "key_exclusions": ["no post-purchase price-match policy"],
   "policy_url": "https://www.walmart.com/help/article/walmart-price-match-policy/6295d9e1a501489b9aa40a60c899b288",
-  "policy_text_full": "Walmart does not offer a post-purchase price match or price adjustment policy. ClaimIt tracks Walmart purchases for awareness only — users buying from Walmart are flagged at ingest with an explanatory message that no claim path is available.",
+  "policy_text_full": "Walmart does not offer a post-purchase price match or price adjustment policy. ClaimIt tracks Walmart purchases for awareness only \u2014 users buying from Walmart are flagged at ingest with an explanatory message that no claim path is available.",
   "policy_text_relevant_clause": "Walmart has no published post-purchase price match policy; users are notified at ingest that price drops are not actionable.",
   "last_verified": "2026-05-14",
   "active": false

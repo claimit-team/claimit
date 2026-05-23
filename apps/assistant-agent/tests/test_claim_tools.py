@@ -8,6 +8,7 @@ from the closure and refuse access if the underlying doc disagrees.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -370,6 +371,8 @@ async def test_get_reasoning_trace_happy_path_no_phoenix_env(
     assert out["phoenix_query_status"] == "unavailable"
     assert out["validator_attempts"] == []
     assert out["self_eval_attempts_detail"] == []
+    assert isinstance(out["trace_summary"], str)
+    assert "Policy cited" in out["trace_summary"]
 
 
 async def test_get_reasoning_trace_builds_phoenix_link(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -649,3 +652,38 @@ async def test_tools_do_not_accept_claim_id_arg() -> None:
         await tool_a(claim_id="hijacked")  # type: ignore[call-arg]
     with pytest.raises(TypeError):
         await tool_b(user_id="hijacked")  # type: ignore[call-arg]
+
+
+async def test_get_reasoning_trace_claim_lookup_failure() -> None:
+    db = AsyncMock()
+    db.get_claim.side_effect = RuntimeError("mongo down")
+
+    tool = make_get_reasoning_trace(
+        user_id=_USER_ID,
+        claim_id=_CLAIM_ID,
+        db_factory=lambda: db,
+    )
+    out = await tool()
+
+    assert out == {"error": "claim_lookup_failed"}
+
+
+async def test_get_reasoning_trace_outer_timeout() -> None:
+    async def slow_phoenix(_claim_id: str, *, timeout: float = 5.0) -> QueryResult:
+        await asyncio.sleep(10)
+        return QueryResult(status="ok", spans=[])
+
+    claim = _fake_claim()
+    db = _fake_db(claim=claim)
+
+    tool = make_get_reasoning_trace(
+        user_id=_USER_ID,
+        claim_id=_CLAIM_ID,
+        db_factory=lambda: db,
+        phoenix_query=slow_phoenix,
+    )
+    out = await tool()
+
+    assert out["phoenix_query_status"] == "timeout"
+    assert "trace_summary" in out
+    assert len(out["trace_summary"]) > 0

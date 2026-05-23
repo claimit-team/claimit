@@ -9,7 +9,7 @@
   "covers_competitor_drops": true,
   "claim_type": "email",
   "claim_url": "https://www.hilton.com/en/hilton-honors/price-match-guarantee/start-claim/",
-  "claim_email": null,
+  "claim_email": "reservations@hilton.com",
   "claim_phone": null,
   "loyalty_required": true,
   "award_ticket_eligible": false,

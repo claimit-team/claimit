@@ -29,6 +29,8 @@ import type { UIMessage, UIToolCall } from "@/types/assistant";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 /** 3× the server's 15s heartbeat interval (conversations route). */
 const STREAM_STALL_MS = 45_000;
+const EMPTY_ASSISTANT_FALLBACK =
+  "I couldn't load full details right now. Check the claim record above or try again in a moment.";
 
 type SendMessageResult = {
   toolNames: string[];
@@ -226,7 +228,12 @@ export function useAssistantStream(): UseAssistantStreamResult {
       try {
         await readSSEStream(response.body, controller.signal, {
           stallMs: STREAM_STALL_MS,
-          onStall: () => setStalled(true),
+          onStall: () => {
+            setStalled(true);
+            setMessages((prev) =>
+              finalizeAssistantTurn(prev, assistantId, EMPTY_ASSISTANT_FALLBACK),
+            );
+          },
           onActivity: () => setStalled(false),
           onHeartbeat: () => setStalled(false),
           onTextChunk: (chunk) => {
@@ -244,8 +251,11 @@ export function useAssistantStream(): UseAssistantStreamResult {
               turnError = errorMsg;
               setError(errorMsg);
               markAssistantError(setMessages, assistantId, errorMsg);
+              setMessages((prev) => settlePendingToolCalls(prev, assistantId));
             } else {
-              setMessages((prev) => finalizeAssistant(prev, assistantId));
+              setMessages((prev) =>
+                finalizeAssistantTurn(prev, assistantId, EMPTY_ASSISTANT_FALLBACK),
+              );
             }
           },
           onUnknown: () => {
@@ -259,6 +269,7 @@ export function useAssistantStream(): UseAssistantStreamResult {
           setError(e instanceof Error ? e.message : "Stream parse error");
           markAssistantError(setMessages, assistantId, "stream error");
         }
+        setMessages((prev) => settlePendingToolCalls(prev, assistantId));
       } finally {
         setStreaming(false);
         setStalled(false);
@@ -486,8 +497,26 @@ function addToolResultToAssistant(
   });
 }
 
-function finalizeAssistant(prev: UIMessage[], id: string): UIMessage[] {
-  return prev.map((m) => (m.id === id ? { ...m, streaming: false } : m));
+function settlePendingToolCalls(prev: UIMessage[], id: string): UIMessage[] {
+  return prev.map((m) => {
+    if (m.id !== id || !m.tool_calls?.length) return m;
+    const nextCalls = m.tool_calls.map((tc) =>
+      tc.output_summary === undefined ? { ...tc, output_summary: "unavailable" } : tc,
+    );
+    return { ...m, tool_calls: nextCalls };
+  });
+}
+
+function finalizeAssistantTurn(prev: UIMessage[], id: string, emptyFallback: string): UIMessage[] {
+  return prev.map((m) => {
+    if (m.id !== id) return m;
+    const settledCalls =
+      m.tool_calls?.map((tc) =>
+        tc.output_summary === undefined ? { ...tc, output_summary: "unavailable" } : tc,
+      ) ?? m.tool_calls;
+    const content = m.content.trim().length > 0 ? m.content : emptyFallback;
+    return { ...m, streaming: false, content, tool_calls: settledCalls };
+  });
 }
 
 function markAssistantError(
@@ -495,5 +524,14 @@ function markAssistantError(
   id: string,
   reason: string,
 ): void {
-  setter((prev) => prev.map((m) => (m.id === id ? { ...m, streaming: false, error: reason } : m)));
+  setter((prev) =>
+    prev.map((m) => {
+      if (m.id !== id) return m;
+      const settledCalls =
+        m.tool_calls?.map((tc) =>
+          tc.output_summary === undefined ? { ...tc, output_summary: "unavailable" } : tc,
+        ) ?? m.tool_calls;
+      return { ...m, streaming: false, error: reason, tool_calls: settledCalls };
+    }),
+  );
 }

@@ -23,6 +23,7 @@ stranger's send_override or queue a redraft on someone else's claim.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import Awaitable, Callable
@@ -37,6 +38,8 @@ from claimit_pubsub import (
 )
 
 logger = logging.getLogger(__name__)
+
+_REASONING_TRACE_TIMEOUT_SECONDS = 5.0
 
 # Type aliases — every tool is async-returning-dict for ADK FunctionTool.
 _ToolResult = dict[str, Any]
@@ -229,6 +232,38 @@ def make_request_redraft(
     return request_redraft
 
 
+def _build_trace_summary(
+    *,
+    claim_type: str | None,
+    policy_clause: str | None,
+    phoenix_query_status: str,
+    self_eval: Any,
+    validator_attempts: list[dict[str, Any]],
+) -> str:
+    """Human-readable fallback the LLM can quote when Phoenix is down."""
+    parts: list[str] = []
+    if claim_type:
+        parts.append(f"Claim type: {claim_type}.")
+    if policy_clause:
+        trimmed = policy_clause.strip()
+        if trimmed:
+            parts.append(f"Policy cited: {trimmed[:240]}{'…' if len(trimmed) > 240 else ''}")
+    if self_eval:
+        parts.append("Self-evaluation scores are stored on the claim record.")
+    if phoenix_query_status == "ok":
+        if validator_attempts:
+            parts.append(f"Validator history covers {len(validator_attempts)} draft version(s).")
+        else:
+            parts.append("Phoenix trace is available but has no validator spans yet.")
+    elif phoenix_query_status == "pending":
+        parts.append("Phoenix trace is still exporting — use claim context for now.")
+    elif phoenix_query_status == "timeout":
+        parts.append("Phoenix query timed out — answer from claim context instead.")
+    else:
+        parts.append("Phoenix trace is unavailable — answer from claim context instead.")
+    return " ".join(parts) if parts else "Use claim context to explain this draft."
+
+
 def make_get_reasoning_trace(
     *,
     user_id: str,
@@ -261,67 +296,102 @@ def make_get_reasoning_trace(
                           self_eval_attempts are populated.
         - "pending"     — claim exists but spans haven't been exported
                           yet (BatchSpanProcessor has a 5s schedule).
-        - "timeout"     — query exceeded the 1.5s budget.
+        - "timeout"     — query exceeded the 5s budget.
         - "unavailable" — Phoenix env vars unset or the API rejected us.
         """
-        db = db_factory()
-        claim = await db.get_claim(claim_id)
-        if claim is None:
-            return {"error": "claim_not_found"}
-        if not _matches_user(claim.user_id, user_id):
-            logger.warning(
-                "get_reasoning_trace refused: user mismatch claim_id=%s expected=%s actual=%s",
-                claim_id,
-                user_id,
-                claim.user_id,
-            )
-            return {"error": "not_authorized"}
 
-        trace_id = claim.trace_id
-        phoenix_base = os.environ.get("PHOENIX_BASE_URL", "").rstrip("/")
-        phoenix_link = f"{phoenix_base}/traces/{trace_id}" if trace_id and phoenix_base else None
+        async def _run() -> _ToolResult:
+            db = db_factory()
+            try:
+                claim = await db.get_claim(claim_id)
+            except Exception:
+                logger.exception("get_reasoning_trace claim lookup failed claim_id=%s", claim_id)
+                return {"error": "claim_lookup_failed"}
 
-        self_eval: Any = None
-        if claim.self_eval_score is not None:
-            # ClaimReadTolerant still nests self_eval_score as a strict
-            # sub-model when present; fall back to the raw value if a
-            # future schema variant changes that.
-            self_eval = (
-                claim.self_eval_score.model_dump()
-                if hasattr(claim.self_eval_score, "model_dump")
-                else claim.self_eval_score
+            if claim is None:
+                return {"error": "claim_not_found"}
+            if not _matches_user(claim.user_id, user_id):
+                logger.warning(
+                    "get_reasoning_trace refused: user mismatch claim_id=%s expected=%s actual=%s",
+                    claim_id,
+                    user_id,
+                    claim.user_id,
+                )
+                return {"error": "not_authorized"}
+
+            trace_id = claim.trace_id
+            phoenix_base = os.environ.get("PHOENIX_BASE_URL", "").rstrip("/")
+            phoenix_link = (
+                f"{phoenix_base}/traces/{trace_id}" if trace_id and phoenix_base else None
             )
 
-        payload: _ToolResult = {
-            "claim_type": str(claim.claim_type) if claim.claim_type is not None else None,
-            "policy_clause_cited": claim.policy_clause_cited,
-            "self_eval_score": self_eval,
-            "self_eval_attempts": claim.self_eval_attempts,
-            "trace_id": trace_id,
-            "phoenix_link": phoenix_link,
-            "phoenix_query_status": "unavailable",
-            "validator_attempts": [],
-            "self_eval_attempts_detail": [],
-        }
+            self_eval: Any = None
+            if claim.self_eval_score is not None:
+                self_eval = (
+                    claim.self_eval_score.model_dump()
+                    if hasattr(claim.self_eval_score, "model_dump")
+                    else claim.self_eval_score
+                )
 
-        # The shipped phoenix_query (`query_claim_spans`) maps every
-        # exception path to a QueryResult, so a default call shouldn't
-        # raise. Belt-and-suspenders for the DI seam: a test fake or a
-        # future replacement that breaks the contract must NOT take the
-        # whole tool down — we'd lose the claim-doc summary too.
-        try:
-            query_result = await phoenix_query(claim_id)
-        except Exception:
-            logger.exception("get_reasoning_trace phoenix query raised claim_id=%s", claim_id)
+            claim_type = str(claim.claim_type) if claim.claim_type is not None else None
+            policy_clause = claim.policy_clause_cited
+
+            payload: _ToolResult = {
+                "claim_type": claim_type,
+                "policy_clause_cited": policy_clause,
+                "self_eval_score": self_eval,
+                "self_eval_attempts": claim.self_eval_attempts,
+                "trace_id": trace_id,
+                "phoenix_link": phoenix_link,
+                "phoenix_query_status": "unavailable",
+                "validator_attempts": [],
+                "self_eval_attempts_detail": [],
+                "trace_summary": _build_trace_summary(
+                    claim_type=claim_type,
+                    policy_clause=policy_clause,
+                    phoenix_query_status="unavailable",
+                    self_eval=self_eval,
+                    validator_attempts=[],
+                ),
+            }
+
+            try:
+                query_result = await phoenix_query(
+                    claim_id,
+                    timeout=_REASONING_TRACE_TIMEOUT_SECONDS,
+                )
+            except Exception:
+                logger.exception("get_reasoning_trace phoenix query raised claim_id=%s", claim_id)
+                return payload
+
+            payload["phoenix_query_status"] = query_result.status
+
+            if query_result.status == "ok":
+                payload["validator_attempts"] = _aggregate_validator_attempts(query_result.spans)
+                payload["self_eval_attempts_detail"] = _aggregate_self_eval_attempts(
+                    query_result.spans
+                )
+
+            payload["trace_summary"] = _build_trace_summary(
+                claim_type=claim_type,
+                policy_clause=policy_clause,
+                phoenix_query_status=query_result.status,
+                self_eval=self_eval,
+                validator_attempts=payload["validator_attempts"],
+            )
             return payload
 
-        payload["phoenix_query_status"] = query_result.status
-
-        if query_result.status == "ok":
-            payload["validator_attempts"] = _aggregate_validator_attempts(query_result.spans)
-            payload["self_eval_attempts_detail"] = _aggregate_self_eval_attempts(query_result.spans)
-
-        return payload
+        try:
+            return await asyncio.wait_for(_run(), timeout=_REASONING_TRACE_TIMEOUT_SECONDS)
+        except TimeoutError:
+            logger.warning("get_reasoning_trace timed out claim_id=%s", claim_id)
+            return {
+                "phoenix_query_status": "timeout",
+                "trace_summary": (
+                    "Reasoning trace lookup timed out. Explain the draft using "
+                    "get_claim_context policy and claim fields instead."
+                ),
+            }
 
     return get_reasoning_trace
 

@@ -20,6 +20,7 @@ from ._shared import (
     _strip_json_fence,
 )
 from .models import ClaimDraft
+from .platform_defaults import resolve_claim_email
 
 _log = logging.getLogger(__name__)
 
@@ -96,9 +97,7 @@ async def generate_email_draft(
     current_price: float | None = None,
     user_instruction: str | None = None,
 ) -> ClaimDraft:
-    # Validate early — fail before wasting an LLM call
-    if not policy.claim_email or not policy.claim_email.strip():
-        raise DraftGenerationError(f"No claim email configured for platform '{purchase.platform}'")
+    to_address = resolve_claim_email(str(purchase.platform), policy)
 
     # 1. Retrieve the most relevant policy clause via search
     query = f"{purchase.platform} price match guarantee refund eligibility"
@@ -148,7 +147,7 @@ async def generate_email_draft(
         claim_id=claim.id,
         draft_content=filled_body,
         subject=filled_subject,
-        to_address=policy.claim_email,
+        to_address=to_address,
         policy_clause_cited=policy_clause,
         platform=str(purchase.platform),
         claim_type=str(claim.claim_type),
