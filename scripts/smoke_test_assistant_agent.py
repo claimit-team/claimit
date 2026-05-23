@@ -112,7 +112,7 @@ def main() -> int:
     # restored function then NameErrors. Reproduce that exact resolution
     # here to fail FAST locally instead of after a 22-minute deploy.
     restored_tools_found = 0
-    for tool, func in _iter_tool_funcs(restored):
+    for _tool, func in _iter_tool_funcs(restored):
         restored_tools_found += 1
         try:
             hints = typing.get_type_hints(func)
@@ -136,7 +136,7 @@ def main() -> int:
 
     # --- Step 3: Tool function signature on the fresh module ---
     step("Step 3: Inspect tool function signatures (fresh module, eval_str=True)")
-    for tool, func in _iter_tool_funcs(agent):
+    for _tool, func in _iter_tool_funcs(agent):
         try:
             sig = inspect.signature(func)
             print(f"OK {func.__name__} signature: {sig}")
@@ -153,9 +153,7 @@ def main() -> int:
     step("Step 4: _fetch_purchases_for_user with invalid uuid")
     if hasattr(mod, "_fetch_purchases_for_user"):
         try:
-            result = asyncio.run(
-                mod._fetch_purchases_for_user(user_id="not-a-uuid", limit=10)
-            )
+            result = asyncio.run(mod._fetch_purchases_for_user(user_id="not-a-uuid", limit=10))
             print(f"OK Helper returned: {result}")
             if not isinstance(result, list):
                 fail(f"Expected list, got {type(result).__name__}")
