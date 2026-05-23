@@ -16,6 +16,25 @@ MODEL_NAME = "gemini-2.5-flash"
 APP_NAME = "claimit-claim-draft"
 DRAFT_TIMEOUT_SECONDS = 30
 
+# ADK resolves `{{TOKEN}}` in agent instructions to `{TOKEN}` and injects from
+# session.state. Seed identity mappings so the model sees literal `{{TOKEN}}`
+# placeholders (filled post-LLM by _fill_placeholders), not real claim data.
+DRAFT_INSTRUCTION_PLACEHOLDER_STATE: dict[str, str] = {
+    "ORDER_ID": "{{ORDER_ID}}",
+    "CHECK_IN_DATE": "{{CHECK_IN_DATE}}",
+    "CHECKOUT_DATE": "{{CHECKOUT_DATE}}",
+    "ORIGINAL_PRICE": "{{ORIGINAL_PRICE}}",
+    "CURRENT_PRICE": "{{CURRENT_PRICE}}",
+    "REFUND_AMOUNT": "{{REFUND_AMOUNT}}",
+    "USER_NAME": "{{USER_NAME}}",
+    "POLICY_CITATION": "{{POLICY_CITATION}}",
+    "PRODUCT_NAME": "{{PRODUCT_NAME}}",
+    "STORE_ADDRESS": "{{STORE_ADDRESS}}",
+    "STORE_HOURS": "{{STORE_HOURS}}",
+    "STORE_PHONE": "{{STORE_PHONE}}",
+    "CLAIM_URL": "{{CLAIM_URL}}",
+}
+
 
 class DraftGenerationError(RuntimeError):
     pass
@@ -101,6 +120,7 @@ async def _run_draft_agent(
             app_name=APP_NAME,
             user_id=user_id,
             session_id=session_id,
+            state=dict(DRAFT_INSTRUCTION_PLACEHOLDER_STATE),
         )
     )
 
