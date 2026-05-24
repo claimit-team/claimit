@@ -27,6 +27,7 @@ import { ApproveConfirmDialog } from "@/components/claims/approve-confirm-dialog
 import { AssistantPane } from "@/components/claims/assistant-pane";
 import { CancelConfirmDialog } from "@/components/claims/cancel-confirm-dialog";
 import { ClaimHeader } from "@/components/claims/claim-header";
+import { ClaimOutcomePrompt } from "@/components/claims/claim-outcome-prompt";
 import type { DraftMode } from "@/components/claims/draft-pane";
 import { DraftPane } from "@/components/claims/draft-pane";
 import { EvidencePane } from "@/components/claims/evidence-pane";
@@ -379,6 +380,8 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
       />
 
       <PostApproveBanner claim={claim} />
+
+      <ClaimOutcomePrompt claim={claim} refetch={refetch} applyOptimistic={applyOptimistic} />
 
       <div className="min-h-0 flex-1 overflow-hidden bg-neutral-50">
         {isDesktop ? renderDesktopLayout() : isTablet ? renderTabletLayout() : renderMobileLayout()}
