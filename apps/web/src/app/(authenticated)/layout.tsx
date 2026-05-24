@@ -160,15 +160,25 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
 
   return (
     <div className="min-h-screen bg-neutral-0">
-      {/* Desktop sidebar */}
-      <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-64 lg:flex-col bg-neutral-0 border-r border-neutral-200">
+      {/*
+        Desktop sidebar. `data-print-hide` lets the 5.16 in-store-guide
+        print stylesheet collapse it so the printed guide fills the page.
+        See app/globals.css `@media print { body.printing-in-store-guide ... }`.
+      */}
+      <aside
+        data-print-hide
+        className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-64 lg:flex-col bg-neutral-0 border-r border-neutral-200"
+      >
         <SidebarContent />
       </aside>
 
       {/* Main column */}
       <div className="lg:pl-64 min-h-screen flex flex-col">
-        {/* Top header */}
-        <header className="sticky top-0 z-40 h-16 bg-neutral-0 border-b border-neutral-200 flex items-center justify-between px-4 lg:px-8">
+        {/* Top header — hidden in 5.16 print mode (same rationale as sidebar). */}
+        <header
+          data-print-hide
+          className="sticky top-0 z-40 h-16 bg-neutral-0 border-b border-neutral-200 flex items-center justify-between px-4 lg:px-8"
+        >
           <div className="flex items-center gap-4">
             {/* Mobile sidebar trigger */}
             <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
@@ -289,7 +299,14 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
         <main className="flex-1">{children}</main>
       </div>
 
-      {!isAssistant ? <FloatingAssistant variant={floatingAssistantVariant} /> : null}
+      {/* Floating assistant — wrapped so `data-print-hide` removes it
+          from 5.16 print output (FloatingAssistant uses `position:fixed`
+          internally; hiding the wrapper removes it from layout entirely). */}
+      {!isAssistant ? (
+        <div data-print-hide>
+          <FloatingAssistant variant={floatingAssistantVariant} />
+        </div>
+      ) : null}
 
       {/* Single global mount of the receipt upload dialog (ticket 5.14
           B2). Driven by `useUIStore(s => s.uploadDialogOpen)` so any

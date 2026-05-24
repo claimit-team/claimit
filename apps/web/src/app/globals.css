@@ -370,3 +370,120 @@ html {
 body {
   font-feature-settings: "cv11", "ss01", "ss03", "cv02";
 }
+
+/* ============================================================ */
+/* In-store guide print stylesheet (ticket 5.16)                */
+/* ============================================================ */
+/*
+ * Activated by toggling `body.printing-in-store-guide` from the
+ * "Download PDF" button in claim-header.tsx. Browser's `window.print()`
+ * then renders only the `[data-print-target]` subtree (the parsed
+ * InStoreGuide content) full-width, portrait, and ink-friendly.
+ *
+ * Hidden chrome (each tagged `data-print-hide` at its render site):
+ *   - desktop sidebar           (authenticated/layout.tsx <aside>)
+ *   - top app header            (authenticated/layout.tsx <header>)
+ *   - floating assistant FAB    (authenticated/layout.tsx FloatingAssistant)
+ *   - claim page sticky header  (claim-header.tsx outer <div>)
+ *   - PostApproveBanner         (claim-detail-shell.tsx)
+ *   - ClaimOutcomePrompt        (claim-detail-shell.tsx)
+ *   - EvidencePane              (claim-detail-shell.tsx — desktop+tablet)
+ *   - AssistantPane             (claim-detail-shell.tsx — desktop+tablet)
+ *   - DraftPane preview/edit tabs + version dropdown (draft-pane.tsx)
+ *
+ * Why explicit `data-print-hide` rather than a `*:not([data-print-target])`
+ * cascade: the universal-selector approach hides absolutely everything
+ * including parent layout containers, then has to selectively un-hide
+ * each ancestor of the print target — fragile and hard to read.
+ * Explicit marking documents WHAT is hidden and WHY, and grepping for
+ * `data-print-hide` gives the full inventory at a glance.
+ */
+@media print {
+  /* Force light foreground/background regardless of dark mode. */
+  body.printing-in-store-guide {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  /* Hide every chrome element explicitly marked. */
+  body.printing-in-store-guide [data-print-hide] {
+    display: none !important;
+  }
+
+  /* Mobile layout uses Tabs to switch between Draft / Evidence /
+     Assistant — Radix TabsContent on a non-active tab sets
+     `display: none`, which would hide the [data-print-target] subtree
+     even if the user clicked "Download PDF" while on the Evidence tab.
+     Force-show whichever tabpanel CONTAINS the print target. `:has()`
+     is supported on Chrome 105+, Firefox 121+, Safari 15.4+ — all our
+     target browsers for the 2026 hackathon demo. */
+  body.printing-in-store-guide [role="tabpanel"]:has([data-print-target]) {
+    display: block !important;
+  }
+
+  /* The 3-pane shell uses `overflow:hidden` + `h-[calc(100dvh-4rem)]`
+     to lock viewport size on screen. In print we want the InStoreGuide
+     content to flow naturally onto multiple pages, so override every
+     ancestor's overflow + height clamp along the path to
+     [data-print-target]. */
+  body.printing-in-store-guide,
+  body.printing-in-store-guide main,
+  body.printing-in-store-guide [data-print-target],
+  body.printing-in-store-guide [data-print-target] * {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+
+  /* Main column was `lg:pl-64` to make room for the sidebar; with the
+     sidebar hidden, reset padding/margin so the guide fills the page. */
+  body.printing-in-store-guide main,
+  body.printing-in-store-guide > div > div {
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+  }
+
+  /* Typography sized for in-store reading on either a printed sheet
+     or a phone screenshot. 12pt is the standard "legible-without-
+     squinting" floor; 1.5 leading gives talking-points room to breathe. */
+  body.printing-in-store-guide [data-print-target] {
+    font-size: 12pt !important;
+    line-height: 1.5 !important;
+    color: #000 !important;
+    padding: 0 !important;
+  }
+
+  body.printing-in-store-guide [data-print-target] h4 {
+    font-size: 18pt !important;
+    font-weight: 600 !important;
+    margin-bottom: 0.5rem !important;
+  }
+
+  /* Each section is one of the five `**Section**` cards. Thin black
+     border ensures section structure survives on a B&W printer; avoid
+     splitting a talking-points block across pages. */
+  body.printing-in-store-guide [data-print-target] > div > div {
+    border: 1px solid #000 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    page-break-inside: avoid;
+    margin-bottom: 0.5rem !important;
+    padding: 0.5rem !important;
+  }
+
+  /* Hyperlinks inside the policy section: keep underline but force
+     black so the printed page doesn't tint links with an unprintable
+     dark-on-paper brand color. */
+  body.printing-in-store-guide [data-print-target] a {
+    color: #000 !important;
+    text-decoration: underline !important;
+  }
+
+  /* Page setup — US Letter portrait with half-inch margins is the
+     phone-screenshot-friendly default. */
+  @page {
+    size: portrait;
+    margin: 0.5in;
+  }
+}

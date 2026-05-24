@@ -371,8 +371,12 @@ function InStoreGuide({ content, policy }: { content: string; policy: ClaimPolic
   // link (CodeRabbit MAJOR / Bugbot MEDIUM, PR #168).
   const policyUrl = toSafeExternalHref(policy.claim_url);
 
+  // `data-print-target`: the print stylesheet (ticket 5.16 — see
+  // app/globals.css `@media print { body.printing-in-store-guide ... }`)
+  // isolates this subtree so window.print() renders only the guide,
+  // not the surrounding 3-pane chrome.
   return (
-    <div className="space-y-3 p-4">
+    <div className="space-y-3 p-4" data-print-target>
       <h4 className="font-medium text-neutral-900 text-sm">{parsed.title}</h4>
       {parsed.sections.map((section, sIdx) => {
         // Composite key `${sIdx}-${section.key}` disambiguates any
@@ -817,13 +821,22 @@ export function DraftPane({
 
   return (
     <div className="flex h-full flex-col bg-neutral-0">
-      <PaneHeader
-        title={claimTypeLabels[claim.claim_type]}
-        icon={Icon}
-        onDoubleClick={onDoubleClickHeader}
-      />
+      {/* PaneHeader, version-selector row, and preview/edit tabs are
+          all part of the DraftPane chrome — `data-print-hide` so the
+          5.16 print stylesheet collapses them and renders only the
+          `[data-print-target]` InStoreGuide content full-width. */}
+      <div data-print-hide>
+        <PaneHeader
+          title={claimTypeLabels[claim.claim_type]}
+          icon={Icon}
+          onDoubleClick={onDoubleClickHeader}
+        />
+      </div>
 
-      <div className="flex items-center justify-between border-neutral-200 border-b px-4 py-2">
+      <div
+        className="flex items-center justify-between border-neutral-200 border-b px-4 py-2"
+        data-print-hide
+      >
         <VersionDropdown
           versions={claim.draft_versions}
           selectedVersion={selectedVersion}
@@ -848,7 +861,7 @@ export function DraftPane({
         onValueChange={handleTabChange}
         className="flex min-h-0 flex-1 flex-col overflow-hidden"
       >
-        <div className="border-neutral-200 border-b px-4">
+        <div className="border-neutral-200 border-b px-4" data-print-hide>
           <TabsList variant="default" className="h-10 bg-transparent">
             <TabsTrigger value="preview" className="data-active:bg-neutral-100">
               Preview
