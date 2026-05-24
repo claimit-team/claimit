@@ -7,6 +7,7 @@
  */
 
 import type { User } from "@claimit/mongodb-types";
+import { friendlyMessage } from "@/lib/api/errors";
 import { auth } from "@/lib/firebase";
 
 export type ConnectGmailResponse = { authorization_url: string };
@@ -74,14 +75,13 @@ export async function connectGmail(returnTo: string): Promise<ConnectGmailRespon
   if (!response.ok) {
     // Backend uses the {error: {code, message}} envelope from middleware/errors.py.
     let code = "request_failed";
-    let message = `Gmail connect failed (${response.status})`;
     try {
       const body = (await response.json()) as { error?: { code?: string; message?: string } };
       code = body.error?.code ?? code;
-      message = body.error?.message ?? message;
     } catch {
       // Non-JSON body; keep defaults.
     }
+    const message = friendlyMessage(response.status, code);
     throw new GmailApiError(code, message);
   }
 
@@ -120,14 +120,13 @@ export async function disconnectGmail(): Promise<User> {
 
   if (!response.ok) {
     let code = "request_failed";
-    let message = `Gmail disconnect failed (${response.status})`;
     try {
       const body = (await response.json()) as { error?: { code?: string; message?: string } };
       code = body.error?.code ?? code;
-      message = body.error?.message ?? message;
     } catch {
       // Non-JSON body; keep defaults.
     }
+    const message = friendlyMessage(response.status, code);
     throw new GmailApiError(code, message);
   }
 
