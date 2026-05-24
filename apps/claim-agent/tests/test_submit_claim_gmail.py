@@ -153,10 +153,10 @@ async def test_email_claim_empty_body_raises_terminal() -> None:
 
 @pytest.mark.asyncio
 async def test_email_claim_token_revoked_is_terminal() -> None:
-    """GmailTokenRevoked maps to ClaimSubmissionError(is_terminal=True):
+    """GmailTokenRevokedError maps to ClaimSubmissionError(is_terminal=True):
     the cron worker should NOT retry on the next tick — the user has to
     re-connect Gmail first."""
-    from claimit_gmail import GmailTokenRevoked
+    from claimit_gmail import GmailTokenRevokedError
 
     claim = _email_claim()
     db = AsyncMock()
@@ -164,7 +164,7 @@ async def test_email_claim_token_revoked_is_terminal() -> None:
     with (
         patch(
             "src.submit_claim.gmail_send",
-            new=AsyncMock(side_effect=GmailTokenRevoked("user revoked")),
+            new=AsyncMock(side_effect=GmailTokenRevokedError("user revoked")),
         ),
         patch(
             "src.submit_claim.secretmanager.SecretManagerServiceClient", return_value=MagicMock()
@@ -177,9 +177,9 @@ async def test_email_claim_token_revoked_is_terminal() -> None:
 
 @pytest.mark.asyncio
 async def test_email_claim_quota_is_transient() -> None:
-    """GmailQuotaExceeded maps to ClaimSubmissionError(is_terminal=False):
+    """GmailQuotaExceededError maps to ClaimSubmissionError(is_terminal=False):
     the cron worker should leave the claim queued and retry."""
-    from claimit_gmail import GmailQuotaExceeded
+    from claimit_gmail import GmailQuotaExceededError
 
     claim = _email_claim()
     db = AsyncMock()
@@ -187,7 +187,7 @@ async def test_email_claim_quota_is_transient() -> None:
     with (
         patch(
             "src.submit_claim.gmail_send",
-            new=AsyncMock(side_effect=GmailQuotaExceeded("over quota")),
+            new=AsyncMock(side_effect=GmailQuotaExceededError("over quota")),
         ),
         patch(
             "src.submit_claim.secretmanager.SecretManagerServiceClient", return_value=MagicMock()

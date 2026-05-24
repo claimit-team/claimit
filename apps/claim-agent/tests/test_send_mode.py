@@ -284,7 +284,9 @@ async def test_submit_claim_email_dispatches_via_gmail_send() -> None:
 
     with (
         patch("src.submit_claim.gmail_send", new=AsyncMock(return_value=fake_gmail_result)),
-        patch("src.submit_claim.secretmanager.SecretManagerServiceClient", return_value=MagicMock()),
+        patch(
+            "src.submit_claim.secretmanager.SecretManagerServiceClient", return_value=MagicMock()
+        ),
     ):
         result = await submit_claim(claim, user, db)
 

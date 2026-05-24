@@ -22,9 +22,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from claimit_gmail import (
-    GmailQuotaExceeded,
+    GmailQuotaExceededError,
     GmailSendError,
-    GmailTokenRevoked,
+    GmailTokenRevokedError,
     gmail_send,
 )
 from claimit_gmail import send as gmail_send_mod
@@ -226,14 +226,14 @@ async def test_send_omits_bcc_when_not_set() -> None:
 
 @pytest.mark.asyncio
 async def test_send_401_raises_token_revoked() -> None:
-    """Gmail 401 → GmailTokenRevoked. The cron worker's terminal-path
+    """Gmail 401 → GmailTokenRevokedError. The cron worker's terminal-path
     branch keys on this exception type to stop retrying."""
     db = _mock_db_with_user()
     sm = MagicMock()
     http = AsyncMock()
     http.post = AsyncMock(return_value=_make_response(401, {"error": {"message": "Unauthorized"}}))
 
-    with _patch_exchange_refresh(), pytest.raises(GmailTokenRevoked):
+    with _patch_exchange_refresh(), pytest.raises(GmailTokenRevokedError):
         await gmail_send(
             user_id=_USER_ID,
             to="x@y.com",
@@ -246,15 +246,55 @@ async def test_send_401_raises_token_revoked() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_refresh_exchange_failure_remaps_to_token_revoked() -> None:
+    """exchange_refresh_for_access raising WatchRegistrationError must
+    remap to GmailTokenRevokedError. The terminal-vs-transient
+    classification contract in the auto-send cron depends on this
+    boundary: a watch-layer failure is observationally the same as a
+    revoked token (user must re-consent to Gmail), so it has to land
+    in the SAME exception class. Skipping this test would let a future
+    watch-layer refactor silently downgrade refresh failures to
+    GmailSendError, which the cron treats as transient — burning
+    retries on a never-recoverable claim.
+
+    Asserts http.post was never called: the failure short-circuits at
+    the access-token mint step, so no Gmail Send round-trip happens."""
+    from claimit_gmail import WatchRegistrationError
+
+    db = _mock_db_with_user()
+    sm = MagicMock()
+    http = AsyncMock()
+
+    with (
+        patch.object(
+            gmail_send_mod,
+            "exchange_refresh_for_access",
+            new=AsyncMock(side_effect=WatchRegistrationError("refresh rejected")),
+        ),
+        pytest.raises(GmailTokenRevokedError),
+    ):
+        await gmail_send(
+            user_id=_USER_ID,
+            to="x@y.com",
+            subject="S",
+            body="B",
+            db=db,
+            sm_client=sm,
+            http_client=http,
+        )
+    http.post.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_send_429_raises_quota_exceeded() -> None:
-    """Gmail 429 → GmailQuotaExceeded. The cron worker treats this as
+    """Gmail 429 → GmailQuotaExceededError. The cron worker treats this as
     transient and retries on the next tick."""
     db = _mock_db_with_user()
     sm = MagicMock()
     http = AsyncMock()
     http.post = AsyncMock(return_value=_make_response(429, {"error": {"message": "Quota"}}))
 
-    with _patch_exchange_refresh(), pytest.raises(GmailQuotaExceeded):
+    with _patch_exchange_refresh(), pytest.raises(GmailQuotaExceededError):
         await gmail_send(
             user_id=_USER_ID,
             to="x@y.com",
@@ -273,9 +313,7 @@ async def test_send_500_raises_generic_send_error() -> None:
     db = _mock_db_with_user()
     sm = MagicMock()
     http = AsyncMock()
-    http.post = AsyncMock(
-        return_value=_make_response(503, {"error": {"message": "Backend error"}})
-    )
+    http.post = AsyncMock(return_value=_make_response(503, {"error": {"message": "Backend error"}}))
 
     with _patch_exchange_refresh(), pytest.raises(GmailSendError) as excinfo:
         await gmail_send(
@@ -289,21 +327,21 @@ async def test_send_500_raises_generic_send_error() -> None:
         )
     # Distinguishes from the typed subclasses — the test must catch
     # the base class but assert it's NOT one of the specific subclasses.
-    assert not isinstance(excinfo.value, GmailTokenRevoked)
-    assert not isinstance(excinfo.value, GmailQuotaExceeded)
+    assert not isinstance(excinfo.value, GmailTokenRevokedError)
+    assert not isinstance(excinfo.value, GmailQuotaExceededError)
     assert "Backend error" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
 async def test_send_no_refresh_token_raises_token_revoked() -> None:
-    """User with no gmail refresh_token_ref → GmailTokenRevoked.
+    """User with no gmail refresh_token_ref → GmailTokenRevokedError.
     Same recoverable state as a revoked token from the caller's
     perspective (both require user re-consent)."""
     db = _mock_db_with_user(_BASE_USER_FIXTURE)  # not connected
     sm = MagicMock()
     http = AsyncMock()
 
-    with pytest.raises(GmailTokenRevoked):
+    with pytest.raises(GmailTokenRevokedError):
         await gmail_send(
             user_id=_USER_ID,
             to="x@y.com",
@@ -337,7 +375,7 @@ async def test_send_user_not_found_raises_generic_error() -> None:
             sm_client=sm,
             http_client=http,
         )
-    assert not isinstance(excinfo.value, GmailTokenRevoked)
+    assert not isinstance(excinfo.value, GmailTokenRevokedError)
     assert "not found" in str(excinfo.value).lower()
 
 

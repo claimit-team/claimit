@@ -29,7 +29,7 @@ Public surface:
   `GmailSendResult(message_id, thread_id, sent_at)`. Used by claim-agent
   to dispatch Type A (email) claim drafts to platform CS addresses.
 
-- `GmailSendError` / `GmailTokenRevoked` / `GmailQuotaExceeded` — typed
+- `GmailSendError` / `GmailTokenRevokedError` / `GmailQuotaExceededError` — typed
   exceptions for the three failure classes the auto-send cron worker
   treats differently (transient retry vs stop trying for this user).
 
@@ -39,10 +39,10 @@ Public surface:
 """
 
 from .send import (
-    GmailQuotaExceeded,
+    GmailQuotaExceededError,
     GmailSendError,
     GmailSendResult,
-    GmailTokenRevoked,
+    GmailTokenRevokedError,
     gmail_send,
     resolve_bcc_from_env,
 )
@@ -54,10 +54,10 @@ from .watch import (
 )
 
 __all__ = [
-    "GmailQuotaExceeded",
+    "GmailQuotaExceededError",
     "GmailSendError",
     "GmailSendResult",
-    "GmailTokenRevoked",
+    "GmailTokenRevokedError",
     "WatchRegistrationError",
     "exchange_refresh_for_access",
     "gmail_send",

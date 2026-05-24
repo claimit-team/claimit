@@ -32,9 +32,9 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from claimit_gmail import (
-    GmailQuotaExceeded,
+    GmailQuotaExceededError,
     GmailSendError,
-    GmailTokenRevoked,
+    GmailTokenRevokedError,
     gmail_send,
     resolve_bcc_from_env,
 )
@@ -173,10 +173,10 @@ async def _submit_email_claim(claim: ClaimReadTolerant, db: MongoDBClient) -> Su
             db=db,
             sm_client=sm_client,
         )
-    except GmailTokenRevoked as err:
+    except GmailTokenRevokedError as err:
         _log.warning("submit_claim.token_revoked claim_id=%s err=%s", claim.id, err)
         raise ClaimSubmissionError(str(err), is_terminal=True) from err
-    except GmailQuotaExceeded as err:
+    except GmailQuotaExceededError as err:
         _log.warning("submit_claim.quota_exceeded claim_id=%s err=%s", claim.id, err)
         raise ClaimSubmissionError(str(err), is_terminal=False) from err
     except GmailSendError as err:

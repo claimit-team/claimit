@@ -72,20 +72,20 @@ class GmailSendError(Exception):
 
     Subclasses cover the two states the auto-send worker treats
     differently:
-    - `GmailTokenRevoked`: stop trying for this user until they
+    - `GmailTokenRevokedError`: stop trying for this user until they
       re-connect Gmail. The cron loop should NOT pick this claim up
       again on the next tick.
-    - `GmailQuotaExceeded`: transient; retry next tick is fine.
+    - `GmailQuotaExceededError`: transient; retry next tick is fine.
     """
 
 
-class GmailTokenRevoked(GmailSendError):
+class GmailTokenRevokedError(GmailSendError):
     """User's refresh token was revoked or the OAuth grant lapsed.
     Caller should mark the user's Gmail integration disconnected so
     the cron doesn't re-attempt every minute."""
 
 
-class GmailQuotaExceeded(GmailSendError):
+class GmailQuotaExceededError(GmailSendError):
     """Per-user or project-wide Gmail quota exceeded.
     Caller can leave the claim queued; the next cron tick will retry."""
 
@@ -145,21 +145,21 @@ async def gmail_send(
         local UTC timestamp of the successful send.
 
     Raises:
-        GmailTokenRevoked: 401 from Gmail OR refresh-token exchange
+        GmailTokenRevokedError: 401 from Gmail OR refresh-token exchange
             failed (user re-consent needed).
-        GmailQuotaExceeded: 429 from Gmail (transient — retry later).
+        GmailQuotaExceededError: 429 from Gmail (transient — retry later).
         GmailSendError: any other 4xx/5xx, network error, or malformed
             response.
     """
     # exchange_refresh_for_access raises WatchRegistrationError on any
-    # token failure; remap to GmailTokenRevoked so callers handle a
+    # token failure; remap to GmailTokenRevokedError so callers handle a
     # single typed exception per failure class. The original error is
     # chained via `from err` so traceback / debug context survives.
     user = await _load_user_with_gmail(db, user_id)
     try:
         access_token = await exchange_refresh_for_access(sm_client, user)
     except WatchRegistrationError as err:
-        raise GmailTokenRevoked(
+        raise GmailTokenRevokedError(
             f"Could not mint Gmail access token for user_id={user_id}: {err.terminal_message}"
         ) from err
 
@@ -189,11 +189,11 @@ async def gmail_send(
             await client.aclose()
 
     if response.status_code == 401:
-        raise GmailTokenRevoked(
+        raise GmailTokenRevokedError(
             f"Gmail returned 401 for user_id={user_id}: token revoked or scope missing"
         )
     if response.status_code == 429:
-        raise GmailQuotaExceeded(
+        raise GmailQuotaExceededError(
             f"Gmail returned 429 for user_id={user_id}: per-user or project quota exceeded"
         )
     if not 200 <= response.status_code < 300:
@@ -233,7 +233,7 @@ async def gmail_send(
 async def _load_user_with_gmail(db: MongoDBClient, user_id: str) -> User:
     """Load the user and verify Gmail is connected.
 
-    Raises GmailTokenRevoked rather than a generic ValueError because
+    Raises GmailTokenRevokedError rather than a generic ValueError because
     "no refresh token" is the same recoverable state as "token
     revoked" from the caller's perspective — both require the user to
     re-connect Gmail before claims for them can send."""
@@ -245,7 +245,7 @@ async def _load_user_with_gmail(db: MongoDBClient, user_id: str) -> User:
     if user is None:
         raise GmailSendError(f"User not found: {user_id}")
     if not user.gmail_integration.refresh_token_ref:
-        raise GmailTokenRevoked(f"Gmail not connected for user_id={user_id}")
+        raise GmailTokenRevokedError(f"Gmail not connected for user_id={user_id}")
     return user
 
 

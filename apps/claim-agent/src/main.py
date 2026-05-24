@@ -744,16 +744,28 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
         final_draft = draft
 
         now = datetime.now(UTC)
+        # Ticket 4.18: persist the (possibly updated) email subject +
+        # recipient address on EMAIL redrafts so the send phase still has
+        # them after the new draft version lands. The LLM may have
+        # re-generated the subject for the new draft; recipient_email is
+        # stable from policy but we refresh it for symmetry with the
+        # initial-draft persistence in handle_price_dropped (line ~370).
+        # Non-EMAIL claim types leave these fields alone (they were
+        # written as None at initial draft and stay None).
+        redraft_extra_updates: dict = {
+            "self_eval_score": None,
+            "self_eval_attempts": getattr(claim, "self_eval_attempts", 0),
+        }
+        if claim_type_enum == ClaimType.EMAIL:
+            redraft_extra_updates["subject"] = final_draft.subject
+            redraft_extra_updates["recipient_email"] = final_draft.to_address
         next_version = await db.atomic_append_draft_version(
             "claims",
             event.claim_id,
             content=final_draft.draft_content,
             generated_by=DraftGeneratedBy.ASSISTANT_REDRAFT,
             at=now,
-            extra_updates={
-                "self_eval_score": None,
-                "self_eval_attempts": getattr(claim, "self_eval_attempts", 0),
-            },
+            extra_updates=redraft_extra_updates,
         )
         new_version = DraftVersion(
             version=next_version,
