@@ -20,11 +20,14 @@ import { getPurchaseDetail, type PurchaseDetailDoc, PurchasesApiError } from "@/
  *
  * Flow:
  *   1. Initial fetch of `getPurchaseDetail(purchaseId)`.
- *   2. Stale guard: if the doc's `status` is NOT `pending_confirmation`,
- *      we replace into `/purchases/:id` (confirm page only makes sense
- *      for rows the user still needs to triage; anything else — already
+ *   2. Stale guard: if the doc's `status` is NOT one of the reviewable
+ *      states (`pending_confirmation`, `pending_user_edit`), we replace
+ *      into `/purchases/:id` (confirm page only makes sense for rows
+ *      the user still needs to triage; anything else — already
  *      monitoring, claimed, dismissed — belongs on detail).
- *   3. Analyzing-poll: when the row IS pending_confirmation but the
+ *      `pending_user_edit` is the ingest-extractor route for multi-item
+ *      receipts / synthesized-product-id rows; same review form applies.
+ *   3. Analyzing-poll: when the row IS in a reviewable status but the
  *      extraction sentinel is still in place (overall_min === 0 and the
  *      placeholder price 0.01 still on the doc — set by the api-gateway
  *      upload route), render an "Analyzing your receipt…" panel and
@@ -48,6 +51,11 @@ import { getPurchaseDetail, type PurchaseDetailDoc, PurchasesApiError } from "@/
 const POLL_INTERVAL_MS = 1500;
 const POLL_CAP_MS = 45_000;
 
+const REVIEWABLE_STATUSES: ReadonlySet<string> = new Set([
+  "pending_confirmation",
+  "pending_user_edit",
+]);
+
 type LoadState =
   | { kind: "loading" }
   | { kind: "analyzing" }
@@ -68,7 +76,7 @@ type LoadState =
  * and goes straight to the stale-guard.
  */
 function isAwaitingExtraction(purchase: PurchaseDetailDoc): boolean {
-  if (purchase.status !== "pending_confirmation") return false;
+  if (!REVIEWABLE_STATUSES.has(purchase.status ?? "")) return false;
   const overallMin = purchase.extraction_confidence?.overall_min;
   return overallMin === 0 || overallMin === null || overallMin === undefined;
 }
@@ -125,12 +133,13 @@ export function ConfirmPurchaseLoader({ purchaseId }: { purchaseId: string }) {
       }
       if (cancelled) return { done: true };
 
-      // Stale-guard: the confirm page is for `pending_confirmation`
-      // only. Any other status (monitoring after high-confidence
-      // extraction, dismissed, claimed, etc.) belongs on detail.
+      // Stale-guard: the confirm page is for reviewable rows only
+      // (`pending_confirmation` or `pending_user_edit`). Any other
+      // status (monitoring after high-confidence extraction, dismissed,
+      // claimed, etc.) belongs on detail.
       // Use `router.replace` rather than `push` so the browser back
       // button doesn't bounce the user right back here.
-      if (purchase.status !== "pending_confirmation") {
+      if (!REVIEWABLE_STATUSES.has(purchase.status ?? "")) {
         routerRef.current.replace(`/purchases/${purchase._id}`);
         return { done: true };
       }
