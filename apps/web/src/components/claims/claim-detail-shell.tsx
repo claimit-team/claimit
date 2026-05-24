@@ -97,13 +97,16 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
     }
     if (redraftProgress.timedOut) return;
     const remaining = redraftProgress.startedAt + REDRAFT_TIMEOUT_MS - Date.now();
-    const timer = window.setTimeout(
-      () => {
-        markTimedOut(claim.claim_id);
-        toast.error("Couldn't redraft. Please try again.");
-      },
-      Math.max(remaining, 0),
-    );
+    if (remaining <= 0) {
+      // Deadline already passed (e.g. user left mid-redraft and came back later):
+      // mark state timed-out but don't announce a stale failure with a toast on mount.
+      markTimedOut(claim.claim_id);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      markTimedOut(claim.claim_id);
+      toast.error("Couldn't redraft. Please try again.");
+    }, remaining);
     return () => window.clearTimeout(timer);
   }, [
     claim.claim_id,
