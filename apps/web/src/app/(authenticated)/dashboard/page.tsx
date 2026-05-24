@@ -14,6 +14,7 @@ import {
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
+import { OutcomeRecorder } from "@/components/claims/outcome-recorder";
 import { AutoSendBanner } from "@/components/dashboard/auto-send-banner";
 import { HeroActiveUser } from "@/components/dashboard/hero/active-user";
 import { HeroNewUser } from "@/components/dashboard/hero/new-user";
@@ -33,6 +34,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAwaitingOutcomeClaims } from "@/hooks/useAwaitingOutcomeClaims";
 import { useDashboardSummary } from "@/hooks/useDashboardSummary";
 import { useMonitoredPurchases } from "@/hooks/useMonitoredPurchases";
 import { usePendingConfirmation } from "@/hooks/usePendingConfirmation";
@@ -42,7 +44,11 @@ import type { ClaimListItem } from "@/lib/api/claims";
 import type { RecentResolvedClaim } from "@/lib/api/dashboard";
 import type { PurchaseListItem, PurchasesApiError } from "@/lib/api/purchases";
 import { formatClaimCurrency } from "@/lib/claim-detail";
-import { formatWindowRemaining, snakeToTitleLabel } from "@/lib/claims-status";
+import {
+  formatRelativeFromNow,
+  formatWindowRemaining,
+  snakeToTitleLabel,
+} from "@/lib/claims-status";
 import { getListStatusBadge, isMonitoringDegraded } from "@/lib/purchase-status";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useUIStore } from "@/store";
@@ -326,12 +332,49 @@ function ConfirmExtractionCard({
   );
 }
 
+function AwaitingOutcomeCard({
+  item,
+  onRecorded,
+}: {
+  item: AwaitingOutcomeItem;
+  onRecorded: () => void | Promise<void>;
+}) {
+  return (
+    <Card className="border-neutral-200">
+      <CardContent className="p-4">
+        <Badge
+          variant="secondary"
+          className="mb-2 bg-semantic-warning-bg text-semantic-warning border-0"
+        >
+          Needs your update
+        </Badge>
+        <div className="font-medium text-neutral-900 truncate">
+          {item.platform} · {item.title}
+        </div>
+        <div className="mt-2 mb-3 flex items-center gap-1 text-sm text-neutral-600">
+          <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+          {item.submittedLabel}
+        </div>
+        <OutcomeRecorder
+          claimId={item.claimId}
+          defaultAmount={item.claimAmount}
+          promptLabel="Heard back?"
+          onRecorded={async () => {
+            await onRecorded();
+          }}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
 /**
  * Confidence threshold mirroring B5 — kept inline (3 places, all FE)
  * rather than promoting to a shared module. Renaming the constant
  * later is a single rg-replace.
  */
 const CONFIDENCE_THRESHOLD = 0.95;
+const AWAITING_OUTCOME_MIN_DAYS = 3;
 
 type ConfirmExtractionItem = {
   type: "confirm_extraction";
@@ -353,7 +396,17 @@ type ReviewDraftItem = {
   claimType: string;
   windowRemaining: string;
 };
-type NeedsAttentionItem = ReviewDraftItem | ConfirmExtractionItem;
+
+type AwaitingOutcomeItem = {
+  type: "awaiting_outcome";
+  claimId: string;
+  platform: string;
+  title: string;
+  claimAmount: number;
+  submittedLabel: string;
+};
+
+type NeedsAttentionItem = ReviewDraftItem | ConfirmExtractionItem | AwaitingOutcomeItem;
 
 /**
  * `best_buy` → `Best Buy` (Title Case). `snakeToTitleLabel` is
@@ -392,6 +445,26 @@ function buildReviewDraftItems(claims: ClaimListItem[]): ReviewDraftItem[] {
       title: c.product_name ?? "Untitled claim",
       claimType: typeof c.claim_type === "string" ? c.claim_type : "email",
       windowRemaining: formatWindowRemaining(c.window_expires),
+    }));
+}
+
+function buildAwaitingOutcomeItems(claims: ClaimListItem[]): AwaitingOutcomeItem[] {
+  return claims
+    .filter((c): c is ClaimListItem & { _id: string; submitted_at: string } => {
+      if (typeof c._id !== "string" || c._id.trim().length === 0) return false;
+      if (c.submitted_at === null) return false;
+      const ms = Date.parse(c.submitted_at);
+      if (Number.isNaN(ms)) return false;
+      const days = Math.floor((Date.now() - ms) / (24 * 60 * 60 * 1000));
+      return days >= AWAITING_OUTCOME_MIN_DAYS;
+    })
+    .map((c) => ({
+      type: "awaiting_outcome" as const,
+      claimId: c._id,
+      platform: toPlatformLabel(c.platform),
+      title: c.product_name ?? "Untitled claim",
+      claimAmount: c.claim_amount ?? 0,
+      submittedLabel: formatRelativeFromNow(c.submitted_at),
     }));
 }
 
@@ -490,7 +563,13 @@ function buildRecentActivityText(item: RecentResolvedClaim): string {
     : `${platform} claim ${outcome}`;
 }
 
-function NeedsAttentionSection({ items }: { items: NeedsAttentionItem[] }) {
+function NeedsAttentionSection({
+  items,
+  onOutcomeRecorded,
+}: {
+  items: NeedsAttentionItem[];
+  onOutcomeRecorded?: () => void | Promise<void>;
+}) {
   return (
     <section>
       <div className="mb-4">
@@ -533,6 +612,15 @@ function NeedsAttentionSection({ items }: { items: NeedsAttentionItem[] }) {
                   platform={item.platform}
                   title={item.title}
                   lowConfidenceFields={item.lowConfidenceFields}
+                />
+              );
+            }
+            if (item.type === "awaiting_outcome") {
+              return (
+                <AwaitingOutcomeCard
+                  key={item.claimId}
+                  item={item}
+                  onRecorded={onOutcomeRecorded ?? (async () => {})}
                 />
               );
             }
@@ -830,6 +918,7 @@ export default function DashboardPage() {
   } = useMonitoredPurchases();
   const { purchases: pendingPurchases } = usePendingConfirmation();
   const { claims: reviewDraftClaims } = useReviewDraft();
+  const { claims: awaitingClaims, refetch: refetchAwaiting } = useAwaitingOutcomeClaims();
   // Ticket 5.15 / WI-9: hydrate the auto-send banner store with the
   // current queued_for_send slice. Live updates after this come via
   // the SSE fanout in useProactiveAssistant (no polling).
@@ -838,6 +927,7 @@ export default function DashboardPage() {
   const needsAttention: NeedsAttentionItem[] = [
     ...buildConfirmExtractionItems(pendingPurchases),
     ...buildReviewDraftItems(reviewDraftClaims),
+    ...buildAwaitingOutcomeItems(awaitingClaims),
   ];
 
   // Auto-derive userState from real summary data:
@@ -914,7 +1004,14 @@ export default function DashboardPage() {
 
         {userState !== "new" && <AutoSendBanner />}
 
-        {userState !== "new" && <NeedsAttentionSection items={needsAttention} />}
+        {userState !== "new" && (
+          <NeedsAttentionSection
+            items={needsAttention}
+            onOutcomeRecorded={async () => {
+              await Promise.all([refetchAwaiting(), refetchSummary()]);
+            }}
+          />
+        )}
 
         {userState !== "new" && (
           <MonitoredPurchasesSection
