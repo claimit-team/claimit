@@ -155,9 +155,19 @@ async def gmail_send(
     # token failure; remap to GmailTokenRevokedError so callers handle a
     # single typed exception per failure class. The original error is
     # chained via `from err` so traceback / debug context survives.
+    #
+    # We pass `[GMAIL_SEND_SCOPE]` explicitly because the helper's
+    # default mints with `gmail.readonly` (the watch / ingest scope).
+    # A token minted with readonly against users.messages.send returns
+    # 403 "Request had insufficient authentication scopes" — exactly
+    # the failure caught during the first end-to-end live test of
+    # 4.18. The OAuth grant requested at consent time covers
+    # readonly + send + modify (api-gateway/services/gmail_oauth.py:32),
+    # so this scope is always honored for users who have completed
+    # the standard connect flow.
     user = await _load_user_with_gmail(db, user_id)
     try:
-        access_token = await exchange_refresh_for_access(sm_client, user)
+        access_token = await exchange_refresh_for_access(sm_client, user, scopes=[GMAIL_SEND_SCOPE])
     except WatchRegistrationError as err:
         raise GmailTokenRevokedError(
             f"Could not mint Gmail access token for user_id={user_id}: {err.terminal_message}"
