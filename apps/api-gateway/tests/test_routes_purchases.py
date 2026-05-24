@@ -924,6 +924,76 @@ async def test_confirm_purchase_with_corrected_fields(client: AsyncClient) -> No
 
 
 @pytest.mark.asyncio
+async def test_confirm_purchase_accepts_pending_user_edit(client: AsyncClient) -> None:
+    """`pending_user_edit` is a peer of `pending_confirmation` at /confirm.
+
+    The ingest extractor routes multi-item / synthesized-product-id
+    receipts to `pending_user_edit` so monitoring doesn't start until
+    the user picks the line; submitting /confirm transitions straight
+    to `monitoring` like the low-confidence path.
+    """
+    pending_edit = _purchase_fixture(status="pending_user_edit")
+    monitoring = _purchase_fixture(status="monitoring")
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(side_effect=[pending_edit, monitoring])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    mock_db.get_policy = AsyncMock(return_value=None)
+    _set_overrides(mock_db)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/confirm",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["purchase"]["status"] == PurchaseStatus.MONITORING
+        update_args = mock_db.partial_update.await_args
+        assert update_args.args[2]["status"] == PurchaseStatus.MONITORING
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_purchase_with_corrected_fields_from_pending_user_edit(
+    client: AsyncClient,
+) -> None:
+    """Regression for issue #197: multi-item OCR row corrects + monitors.
+
+    Mirrors `test_confirm_purchase_with_corrected_fields` but starts
+    from `pending_user_edit`, which is the load-bearing path for a
+    multi-item receipt where the user must pick / correct the product
+    line before monitoring can start.
+    """
+    pending_edit = _purchase_fixture(status="pending_user_edit")
+    monitoring = _purchase_fixture(status="monitoring")
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(side_effect=[pending_edit, monitoring])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    mock_db.get_policy = AsyncMock(return_value=None)
+    _set_overrides(mock_db)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/confirm",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "corrected_fields": {
+                    "product_name": "Corrected Item Line",
+                    "product_id": "SKU-CORRECTED",
+                    "price_paid": 42.50,
+                }
+            },
+        )
+        assert response.status_code == 200
+        updates = mock_db.partial_update.await_args.args[2]
+        assert updates["product_name"] == "Corrected Item Line"
+        assert updates["product_id"] == "SKU-CORRECTED"
+        assert updates["price_paid"] == 42.50
+        assert updates["status"] == PurchaseStatus.MONITORING
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
 async def test_confirm_purchase_rejects_disallowed_field(client: AsyncClient) -> None:
     pending = _purchase_fixture()
     mock_db = AsyncMock(spec=MongoDBClient)
@@ -1336,9 +1406,19 @@ async def test_confirm_purchase_no_policy_leaves_window_untouched(client: AsyncC
 
 
 @pytest.mark.asyncio
-async def test_confirm_purchase_rejects_wrong_status(client: AsyncClient) -> None:
+@pytest.mark.parametrize(
+    "status", ["monitoring", "monitoring_degraded", "claimed", "dismissed", "expired"]
+)
+async def test_confirm_purchase_rejects_wrong_status(client: AsyncClient, status: str) -> None:
+    """Only `pending_confirmation` and `pending_user_edit` are reviewable.
+
+    `pending_user_edit` is covered by
+    `test_confirm_purchase_accepts_pending_user_edit` (happy path) — this
+    test exhaustively pins the rejected matrix so a future status added
+    to the enum is forced through an explicit decision here.
+    """
     mock_db = AsyncMock(spec=MongoDBClient)
-    mock_db.get_purchase = AsyncMock(return_value=_purchase_fixture(status="monitoring"))
+    mock_db.get_purchase = AsyncMock(return_value=_purchase_fixture(status=status))
     _set_overrides(mock_db)
     try:
         response = await client.post(
@@ -1346,6 +1426,8 @@ async def test_confirm_purchase_rejects_wrong_status(client: AsyncClient) -> Non
             headers={"Authorization": "Bearer valid-token"},
         )
         assert response.status_code == 409
+        assert response.json()["error"]["code"] == "invalid_status"
+        mock_db.partial_update.assert_not_awaited()
     finally:
         _clear_overrides()
 
@@ -1664,6 +1746,33 @@ async def test_dismiss_rejects_unknown_reason(client: AsyncClient) -> None:
             json={"reason": "made_up_reason"},
         )
         assert response.status_code == 422
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_dismiss_accepts_pending_user_edit(client: AsyncClient) -> None:
+    """`pending_user_edit` rows can be dismissed without first confirming.
+
+    Same gate as /confirm — a multi-item OCR receipt the user doesn't
+    want to triage should be dismissable directly, not stuck.
+    """
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=_purchase_fixture(status="pending_user_edit"))
+    mock_db.partial_update = AsyncMock(return_value=True)
+    _set_overrides(mock_db)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/dismiss",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"reason": "duplicate", "remember_sender": False},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["success"] is True
+        assert payload["status"] == PurchaseStatus.DISMISSED
+        update_args = mock_db.partial_update.await_args
+        assert update_args.args[2]["status"] == PurchaseStatus.DISMISSED
     finally:
         _clear_overrides()
 
