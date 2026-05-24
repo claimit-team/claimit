@@ -42,6 +42,20 @@ export function snakeToTitleLabel(raw: string | null | undefined): string {
 }
 
 /**
+ * Brand-style platform label: `best_buy` → `Best Buy`, `hilton` → `Hilton`.
+ * Matches the detail VM's `safePlatformLabel` and the dashboard's local
+ * `toPlatformLabel` helper (Title Case on each `_`-segment).
+ */
+export function toPlatformLabel(raw: string | null | undefined): string {
+  if (raw === null || raw === undefined || raw === "") return "Unknown platform";
+  return raw
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+/**
  * `outcome` may be `null` (legacy doc never populated it) or a string
  * the current `ClaimOutcome` enum no longer recognises (PR #142). Both
  * cases land in `resolved` — better to surface the row in the most
