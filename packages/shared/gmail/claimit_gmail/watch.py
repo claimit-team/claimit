@@ -158,22 +158,36 @@ async def _load_user(db: MongoDBClient, user_id: str) -> User:
 
 
 async def exchange_refresh_for_access(
-    sm_client: secretmanager.SecretManagerServiceClient, user: User
+    sm_client: secretmanager.SecretManagerServiceClient,
+    user: User,
+    scopes: list[str] | None = None,
 ) -> str:
     """Load refresh token from Secret Manager, exchange for an access token.
 
-    Public surface — both `register_watch_or_raise` (this module) and
-    the 4.17 Gmail ingest handler in ingest-agent need a fresh access
-    token to call Gmail APIs on a user's behalf. Mirrors
+    Public surface — `register_watch_or_raise` (this module), the 4.17
+    Gmail ingest handler in ingest-agent, and the 4.18 Gmail Send path
+    in `claimit_gmail.send` all need a fresh access token to call Gmail
+    APIs on a user's behalf. Mirrors
     `ingest-agent/src/notifier.py:get_gmail_access_token` so the
-    confirmation-email path and the watch / ingest paths stay aligned
-    on how Gmail credentials are minted.
+    confirmation-email path and the watch / ingest / claim-send paths
+    stay aligned on how Gmail credentials are minted.
+
+    `scopes` defaults to the watch scope (`gmail.readonly`) for
+    backward compatibility with the original 4.15-4.16 callers. The
+    4.18 Gmail Send caller passes `[GMAIL_SEND_SCOPE]` because Google's
+    token endpoint binds each access token to the requested scope —
+    using a token minted with `gmail.readonly` against
+    `users.messages.send` returns 403 "Request had insufficient
+    authentication scopes". The underlying OAuth grant (consented at
+    user-OAuth time by api-gateway/services/gmail_oauth.py:32-36)
+    covers readonly + send + modify, so any subset is mintable.
 
     Raises `WatchRegistrationError` (kept for backward compatibility
     with `register_watch_or_raise`) on any failure: missing OAuth
     client env vars, Secret Manager read failure, refresh-token grant
     rejected by Google. Callers that don't want the watch-specific
-    error type can catch this and re-raise as their own.
+    error type can catch this and re-raise as their own (see
+    `claimit_gmail.send.gmail_send` which remaps to GmailTokenRevokedError).
     """
     client_id = os.environ.get("GMAIL_OAUTH_CLIENT_ID", "").strip()
     client_secret = os.environ.get("GMAIL_OAUTH_CLIENT_SECRET", "").strip()
@@ -198,13 +212,14 @@ async def exchange_refresh_for_access(
     except Exception as err:
         raise WatchRegistrationError("Could not load refresh token") from err
 
+    effective_scopes = scopes if scopes is not None else [_GMAIL_WATCH_SCOPE]
     creds = Credentials(
         token=None,
         refresh_token=refresh_token,
         token_uri="https://oauth2.googleapis.com/token",
         client_id=client_id,
         client_secret=client_secret,
-        scopes=[_GMAIL_WATCH_SCOPE],
+        scopes=effective_scopes,
     )
     try:
         # creds.refresh is sync and hits Google's token endpoint over the
