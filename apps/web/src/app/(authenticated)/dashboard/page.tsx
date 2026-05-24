@@ -1003,7 +1003,12 @@ export default function DashboardPage() {
   // real users see.
   const [userStateOverride, setUserStateOverride] = useState<UserState | null>(null);
 
-  const { summary, isLoading: isSummaryLoading, error: summaryError } = useDashboardSummary();
+  const {
+    summary,
+    isLoading: isSummaryLoading,
+    error: summaryError,
+    refetch: refetchSummary,
+  } = useDashboardSummary();
   // gmailConnected reads from auth store (AuthInit populates user via getMe()).
   // Previously read from mockDashboardData.gmailConnected, which masked the
   // real backend state — accounts with gmail_integration.connected=true in
@@ -1064,8 +1069,13 @@ export default function DashboardPage() {
           <Alert variant="destructive">
             <AlertTitle>We couldn&apos;t load your savings summary.</AlertTitle>
             <AlertDescription>
-              {summaryError.message} Refresh to try again — the rest of the dashboard is still
-              available below.
+              <p className="mb-3 text-sm">{summaryError.message}</p>
+              <p className="mb-3 text-sm text-neutral-600">
+                The rest of the dashboard is still available below.
+              </p>
+              <Button type="button" size="sm" variant="outline" onClick={refetchSummary}>
+                Try again
+              </Button>
             </AlertDescription>
           </Alert>
         )}

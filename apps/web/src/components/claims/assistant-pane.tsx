@@ -7,6 +7,7 @@ import { MarkdownMessage } from "@/components/assistant/markdown-message";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useAssistantStream } from "@/hooks/useAssistantStream";
 import { useConversations } from "@/hooks/useConversations";
@@ -144,6 +145,7 @@ export function AssistantPane({
     conversations,
     isLoading: convLoading,
     error: convError,
+    refetch: refetchConversations,
     createConversation,
   } = useConversations({ mode: "claim_focused" });
   const {
@@ -262,7 +264,12 @@ export function AssistantPane({
         {convError ? (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{convError.message}</AlertDescription>
+            <AlertDescription>
+              <p className="mb-3 text-sm">{convError.message}</p>
+              <Button type="button" size="sm" variant="outline" onClick={refetchConversations}>
+                Try again
+              </Button>
+            </AlertDescription>
           </Alert>
         ) : null}
 
@@ -279,9 +286,17 @@ export function AssistantPane({
         ) : null}
 
         {!activeId && !createError && (convLoading || creating) ? (
-          <div className="flex items-center gap-2 text-sm text-neutral-500">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            Preparing assistant for this claim…
+          <div className="space-y-4">
+            <div className="flex justify-end gap-3">
+              <Skeleton className="h-12 w-[55%] rounded-lg" />
+            </div>
+            <div className="flex justify-start gap-3">
+              <Skeleton className="h-8 w-8 shrink-0 rounded-full" />
+              <Skeleton className="h-16 w-[75%] rounded-lg" />
+            </div>
+            <div className="flex justify-end gap-3">
+              <Skeleton className="h-12 w-[65%] rounded-lg" />
+            </div>
           </div>
         ) : !createError ? (
           <div className="space-y-4">
