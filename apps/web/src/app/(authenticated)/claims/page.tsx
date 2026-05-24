@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/table";
 import { useClaims } from "@/hooks/useClaims";
 import type { ClaimListItem, StatusGroup } from "@/lib/api/claims";
-import { claimTypeLabel, formatWindowRemaining } from "@/lib/claims-status";
+import { claimTypeLabel, formatRelativeFromNow, formatWindowRemaining } from "@/lib/claims-status";
 import { cn } from "@/lib/utils";
 
 // --- chip group config ---------------------------------------------------
@@ -91,15 +91,6 @@ function formatDateShort(iso: string | null): string {
     month: "short",
     day: "numeric",
   });
-}
-
-function formatRelativeFromNow(iso: string): string {
-  const ms = Date.parse(iso);
-  if (Number.isNaN(ms)) return "—";
-  const days = Math.floor((Date.now() - ms) / (24 * 60 * 60 * 1000));
-  if (days < 1) return "Submitted today";
-  if (days === 1) return "Submitted 1 day ago";
-  return `Submitted ${days} days ago`;
 }
 
 /**
