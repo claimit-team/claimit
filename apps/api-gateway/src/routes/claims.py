@@ -36,6 +36,12 @@ class CancelClaimRequest(BaseModel):
     reason: str | None = None
 
 
+class RecordClaimOutcomeRequest(BaseModel):
+    outcome: Literal["approved", "denied"]
+    reclaimed_amount: float | None = None
+    denial_reason: str | None = None
+
+
 class EditClaimDraftRequest(BaseModel):
     draft_content: str = Field(min_length=1)
 
@@ -175,6 +181,24 @@ async def cancel_claim(
     """
     return await claims_service.cancel_claim(
         db=db, user_id=user.id, claim_id=claim_id, reason=body.reason
+    )
+
+
+@router.post("/{claim_id}/outcome")
+async def record_claim_outcome(
+    claim_id: Annotated[UUID, Path()],
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[MongoDBClient, Depends(get_db)],
+    body: RecordClaimOutcomeRequest = Body(...),
+) -> dict[str, object]:
+    """Record merchant outcome (approved/denied) for a submitted claim."""
+    return await claims_service.record_claim_outcome(
+        db=db,
+        user_id=user.id,
+        claim_id=claim_id,
+        outcome=body.outcome,
+        reclaimed_amount=body.reclaimed_amount,
+        denial_reason=body.denial_reason,
     )
 
 

@@ -28,6 +28,9 @@ _MONITORING_STATUSES: list[str] = ["monitoring", "monitoring_degraded"]
 
 _RECENT_RESOLVED_LIMIT: int = 5
 
+# Real refund when recorded; fall back to requested amount for legacy/seed docs.
+_EFFECTIVE_SAVINGS_AMOUNT: dict[str, Any] = {"$ifNull": ["$reclaimed_amount", "$claim_amount"]}
+
 
 def _start_of_current_month_utc() -> datetime:
     """First moment of the current UTC calendar month."""
@@ -83,7 +86,7 @@ def _build_claims_pipeline(
                             },
                         }
                     },
-                    {"$group": {"_id": None, "total": {"$sum": "$claim_amount"}}},
+                    {"$group": {"_id": None, "total": {"$sum": _EFFECTIVE_SAVINGS_AMOUNT}}},
                 ],
                 "savings_lifetime": [
                     {
@@ -92,7 +95,7 @@ def _build_claims_pipeline(
                             "resolved_at": {"$ne": None},
                         }
                     },
-                    {"$group": {"_id": None, "total": {"$sum": "$claim_amount"}}},
+                    {"$group": {"_id": None, "total": {"$sum": _EFFECTIVE_SAVINGS_AMOUNT}}},
                 ],
                 "active_count": [
                     {"$match": {"outcome": {"$in": _ACTIVE_OUTCOMES}}},
@@ -108,7 +111,7 @@ def _build_claims_pipeline(
                             "claim_id": {"$toString": "$_id"},
                             "platform": 1,
                             "outcome": 1,
-                            "amount": "$claim_amount",
+                            "amount": _EFFECTIVE_SAVINGS_AMOUNT,
                         }
                     },
                 ],

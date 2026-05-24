@@ -35,6 +35,8 @@ export interface Claim {
   user_id: UUID;
   platform: Platform;
   claim_amount: number;
+  /** Actual refund recovered; null until an approved outcome is recorded. */
+  reclaimed_amount: number | null;
   currency: "USD";
   claim_type: ClaimType;
   draft_content: string;

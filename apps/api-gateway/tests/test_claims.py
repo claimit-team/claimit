@@ -1263,6 +1263,158 @@ async def test_cancel_claim_rejected_after_resolved(client: AsyncClient) -> None
 
 
 # ---------------------------------------------------------------------------
+# POST /claims/{id}/outcome
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_record_outcome_approved_with_reclaimed_amount(client: AsyncClient) -> None:
+    claim = Claim.model_validate(_claim_doc(outcome="pending", claim_amount=50.0))
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
+    db.partial_update = AsyncMock(return_value=True)
+
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/outcome",
+                json={"outcome": "approved", "reclaimed_amount": 42.0},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["claim_id"] == _CLAIM_ID
+        assert payload["outcome"] == "approved"
+        assert payload["reclaimed_amount"] == 42.0
+        assert payload["resolved_at"] is not None
+        assert payload["outcome_note"] is None
+        db.partial_update.assert_awaited_once()
+        updates = db.partial_update.await_args.args[2]
+        assert updates["outcome"] == "approved"
+        assert updates["reclaimed_amount"] == 42.0
+        assert updates["resolved_at"] is not None
+        assert updates["outcome_note"] is None
+        assert updates["denial_reason_extracted"] is None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_record_outcome_approved_without_amount_falls_back(client: AsyncClient) -> None:
+    claim = Claim.model_validate(_claim_doc(outcome="pending", claim_amount=50.0))
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
+    db.partial_update = AsyncMock(return_value=True)
+
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/outcome",
+                json={"outcome": "approved"},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["reclaimed_amount"] == 50.0
+        updates = db.partial_update.await_args.args[2]
+        assert updates["reclaimed_amount"] == 50.0
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_record_outcome_denied(client: AsyncClient) -> None:
+    claim = Claim.model_validate(_claim_doc(outcome="pending"))
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
+    db.partial_update = AsyncMock(return_value=True)
+
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/outcome",
+                json={"outcome": "denied", "denial_reason": "Window expired"},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["outcome"] == "denied"
+        assert payload["reclaimed_amount"] is None
+        assert payload["outcome_note"] == "Window expired"
+        updates = db.partial_update.await_args.args[2]
+        assert updates["outcome"] == "denied"
+        assert updates["reclaimed_amount"] is None
+        assert updates["outcome_note"] == "Window expired"
+        assert updates["denial_reason_extracted"] is None
+        assert updates["resolved_at"] is not None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_record_outcome_rejects_draft_pending(client: AsyncClient) -> None:
+    claim = Claim.model_validate(_claim_doc(outcome="draft_pending", submitted_at=None))
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
+
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/outcome",
+                json={"outcome": "approved"},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "invalid_state"
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_record_outcome_rejects_queued_for_send(client: AsyncClient) -> None:
+    claim = Claim.model_validate(_claim_doc(outcome="queued_for_send", submitted_at=None))
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
+
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/outcome",
+                json={"outcome": "approved"},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "invalid_state"
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_record_outcome_rejects_non_positive_reclaimed_amount(client: AsyncClient) -> None:
+    claim = Claim.model_validate(_claim_doc(outcome="pending"))
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(side_effect=[_user_for_auth(), claim])
+
+    _override_db(db)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                f"/api/v1/claims/{_CLAIM_ID}/outcome",
+                json={"outcome": "approved", "reclaimed_amount": 0},
+                headers={"Authorization": "Bearer t"},
+            )
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "invalid_reclaimed_amount"
+    finally:
+        _clear_overrides()
+
+
+# ---------------------------------------------------------------------------
 # PUT /claims/{id}/edit
 # ---------------------------------------------------------------------------
 

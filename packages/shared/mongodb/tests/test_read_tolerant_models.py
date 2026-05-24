@@ -46,6 +46,7 @@ def _valid_claim_doc() -> dict:
         "user_id": uuid4(),
         "platform": "best_buy",
         "claim_amount": 50.0,
+        "reclaimed_amount": None,
         "currency": "USD",
         "claim_type": "email",
         "draft_content": draft_content,
@@ -181,6 +182,17 @@ class TestClaimReadTolerant:
 
         tolerant = ClaimReadTolerant.model_validate(doc)
         assert tolerant.claim_amount == 0.0
+
+        with pytest.raises(ValidationError):
+            Claim.model_validate(doc)
+
+    def test_zero_reclaimed_amount_rejects_strict(self) -> None:
+        """`reclaimed_amount` uses `Field(gt=0)` when set; zero is invalid."""
+        doc = _valid_claim_doc()
+        doc["reclaimed_amount"] = 0.0
+
+        tolerant = ClaimReadTolerant.model_validate(doc)
+        assert tolerant.reclaimed_amount == 0.0
 
         with pytest.raises(ValidationError):
             Claim.model_validate(doc)

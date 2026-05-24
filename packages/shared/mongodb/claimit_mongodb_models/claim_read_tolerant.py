@@ -91,6 +91,7 @@ class ClaimReadTolerant(BaseDocument):
     user_id: UUID | None = None
     platform: str | None = None
     claim_amount: float | None = None
+    reclaimed_amount: float | None = None
     currency: str | None = None
     claim_type: str | None = None
     draft_content: str | None = None
