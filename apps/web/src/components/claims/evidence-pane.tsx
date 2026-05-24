@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ClaimsApiError, fetchEvidenceBlob } from "@/lib/api/claims";
 import { formatClaimCurrency } from "@/lib/claim-detail";
 import type { ClaimDetail } from "@/lib/claim-detail-types";
@@ -177,8 +178,9 @@ function EvidenceScreenshot({ claimId, platform }: { claimId: string; platform: 
 
   if (state.kind === "loading") {
     return (
-      <div className="flex h-32 animate-pulse items-center justify-center rounded-lg border border-neutral-200 bg-neutral-100">
-        <ImageIcon className="h-8 w-8 text-neutral-300" aria-hidden />
+      <div className="space-y-2">
+        <Skeleton className="aspect-[4/3] w-full rounded-lg" />
+        <Skeleton className="h-3 w-24" />
       </div>
     );
   }
