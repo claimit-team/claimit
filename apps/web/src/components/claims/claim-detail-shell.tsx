@@ -172,6 +172,30 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
   };
   const handleClickCancel = () => setCancelOpen(true);
 
+  /**
+   * In-store guide print handler (ticket 5.16). Toggles
+   * `body.printing-in-store-guide` which activates the print stylesheet
+   * in `app/globals.css` (hides chrome via `[data-print-hide]`, shows
+   * only the `[data-print-target]` InStoreGuide subtree, portrait
+   * orientation, ink-friendly typography). The browser's print dialog
+   * then handles Save-as-PDF or direct printer routing.
+   *
+   * `window.print()` is synchronous in modern browsers — it blocks
+   * until the dialog closes — but we also bind `afterprint` to clean
+   * up the body class as a defense against user-canceled previews
+   * or browsers that return from `window.print()` before the dialog
+   * is dismissed (older Safari).
+   */
+  const handleClickPrint = () => {
+    document.body.classList.add("printing-in-store-guide");
+    const cleanup = () => {
+      document.body.classList.remove("printing-in-store-guide");
+      window.removeEventListener("afterprint", cleanup);
+    };
+    window.addEventListener("afterprint", cleanup);
+    window.print();
+  };
+
   const assistantExpanded = useUIStore((s) => s.claimEmbeddedAssistantExpanded);
   const setEmbeddedExpanded = useUIStore((s) => s.setClaimEmbeddedAssistantExpanded);
   const toggleEmbedded = useUIStore((s) => s.toggleClaimEmbeddedAssistant);
@@ -239,9 +263,13 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
           />
         </ResizablePanel>
 
-        <ResizableHandle withHandle />
+        <ResizableHandle withHandle data-print-hide />
 
-        <ResizablePanel defaultSize={defaultSizes[1]} minSize={20}>
+        {/* Right-hand pane (Evidence + Assistant + their inner handle):
+            entire subtree collapsed by 5.16 print stylesheet so the
+            DraftPane (which contains the [data-print-target] InStoreGuide)
+            fills the page. */}
+        <ResizablePanel defaultSize={defaultSizes[1]} minSize={20} data-print-hide>
           <ResizablePanelGroup orientation="vertical" className="h-full">
             <ResizablePanel defaultSize={rightTop} minSize={15}>
               <EvidencePane claim={claim} onDoubleClickHeader={toggleEvidenceMax} />
@@ -286,9 +314,11 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
           />
         </ResizablePanel>
 
-        <ResizableHandle withHandle />
+        <ResizableHandle withHandle data-print-hide />
 
-        <ResizablePanel defaultSize={50} minSize={30}>
+        {/* Tablet right pane = Evidence/Assistant tab pair — fully
+            collapsed in 5.16 print mode (same rationale as desktop). */}
+        <ResizablePanel defaultSize={50} minSize={30} data-print-hide>
           <Tabs
             value={tabletTab}
             onValueChange={(v) => setTabletTab(v as "evidence" | "assistant")}
@@ -327,7 +357,7 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
         onValueChange={(v) => setMobileTab(v as "draft" | "evidence" | "assistant")}
         className="flex h-full flex-col"
       >
-        <div className="border-neutral-200 border-b px-4">
+        <div className="border-neutral-200 border-b px-4" data-print-hide>
           <TabsList className="h-10 w-full bg-transparent">
             <TabsTrigger value="draft" className="flex-1 data-active:bg-neutral-100">
               Draft
@@ -340,6 +370,11 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
             </TabsTrigger>
           </TabsList>
         </div>
+        {/* Draft tab: the [data-print-target] InStoreGuide lives inside
+            this TabsContent. The 5.16 print stylesheet uses :has() to
+            force-show this panel even when the user is currently on a
+            different mobile tab — so clicking Download PDF on the
+            Evidence tab still prints the guide, not an empty page. */}
         <TabsContent value="draft" className="m-0 flex-1 overflow-hidden">
           <DraftPane
             claim={claim}
@@ -356,10 +391,10 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
             regeneratingTimedOut={regeneratingTimedOut}
           />
         </TabsContent>
-        <TabsContent value="evidence" className="m-0 flex-1 overflow-hidden">
+        <TabsContent value="evidence" className="m-0 flex-1 overflow-hidden" data-print-hide>
           <EvidencePane claim={claim} />
         </TabsContent>
-        <TabsContent value="assistant" className="m-0 flex-1 overflow-hidden">
+        <TabsContent value="assistant" className="m-0 flex-1 overflow-hidden" data-print-hide>
           <AssistantPane
             claimId={claim.claim_id}
             currentVersion={claim.current_version}
@@ -377,11 +412,16 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
         onClickEdit={handleClickEdit}
         onClickCancel={handleClickCancel}
         onClickApprove={handleClickApprove}
+        onClickPrint={handleClickPrint}
       />
 
-      <PostApproveBanner claim={claim} />
-
-      <ClaimOutcomePrompt claim={claim} refetch={refetch} applyOptimistic={applyOptimistic} />
+      {/* Banner + outcome prompt are post-action surfaces that have no
+          place on the printed in-store guide — `data-print-hide` per
+          5.16 (see globals.css print stylesheet). */}
+      <div data-print-hide>
+        <PostApproveBanner claim={claim} />
+        <ClaimOutcomePrompt claim={claim} refetch={refetch} applyOptimistic={applyOptimistic} />
+      </div>
 
       <div className="min-h-0 flex-1 overflow-hidden bg-neutral-50">
         {isDesktop ? renderDesktopLayout() : isTablet ? renderTabletLayout() : renderMobileLayout()}
