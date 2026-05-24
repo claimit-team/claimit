@@ -19,6 +19,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { type ClaimDetailDoc, ClaimsApiError, recordClaimOutcome } from "@/lib/api/claims";
 import type { ClaimDetail } from "@/lib/claim-detail-types";
+import { toPlatformLabel } from "@/lib/claims-status";
 import { cn } from "@/lib/utils";
 
 type FormMode = "idle" | "approved" | "denied";
@@ -144,7 +145,8 @@ export function ClaimOutcomePrompt({ claim, refetch, applyOptimistic }: ClaimOut
         {mode === "idle" ? (
           <div className="flex flex-wrap items-center gap-3">
             <p className="text-neutral-700 text-sm">
-              Heard back from <strong className="font-medium">{claim.platform}</strong>?
+              Heard back from{" "}
+              <strong className="font-medium">{toPlatformLabel(claim.platform)}</strong>?
             </p>
             <div className="flex flex-wrap gap-2">
               <Button
