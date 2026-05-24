@@ -116,3 +116,16 @@ export function formatWindowRemaining(windowExpires: string | null): string {
   const hoursRemaining = Math.floor((expiresMs - Date.now()) / (60 * 60 * 1000));
   return formatClaimRemainingTime(hoursRemaining);
 }
+
+/**
+ * Relative copy for a claim's `submitted_at` timestamp.
+ * Shared by the /claims list and dashboard awaiting-outcome cards.
+ */
+export function formatRelativeFromNow(iso: string): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "—";
+  const days = Math.floor((Date.now() - ms) / (24 * 60 * 60 * 1000));
+  if (days < 1) return "Submitted today";
+  if (days === 1) return "Submitted 1 day ago";
+  return `Submitted ${days} days ago`;
+}
