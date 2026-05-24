@@ -232,6 +232,7 @@ export type ClaimDetailDoc = {
   user_id: string | null;
   platform: Platform | string | null;
   claim_amount: number | null;
+  reclaimed_amount: number | null;
   currency: string | null;
   claim_type: ClaimType | string | null;
   draft_content: string | null;
@@ -432,6 +433,35 @@ export async function editClaimDraft(
       body: JSON.stringify(body),
     },
     "Edit claim draft request failed",
+  );
+}
+
+export type RecordClaimOutcomeRequest = {
+  outcome: "approved" | "denied";
+  reclaimed_amount?: number;
+  denial_reason?: string;
+};
+
+export type RecordClaimOutcomeResponse = {
+  claim_id: string;
+  outcome: string;
+  reclaimed_amount: number | null;
+  resolved_at: string;
+  outcome_note: string | null;
+};
+
+export async function recordClaimOutcome(
+  claimId: string,
+  body: RecordClaimOutcomeRequest,
+): Promise<RecordClaimOutcomeResponse> {
+  return _request<RecordClaimOutcomeResponse>(
+    `/api/v1/claims/${encodeURIComponent(claimId)}/outcome`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    "Record claim outcome request failed",
   );
 }
 

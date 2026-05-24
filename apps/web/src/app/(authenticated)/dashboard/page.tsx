@@ -484,8 +484,10 @@ function humanizeField(field: string): string {
 function buildRecentActivityText(item: RecentResolvedClaim): string {
   const platform = toPlatformLabel(item.platform);
   const outcome = snakeToTitleLabel(item.outcome);
-  const amount = formatClaimCurrency(item.amount);
-  return `${platform} claim ${outcome} · ${amount}`;
+  const isWinning = item.outcome === "approved" || item.outcome === "user_self_service";
+  return isWinning
+    ? `${platform} claim ${outcome} · ${formatClaimCurrency(item.amount)}`
+    : `${platform} claim ${outcome}`;
 }
 
 function NeedsAttentionSection({ items }: { items: NeedsAttentionItem[] }) {
