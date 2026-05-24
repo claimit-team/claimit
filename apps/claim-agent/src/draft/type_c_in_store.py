@@ -156,6 +156,7 @@ async def generate_in_store_guide(
     user_instruction: str | None = None,
 ) -> ClaimDraft:
     _ = search_client
+    _log.info("type_c_in_store.start: claim_id=%s platform=%s", claim.id, purchase.platform)
     policy_clause = policy.policy_text_relevant_clause
 
     store_info: StoreInfo | None = None
@@ -183,10 +184,19 @@ async def generate_in_store_guide(
             tools=[],
         )
 
+    _log.info("type_c_in_store.gemini_call.start: claim_id=%s", claim.id)
     raw_output = await _run_draft_agent(
         str(purchase.platform), policy_clause, _build_in_store_agent, user_instruction
     )
+    _log.info(
+        "type_c_in_store.gemini_call.end: claim_id=%s raw_len=%d", claim.id, len(raw_output or "")
+    )
     output = _parse_in_store_guide_output(raw_output)
+    _log.info(
+        "type_c_in_store.parse.success: claim_id=%s talking_points=%d",
+        claim.id,
+        len(output.talking_points),
+    )
 
     markdown_content = _format_in_store_guide(output)
 
@@ -211,6 +221,7 @@ async def generate_in_store_guide(
         order_id=purchase.order_id or str(claim.id),
     )
 
+    _log.info("type_c_in_store.complete: claim_id=%s draft_len=%d", claim.id, len(filled_content))
     return ClaimDraft(
         claim_id=claim.id,
         draft_content=filled_content,

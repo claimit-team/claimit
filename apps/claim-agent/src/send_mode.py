@@ -40,9 +40,13 @@ class ClaimDraftedEvent(EventEnvelope):
 
 
 def determine_send_mode(user: User, claim: Claim) -> SendMode:
-    if claim.send_override is not None:
-        return claim.send_override
-    return user.send_preference.default_mode
+    mode = (
+        claim.send_override
+        if claim.send_override is not None
+        else user.send_preference.default_mode
+    )
+    _log.info("send_mode.determined: claim_id=%s mode=%s", claim.id, mode)
+    return mode
 
 
 async def handle_approval_mode(
@@ -51,6 +55,7 @@ async def handle_approval_mode(
     event_platform_id: str,
     refund_amount: float,
 ) -> Claim:
+    _log.info("send_mode.approval_mode.start: claim_id=%s", claim.id)
     # Write `draft_pending` (not `awaiting_approval`) so the rest of the
     # stack — 6.4 gateway gates, 5.7 FE workflow status, useReviewDraft
     # dashboard hook, scripts/seed_claims_demo.py — sees the canonical
@@ -85,6 +90,7 @@ async def handle_approval_mode(
         auto_send_at=None,
     )
     await publish_event(TOPIC_CLAIM_DRAFTED, event)
+    _log.info("send_mode.approval_mode.published: claim_id=%s", claim.id)
     return claim.model_copy(update={"outcome": ClaimOutcome.DRAFT_PENDING})
 
 
@@ -95,6 +101,7 @@ async def handle_auto_mode(
     refund_amount: float,
     delay_seconds: int = 300,
 ) -> tuple[Claim, datetime]:
+    _log.info("send_mode.auto_mode.start: claim_id=%s delay_seconds=%d", claim.id, delay_seconds)
     auto_send_at = datetime.now(UTC) + timedelta(seconds=delay_seconds)
     await db.partial_update(
         "claims",
@@ -115,6 +122,11 @@ async def handle_auto_mode(
         auto_send_at=auto_send_at.isoformat(),
     )
     await publish_event(TOPIC_CLAIM_DRAFTED, event)
+    _log.info(
+        "send_mode.auto_mode.queued: claim_id=%s auto_send_at=%s",
+        claim.id,
+        auto_send_at.isoformat(),
+    )
     updated = claim.model_copy(
         update={
             "outcome": ClaimOutcome.QUEUED_FOR_SEND,

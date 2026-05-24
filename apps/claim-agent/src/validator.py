@@ -60,6 +60,11 @@ def validate(draft: ClaimDraft, claim: Claim, purchase: Purchase) -> ValidationR
             "draft.version": draft.draft_version,
         },
     ) as span:
+        _log.info(
+            "validator.start: claim_id=%s claim_type=%s",
+            claim.id,
+            enum_to_str(claim.claim_type),
+        )
         issues: list[str] = []
 
         # Check 1 — Unresolved placeholders
@@ -91,6 +96,8 @@ def validate(draft: ClaimDraft, claim: Claim, purchase: Purchase) -> ValidationR
                 issues.append(f"Prohibited language detected: '{phrase}'")
 
         valid = len(issues) == 0
+        if valid:
+            _log.info("validator.passed: claim_id=%s", claim.id)
         if not valid:
             issue_types = [issue.split(":")[0].strip() for issue in issues]
             span.set_attribute("validator.issue_count", len(issues))

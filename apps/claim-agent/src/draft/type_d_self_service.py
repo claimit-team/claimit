@@ -237,6 +237,7 @@ async def generate_self_service_walkthrough(
         if hasattr(purchase.platform, "value")
         else str(purchase.platform).lower()
     )
+    _log.info("type_d_self_service.start: claim_id=%s platform=%s", claim.id, platform)
 
     meta = PLATFORM_META.get(platform)
     if meta is None:
@@ -256,6 +257,11 @@ async def generate_self_service_walkthrough(
     }
 
     rendered_steps = _render_steps(platform, context)
+    _log.info(
+        "type_d_self_service.steps_rendered: claim_id=%s step_count=%d",
+        claim.id,
+        len(rendered_steps),
+    )
 
     notes_prompt = _build_notes_prompt(
         meta["display_name"],
@@ -273,11 +279,17 @@ async def generate_self_service_walkthrough(
             tools=[],
         )
 
+    _log.info("type_d_self_service.gemini_call.start: claim_id=%s", claim.id)
     raw_notes = await _run_draft_agent(
         platform,
         getattr(policy, "policy_text_relevant_clause", "") or "",
         _build_notes_agent,
         user_instruction,
+    )
+    _log.info(
+        "type_d_self_service.gemini_call.end: claim_id=%s raw_len=%d",
+        claim.id,
+        len(raw_notes or ""),
     )
     notes = _parse_notes(raw_notes, policy)
 
@@ -292,6 +304,12 @@ async def generate_self_service_walkthrough(
         credit_type=meta["credit_type"],
     )
 
+    _log.info(
+        "type_d_self_service.complete: claim_id=%s notes=%d draft_len=%d",
+        claim.id,
+        len(notes),
+        len(walkthrough.model_dump_json()),
+    )
     draft_versions = getattr(claim, "draft_versions", None) or []
 
     return ClaimDraft(

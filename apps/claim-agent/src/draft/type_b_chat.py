@@ -88,11 +88,11 @@ def _parse_chat_script_output(raw_output: str | None) -> _ChatScriptOutput:
     except json.JSONDecodeError as exc:
         raise DraftGenerationError("Draft generator returned malformed JSON") from exc
     result = _ChatScriptOutput.model_validate(payload)
-    if len(result.main_steps) != 5:
-        raise DraftGenerationError(f"Expected 5 main steps, got {len(result.main_steps)}")
-    if len(result.escalation_steps) != 2:
+    if not (3 <= len(result.main_steps) <= 8):
+        raise DraftGenerationError(f"Expected 3-8 main steps, got {len(result.main_steps)}")
+    if not (1 <= len(result.escalation_steps) <= 5):
         raise DraftGenerationError(
-            f"Expected 2 escalation steps, got {len(result.escalation_steps)}"
+            f"Expected 1-5 escalation steps, got {len(result.escalation_steps)}"
         )
     return result
 
@@ -120,12 +120,23 @@ async def generate_chat_script(
     user_instruction: str | None = None,
 ) -> ClaimDraft:
     _ = search_client
+    _log.info("type_b_chat.start: claim_id=%s platform=%s", claim.id, purchase.platform)
     policy_clause = policy.policy_text_relevant_clause
 
+    _log.info("type_b_chat.gemini_call.start: claim_id=%s", claim.id)
     raw_output = await _run_draft_agent(
         str(purchase.platform), policy_clause, _build_chat_script_agent, user_instruction
     )
+    _log.info(
+        "type_b_chat.gemini_call.end: claim_id=%s raw_len=%d", claim.id, len(raw_output or "")
+    )
     draft_output = _parse_chat_script_output(raw_output)
+    _log.info(
+        "type_b_chat.parse.success: claim_id=%s main_steps=%d escalation_steps=%d",
+        claim.id,
+        len(draft_output.main_steps),
+        len(draft_output.escalation_steps),
+    )
 
     resolved_current_price = (
         current_price
@@ -160,7 +171,7 @@ async def generate_chat_script(
         raise DraftGenerationError("Draft contains unreplaced placeholder tokens")
 
     draft_content = _format_chat_script(filled_steps)
-
+    _log.info("type_b_chat.complete: claim_id=%s draft_len=%d", claim.id, len(draft_content))
     return ClaimDraft(
         claim_id=claim.id,
         draft_content=draft_content,

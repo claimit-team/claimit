@@ -125,6 +125,11 @@ async def self_evaluate(
     Single Gemini eval call. Does NOT retry — caller controls retry loop.
     Pass criteria: ALL 4 dimensions >= PASS_THRESHOLD (7).
     """
+    _log.info(
+        "self_evaluate.start: claim_id=%s attempt=%d",
+        claim.id,
+        retry_count + 1,
+    )
     tracer = get_tracer(__name__)
     with span_with_attributes(
         tracer,
@@ -164,6 +169,29 @@ async def self_evaluate(
         failed_dimensions = [dim for dim in _DIMENSIONS if getattr(scores, dim) < PASS_THRESHOLD]
         passed = len(failed_dimensions) == 0
         total_score = scores.clarity + scores.tone + scores.accuracy + scores.completeness
+
+        _log.info(
+            "self_evaluate.scores: claim_id=%s clarity=%d tone=%d accuracy=%d completeness=%d",
+            claim.id,
+            scores.clarity,
+            scores.tone,
+            scores.accuracy,
+            scores.completeness,
+        )
+        _log.info(
+            "self_evaluate.result: claim_id=%s passed=%s total_score=%d failed_dims=%s",
+            claim.id,
+            passed,
+            total_score,
+            failed_dimensions,
+        )
+        if not passed:
+            _log.warning(
+                "self_evaluate.failed_dims: claim_id=%s attempt=%d failed_dims=%s",
+                claim.id,
+                retry_count + 1,
+                failed_dimensions,
+            )
 
         improvement_suggestions = {
             dim: raw["improvement_suggestions"].get(dim, "") for dim in failed_dimensions
