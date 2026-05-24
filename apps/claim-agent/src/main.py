@@ -152,10 +152,27 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
     try:
         body = _PubSubPushBody.model_validate(await request.json())
         raw_data = base64.b64decode(body.message.data).decode("utf-8")
+        _log.info(
+            "claim_agent.body_decoded: message_id=%s subscription=%s",
+            body.message.message_id,
+            body.subscription,
+        )
         event = PriceDroppedEvent.model_validate_json(raw_data)
+        _log.info(
+            "claim_agent.event_parsed: event_id=%s purchase_id=%s platform_id=%s",
+            event.event_id,
+            event.purchase_id,
+            event.platform_id,
+        )
 
         db = MongoDBClient()
         claim_plan = await plan_claim(event, db)
+        _log.info(
+            "claim_agent.plan_claim: platform_id=%s claim_type=%s purchase_id=%s",
+            event.platform_id,
+            claim_plan.claim_type,
+            event.purchase_id,
+        )
 
         # `db.get_purchase` returns the read-tolerant variant so a legacy
         # doc with a now-invalid enum or a null required field doesn't 500
@@ -166,11 +183,25 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         # degraded-fields gate. This is the §4 "don't draft garbage"
         # contract from the read-tolerance follow-up.
         purchase = await db.get_purchase(event.purchase_id)
+        _log.info(
+            "claim_agent.get_purchase: purchase_id=%s found=%s",
+            event.purchase_id,
+            purchase is not None,
+        )
         if purchase is None:
+            _log.info(
+                "claim_agent.early_exit: reason=purchase_not_found purchase_id=%s",
+                event.purchase_id,
+            )
             _log.error("Purchase not found: %s", event.purchase_id)
             return {"status": "error", "reason": "purchase_not_found"}
         degraded_reason = _purchase_degraded_reason(purchase)
         if degraded_reason is not None:
+            _log.info(
+                "claim_agent.early_exit: reason=degraded_purchase purchase_id=%s detail=%s",
+                event.purchase_id,
+                degraded_reason,
+            )
             _log.warning(
                 "claim_agent.skip_degraded_purchase purchase_id=%s reason=%s",
                 event.purchase_id,
@@ -179,12 +210,26 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             return {"status": "skipped", "reason": "degraded_purchase"}
 
         policy = await db.get_policy(event.platform_id)
+        _log.info(
+            "claim_agent.get_policy: platform_id=%s found=%s",
+            event.platform_id,
+            policy is not None,
+        )
         if policy is None:
+            _log.info(
+                "claim_agent.early_exit: reason=policy_not_found platform_id=%s",
+                event.platform_id,
+            )
             _log.error("Policy not found for platform: %s", event.platform_id)
             return {"status": "error", "reason": "policy_not_found"}
 
         user_name = "Valued Customer"
         user = await db.get_user(event.user_id)
+        _log.info(
+            "claim_agent.get_user: user_id=%s found=%s",
+            event.user_id,
+            user is not None,
+        )
         if user is not None:
             user_name = (user.name or "").strip() or "Valued Customer"
 
@@ -282,14 +327,33 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             "type_c_in_store",
             "type_d_self_service",
         }:
+            _log.info(
+                "claim_agent.early_exit: reason=unsupported_generator generator=%s",
+                claim_plan.draft_generator,
+            )
             _log.info("Skipping unsupported generator %s", claim_plan.draft_generator)
             return {"status": "skipped", "reason": claim_plan.draft_generator}
 
+        _log.info(
+            "claim_agent.dispatch_generator.before: draft_generator=%s claim_id=%s",
+            claim_plan.draft_generator,
+            claim_id,
+        )
         draft = await _dispatch_generator(temp_claim)
+        _log.info(
+            "claim_agent.dispatch_generator.after: draft_generator=%s claim_id=%s",
+            claim_plan.draft_generator,
+            claim_id,
+        )
 
         # --- Validate draft (task 3.18) ---
         validation = validate(draft, temp_claim, purchase)
         if not validation.valid:
+            _log.info(
+                "claim_agent.validate: pass=false claim_id=%s issues=%s",
+                claim_id,
+                validation.issues,
+            )
             _log.warning(
                 "claim_agent.validation_failed claim_id=%s issues=%s",
                 claim_id,
@@ -316,16 +380,27 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
                         "escalated": True,
                     },
                 )
+                _log.info(
+                    "claim_agent.early_exit: reason=validation_failed_escalated claim_id=%s issues=%s",
+                    claim_id,
+                    validation.issues,
+                )
                 return {
                     "status": "error",
                     "reason": "validation_failed_escalated",
                     "issues": validation.issues,
                 }
+            _log.info(
+                "claim_agent.early_exit: reason=validation_failed claim_id=%s issues=%s",
+                claim_id,
+                validation.issues,
+            )
             return {
                 "status": "error",
                 "reason": "validation_failed",
                 "issues": validation.issues,
             }
+        _log.info("claim_agent.validate: pass=true claim_id=%s", claim_id)
 
         # --- Self-evaluation pass (task 3.19) ---
         async def _regenerate(current_draft: ClaimDraft, feedback: str, c: Claim) -> ClaimDraft:
@@ -381,6 +456,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             }
         )
         await db.upsert_claim(final_claim)
+        _log.info("claim_agent.upsert_claim: claim_id=%s", claim_id)
         mode = SendMode.APPROVAL if user is None else determine_send_mode(user, final_claim)
         notif_id = await write_notification_event(
             db=db,
@@ -395,6 +471,11 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
                 "send_mode": mode.value,
                 "platform": event.platform_id,
             },
+        )
+        _log.info(
+            "claim_agent.publish_event: claim.drafted published claim_id=%s notif_id=%s",
+            claim_id,
+            notif_id,
         )
         if notif_id is None:
             _log.warning("Failed to write claim_drafted notification for claim %s", claim_id)
@@ -428,7 +509,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             )
 
         _log.info(
-            "Generated %s draft for claim %s (purchase %s)",
+            "claim_agent.complete: draft_generator=%s claim_id=%s purchase_id=%s",
             claim_plan.draft_generator,
             claim_id,
             event.purchase_id,
@@ -436,6 +517,11 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         return {"status": "ok", "claim_id": str(claim_id)}
 
     except Exception:
+        _log.info(
+            "claim_agent.early_exit: reason=internal_error event_id=%s purchase_id=%s",
+            getattr(event, "event_id", "unknown"),
+            getattr(event, "purchase_id", "unknown"),
+        )
         _log.exception(
             "Failed to process price.dropped event",
             extra={
