@@ -226,9 +226,13 @@ export function useAssistantStream(): UseAssistantStreamResult {
           },
           onDone: (errorMsg) => {
             if (errorMsg) {
-              turnError = errorMsg;
-              setError(errorMsg);
-              markAssistantError(setMessages, assistantId, errorMsg);
+              // Server done-frame error (assistant-agent threw). Log the raw string
+              // for debugging but never show it to the user — curate it.
+              console.error("[useAssistantStream] stream completed with error:", errorMsg);
+              const friendly = friendlyMessage(500);
+              turnError = friendly;
+              setError(friendly);
+              markAssistantError(setMessages, assistantId, friendly);
               setMessages((prev) => settlePendingToolCalls(prev, assistantId));
             } else {
               setMessages((prev) =>
@@ -244,8 +248,11 @@ export function useAssistantStream(): UseAssistantStreamResult {
         if (controller.signal.aborted) {
           markAssistantError(setMessages, assistantId, "cancelled");
         } else {
-          setError(e instanceof Error ? e.message : "Stream parse error");
-          markAssistantError(setMessages, assistantId, "stream error");
+          // Curate parse/transport errors; log raw for debugging.
+          console.error("[useAssistantStream] stream parse error:", e);
+          const friendly = friendlyMessage(500);
+          setError(friendly);
+          markAssistantError(setMessages, assistantId, friendly);
         }
         setMessages((prev) => settlePendingToolCalls(prev, assistantId));
       } finally {
