@@ -2,6 +2,7 @@
 
 import { X } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { acknowledgeProactiveEvent } from "@/lib/api/conversations";
@@ -42,7 +43,7 @@ export function ProactiveCard({ onAction, className }: ProactiveCardProps) {
     try {
       await acknowledgeProactiveEvent(event.notificationId);
     } catch {
-      // Best-effort.
+      toast.error("Couldn't dismiss that. Please try again.");
     } finally {
       setDismissing(false);
     }

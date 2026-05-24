@@ -5,6 +5,7 @@ import { isToday, isYesterday, parseISO } from "date-fns";
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import { NotificationEmpty } from "@/components/notifications/notification-empty";
 import {
@@ -103,7 +104,7 @@ export default function NotificationsPage() {
     // Failures are non-fatal — we still let the user reach the detail
     // page; the next refetch will reconcile.
     void ack(n._id).catch(() => {
-      // Swallow: useNotifications already rolled back local state.
+      toast.error("Couldn't update that notification. Please try again.");
     });
     if (dest) router.push(dest);
   };
@@ -111,9 +112,9 @@ export default function NotificationsPage() {
   const handleMarkAllRead = async () => {
     try {
       await ackAll();
+      toast.success("All notifications marked as read.");
     } catch {
-      // Swallow: useNotifications rolled back local state and surfaced
-      // the error in the page-level alert below if we wanted to read it.
+      toast.error("Couldn't mark all as read. Please try again.");
     }
   };
 

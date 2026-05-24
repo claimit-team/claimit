@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { friendlyMessage } from "./errors";
+import { friendlyAuthError, friendlyMessage } from "./errors";
 
 describe("friendlyMessage", () => {
   it("code overrides win over status", () => {
@@ -28,5 +28,17 @@ describe("friendlyMessage", () => {
   });
   it("falls back for unknown status", () => {
     expect(friendlyMessage(418)).toMatch(/something went wrong/i);
+  });
+});
+
+describe("friendlyAuthError", () => {
+  it("suppresses user-cancelled popups", () => {
+    expect(friendlyAuthError("auth/popup-closed-by-user")).toBeNull();
+    expect(friendlyAuthError("auth/cancelled-popup-request")).toBeNull();
+  });
+  it("maps network and falls back", () => {
+    expect(friendlyAuthError("auth/network-request-failed")).toMatch(/can't reach the server/i);
+    expect(friendlyAuthError("auth/unknown")).toMatch(/couldn't sign in/i);
+    expect(friendlyAuthError(undefined)).toMatch(/couldn't sign in/i);
   });
 });

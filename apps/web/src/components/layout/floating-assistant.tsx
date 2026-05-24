@@ -182,7 +182,7 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
                 try {
                   await acknowledgeProactiveEvent(notificationId);
                 } catch {
-                  // Best-effort — the unread-count poll reconciles.
+                  toast.error("Couldn't dismiss that. Please try again.");
                 }
               }
               clearProactiveEvent();
@@ -365,8 +365,7 @@ function FloatingPanel({ onActionClick }: { onActionClick: (a: string) => void }
         convId = created._id;
         conversationIdRef.current = convId;
       } catch {
-        // useAssistantStream surfaces its own errors; conversation
-        // creation failure short-circuits here.
+        toast.error("Couldn't start a new conversation. Please try again.");
         return;
       }
     }
