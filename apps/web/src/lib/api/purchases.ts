@@ -31,6 +31,7 @@ import type {
   PurchaseStatus,
 } from "@claimit/mongodb-types";
 import type { ClaimListItem } from "@/lib/api/claims";
+import { friendlyMessage } from "@/lib/api/errors";
 import { auth } from "@/lib/firebase";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
@@ -177,7 +178,7 @@ export class PurchasesApiError extends Error {
 async function _authedFetch(
   path: string,
   init: RequestInit,
-  failureMessage: string,
+  _failureMessage: string,
   options: { timeoutMs?: number } = {},
 ): Promise<Response> {
   if (!API_BASE_URL) {
@@ -228,16 +229,15 @@ async function _authedFetch(
     // `"request_failed"` and the receipt-blob "no receipt" detection
     // would fall through to a hard error toast.
     let code = response.status === 404 ? "not_found" : "request_failed";
-    let message = `${failureMessage} (${response.status})`;
     try {
       const body = (await response.json()) as {
         error?: { code?: string; message?: string };
       };
       code = body.error?.code ?? code;
-      message = body.error?.message ?? message;
     } catch {
       // Non-JSON body (e.g. binary receipt with non-200) — keep defaults.
     }
+    const message = friendlyMessage(response.status, code);
     throw new PurchasesApiError(code, message);
   }
 

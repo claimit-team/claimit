@@ -23,6 +23,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { friendlyMessage } from "@/lib/api/errors";
 import { auth } from "@/lib/firebase";
 import type { UIMessage, UIToolCall } from "@/types/assistant";
 
@@ -167,55 +168,25 @@ export function useAssistantStream(): UseAssistantStreamResult {
             signal: controller.signal,
           },
         );
-      } catch (e) {
+      } catch (_e) {
         if (controller.signal.aborted) {
           // Caller-initiated cancellation; not an error.
           markAssistantError(setMessages, assistantId, "cancelled");
           setStreaming(false);
           return { toolNames: turnToolNames, error: "cancelled" };
         }
-        setError(e instanceof Error ? e.message : "Network error");
+        const networkMsg = friendlyMessage(0, "network_error");
+        setError(networkMsg);
         markAssistantError(setMessages, assistantId, "network failed");
         setStreaming(false);
         return {
           toolNames: turnToolNames,
-          error: e instanceof Error ? e.message : "Network error",
+          error: networkMsg,
         };
       }
 
       if (!response.ok) {
-        // Drain the error body so the user sees the backend's actual
-        // explanation, not a bare HTTP status. FastAPI returns
-        // {error: {code, message}} for typed errors and {detail: ...}
-        // for Pydantic validation failures (422). Cover both shapes.
-        let errorMsg = `Stream request failed: ${response.status}`;
-        try {
-          const bodyText = await response.text();
-          try {
-            const parsed = JSON.parse(bodyText) as {
-              error?: { code?: string; message?: string };
-              detail?: unknown;
-            };
-            if (parsed.error?.message) {
-              errorMsg = parsed.error.message;
-            } else if (parsed.detail !== undefined) {
-              errorMsg =
-                typeof parsed.detail === "string" ? parsed.detail : JSON.stringify(parsed.detail);
-            }
-          } catch {
-            // Non-JSON body — some intermediaries (Cloud Run cold-start
-            // error pages, load balancers, nginx default error responses)
-            // return plain text. Surface that verbatim rather than a bare
-            // status code; the trim() guard avoids replacing the
-            // useful default with an empty string.
-            const fallbackText = bodyText.trim();
-            if (fallbackText.length > 0) {
-              errorMsg = fallbackText;
-            }
-          }
-        } catch {
-          // Body read failed entirely — keep the status-only fallback.
-        }
+        const errorMsg = friendlyMessage(response.status);
         setError(errorMsg);
         // Both surfaces (page-level error banner + per-message bubble
         // footer) show the same detailed message — the bubble used to

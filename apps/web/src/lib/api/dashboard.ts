@@ -8,6 +8,7 @@
  * DashboardApiError.
  */
 
+import { friendlyMessage } from "@/lib/api/errors";
 import { auth } from "@/lib/firebase";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
@@ -86,16 +87,15 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
 
   if (!response.ok) {
     let code = "request_failed";
-    let message = `Dashboard summary failed (${response.status})`;
     try {
       const body = (await response.json()) as {
         error?: { code?: string; message?: string };
       };
       code = body.error?.code ?? code;
-      message = body.error?.message ?? message;
     } catch {
       // Non-JSON body; keep defaults.
     }
+    const message = friendlyMessage(response.status, code);
     throw new DashboardApiError(code, message);
   }
 

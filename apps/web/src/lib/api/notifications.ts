@@ -15,6 +15,7 @@
  */
 
 import type { NotificationEvent, NotificationEventType } from "@claimit/mongodb-types";
+import { friendlyMessage } from "@/lib/api/errors";
 import { auth } from "@/lib/firebase";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
@@ -47,7 +48,7 @@ export class NotificationsApiError extends Error {
   }
 }
 
-async function _request<T>(path: string, init: RequestInit, failureMessage: string): Promise<T> {
+async function _request<T>(path: string, init: RequestInit, _failureMessage: string): Promise<T> {
   if (!API_BASE_URL) {
     throw new NotificationsApiError(
       "missing_api_base_url",
@@ -88,16 +89,15 @@ async function _request<T>(path: string, init: RequestInit, failureMessage: stri
 
   if (!response.ok) {
     let code = "request_failed";
-    let message = `${failureMessage} (${response.status})`;
     try {
       const body = (await response.json()) as {
         error?: { code?: string; message?: string };
       };
       code = body.error?.code ?? code;
-      message = body.error?.message ?? message;
     } catch {
       // Non-JSON body; keep defaults.
     }
+    const message = friendlyMessage(response.status, code);
     throw new NotificationsApiError(code, message);
   }
 
