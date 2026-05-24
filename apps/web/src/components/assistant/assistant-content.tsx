@@ -42,6 +42,13 @@ const EXAMPLE_PROMPTS: string[] = [
 type Bucket = "Today" | "Yesterday" | "Last 7 days" | "Older";
 const BUCKET_ORDER: Bucket[] = ["Today", "Yesterday", "Last 7 days", "Older"];
 
+// Auto-scroll-to-bottom pins the viewport only when the user is within this
+// many pixels of the bottom. Above the threshold, message-list updates do not
+// scroll — so a user who scrolled up to re-read history isn't yanked back by
+// every incoming token during streaming. 100px matches the feel of ChatGPT /
+// Claude.ai (a small slack for trackpad inertial scroll near the bottom).
+const AUTOSCROLL_THRESHOLD_PX = 100;
+
 function bucketFor(isoTimestamp: string): Bucket {
   const then = new Date(isoTimestamp);
   if (Number.isNaN(then.getTime())) return "Older";
@@ -334,9 +341,41 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
     else reset();
   }, [active, hydrate, reset, streaming]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `messages` is the intentional trigger for the scroll effect even though the body doesn't read it
+  // Track whether the user is currently near the bottom of the message list.
+  // Stored in a ref (not state) so the auto-scroll effect below depends only
+  // on `messages` — otherwise every scroll event would re-fire the effect and
+  // double-scroll. The ref is read at effect time, so its current value
+  // (set by the scroll handler below) is what governs auto-pin behavior.
+  const isAtBottomRef = useRef(true);
+
+  // Attach a scroll listener to the actual scrolling element. The shadcn
+  // ScrollArea shim doesn't forward refs to its BaseUI Viewport, so we walk
+  // up from the bottom sentinel until we find the element with the
+  // `data-slot="scroll-area-viewport"` attribute (set by the shim — see
+  // components/ui/scroll-area.tsx:20). This isolates us from BaseUI's
+  // internal class structure while still letting us measure scroll
+  // position on the right element.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    const sentinel = bottomRef.current;
+    if (!sentinel) return;
+    const viewport = sentinel.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    if (!viewport) return;
+    const handler = () => {
+      const distFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      isAtBottomRef.current = distFromBottom < AUTOSCROLL_THRESHOLD_PX;
+    };
+    viewport.addEventListener("scroll", handler, { passive: true });
+    handler();
+    return () => {
+      viewport.removeEventListener("scroll", handler);
+    };
+  }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `messages` is the intentional trigger; isAtBottomRef.current is read fresh on each tick and intentionally NOT in the dep list
+  useEffect(() => {
+    if (isAtBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    }
   }, [messages]);
 
   async function sendDraftIfPossible() {
@@ -354,6 +393,10 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
         return;
       }
     }
+    // When the user sends, force-pin to bottom regardless of previous scroll
+    // position — they're signaling intent to follow the new exchange. The
+    // scroll handler will update this ref naturally on subsequent user scrolls.
+    isAtBottomRef.current = true;
     await sendMessage(convId, text);
   }
 
@@ -553,7 +596,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
             <div ref={bottomRef} aria-hidden="true" />
           </div>
         </ScrollArea>
-        <div className="border-t border-neutral-200 bg-neutral-0 px-4 py-3 lg:px-8">
+        <div className="border-t border-neutral-200 bg-neutral-0 px-4 py-3 lg:px-8 shrink-0">
           <div className="mx-auto flex max-w-4xl gap-3 items-end flex-wrap md:flex-nowrap">
             <Textarea
               value={draft}
