@@ -418,7 +418,10 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    // Enter sends; Shift+Enter inserts a newline. isComposing stops a send while
+    // an IME (e.g. Chinese pinyin) is composing — Enter there confirms a
+    // candidate, not a submit.
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void sendDraftIfPossible();
     }
@@ -545,7 +548,8 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
             </Button>
           </div>
           <p className="mx-auto mt-2 max-w-4xl text-center text-[11px] text-neutral-400">
-            Ctrl/Cmd + Enter to send — a new conversation is created on first message.
+            Enter to send · Shift+Enter for newline — a new conversation is created on first
+            message.
           </p>
         </div>
       </>
@@ -635,7 +639,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
             </Button>
           </div>
           <p className="mx-auto mt-2 max-w-4xl text-center text-[11px] text-neutral-400">
-            Ctrl/Cmd + Enter to send.
+            Enter to send · Shift+Enter for newline.
           </p>
         </div>
       </>
