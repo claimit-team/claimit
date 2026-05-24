@@ -458,6 +458,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
         await db.upsert_claim(final_claim)
         _log.info("claim_agent.upsert_claim: claim_id=%s", claim_id)
         mode = SendMode.APPROVAL if user is None else determine_send_mode(user, final_claim)
+        _log.info("claim_agent.send_mode: claim_id=%s mode=%s", claim_id, mode)
         notif_id = await write_notification_event(
             db=db,
             user_id=event.user_id,

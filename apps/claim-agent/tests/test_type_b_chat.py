@@ -306,9 +306,7 @@ async def test_wrong_main_step_count_raises() -> None:
             "main_steps": [
                 "Step 1 text.",
                 "Step 2 text.",
-                "Step 3 text.",
-                "Step 4 text.",
-                # missing step 5 — only 4 steps
+                # only 2 steps — below minimum of 3
             ],
             "escalation_steps": [
                 "Escalation step 1.",
@@ -323,7 +321,7 @@ async def test_wrong_main_step_count_raises() -> None:
 
     with patch("src.draft.type_b_chat._run_draft_agent", new_callable=AsyncMock) as mock_runner:
         mock_runner.return_value = bad_template
-        with pytest.raises(DraftGenerationError, match="Expected 5 main steps, got 4"):
+        with pytest.raises(DraftGenerationError, match="Expected 3-8 main steps, got 2"):
             await generate_chat_script(claim, purchase, policy, mock_search)
 
 
@@ -341,8 +339,13 @@ async def test_wrong_escalation_step_count_raises() -> None:
                 "Step 5 text.",
             ],
             "escalation_steps": [
-                "Only one escalation step.",
-                # missing step 2 — only 1 step
+                "Escalation step 1.",
+                "Escalation step 2.",
+                "Escalation step 3.",
+                "Escalation step 4.",
+                "Escalation step 5.",
+                "Escalation step 6.",
+                # 6 steps — above maximum of 5
             ],
         }
     )
@@ -353,5 +356,5 @@ async def test_wrong_escalation_step_count_raises() -> None:
 
     with patch("src.draft.type_b_chat._run_draft_agent", new_callable=AsyncMock) as mock_runner:
         mock_runner.return_value = bad_template
-        with pytest.raises(DraftGenerationError, match="Expected 2 escalation steps, got 1"):
+        with pytest.raises(DraftGenerationError, match="Expected 1-5 escalation steps, got 6"):
             await generate_chat_script(claim, purchase, policy, mock_search)

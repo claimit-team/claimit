@@ -207,6 +207,7 @@ async def generate_email_draft(
     user_instruction: str | None = None,
 ) -> ClaimDraft:
     _ = search_client  # API compatibility; clause comes from loaded policy only.
+    _log.info("type_a_email.start: claim_id=%s platform=%s", claim.id, purchase.platform)
     to_address = resolve_claim_email(str(purchase.platform), policy)
     policy_clause = policy.policy_text_relevant_clause
     try:
@@ -215,6 +216,7 @@ async def generate_email_draft(
         raise DraftGenerationError(f"Unsupported policy category: {policy.category!r}") from exc
     merchant_name = resolve_merchant_name(str(purchase.platform))
 
+    _log.info("type_a_email.gemini_call.start: claim_id=%s category=%s", claim.id, category)
     raw_output = await _run_draft_agent(
         str(purchase.platform),
         policy_clause,
@@ -222,7 +224,11 @@ async def generate_email_draft(
         user_instruction,
         category=str(category.value),
     )
+    _log.info(
+        "type_a_email.gemini_call.end: claim_id=%s raw_len=%d", claim.id, len(raw_output or "")
+    )
     draft_output = _parse_draft_output(raw_output)
+    _log.info("type_a_email.parse.success: claim_id=%s", claim.id)
 
     resolved_current_price = (
         current_price
@@ -259,6 +265,7 @@ async def generate_email_draft(
     if "{{" in filled_body or "{{" in filled_subject:
         raise DraftGenerationError("Draft contains unreplaced placeholder tokens")
 
+    _log.info("type_a_email.complete: claim_id=%s draft_len=%d", claim.id, len(filled_body))
     return ClaimDraft(
         claim_id=claim.id,
         draft_content=filled_body,

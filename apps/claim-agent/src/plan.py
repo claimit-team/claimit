@@ -93,6 +93,11 @@ async def plan_claim(
     event: PriceDroppedEvent,
     client: MongoDBClient,
 ) -> ClaimPlan:
+    _log.info(
+        "plan_claim.start: platform_id=%s purchase_id=%s",
+        event.platform_id,
+        event.purchase_id,
+    )
     policy = await client.get_policy(event.platform_id)
     if policy is None:
         raise UnknownPlatformError(event.platform_id)
@@ -104,6 +109,16 @@ async def plan_claim(
         raise InvalidPolicyError(event.platform_id, raw_claim_type) from None
 
     routing = CLAIM_TYPE_ROUTING[claim_type]
+    _log.info(
+        "plan_claim.policy_found: platform_id=%s claim_type=%s",
+        event.platform_id,
+        claim_type,
+    )
+    _log.info(
+        "plan_claim.created: claim_type=%s draft_generator=%s",
+        claim_type,
+        routing["draft_generator"],
+    )
     _log.debug("Routing %s → %s via %s", event.platform_id, claim_type, routing["draft_generator"])
 
     return ClaimPlan(
