@@ -68,8 +68,12 @@ async def test_email_claim_invokes_gmail_send_with_claim_fields() -> None:
     db = AsyncMock()
 
     with (
-        patch("src.submit_claim.gmail_send", new=AsyncMock(return_value=_gmail_result())) as mock_send,
-        patch("src.submit_claim.secretmanager.SecretManagerServiceClient", return_value=MagicMock()),
+        patch(
+            "src.submit_claim.gmail_send", new=AsyncMock(return_value=_gmail_result())
+        ) as mock_send,
+        patch(
+            "src.submit_claim.secretmanager.SecretManagerServiceClient", return_value=MagicMock()
+        ),
         patch("src.submit_claim.resolve_bcc_from_env", return_value="audit@claimit.team"),
     ):
         result = await submit_claim(claim, user, db)
@@ -97,7 +101,9 @@ async def test_email_claim_persists_gmail_message_id() -> None:
 
     with (
         patch("src.submit_claim.gmail_send", new=AsyncMock(return_value=_gmail_result("msg-xyz"))),
-        patch("src.submit_claim.secretmanager.SecretManagerServiceClient", return_value=MagicMock()),
+        patch(
+            "src.submit_claim.secretmanager.SecretManagerServiceClient", return_value=MagicMock()
+        ),
     ):
         await submit_claim(claim, user, db)
 
@@ -116,7 +122,6 @@ async def test_email_claim_missing_subject_raises_terminal() -> None:
     to send (re-derivation at this layer would compromise the LLM-
     generated personalization)."""
     claim = _email_claim(subject=None)
-    user = MagicMock()
     db = AsyncMock()
 
     with pytest.raises(ClaimSubmissionError) as excinfo:
@@ -161,7 +166,9 @@ async def test_email_claim_token_revoked_is_terminal() -> None:
             "src.submit_claim.gmail_send",
             new=AsyncMock(side_effect=GmailTokenRevoked("user revoked")),
         ),
-        patch("src.submit_claim.secretmanager.SecretManagerServiceClient", return_value=MagicMock()),
+        patch(
+            "src.submit_claim.secretmanager.SecretManagerServiceClient", return_value=MagicMock()
+        ),
         pytest.raises(ClaimSubmissionError) as excinfo,
     ):
         await _submit_email_claim(claim, db)
@@ -182,7 +189,9 @@ async def test_email_claim_quota_is_transient() -> None:
             "src.submit_claim.gmail_send",
             new=AsyncMock(side_effect=GmailQuotaExceeded("over quota")),
         ),
-        patch("src.submit_claim.secretmanager.SecretManagerServiceClient", return_value=MagicMock()),
+        patch(
+            "src.submit_claim.secretmanager.SecretManagerServiceClient", return_value=MagicMock()
+        ),
         pytest.raises(ClaimSubmissionError) as excinfo,
     ):
         await _submit_email_claim(claim, db)
@@ -204,7 +213,9 @@ async def test_email_claim_generic_send_error_is_transient() -> None:
             "src.submit_claim.gmail_send",
             new=AsyncMock(side_effect=GmailSendError("503 Backend error")),
         ),
-        patch("src.submit_claim.secretmanager.SecretManagerServiceClient", return_value=MagicMock()),
+        patch(
+            "src.submit_claim.secretmanager.SecretManagerServiceClient", return_value=MagicMock()
+        ),
         pytest.raises(ClaimSubmissionError) as excinfo,
     ):
         await _submit_email_claim(claim, db)
