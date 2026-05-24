@@ -113,12 +113,86 @@ pnpm install
 # Frontend (port 3000)
 pnpm --filter web dev
 
-# Backend agents (one per terminal)
-cd apps/ingest-agent && uv run uvicorn src.main:app --reload --port 8001
-cd apps/monitor-agent && uv run uvicorn src.main:app --reload --port 8002
-cd apps/claim-agent && uv run uvicorn src.main:app --reload --port 8003
+# Backend services (one per terminal)
+cd apps/api-gateway     && uv run uvicorn src.main:app --reload --port 8005
+cd apps/ingest-agent    && uv run uvicorn src.main:app --reload --port 8001
+cd apps/monitor-agent   && uv run uvicorn src.main:app --reload --port 8002
+cd apps/claim-agent     && uv run uvicorn src.main:app --reload --port 8003
 cd apps/assistant-agent && uv run uvicorn src.main:app --reload --port 8004
+cd apps/sync-worker     && uv run uvicorn src.main:app --reload --port 8006
 ```
+
+### Local end-to-end development
+
+The frontend and every backend service read config from a `.env.local` file in
+their respective app directory. `scripts/fetch_env.sh` pulls the values out of
+Google Secret Manager and assembles a ready-to-go `.env.local`, so any teammate
+with `gcloud` access can run the full stack locally without merging to test.
+
+See **[docs/local-testing.md](docs/local-testing.md)** for the full walkthrough
+(troubleshooting, mode switching, known limitations). TL;DR below.
+
+> ⚠️  **Everything below talks to PROD `claimit-beta`.** There is no
+> separate dev environment. Mongo writes are real, Anthropic spend is real,
+> Firebase users are real, and outbound Gmail sends are real. Don't trigger
+> destructive flows (claim send, account changes) unless that's the intent.
+
+**One-time setup**
+
+```bash
+gcloud auth login                          # Secret Manager access
+gcloud auth application-default login      # ADC for Firebase Admin / Vertex / Pub-Sub
+gcloud config set project claimit-beta
+```
+
+Verify your account has `roles/secretmanager.secretAccessor` on `claimit-beta`.
+Also confirm `localhost` is in the Firebase Console's **Auth → Settings →
+Authorized domains** list — without it Google sign-in fails with
+`auth/unauthorized-domain`.
+
+**Fastest path: local frontend against the deployed BFF**
+
+```bash
+./scripts/fetch_env.sh web                 # writes apps/web/.env.local
+pnpm --filter web dev                      # http://localhost:3000
+```
+
+This unblocks the Vercel-CD bottleneck for any FE-only change. The deployed
+api-gateway already whitelists `http://localhost:3000` in CORS, so no infra
+change is needed.
+
+**Full local stack (FE + any subset of backend)**
+
+Fetch envs for whichever services you want to run locally:
+
+```bash
+./scripts/fetch_env.sh api-gateway
+./scripts/fetch_env.sh assistant-agent
+# ...repeat for ingest-agent / monitor-agent / claim-agent / sync-worker
+```
+
+Then start the services with the existing `uv run uvicorn` commands. When
+running api-gateway locally, point the frontend at it:
+
+```bash
+./scripts/fetch_env.sh web --force --local-backend
+```
+
+Use `--force` to overwrite an existing `.env.local`.
+
+**Known limitations (v1)**
+
+- **Gmail OAuth from a local api-gateway won't complete.** The OAuth redirect
+  URI is registered against the deployed Cloud Run callback. The flow will
+  start from localhost but Google redirects back to the prod URL.
+- **Pub/Sub push subscriptions can't deliver to localhost.** Handlers under
+  `/pubsub/*` won't fire automatically. To exercise them, POST a synthetic
+  envelope manually, or tunnel localhost with ngrok and temporarily repoint
+  the subscription. `PUBSUB_AUTH_DISABLED=1` is set in the generated
+  `.env.local` so manual POSTs aren't rejected by OIDC verification.
+- **Backend changes still require running THAT service locally.** The
+  deployed BFF only talks to the deployed agents — mixing local FE +
+  deployed BFF + local agent doesn't work.
 
 ### Linting & formatting
 
