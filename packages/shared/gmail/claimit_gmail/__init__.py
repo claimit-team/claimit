@@ -33,9 +33,11 @@ Public surface:
   exceptions for the three failure classes the auto-send cron worker
   treats differently (transient retry vs stop trying for this user).
 
-- `resolve_bcc_from_env()` — pull the optional audit-BCC address
-  (CLAIMIT_BCC_EMAIL, default claimitbeta@gmail.com) so the demo team
-  sees what's going out without per-environment configuration.
+- `resolve_bcc_from_env()` — pull the optional audit-BCC address from
+  `CLAIMIT_BCC_EMAIL`. Opt-in: returns None when the env var is unset
+  so no environment silently leaks claim sends to an audit mailbox.
+  The demo BCC is wired explicitly in `infra/terraform/main.tf`'s
+  claim_agent env block.
 """
 
 from .send import (

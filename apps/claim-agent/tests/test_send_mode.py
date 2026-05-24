@@ -292,3 +292,102 @@ async def test_submit_claim_email_dispatches_via_gmail_send() -> None:
 
     assert result.submitted_via == SubmittedVia.GMAIL_SEND
     assert result.gmail_message_id == "msg-4.18"
+
+
+# ---------------------------------------------------------------------------
+# 6g — auto-send loop branches on ClaimSubmissionError.is_terminal
+#
+# CodeRabbit Round 2: the auto-send worker previously caught broad
+# Exception only, so a terminal failure (revoked Gmail grant, missing
+# subject/recipient on a legacy claim) would leave the claim in
+# QUEUED_FOR_SEND and the cron would re-pick it every minute forever —
+# burning quota on a claim that can never recover on its own. The
+# worker now distinguishes:
+#   - terminal: move to DRAFT_PENDING + outcome_note + clear auto_send_at
+#                so the cron skips it AND the user-facing UI surfaces it.
+#   - transient: leave queued (pre-4.18 behavior) — quota / network
+#                blips genuinely do recover on the next tick.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_auto_send_worker_parks_terminal_failure_as_draft_pending() -> None:
+    """Terminal ClaimSubmissionError → claim moves to DRAFT_PENDING with
+    outcome_note set and auto_send_at cleared, so the cron stops picking
+    it up and the user-facing UI can surface the error."""
+    from src.main import handle_auto_send
+    from src.submit_claim import ClaimSubmissionError
+
+    queued_claim = _make_tolerant_claim(outcome=ClaimOutcome.QUEUED_FOR_SEND)
+    user = _make_user()
+
+    mock_db = AsyncMock()
+    mock_db.find_claims.return_value = [queued_claim]
+    mock_db.get_claim.return_value = queued_claim
+    mock_db.get_user.return_value = user
+    mock_db.partial_update.return_value = True
+
+    mock_request = MagicMock()
+
+    terminal_err = ClaimSubmissionError("gmail revoked", is_terminal=True)
+
+    with (
+        patch("src.main.MongoDBClient", return_value=mock_db),
+        patch("src.main.submit_claim", new=AsyncMock(side_effect=terminal_err)),
+        patch("src.main.publish_claim_approved", new=AsyncMock()) as mock_publish,
+        patch("src.main.write_notification_event", new=AsyncMock()) as mock_notify,
+    ):
+        result = await handle_auto_send(mock_request)
+
+    # Publish + notify must NOT fire on a failed submit.
+    mock_publish.assert_not_awaited()
+    mock_notify.assert_not_awaited()
+
+    # Exactly one partial_update — the terminal-failure park.
+    mock_db.partial_update.assert_awaited_once()
+    park_updates = mock_db.partial_update.await_args.args[2]
+    assert park_updates["outcome"] == ClaimOutcome.DRAFT_PENDING.value
+    assert park_updates["outcome_note"] == "gmail revoked"
+    assert park_updates["auto_send_at"] is None
+
+    assert result["processed"] == 0
+    assert result["errors"] == 1
+
+
+@pytest.mark.asyncio
+async def test_auto_send_worker_leaves_transient_failure_queued() -> None:
+    """Transient ClaimSubmissionError → claim stays in QUEUED_FOR_SEND
+    (no DB write) so the next cron tick retries. Quota / network blips
+    are expected to recover on their own."""
+    from src.main import handle_auto_send
+    from src.submit_claim import ClaimSubmissionError
+
+    queued_claim = _make_tolerant_claim(outcome=ClaimOutcome.QUEUED_FOR_SEND)
+    user = _make_user()
+
+    mock_db = AsyncMock()
+    mock_db.find_claims.return_value = [queued_claim]
+    mock_db.get_claim.return_value = queued_claim
+    mock_db.get_user.return_value = user
+
+    mock_request = MagicMock()
+
+    transient_err = ClaimSubmissionError("quota exceeded", is_terminal=False)
+
+    with (
+        patch("src.main.MongoDBClient", return_value=mock_db),
+        patch("src.main.submit_claim", new=AsyncMock(side_effect=transient_err)),
+        patch("src.main.publish_claim_approved", new=AsyncMock()) as mock_publish,
+        patch("src.main.write_notification_event", new=AsyncMock()) as mock_notify,
+    ):
+        result = await handle_auto_send(mock_request)
+
+    mock_publish.assert_not_awaited()
+    mock_notify.assert_not_awaited()
+    # Critical: NO db.partial_update on transient — the claim must stay
+    # queued for the next tick to retry. A spurious write here would
+    # bump updated_at and could confuse the operator timeline.
+    mock_db.partial_update.assert_not_awaited()
+
+    assert result["processed"] == 0
+    assert result["errors"] == 1

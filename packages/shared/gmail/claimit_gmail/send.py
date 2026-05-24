@@ -163,13 +163,24 @@ async def gmail_send(
             f"Could not mint Gmail access token for user_id={user_id}: {err.terminal_message}"
         ) from err
 
-    raw = _build_raw_message(
-        to=to,
-        from_email=_resolve_from_email(user),
-        subject=subject,
-        body=body,
-        bcc=bcc,
-    )
+    # Guard the MIME assembly. Bad input (subject with un-encodable
+    # control characters, a body wider than the email package's
+    # header-folding can handle) raises stdlib exceptions that aren't
+    # GmailSendError, which would bypass the caller's terminal/
+    # transient classification. Wrapping here gives the caller a
+    # single exception family for every Gmail-send failure mode.
+    try:
+        raw = _build_raw_message(
+            to=to,
+            from_email=_resolve_from_email(user),
+            subject=subject,
+            body=body,
+            bcc=bcc,
+        )
+    except Exception as err:
+        raise GmailSendError(
+            f"Failed to build Gmail MIME payload for user_id={user_id}: {err!s}"
+        ) from err
 
     owns_client = http_client is None
     client = http_client or httpx.AsyncClient(timeout=_SEND_TIMEOUT_SECONDS)
@@ -290,9 +301,17 @@ def _build_raw_message(
 def resolve_bcc_from_env() -> str | None:
     """Read the optional audit-BCC address from env.
 
-    Centralised here so submit_claim and the test suite agree on the
-    default. `CLAIMIT_BCC_EMAIL` defaults to claimitbeta@gmail.com so
-    the demo team sees what's going out without per-environment
-    configuration. Set to empty string to disable BCC entirely."""
-    raw = os.environ.get("CLAIMIT_BCC_EMAIL", "claimitbeta@gmail.com").strip()
+    Opt-in by default: returns None unless `CLAIMIT_BCC_EMAIL` is
+    explicitly set. The previous default ("claimitbeta@gmail.com")
+    would have silently BCC'd every outbound claim from any
+    environment that forgot to set the var — including production —
+    leaking the user-sender's identity + the platform CS address into
+    our internal mailbox. CodeRabbit Round 2 flagged this as a
+    privacy footgun.
+
+    The demo BCC is now wired in `infra/terraform/main.tf` as an
+    explicit `CLAIMIT_BCC_EMAIL` entry on the claim-agent Cloud Run
+    env block — so the demo audit trail still works, but production
+    or any future environment must consciously opt in."""
+    raw = os.environ.get("CLAIMIT_BCC_EMAIL", "").strip()
     return raw or None

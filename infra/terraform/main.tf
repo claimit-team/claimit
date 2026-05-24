@@ -240,6 +240,14 @@ module "claim_agent" {
     GOOGLE_GENAI_USE_VERTEXAI = "true"
     GOOGLE_CLOUD_LOCATION     = var.region
     PHOENIX_PROJECT_NAME      = "claimit"
+    # Ticket 4.18 — audit BCC for outbound Gmail-Send claim drafts.
+    # `claimit_gmail.resolve_bcc_from_env` defaults to None (opt-in) so
+    # the BCC address is set explicitly here for the demo environment.
+    # CodeRabbit Round 2: previously defaulted in code to this same
+    # value, which silently BCC'd ANY environment that forgot to
+    # override — including prod. Keep the explicit assignment here as
+    # the single source of truth for which environments audit-BCC.
+    CLAIMIT_BCC_EMAIL = "claimitbeta@gmail.com"
   }
   # Keep one warm instance so the genai/Vertex connection warmed at startup
   # (warm_up_*_model) survives idle — otherwise scale-to-zero re-colds it and the

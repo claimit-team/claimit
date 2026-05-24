@@ -437,9 +437,14 @@ async def test_send_uses_user_email_when_connected_email_missing() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_bcc_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_bcc_default_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Opt-in by default: returns None when CLAIMIT_BCC_EMAIL is unset.
+    The previous default ("claimitbeta@gmail.com") was a privacy footgun
+    that silently BCC'd every environment that forgot to override —
+    CodeRabbit Round 2 finding. The demo BCC is now wired explicitly in
+    infra/terraform/main.tf's claim_agent env block."""
     monkeypatch.delenv("CLAIMIT_BCC_EMAIL", raising=False)
-    assert gmail_send_mod.resolve_bcc_from_env() == "claimitbeta@gmail.com"
+    assert gmail_send_mod.resolve_bcc_from_env() is None
 
 
 def test_resolve_bcc_explicit_value(monkeypatch: pytest.MonkeyPatch) -> None:
