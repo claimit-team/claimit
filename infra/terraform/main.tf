@@ -47,6 +47,20 @@ locals {
   ]
 }
 
+# Web app bootstrap config secrets — read by scripts/fetch_env.sh to populate
+# apps/web/.env.local for local development. Managed manually (same pattern
+# as gmail-oauth-* above) because the values aren't sensitive (Firebase web
+# config ships in client JS) and avoiding the terraform declaration means
+# no CI dependency for a developer-only flow. Created out-of-band via:
+#   gcloud secrets create web-firebase-api-key --replication-policy=automatic
+#   gcloud secrets create web-firebase-auth-domain --replication-policy=automatic
+#   gcloud secrets create web-firebase-project-id --replication-policy=automatic
+#   gcloud secrets create web-firebase-storage-bucket --replication-policy=automatic
+#   gcloud secrets create web-firebase-messaging-sender-id --replication-policy=automatic
+#   gcloud secrets create web-firebase-app-id --replication-policy=automatic
+#   gcloud secrets create web-api-base-url --replication-policy=automatic
+# Then populate values via `gcloud secrets versions add`.
+
 resource "google_secret_manager_secret" "shared" {
   for_each  = toset(local.shared_secret_ids)
   secret_id = each.value
