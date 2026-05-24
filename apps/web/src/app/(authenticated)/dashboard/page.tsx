@@ -10,11 +10,11 @@ import {
   Plane,
   ShoppingBag,
   UploadCloud,
-  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
+import { OutcomeRecorder } from "@/components/claims/outcome-recorder";
 import { AutoSendBanner } from "@/components/dashboard/auto-send-banner";
 import { HeroActiveUser } from "@/components/dashboard/hero/active-user";
 import { HeroNewUser } from "@/components/dashboard/hero/new-user";
@@ -33,59 +33,31 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
+import { useAwaitingOutcomeClaims } from "@/hooks/useAwaitingOutcomeClaims";
 import { useDashboardSummary } from "@/hooks/useDashboardSummary";
 import { useMonitoredPurchases } from "@/hooks/useMonitoredPurchases";
 import { usePendingConfirmation } from "@/hooks/usePendingConfirmation";
 import { useQueuedForSendClaims } from "@/hooks/useQueuedForSendClaims";
 import { useReviewDraft } from "@/hooks/useReviewDraft";
 import type { ClaimListItem } from "@/lib/api/claims";
+import type { RecentResolvedClaim } from "@/lib/api/dashboard";
 import type { PurchaseListItem, PurchasesApiError } from "@/lib/api/purchases";
-import { formatWindowRemaining, snakeToTitleLabel } from "@/lib/claims-status";
+import { formatClaimCurrency } from "@/lib/claim-detail";
+import {
+  formatRelativeFromNow,
+  formatWindowRemaining,
+  snakeToTitleLabel,
+} from "@/lib/claims-status";
 import { getListStatusBadge, isMonitoringDegraded } from "@/lib/purchase-status";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useUIStore } from "@/store";
 
 // ============================================================================
-// MOCK DATA
+// USER STATE (dev override + auto-derived)
 // ============================================================================
 
 type UserState = "new" | "active" | "reclaim_experienced";
-
-const mockDashboardData = {
-  // Ticket 5.14 B8: `confirm_extraction` cards now come from the real
-  // `pending_confirmation` purchase list (see `usePendingConfirmation`
-  // + `buildConfirmExtractionItems`).
-  // 5.7 WI-9: `review_draft` cards now come from the real
-  // `outcome=draft_pending` claim list (see `useReviewDraft` +
-  // `buildReviewDraftItems`).
-  // The mock `update_needed` entry below stays as a placeholder until
-  // a backend signal exists for "we need an update on this submitted
-  // claim" (no endpoint today).
-  needsAttention: [
-    {
-      type: "update_needed" as const,
-      claimId: "claim_002",
-      platform: "Hilton",
-      title: "Hilton Waikiki stay",
-      submittedDaysAgo: 6,
-      claimType: "email",
-      requestedAmount: 74,
-    },
-  ],
-  // monitoredPurchases removed in PR2 — the dashboard section now
-  // fetches the real top-N monitoring slice via `useMonitoredPurchases`
-  // (see MonitoredPurchasesSection).
-  recentActivity: [
-    { text: "You marked a Hilton claim approved", time: "2 minutes ago" },
-    { text: "Claim Agent drafted a Best Buy chat script", time: "1 hour ago" },
-    { text: "Monitor Agent checked Southwest pricing", time: "3 hours ago" },
-    { text: "Ingest Agent added a receipt from Gmail", time: "Yesterday" },
-    { text: "Assistant explained a Best Buy policy clause", time: "Yesterday" },
-  ],
-};
 
 // ============================================================================
 // PAGE HEADER + DEV STATE SWITCHER
@@ -149,7 +121,7 @@ function PageHeader({
           Upload receipt
         </Button>
         {/* Dev-only userState switcher — not shipped to production builds */}
-        {process.env.NODE_ENV !== "production" && (
+        {process.env.NODE_ENV === "development" && (
           <>
             <DevStateSwitcher value={userState} onChange={onUserStateChange} />
             <DevPulseTrigger />
@@ -360,139 +332,37 @@ function ConfirmExtractionCard({
   );
 }
 
-function UpdateNeededCard({
-  claimId,
-  platform,
-  title,
-  submittedDaysAgo,
-  claimType,
-  requestedAmount,
-  onDismiss,
+function AwaitingOutcomeCard({
+  item,
+  onRecorded,
 }: {
-  claimId: string;
-  platform: string;
-  title: string;
-  submittedDaysAgo: number;
-  claimType: string;
-  requestedAmount?: number;
-  onDismiss: () => void;
+  item: AwaitingOutcomeItem;
+  onRecorded: () => void | Promise<void>;
 }) {
-  const [expandedAction, setExpandedAction] = useState<"approved" | "denied" | null>(null);
-  const [refundAmount, setRefundAmount] = useState("");
-  const [denialReason, setDenialReason] = useState("");
-  const [dismissed, setDismissed] = useState(false);
-
-  if (dismissed) return null;
-
-  const handleStillWaiting = () => {
-    toast.success("Thanks. We'll remind you later.");
-    setDismissed(true);
-    onDismiss();
-  };
-
-  const handleSaveApproved = () => {
-    toast.success("Outcome recorded. Reclaimed amount updated from your report.");
-    setDismissed(true);
-    onDismiss();
-  };
-
-  const handleSaveDenied = () => {
-    toast.success("Outcome recorded. Claim marked denied.");
-    setDismissed(true);
-    onDismiss();
-  };
-
   return (
-    <Card className={cn("border-neutral-200 transition-opacity", dismissed && "opacity-50")}>
+    <Card className="border-neutral-200">
       <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-4 mb-3">
-          <div className="flex-1 min-w-0">
-            <Badge variant="secondary" className="mb-2 bg-neutral-100 text-neutral-700 border-0">
-              Update needed
-            </Badge>
-            <div className="font-medium text-neutral-900">
-              {platform} claim submitted {submittedDaysAgo} days ago
-            </div>
-            <div className="text-sm text-neutral-600 mt-1">
-              {title} · {claimType === "email" ? "Email" : claimType}
-              {requestedAmount && ` · Requested $${requestedAmount}`}
-            </div>
-          </div>
+        <Badge
+          variant="secondary"
+          className="mb-2 bg-semantic-warning-bg text-semantic-warning border-0"
+        >
+          Needs your update
+        </Badge>
+        <div className="font-medium text-neutral-900 truncate">
+          {item.platform} · {item.title}
         </div>
-
-        {!expandedAction && (
-          <div className="flex items-center gap-2 flex-wrap">
-            <Button size="sm" variant="outline" onClick={() => setExpandedAction("approved")}>
-              <CheckCircle2 className="w-4 h-4 mr-1.5 text-semantic-success" aria-hidden="true" />
-              Mark approved
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setExpandedAction("denied")}>
-              <X className="w-4 h-4 mr-1.5 text-semantic-danger" aria-hidden="true" />
-              Mark denied
-            </Button>
-            <Button size="sm" variant="ghost" onClick={handleStillWaiting}>
-              <Clock className="w-4 h-4 mr-1.5" aria-hidden="true" />
-              Still waiting
-            </Button>
-          </div>
-        )}
-
-        {expandedAction === "approved" && (
-          <div className="mt-3 p-3 bg-neutral-50 rounded-lg border border-neutral-200">
-            <label
-              htmlFor={`refund-amount-${claimId}`}
-              className="block text-sm font-medium text-neutral-700 mb-2"
-            >
-              Refund amount
-            </label>
-            <div className="flex items-center gap-3">
-              <div className="relative flex-1 max-w-32">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">$</span>
-                <Input
-                  id={`refund-amount-${claimId}`}
-                  type="number"
-                  placeholder="0.00"
-                  value={refundAmount}
-                  onChange={(e) => setRefundAmount(e.target.value)}
-                  className="pl-7"
-                />
-              </div>
-              <Button size="sm" onClick={handleSaveApproved}>
-                Save outcome
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setExpandedAction(null)}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {expandedAction === "denied" && (
-          <div className="mt-3 p-3 bg-neutral-50 rounded-lg border border-neutral-200">
-            <label
-              htmlFor={`denial-reason-${claimId}`}
-              className="block text-sm font-medium text-neutral-700 mb-2"
-            >
-              What reason did they give?
-            </label>
-            <Textarea
-              id={`denial-reason-${claimId}`}
-              placeholder="e.g., Price match policy expired, product not eligible..."
-              value={denialReason}
-              onChange={(e) => setDenialReason(e.target.value)}
-              className="mb-3"
-              rows={2}
-            />
-            <div className="flex items-center gap-2">
-              <Button size="sm" onClick={handleSaveDenied}>
-                Save outcome
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setExpandedAction(null)}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        )}
+        <div className="mt-2 mb-3 flex items-center gap-1 text-sm text-neutral-600">
+          <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+          {item.submittedLabel}
+        </div>
+        <OutcomeRecorder
+          claimId={item.claimId}
+          defaultAmount={item.claimAmount}
+          promptLabel="Heard back?"
+          onRecorded={async () => {
+            await onRecorded();
+          }}
+        />
       </CardContent>
     </Card>
   );
@@ -504,6 +374,7 @@ function UpdateNeededCard({
  * later is a single rg-replace.
  */
 const CONFIDENCE_THRESHOLD = 0.95;
+const AWAITING_OUTCOME_MIN_DAYS = 3;
 
 type ConfirmExtractionItem = {
   type: "confirm_extraction";
@@ -515,8 +386,7 @@ type ConfirmExtractionItem = {
 
 /**
  * `review_draft` cards come from `outcome=draft_pending` claims via
- * `useReviewDraft`; an explicit type now that the source no longer
- * lives in `mockDashboardData`.
+ * `useReviewDraft`.
  */
 type ReviewDraftItem = {
   type: "review_draft";
@@ -526,10 +396,17 @@ type ReviewDraftItem = {
   claimType: string;
   windowRemaining: string;
 };
-type UpdateNeededItem = (typeof mockDashboardData.needsAttention)[number] & {
-  type: "update_needed";
+
+type AwaitingOutcomeItem = {
+  type: "awaiting_outcome";
+  claimId: string;
+  platform: string;
+  title: string;
+  claimAmount: number;
+  submittedLabel: string;
 };
-type NeedsAttentionItem = ReviewDraftItem | UpdateNeededItem | ConfirmExtractionItem;
+
+type NeedsAttentionItem = ReviewDraftItem | ConfirmExtractionItem | AwaitingOutcomeItem;
 
 /**
  * `best_buy` → `Best Buy` (Title Case). `snakeToTitleLabel` is
@@ -568,6 +445,26 @@ function buildReviewDraftItems(claims: ClaimListItem[]): ReviewDraftItem[] {
       title: c.product_name ?? "Untitled claim",
       claimType: typeof c.claim_type === "string" ? c.claim_type : "email",
       windowRemaining: formatWindowRemaining(c.window_expires),
+    }));
+}
+
+function buildAwaitingOutcomeItems(claims: ClaimListItem[]): AwaitingOutcomeItem[] {
+  return claims
+    .filter((c): c is ClaimListItem & { _id: string; submitted_at: string } => {
+      if (typeof c._id !== "string" || c._id.trim().length === 0) return false;
+      if (c.submitted_at === null) return false;
+      const ms = Date.parse(c.submitted_at);
+      if (Number.isNaN(ms)) return false;
+      const days = Math.floor((Date.now() - ms) / (24 * 60 * 60 * 1000));
+      return days >= AWAITING_OUTCOME_MIN_DAYS;
+    })
+    .map((c) => ({
+      type: "awaiting_outcome" as const,
+      claimId: c._id,
+      platform: toPlatformLabel(c.platform),
+      title: c.product_name ?? "Untitled claim",
+      claimAmount: c.claim_amount ?? 0,
+      submittedLabel: formatRelativeFromNow(c.submitted_at),
     }));
 }
 
@@ -657,16 +554,22 @@ function humanizeField(field: string): string {
   return DASHBOARD_FIELD_LABEL[field] ?? field.replace(/_/g, " ");
 }
 
-function NeedsAttentionSection({ items }: { items: NeedsAttentionItem[] }) {
-  const [dismissedIds, setDismissedIds] = useState<string[]>([]);
-  const getItemId = (item: (typeof items)[number]): string =>
-    item.type === "confirm_extraction" ? item.purchaseId : item.claimId;
-  const visibleItems = items.filter((item) => !dismissedIds.includes(getItemId(item)));
+function buildRecentActivityText(item: RecentResolvedClaim): string {
+  const platform = toPlatformLabel(item.platform);
+  const outcome = snakeToTitleLabel(item.outcome);
+  const isWinning = item.outcome === "approved" || item.outcome === "user_self_service";
+  return isWinning
+    ? `${platform} claim ${outcome} · ${formatClaimCurrency(item.amount)}`
+    : `${platform} claim ${outcome}`;
+}
 
-  const handleDismiss = (id: string) => {
-    setDismissedIds([...dismissedIds, id]);
-  };
-
+function NeedsAttentionSection({
+  items,
+  onOutcomeRecorded,
+}: {
+  items: NeedsAttentionItem[];
+  onOutcomeRecorded?: () => void | Promise<void>;
+}) {
   return (
     <section>
       <div className="mb-4">
@@ -676,7 +579,7 @@ function NeedsAttentionSection({ items }: { items: NeedsAttentionItem[] }) {
         </p>
       </div>
 
-      {visibleItems.length === 0 ? (
+      {items.length === 0 ? (
         <Card className="border-neutral-200">
           <CardContent className="p-6 text-center">
             <CheckCircle2 className="w-10 h-10 mx-auto text-neutral-300 mb-3" aria-hidden="true" />
@@ -688,7 +591,7 @@ function NeedsAttentionSection({ items }: { items: NeedsAttentionItem[] }) {
         </Card>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {visibleItems.map((item) => {
+          {items.map((item) => {
             if (item.type === "review_draft") {
               return (
                 <ReviewDraftCard
@@ -712,17 +615,12 @@ function NeedsAttentionSection({ items }: { items: NeedsAttentionItem[] }) {
                 />
               );
             }
-            if (item.type === "update_needed") {
+            if (item.type === "awaiting_outcome") {
               return (
-                <UpdateNeededCard
+                <AwaitingOutcomeCard
                   key={item.claimId}
-                  claimId={item.claimId}
-                  platform={item.platform}
-                  title={item.title}
-                  submittedDaysAgo={item.submittedDaysAgo}
-                  claimType={item.claimType}
-                  requestedAmount={item.requestedAmount}
-                  onDismiss={() => handleDismiss(item.claimId)}
+                  item={item}
+                  onRecorded={onOutcomeRecorded ?? (async () => {})}
                 />
               );
             }
@@ -945,31 +843,30 @@ function QuickUploadSection({ gmailConnected }: { gmailConnected: boolean }) {
 // RECENT ACTIVITY
 // ============================================================================
 
-function RecentActivitySection({
-  activities,
-}: {
-  activities: typeof mockDashboardData.recentActivity;
-}) {
+function RecentActivitySection({ items }: { items: RecentResolvedClaim[] }) {
   return (
     <section>
       <Card className="border-neutral-200">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold text-neutral-900">
-            Recent activity
+            Recently resolved
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
-          <ul className="space-y-3">
-            {activities.map((activity) => (
-              <li key={activity.text} className="flex items-start gap-3 text-sm">
-                <div className="w-2 h-2 rounded-full bg-neutral-300 mt-1.5 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <span className="text-neutral-700">{activity.text}</span>
-                  <span className="text-neutral-500 ml-2">{activity.time}</span>
-                </div>
-              </li>
-            ))}
-          </ul>
+          {items.length === 0 ? (
+            <p className="text-sm text-neutral-500">No recent activity yet</p>
+          ) : (
+            <ul className="space-y-3">
+              {items.map((item) => (
+                <li key={item.claim_id} className="flex items-start gap-3 text-sm">
+                  <div className="w-2 h-2 rounded-full bg-neutral-300 mt-1.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-neutral-700">{buildRecentActivityText(item)}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </CardContent>
       </Card>
     </section>
@@ -1003,13 +900,17 @@ export default function DashboardPage() {
   // real users see.
   const [userStateOverride, setUserStateOverride] = useState<UserState | null>(null);
 
-  const { summary, isLoading: isSummaryLoading, error: summaryError } = useDashboardSummary();
+  const {
+    summary,
+    isLoading: isSummaryLoading,
+    error: summaryError,
+    refetch: refetchSummary,
+  } = useDashboardSummary();
   // gmailConnected reads from auth store (AuthInit populates user via getMe()).
   // Previously read from mockDashboardData.gmailConnected, which masked the
   // real backend state — accounts with gmail_integration.connected=true in
   // Mongo were rendering as "not connected" in the dashboard header.
   const gmailConnected = useAuthStore((s) => s.user?.gmail_integration?.connected ?? false);
-  const { needsAttention: mockNeedsAttention, recentActivity } = mockDashboardData;
   const {
     purchases: monitoredPurchases,
     isLoading: isMonitoredLoading,
@@ -1017,6 +918,7 @@ export default function DashboardPage() {
   } = useMonitoredPurchases();
   const { purchases: pendingPurchases } = usePendingConfirmation();
   const { claims: reviewDraftClaims } = useReviewDraft();
+  const { claims: awaitingClaims, refetch: refetchAwaiting } = useAwaitingOutcomeClaims();
   // Ticket 5.15 / WI-9: hydrate the auto-send banner store with the
   // current queued_for_send slice. Live updates after this come via
   // the SSE fanout in useProactiveAssistant (no polling).
@@ -1025,7 +927,7 @@ export default function DashboardPage() {
   const needsAttention: NeedsAttentionItem[] = [
     ...buildConfirmExtractionItems(pendingPurchases),
     ...buildReviewDraftItems(reviewDraftClaims),
-    ...mockNeedsAttention,
+    ...buildAwaitingOutcomeItems(awaitingClaims),
   ];
 
   // Auto-derive userState from real summary data:
@@ -1064,8 +966,13 @@ export default function DashboardPage() {
           <Alert variant="destructive">
             <AlertTitle>We couldn&apos;t load your savings summary.</AlertTitle>
             <AlertDescription>
-              {summaryError.message} Refresh to try again — the rest of the dashboard is still
-              available below.
+              <p className="mb-3 text-sm">{summaryError.message}</p>
+              <p className="mb-3 text-sm text-neutral-600">
+                The rest of the dashboard is still available below.
+              </p>
+              <Button type="button" size="sm" variant="outline" onClick={refetchSummary}>
+                Try again
+              </Button>
             </AlertDescription>
           </Alert>
         )}
@@ -1097,7 +1004,14 @@ export default function DashboardPage() {
 
         {userState !== "new" && <AutoSendBanner />}
 
-        {userState !== "new" && <NeedsAttentionSection items={needsAttention} />}
+        {userState !== "new" && (
+          <NeedsAttentionSection
+            items={needsAttention}
+            onOutcomeRecorded={async () => {
+              await Promise.all([refetchAwaiting(), refetchSummary()]);
+            }}
+          />
+        )}
 
         {userState !== "new" && (
           <MonitoredPurchasesSection
@@ -1113,7 +1027,7 @@ export default function DashboardPage() {
         {userState !== "new" && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <QuickUploadSection gmailConnected={gmailConnected} />
-            <RecentActivitySection activities={recentActivity} />
+            <RecentActivitySection items={summary?.recent_resolved ?? []} />
           </div>
         )}
       </div>

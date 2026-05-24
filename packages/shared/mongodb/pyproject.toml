@@ -1,6 +1,6 @@
 [project]
 name = "claimit-mongodb-models"
-version = "0.1.0"
+version = "0.3.0"
 description = "ClaimIt MongoDB Pydantic v2 models — mirrors the TypeScript definitions in @claimit/mongodb-types (same directory)."
 requires-python = ">=3.11"
 dependencies = [

@@ -163,6 +163,19 @@
       "title": "Claim Amount",
       "type": "number"
     },
+    "reclaimed_amount": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reclaimed Amount"
+    },
     "currency": {
       "const": "USD",
       "title": "Currency",

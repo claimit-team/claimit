@@ -189,10 +189,8 @@ export function ClaimHeader({
         );
 
       case "submitted":
-        // Submitted to the merchant — no user-driven action until they
-        // reply. The MarkResultSection that used to surface here for
-        // manual outcome marking has been removed (no backend endpoint
-        // yet); see claim-detail-shell.tsx FIXME.
+        // Submitted to the merchant — outcome reporting lives in
+        // ClaimOutcomePrompt below PostApproveBanner in the shell.
         return null;
 
       case "approved":

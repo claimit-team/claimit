@@ -319,11 +319,9 @@ function buildResolutionFields(claim: ClaimDetailDoc): {
     denial_reason?: string;
     cancel_reason?: string;
   } = { outcome };
-  if (outcome === "approved" && claim.claim_amount !== null) {
-    // No separate "reclaimed amount" field on the API yet — the
-    // claimed amount is the faithful proxy for "Reclaimed $X" copy
-    // in the header. Real reclaimed amount will need a backend field.
-    out.outcome_amount = claim.claim_amount;
+  if (outcome === "approved") {
+    const amount = claim.reclaimed_amount ?? claim.claim_amount;
+    if (amount !== null) out.outcome_amount = amount;
   }
   if (outcome === "denied") {
     const reason = claim.denial_reason_extracted ?? claim.outcome_note ?? null;

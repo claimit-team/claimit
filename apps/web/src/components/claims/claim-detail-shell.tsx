@@ -27,6 +27,7 @@ import { ApproveConfirmDialog } from "@/components/claims/approve-confirm-dialog
 import { AssistantPane } from "@/components/claims/assistant-pane";
 import { CancelConfirmDialog } from "@/components/claims/cancel-confirm-dialog";
 import { ClaimHeader } from "@/components/claims/claim-header";
+import { ClaimOutcomePrompt } from "@/components/claims/claim-outcome-prompt";
 import type { DraftMode } from "@/components/claims/draft-pane";
 import { DraftPane } from "@/components/claims/draft-pane";
 import { EvidencePane } from "@/components/claims/evidence-pane";
@@ -97,12 +98,16 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
     }
     if (redraftProgress.timedOut) return;
     const remaining = redraftProgress.startedAt + REDRAFT_TIMEOUT_MS - Date.now();
-    const timer = window.setTimeout(
-      () => {
-        markTimedOut(claim.claim_id);
-      },
-      Math.max(remaining, 0),
-    );
+    if (remaining <= 0) {
+      // Deadline already passed (e.g. user left mid-redraft and came back later):
+      // mark state timed-out but don't announce a stale failure with a toast on mount.
+      markTimedOut(claim.claim_id);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      markTimedOut(claim.claim_id);
+      toast.error("Couldn't redraft. Please try again.");
+    }, remaining);
     return () => window.clearTimeout(timer);
   }, [
     claim.claim_id,
@@ -375,6 +380,8 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
       />
 
       <PostApproveBanner claim={claim} />
+
+      <ClaimOutcomePrompt claim={claim} refetch={refetch} applyOptimistic={applyOptimistic} />
 
       <div className="min-h-0 flex-1 overflow-hidden bg-neutral-50">
         {isDesktop ? renderDesktopLayout() : isTablet ? renderTabletLayout() : renderMobileLayout()}

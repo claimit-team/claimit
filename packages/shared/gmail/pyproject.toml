@@ -1,7 +1,7 @@
 [project]
 name = "claimit-gmail"
-version = "0.1.0"
-description = "ClaimIt shared Gmail helpers — users.watch registration with retry, persistence, and failure surfacing. Used by api-gateway (OAuth callback BackgroundTask) and ingest-agent (4.16 daily renewal cron)."
+version = "0.2.0"
+description = "ClaimIt shared Gmail helpers — users.watch registration (4.15-4.16) and users.messages.send (4.18). Used by api-gateway, ingest-agent, and claim-agent."
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.27.0",

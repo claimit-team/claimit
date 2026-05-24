@@ -27,6 +27,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useAssistantStream } from "@/hooks/useAssistantStream";
 import { useConversations } from "@/hooks/useConversations";
@@ -41,6 +42,13 @@ const EXAMPLE_PROMPTS: string[] = [
 
 type Bucket = "Today" | "Yesterday" | "Last 7 days" | "Older";
 const BUCKET_ORDER: Bucket[] = ["Today", "Yesterday", "Last 7 days", "Older"];
+
+// Auto-scroll-to-bottom pins the viewport only when the user is within this
+// many pixels of the bottom. Above the threshold, message-list updates do not
+// scroll — so a user who scrolled up to re-read history isn't yanked back by
+// every incoming token during streaming. 100px matches the feel of ChatGPT /
+// Claude.ai (a small slack for trackpad inertial scroll near the bottom).
+const AUTOSCROLL_THRESHOLD_PX = 100;
 
 function bucketFor(isoTimestamp: string): Bucket {
   const then = new Date(isoTimestamp);
@@ -243,9 +251,13 @@ function ConversationList({
         />
       </div>
       {isLoading && conversations.length === 0 ? (
-        <div className="flex items-center gap-2 px-3 text-sm text-neutral-500">
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-          Loading conversations…
+        <div className="space-y-1">
+          {(["a", "b", "c", "d", "e"] as const).map((key) => (
+            <div key={key} className="flex flex-col gap-0.5 rounded-lg px-3 py-2">
+              <Skeleton className="h-4 w-[70%]" />
+              <Skeleton className="h-3 w-[40%]" />
+            </div>
+          ))}
         </div>
       ) : groupedList.length === 0 ? (
         <p className="px-3 text-sm text-neutral-500">
@@ -288,6 +300,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
     conversations,
     isLoading: convLoading,
     error: convError,
+    refetch: refetchConversations,
     createConversation,
     renameConversation,
     archiveConversation,
@@ -334,9 +347,58 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
     else reset();
   }, [active, hydrate, reset, streaming]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `messages` is the intentional trigger for the scroll effect even though the body doesn't read it
+  // Track whether the user is currently near the bottom of the message list.
+  // Stored in a ref (not state) so the auto-scroll effect below depends only
+  // on `messages` — otherwise every scroll event would re-fire the effect and
+  // double-scroll. The ref is read at effect time, so its current value
+  // (set by the scroll handler below) is what governs auto-pin behavior.
+  const isAtBottomRef = useRef(true);
+
+  // Attach a scroll listener to the actual scrolling element. The shadcn
+  // ScrollArea shim doesn't forward refs to its BaseUI Viewport, so we walk
+  // up from the bottom sentinel until we find the element with the
+  // `data-slot="scroll-area-viewport"` attribute (set by the shim — see
+  // components/ui/scroll-area.tsx:20). This isolates us from BaseUI's
+  // internal class structure while still letting us measure scroll
+  // position on the right element.
+  //
+  // Dep is `[active?._id]`, NOT `[]`: the active-conversation branch of
+  // mainPaneContent only mounts when a conversation is selected, so the
+  // bottomRef sentinel doesn't exist on the initial empty-state render.
+  // A `[]`-keyed effect would run once with `bottomRef.current === null`
+  // and never reattach when the active branch mounts. Keying on the id
+  // (the string, not the `active` object reference — the conversations
+  // array refetches periodically and replaces the object even when the
+  // id is unchanged) makes the effect rerun on conversation
+  // load / switch so the listener is always bound to the live viewport.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: active?._id is the intentional re-bind trigger; we don't read it inside the body
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    // Conversation switch: pin to bottom regardless of where the user
+    // left the previous conversation's scroll. A new conversation
+    // should always open at the most-recent message. Mirrors the
+    // force-pin in sendDraftIfPossible below.
+    isAtBottomRef.current = true;
+
+    const sentinel = bottomRef.current;
+    if (!sentinel) return;
+    const viewport = sentinel.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    if (!viewport) return;
+    const handler = () => {
+      const distFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      isAtBottomRef.current = distFromBottom < AUTOSCROLL_THRESHOLD_PX;
+    };
+    viewport.addEventListener("scroll", handler, { passive: true });
+    handler();
+    return () => {
+      viewport.removeEventListener("scroll", handler);
+    };
+  }, [active?._id]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `messages` is the intentional trigger; isAtBottomRef.current is read fresh on each tick and intentionally NOT in the dep list
+  useEffect(() => {
+    if (isAtBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    }
   }, [messages]);
 
   async function sendDraftIfPossible() {
@@ -351,14 +413,22 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
         convId = created._id;
         router.push(`/assistant/${convId}`);
       } catch {
+        toast.error("Couldn't start a new conversation. Please try again.");
         return;
       }
     }
+    // When the user sends, force-pin to bottom regardless of previous scroll
+    // position — they're signaling intent to follow the new exchange. The
+    // scroll handler will update this ref naturally on subsequent user scrolls.
+    isAtBottomRef.current = true;
     await sendMessage(convId, text);
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    // Enter sends; Shift+Enter inserts a newline. isComposing stops a send while
+    // an IME (e.g. Chinese pinyin) is composing — Enter there confirms a
+    // candidate, not a submit.
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void sendDraftIfPossible();
     }
@@ -485,7 +555,8 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
             </Button>
           </div>
           <p className="mx-auto mt-2 max-w-4xl text-center text-[11px] text-neutral-400">
-            Ctrl/Cmd + Enter to send — a new conversation is created on first message.
+            Enter to send · Shift+Enter for newline — a new conversation is created on first
+            message.
           </p>
         </div>
       </>
@@ -553,7 +624,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
             <div ref={bottomRef} aria-hidden="true" />
           </div>
         </ScrollArea>
-        <div className="border-t border-neutral-200 bg-neutral-0 px-4 py-3 lg:px-8">
+        <div className="border-t border-neutral-200 bg-neutral-0 px-4 py-3 lg:px-8 shrink-0">
           <div className="mx-auto flex max-w-4xl gap-3 items-end flex-wrap md:flex-nowrap">
             <Textarea
               value={draft}
@@ -575,7 +646,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
             </Button>
           </div>
           <p className="mx-auto mt-2 max-w-4xl text-center text-[11px] text-neutral-400">
-            Ctrl/Cmd + Enter to send.
+            Enter to send · Shift+Enter for newline.
           </p>
         </div>
       </>
@@ -611,7 +682,12 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
         {convError ? (
           <Alert variant="destructive" className="mx-3 mt-3">
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{convError.message}</AlertDescription>
+            <AlertDescription>
+              <p className="mb-3 text-sm">{convError.message}</p>
+              <Button type="button" size="sm" variant="outline" onClick={refetchConversations}>
+                Try again
+              </Button>
+            </AlertDescription>
           </Alert>
         ) : null}
         <ScrollArea className="min-h-0 flex-1">

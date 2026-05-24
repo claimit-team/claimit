@@ -42,6 +42,20 @@ export function snakeToTitleLabel(raw: string | null | undefined): string {
 }
 
 /**
+ * Brand-style platform label: `best_buy` → `Best Buy`, `hilton` → `Hilton`.
+ * Matches the detail VM's `safePlatformLabel` and the dashboard's local
+ * `toPlatformLabel` helper (Title Case on each `_`-segment).
+ */
+export function toPlatformLabel(raw: string | null | undefined): string {
+  if (raw === null || raw === undefined || raw === "") return "Unknown platform";
+  return raw
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+/**
  * `outcome` may be `null` (legacy doc never populated it) or a string
  * the current `ClaimOutcome` enum no longer recognises (PR #142). Both
  * cases land in `resolved` — better to surface the row in the most
@@ -101,4 +115,17 @@ export function formatWindowRemaining(windowExpires: string | null): string {
   if (Number.isNaN(expiresMs)) return "—";
   const hoursRemaining = Math.floor((expiresMs - Date.now()) / (60 * 60 * 1000));
   return formatClaimRemainingTime(hoursRemaining);
+}
+
+/**
+ * Relative copy for a claim's `submitted_at` timestamp.
+ * Shared by the /claims list and dashboard awaiting-outcome cards.
+ */
+export function formatRelativeFromNow(iso: string): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "—";
+  const days = Math.floor((Date.now() - ms) / (24 * 60 * 60 * 1000));
+  if (days < 1) return "Submitted today";
+  if (days === 1) return "Submitted 1 day ago";
+  return `Submitted ${days} days ago`;
 }

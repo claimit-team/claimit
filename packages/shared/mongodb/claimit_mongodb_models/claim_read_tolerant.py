@@ -91,6 +91,7 @@ class ClaimReadTolerant(BaseDocument):
     user_id: UUID | None = None
     platform: str | None = None
     claim_amount: float | None = None
+    reclaimed_amount: float | None = None
     currency: str | None = None
     claim_type: str | None = None
     draft_content: str | None = None
@@ -103,6 +104,8 @@ class ClaimReadTolerant(BaseDocument):
     evidence_screenshot_url: str | None = None
     send_override: str | None = None
     auto_send_at: datetime | None = None
+    subject: str | None = None
+    recipient_email: str | None = None
     gmail_message_id: str | None = None
     submitted_at: datetime | None = None
     submitted_via: str | None = None
