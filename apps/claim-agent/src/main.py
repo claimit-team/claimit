@@ -363,11 +363,19 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             generated_by=DraftGeneratedBy.AGENT,
             at=now,
         )
+        # `subject` and `recipient_email` come from the ClaimDraft (draft/
+        # models.py:12-13) and only matter for EMAIL-type claims; for chat/
+        # in-store/self-service drafts these stay None. We persist them now
+        # so the send phase (submit_claim → gmail_send, ticket 4.18) has a
+        # stable target without re-running the LLM or re-resolving policy.
+        is_email_claim = claim_plan.claim_type == ClaimType.EMAIL
         final_claim = temp_claim.model_copy(
             update={
                 "draft_content": draft.draft_content,
                 "draft_versions": [generated_version],
                 "policy_clause_cited": draft.policy_clause_cited,
+                "subject": draft.subject if is_email_claim else None,
+                "recipient_email": draft.to_address if is_email_claim else None,
                 "self_eval_score": eval_result.scores if eval_result is not None else None,
                 "self_eval_attempts": attempts,
             }

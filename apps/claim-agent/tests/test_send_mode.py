@@ -41,7 +41,14 @@ def _make_user(default_mode: SendMode = SendMode.APPROVAL, **overrides) -> Magic
 
 
 def _make_tolerant_claim(**overrides) -> ClaimReadTolerant:
-    claim = MagicMock(spec=ClaimReadTolerant)
+    # `spec=ClaimReadTolerant` would honor the real schema, but Pydantic
+    # 2's class-level attribute introspection via mock's spec= doesn't
+    # round-trip the field list reliably (`dir(model_cls)` excludes
+    # field names in some pydantic 2.x point-releases). Dropping spec=
+    # lets us configure whatever attributes the code-under-test reads;
+    # the test is still typed at the call sites where attributes are
+    # consumed.
+    claim = MagicMock()
     claim.id = uuid4()
     claim.user_id = uuid4()
     claim.purchase_id = uuid4()
@@ -49,6 +56,11 @@ def _make_tolerant_claim(**overrides) -> ClaimReadTolerant:
     claim.currency = "USD"
     claim.evidence_screenshot_url = None
     claim.draft_content = "Email draft body"
+    # Ticket 4.18: subject + recipient_email are persisted at draft time
+    # and read by submit_claim's EMAIL branch. Provide sensible defaults
+    # so tests that don't care about the send-path don't have to set them.
+    claim.subject = "Test subject"
+    claim.recipient_email = "claims@example.com"
     claim.claim_amount = 20.0
     claim.outcome = ClaimOutcome.QUEUED_FOR_SEND
     for k, v in overrides.items():
@@ -246,22 +258,35 @@ async def test_auto_send_worker_rolls_back_on_publish_failure() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 6f — submit_claim EMAIL path uses stub and logs a warning
+# 6f — submit_claim EMAIL path dispatches via gmail_send (ticket 4.18)
+#
+# Previously this test pinned the stub behavior (gmail_message_id=None,
+# warning log "awaiting task 4.18"). 4.18 replaced the stub with a real
+# call into claimit_gmail.gmail_send; the assertion is now that the
+# returned message_id flows through to SubmitResult and that the result
+# carries SubmittedVia.GMAIL_SEND. Deeper coverage of the gmail-send
+# integration (typed exception mapping, missing-field rejection, etc.)
+# lives in test_submit_claim_gmail.py.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_submit_claim_email_uses_stub(caplog: pytest.LogCaptureFixture) -> None:
-    import logging
-
+async def test_submit_claim_email_dispatches_via_gmail_send() -> None:
     claim = _make_tolerant_claim(claim_type=ClaimType.EMAIL)
     user = _make_user()
     db = AsyncMock()
     db.partial_update.return_value = True
 
-    with caplog.at_level(logging.WARNING, logger="src.submit_claim"):
+    fake_gmail_result = MagicMock()
+    fake_gmail_result.message_id = "msg-4.18"
+    fake_gmail_result.thread_id = "thr-1"
+    fake_gmail_result.sent_at = datetime.now(UTC)
+
+    with (
+        patch("src.submit_claim.gmail_send", new=AsyncMock(return_value=fake_gmail_result)),
+        patch("src.submit_claim.secretmanager.SecretManagerServiceClient", return_value=MagicMock()),
+    ):
         result = await submit_claim(claim, user, db)
 
     assert result.submitted_via == SubmittedVia.GMAIL_SEND
-    assert result.gmail_message_id is None
-    assert any("awaiting task 4.18" in r.message for r in caplog.records)
+    assert result.gmail_message_id == "msg-4.18"

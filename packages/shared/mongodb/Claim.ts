@@ -44,6 +44,13 @@ export interface Claim {
   evidence_screenshot_url: string | null;
   send_override: SendMode | null;
   auto_send_at: ISODateString | null;
+  /**
+   * LLM-generated subject + platform CS address resolved at draft time.
+   * Persisted so the send phase doesn't have to re-run the LLM or
+   * re-resolve policy. Null on non-EMAIL claim_types.
+   */
+  subject: string | null;
+  recipient_email: string | null;
   gmail_message_id: string | null;
   submitted_at: ISODateString | null;
   submitted_via: SubmittedVia | null;
