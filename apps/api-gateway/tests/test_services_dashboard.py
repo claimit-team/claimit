@@ -164,6 +164,29 @@ async def test_pipeline_recent_resolved_limit_and_sort() -> None:
 
 
 @pytest.mark.asyncio
+async def test_pipeline_savings_sums_ifnull_reclaimed_amount() -> None:
+    db = _mock_db()
+    await dashboard.get_summary(db, _USER_ID)
+    pipeline = db.aggregate.call_args.args[1]
+    facet_stage = pipeline[1]["$facet"]
+    expected_sum = {"$sum": {"$ifNull": ["$reclaimed_amount", "$claim_amount"]}}
+
+    month_group = facet_stage["savings_month"][1]["$group"]
+    lifetime_group = facet_stage["savings_lifetime"][1]["$group"]
+    assert month_group["total"] == expected_sum
+    assert lifetime_group["total"] == expected_sum
+
+
+@pytest.mark.asyncio
+async def test_pipeline_recent_resolved_amount_uses_ifnull() -> None:
+    db = _mock_db()
+    await dashboard.get_summary(db, _USER_ID)
+    pipeline = db.aggregate.call_args.args[1]
+    project_stage = pipeline[1]["$facet"]["recent_resolved"][3]["$project"]
+    assert project_stage["amount"] == {"$ifNull": ["$reclaimed_amount", "$claim_amount"]}
+
+
+@pytest.mark.asyncio
 async def test_pipeline_month_filter_uses_utc_start_of_month() -> None:
     """Locked design decision: month = UTC calendar month (start inclusive, end exclusive)."""
     db = _mock_db()

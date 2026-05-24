@@ -74,6 +74,7 @@ def make_claim(
         "user_id": user_id,
         "platform": platform,
         "claim_amount": claim_amount,
+        "reclaimed_amount": None,
         "currency": "USD",
         "claim_type": "email",
         "draft_content": "Test draft body.",

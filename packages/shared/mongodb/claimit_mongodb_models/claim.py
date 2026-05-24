@@ -39,6 +39,10 @@ class Claim(BaseDocument):
     user_id: UUID
     platform: Platform
     claim_amount: float = Field(gt=0)
+    # Actual refund recovered (user-reported now, auto-detected later);
+    # None until an `approved` outcome is recorded. Distinct from
+    # claim_amount (the requested amount).
+    reclaimed_amount: float | None = Field(default=None, gt=0)
     currency: Literal["USD"]
     claim_type: ClaimType
     draft_content: str

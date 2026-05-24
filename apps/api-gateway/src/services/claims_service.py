@@ -825,6 +825,91 @@ async def cancel_claim(
     return {"success": True}
 
 
+async def record_claim_outcome(
+    db: MongoDBClient,
+    user_id: UUID,
+    claim_id: UUID,
+    *,
+    outcome: str,
+    reclaimed_amount: float | None = None,
+    denial_reason: str | None = None,
+) -> dict[str, object]:
+    """Record a merchant outcome (approved/denied) for a submitted claim.
+
+    Allowed when the claim is PENDING (first record) or already
+    APPROVED/DENIED (correction). Sets `resolved_at` and, on approval,
+    persists `reclaimed_amount` (explicit or fallback to `claim_amount`).
+    """
+    claim = await _load_owned_claim(db, claim_id, user_id)
+
+    if claim.outcome not in (
+        ClaimOutcome.PENDING.value,
+        ClaimOutcome.APPROVED.value,
+        ClaimOutcome.DENIED.value,
+    ):
+        raise ApiError(
+            "invalid_state",
+            f"Claim outcome cannot be recorded in state {claim.outcome!r}",
+            status_code=409,
+        )
+
+    now = datetime.now(UTC)
+
+    if outcome == ClaimOutcome.APPROVED.value:
+        if reclaimed_amount is not None and reclaimed_amount <= 0:
+            raise ApiError(
+                "invalid_reclaimed_amount",
+                "reclaimed_amount must be greater than zero when provided",
+                status_code=422,
+            )
+        effective_reclaimed = (
+            reclaimed_amount
+            if reclaimed_amount is not None and reclaimed_amount > 0
+            else claim.claim_amount
+        )
+        if effective_reclaimed is None or effective_reclaimed <= 0:
+            raise ApiError(
+                "invalid_reclaimed_amount",
+                "Claim has no valid amount to record as reclaimed",
+                status_code=422,
+            )
+        updates: dict[str, Any] = {
+            "outcome": ClaimOutcome.APPROVED.value,
+            "reclaimed_amount": effective_reclaimed,
+            "outcome_note": None,
+            "denial_reason_extracted": None,
+            "resolved_at": now,
+        }
+        response_outcome_note: str | None = None
+    elif outcome == ClaimOutcome.DENIED.value:
+        updates = {
+            "outcome": ClaimOutcome.DENIED.value,
+            "reclaimed_amount": None,
+            "outcome_note": denial_reason,
+            "denial_reason_extracted": None,
+            "resolved_at": now,
+        }
+        response_outcome_note = denial_reason
+    else:
+        raise ApiError(
+            "invalid_outcome",
+            f"Unsupported outcome {outcome!r}",
+            status_code=422,
+        )
+
+    success = await db.partial_update("claims", claim_id, updates, model=Claim)
+    if not success:
+        raise ApiError("claim_not_found", "Claim not found", status_code=404)
+
+    return {
+        "claim_id": str(claim_id),
+        "outcome": outcome,
+        "reclaimed_amount": updates.get("reclaimed_amount"),
+        "resolved_at": to_json_datetime(now),
+        "outcome_note": response_outcome_note,
+    }
+
+
 async def edit_claim_draft(
     db: MongoDBClient,
     user_id: UUID,
@@ -1001,4 +1086,5 @@ __all__ = [
     "get_claim_detail",
     "list_claims",
     "list_claims_for_purchase",
+    "record_claim_outcome",
 ]
