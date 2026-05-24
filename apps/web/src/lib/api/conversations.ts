@@ -12,6 +12,7 @@
  * and AbortSignal lifecycle management tied to the React component tree.
  */
 
+import { friendlyMessage } from "@/lib/api/errors";
 import { auth } from "@/lib/firebase";
 import type { Conversation, ConversationMode } from "@/types/assistant";
 
@@ -51,7 +52,7 @@ export class ConversationsApiError extends Error {
   }
 }
 
-async function _request<T>(path: string, init: RequestInit, failureMessage: string): Promise<T> {
+async function _request<T>(path: string, init: RequestInit, _failureMessage: string): Promise<T> {
   if (!API_BASE_URL) {
     throw new ConversationsApiError(
       "missing_api_base_url",
@@ -92,16 +93,15 @@ async function _request<T>(path: string, init: RequestInit, failureMessage: stri
 
   if (!response.ok) {
     let code = "request_failed";
-    let message = `${failureMessage} (${response.status})`;
     try {
       const body = (await response.json()) as {
         error?: { code?: string; message?: string };
       };
       code = body.error?.code ?? code;
-      message = body.error?.message ?? message;
     } catch {
       // Non-JSON body; keep defaults.
     }
+    const message = friendlyMessage(response.status, code);
     throw new ConversationsApiError(code, message);
   }
 

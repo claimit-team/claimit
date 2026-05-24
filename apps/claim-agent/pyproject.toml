@@ -19,6 +19,8 @@ dependencies = [
     "claimit-elastic",
     "claimit-search",
     "claimit-maps",
+    "claimit-gmail",
+    "google-cloud-secret-manager>=2.20.0",
 ]
 
 [tool.uv.sources]
@@ -29,6 +31,7 @@ claimit-pubsub = { path = "../../packages/shared/pubsub" }
 claimit-search = { path = "../../packages/shared/search" }
 claimit-elastic = { path = "../../packages/shared/elastic" }
 claimit-maps = { path = "../../packages/shared/maps" }
+claimit-gmail = { path = "../../packages/shared/gmail" }
 
 [dependency-groups]
 dev = [

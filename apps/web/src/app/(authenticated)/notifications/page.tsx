@@ -5,6 +5,7 @@ import { isToday, isYesterday, parseISO } from "date-fns";
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import { NotificationEmpty } from "@/components/notifications/notification-empty";
 import {
@@ -14,6 +15,7 @@ import {
 import { NotificationGroupSection } from "@/components/notifications/notification-group";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useNotifications } from "@/hooks/useNotifications";
 
 type Group = { label: string; events: NotificationEvent[] };
@@ -88,6 +90,7 @@ export default function NotificationsPage() {
     isLoading,
     isLoadingMore,
     error,
+    refetch,
     loadMore,
     ack,
     ackAll,
@@ -101,7 +104,7 @@ export default function NotificationsPage() {
     // Failures are non-fatal — we still let the user reach the detail
     // page; the next refetch will reconcile.
     void ack(n._id).catch(() => {
-      // Swallow: useNotifications already rolled back local state.
+      toast.error("Couldn't update that notification. Please try again.");
     });
     if (dest) router.push(dest);
   };
@@ -109,9 +112,9 @@ export default function NotificationsPage() {
   const handleMarkAllRead = async () => {
     try {
       await ackAll();
+      toast.success("All notifications marked as read.");
     } catch {
-      // Swallow: useNotifications rolled back local state and surfaced
-      // the error in the page-level alert below if we wanted to read it.
+      toast.error("Couldn't mark all as read. Please try again.");
     }
   };
 
@@ -147,13 +150,29 @@ export default function NotificationsPage() {
 
       {error ? (
         <Alert variant="destructive">
-          <AlertDescription>{error.message}</AlertDescription>
+          <AlertDescription>
+            <p className="mb-3 text-sm">{error.message}</p>
+            <Button type="button" size="sm" variant="outline" onClick={refetch}>
+              Try again
+            </Button>
+          </AlertDescription>
         </Alert>
       ) : null}
 
       {showInitialSkeleton ? (
-        <div className="flex h-48 items-center justify-center rounded-xl border border-neutral-200 bg-neutral-0">
-          <Loader2 className="h-5 w-5 animate-spin text-neutral-400" aria-label="Loading" />
+        <div className="-mx-4 overflow-hidden rounded-xl border border-neutral-200 bg-neutral-0 shadow-sm lg:mx-0">
+          <Skeleton className="h-10 w-24 mx-4 my-3 sm:mx-6" />
+          <div className="max-h-[min(70dvh,640px)] overflow-y-auto">
+            {(["a", "b", "c", "d", "e", "f"] as const).map((key) => (
+              <div key={key} className="flex gap-4 border-b border-neutral-100 px-4 py-4 sm:px-6">
+                <Skeleton className="h-10 w-10 shrink-0 rounded-full" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Skeleton className="h-4 w-1/3" />
+                  <Skeleton className="h-3 w-2/3" />
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       ) : groups.length === 0 ? (
         <NotificationEmpty

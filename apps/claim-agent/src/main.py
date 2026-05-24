@@ -42,7 +42,7 @@ from .orchestrate_eval import evaluate_and_maybe_regenerate
 from .plan import PriceDroppedEvent, plan_claim
 from .redraft_idempotency import mark_redraft_event_done, try_claim_redraft_event
 from .send_mode import determine_send_mode, handle_approval_mode, handle_auto_mode
-from .submit_claim import publish_claim_approved, submit_claim
+from .submit_claim import ClaimSubmissionError, publish_claim_approved, submit_claim
 from .validator import validate
 
 _log = logging.getLogger(__name__)
@@ -438,11 +438,19 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             generated_by=DraftGeneratedBy.AGENT,
             at=now,
         )
+        # `subject` and `recipient_email` come from the ClaimDraft (draft/
+        # models.py:12-13) and only matter for EMAIL-type claims; for chat/
+        # in-store/self-service drafts these stay None. We persist them now
+        # so the send phase (submit_claim → gmail_send, ticket 4.18) has a
+        # stable target without re-running the LLM or re-resolving policy.
+        is_email_claim = claim_plan.claim_type == ClaimType.EMAIL
         final_claim = temp_claim.model_copy(
             update={
                 "draft_content": draft.draft_content,
                 "draft_versions": [generated_version],
                 "policy_clause_cited": draft.policy_clause_cited,
+                "subject": draft.subject if is_email_claim else None,
+                "recipient_email": draft.to_address if is_email_claim else None,
                 "self_eval_score": eval_result.scores if eval_result is not None else None,
                 "self_eval_attempts": attempts,
             }
@@ -586,7 +594,31 @@ async def handle_claim_approved(request: Request) -> dict[str, str]:
             )
             return {"status": "error", "reason": "user_not_found"}
 
-        await submit_claim(claim, user, db)
+        try:
+            await submit_claim(claim, user, db)
+        except ClaimSubmissionError as submit_err:
+            # User-approved path has no retry cron (the auto-send loop
+            # only picks up QUEUED_FOR_SEND). Both terminal and transient
+            # failures revert the claim to DRAFT_PENDING with an
+            # outcome_note the UI can render; the user re-approves to
+            # try again (or fixes the underlying issue — re-connecting
+            # Gmail, re-drafting to populate recipient_email).
+            _log.warning(
+                "claim_agent.approved.submission_failed claim_id=%s terminal=%s err=%s",
+                claim_id,
+                submit_err.is_terminal,
+                submit_err,
+            )
+            await db.partial_update(
+                "claims",
+                str(claim_id),
+                {
+                    "outcome": ClaimOutcome.DRAFT_PENDING.value,
+                    "outcome_note": str(submit_err),
+                },
+            )
+            return {"status": "error", "reason": "submission_failed"}
+
         _log.info("claim_agent.approved.submitted claim_id=%s", claim_id)
         return {"status": "ok"}
 
@@ -637,7 +669,40 @@ async def handle_auto_send(request: Request) -> dict:
 
             previous_auto_send_at = current.auto_send_at
 
-            submit_result = await submit_claim(current, user, db)
+            try:
+                submit_result = await submit_claim(current, user, db)
+            except ClaimSubmissionError as submit_err:
+                # Terminal: claim cannot send without external intervention
+                # (revoked Gmail grant, missing subject/recipient from a
+                # legacy draft). Park in DRAFT_PENDING so the user-facing
+                # UI surfaces the error via outcome_note and the cron
+                # stops picking it up. Transient: leave the claim queued
+                # so the next minute's tick retries — this preserves the
+                # pre-4.18 retry behavior for network blips / quota.
+                if submit_err.is_terminal:
+                    _log.warning(
+                        "claim_agent.auto_send.terminal_failure claim_id=%s err=%s",
+                        current.id,
+                        submit_err,
+                    )
+                    await db.partial_update(
+                        "claims",
+                        current.id,
+                        {
+                            "outcome": ClaimOutcome.DRAFT_PENDING.value,
+                            "outcome_note": str(submit_err),
+                            "auto_send_at": None,
+                        },
+                    )
+                else:
+                    _log.warning(
+                        "claim_agent.auto_send.transient_failure claim_id=%s err=%s "
+                        "(will retry on next tick)",
+                        current.id,
+                        submit_err,
+                    )
+                results["errors"] += 1
+                continue
 
             try:
                 await publish_claim_approved(
@@ -822,16 +887,28 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
         final_draft = draft
 
         now = datetime.now(UTC)
+        # Ticket 4.18: persist the (possibly updated) email subject +
+        # recipient address on EMAIL redrafts so the send phase still has
+        # them after the new draft version lands. The LLM may have
+        # re-generated the subject for the new draft; recipient_email is
+        # stable from policy but we refresh it for symmetry with the
+        # initial-draft persistence in handle_price_dropped (line ~370).
+        # Non-EMAIL claim types leave these fields alone (they were
+        # written as None at initial draft and stay None).
+        redraft_extra_updates: dict = {
+            "self_eval_score": None,
+            "self_eval_attempts": getattr(claim, "self_eval_attempts", 0),
+        }
+        if claim_type_enum == ClaimType.EMAIL:
+            redraft_extra_updates["subject"] = final_draft.subject
+            redraft_extra_updates["recipient_email"] = final_draft.to_address
         next_version = await db.atomic_append_draft_version(
             "claims",
             event.claim_id,
             content=final_draft.draft_content,
             generated_by=DraftGeneratedBy.ASSISTANT_REDRAFT,
             at=now,
-            extra_updates={
-                "self_eval_score": None,
-                "self_eval_attempts": getattr(claim, "self_eval_attempts", 0),
-            },
+            extra_updates=redraft_extra_updates,
         )
         new_version = DraftVersion(
             version=next_version,

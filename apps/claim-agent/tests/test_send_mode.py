@@ -41,7 +41,14 @@ def _make_user(default_mode: SendMode = SendMode.APPROVAL, **overrides) -> Magic
 
 
 def _make_tolerant_claim(**overrides) -> ClaimReadTolerant:
-    claim = MagicMock(spec=ClaimReadTolerant)
+    # `spec=ClaimReadTolerant` would honor the real schema, but Pydantic
+    # 2's class-level attribute introspection via mock's spec= doesn't
+    # round-trip the field list reliably (`dir(model_cls)` excludes
+    # field names in some pydantic 2.x point-releases). Dropping spec=
+    # lets us configure whatever attributes the code-under-test reads;
+    # the test is still typed at the call sites where attributes are
+    # consumed.
+    claim = MagicMock()
     claim.id = uuid4()
     claim.user_id = uuid4()
     claim.purchase_id = uuid4()
@@ -49,6 +56,11 @@ def _make_tolerant_claim(**overrides) -> ClaimReadTolerant:
     claim.currency = "USD"
     claim.evidence_screenshot_url = None
     claim.draft_content = "Email draft body"
+    # Ticket 4.18: subject + recipient_email are persisted at draft time
+    # and read by submit_claim's EMAIL branch. Provide sensible defaults
+    # so tests that don't care about the send-path don't have to set them.
+    claim.subject = "Test subject"
+    claim.recipient_email = "claims@example.com"
     claim.claim_amount = 20.0
     claim.outcome = ClaimOutcome.QUEUED_FOR_SEND
     for k, v in overrides.items():
@@ -246,22 +258,136 @@ async def test_auto_send_worker_rolls_back_on_publish_failure() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 6f — submit_claim EMAIL path uses stub and logs a warning
+# 6f — submit_claim EMAIL path dispatches via gmail_send (ticket 4.18)
+#
+# Previously this test pinned the stub behavior (gmail_message_id=None,
+# warning log "awaiting task 4.18"). 4.18 replaced the stub with a real
+# call into claimit_gmail.gmail_send; the assertion is now that the
+# returned message_id flows through to SubmitResult and that the result
+# carries SubmittedVia.GMAIL_SEND. Deeper coverage of the gmail-send
+# integration (typed exception mapping, missing-field rejection, etc.)
+# lives in test_submit_claim_gmail.py.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_submit_claim_email_uses_stub(caplog: pytest.LogCaptureFixture) -> None:
-    import logging
-
+async def test_submit_claim_email_dispatches_via_gmail_send() -> None:
     claim = _make_tolerant_claim(claim_type=ClaimType.EMAIL)
     user = _make_user()
     db = AsyncMock()
     db.partial_update.return_value = True
 
-    with caplog.at_level(logging.WARNING, logger="src.submit_claim"):
+    fake_gmail_result = MagicMock()
+    fake_gmail_result.message_id = "msg-4.18"
+    fake_gmail_result.thread_id = "thr-1"
+    fake_gmail_result.sent_at = datetime.now(UTC)
+
+    with (
+        patch("src.submit_claim.gmail_send", new=AsyncMock(return_value=fake_gmail_result)),
+        patch(
+            "src.submit_claim.secretmanager.SecretManagerServiceClient", return_value=MagicMock()
+        ),
+    ):
         result = await submit_claim(claim, user, db)
 
     assert result.submitted_via == SubmittedVia.GMAIL_SEND
-    assert result.gmail_message_id is None
-    assert any("awaiting task 4.18" in r.message for r in caplog.records)
+    assert result.gmail_message_id == "msg-4.18"
+
+
+# ---------------------------------------------------------------------------
+# 6g — auto-send loop branches on ClaimSubmissionError.is_terminal
+#
+# CodeRabbit Round 2: the auto-send worker previously caught broad
+# Exception only, so a terminal failure (revoked Gmail grant, missing
+# subject/recipient on a legacy claim) would leave the claim in
+# QUEUED_FOR_SEND and the cron would re-pick it every minute forever —
+# burning quota on a claim that can never recover on its own. The
+# worker now distinguishes:
+#   - terminal: move to DRAFT_PENDING + outcome_note + clear auto_send_at
+#                so the cron skips it AND the user-facing UI surfaces it.
+#   - transient: leave queued (pre-4.18 behavior) — quota / network
+#                blips genuinely do recover on the next tick.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_auto_send_worker_parks_terminal_failure_as_draft_pending() -> None:
+    """Terminal ClaimSubmissionError → claim moves to DRAFT_PENDING with
+    outcome_note set and auto_send_at cleared, so the cron stops picking
+    it up and the user-facing UI can surface the error."""
+    from src.main import handle_auto_send
+    from src.submit_claim import ClaimSubmissionError
+
+    queued_claim = _make_tolerant_claim(outcome=ClaimOutcome.QUEUED_FOR_SEND)
+    user = _make_user()
+
+    mock_db = AsyncMock()
+    mock_db.find_claims.return_value = [queued_claim]
+    mock_db.get_claim.return_value = queued_claim
+    mock_db.get_user.return_value = user
+    mock_db.partial_update.return_value = True
+
+    mock_request = MagicMock()
+
+    terminal_err = ClaimSubmissionError("gmail revoked", is_terminal=True)
+
+    with (
+        patch("src.main.MongoDBClient", return_value=mock_db),
+        patch("src.main.submit_claim", new=AsyncMock(side_effect=terminal_err)),
+        patch("src.main.publish_claim_approved", new=AsyncMock()) as mock_publish,
+        patch("src.main.write_notification_event", new=AsyncMock()) as mock_notify,
+    ):
+        result = await handle_auto_send(mock_request)
+
+    # Publish + notify must NOT fire on a failed submit.
+    mock_publish.assert_not_awaited()
+    mock_notify.assert_not_awaited()
+
+    # Exactly one partial_update — the terminal-failure park.
+    mock_db.partial_update.assert_awaited_once()
+    park_updates = mock_db.partial_update.await_args.args[2]
+    assert park_updates["outcome"] == ClaimOutcome.DRAFT_PENDING.value
+    assert park_updates["outcome_note"] == "gmail revoked"
+    assert park_updates["auto_send_at"] is None
+
+    assert result["processed"] == 0
+    assert result["errors"] == 1
+
+
+@pytest.mark.asyncio
+async def test_auto_send_worker_leaves_transient_failure_queued() -> None:
+    """Transient ClaimSubmissionError → claim stays in QUEUED_FOR_SEND
+    (no DB write) so the next cron tick retries. Quota / network blips
+    are expected to recover on their own."""
+    from src.main import handle_auto_send
+    from src.submit_claim import ClaimSubmissionError
+
+    queued_claim = _make_tolerant_claim(outcome=ClaimOutcome.QUEUED_FOR_SEND)
+    user = _make_user()
+
+    mock_db = AsyncMock()
+    mock_db.find_claims.return_value = [queued_claim]
+    mock_db.get_claim.return_value = queued_claim
+    mock_db.get_user.return_value = user
+
+    mock_request = MagicMock()
+
+    transient_err = ClaimSubmissionError("quota exceeded", is_terminal=False)
+
+    with (
+        patch("src.main.MongoDBClient", return_value=mock_db),
+        patch("src.main.submit_claim", new=AsyncMock(side_effect=transient_err)),
+        patch("src.main.publish_claim_approved", new=AsyncMock()) as mock_publish,
+        patch("src.main.write_notification_event", new=AsyncMock()) as mock_notify,
+    ):
+        result = await handle_auto_send(mock_request)
+
+    mock_publish.assert_not_awaited()
+    mock_notify.assert_not_awaited()
+    # Critical: NO db.partial_update on transient — the claim must stay
+    # queued for the next tick to retry. A spurious write here would
+    # bump updated_at and could confuse the operator timeline.
+    mock_db.partial_update.assert_not_awaited()
+
+    assert result["processed"] == 0
+    assert result["errors"] == 1

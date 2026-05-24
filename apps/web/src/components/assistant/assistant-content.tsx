@@ -27,6 +27,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useAssistantStream } from "@/hooks/useAssistantStream";
 import { useConversations } from "@/hooks/useConversations";
@@ -250,9 +251,13 @@ function ConversationList({
         />
       </div>
       {isLoading && conversations.length === 0 ? (
-        <div className="flex items-center gap-2 px-3 text-sm text-neutral-500">
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-          Loading conversations…
+        <div className="space-y-1">
+          {(["a", "b", "c", "d", "e"] as const).map((key) => (
+            <div key={key} className="flex flex-col gap-0.5 rounded-lg px-3 py-2">
+              <Skeleton className="h-4 w-[70%]" />
+              <Skeleton className="h-3 w-[40%]" />
+            </div>
+          ))}
         </div>
       ) : groupedList.length === 0 ? (
         <p className="px-3 text-sm text-neutral-500">
@@ -295,6 +300,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
     conversations,
     isLoading: convLoading,
     error: convError,
+    refetch: refetchConversations,
     createConversation,
     renameConversation,
     archiveConversation,
@@ -407,6 +413,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
         convId = created._id;
         router.push(`/assistant/${convId}`);
       } catch {
+        toast.error("Couldn't start a new conversation. Please try again.");
         return;
       }
     }
@@ -418,7 +425,10 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    // Enter sends; Shift+Enter inserts a newline. isComposing stops a send while
+    // an IME (e.g. Chinese pinyin) is composing — Enter there confirms a
+    // candidate, not a submit.
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void sendDraftIfPossible();
     }
@@ -545,7 +555,8 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
             </Button>
           </div>
           <p className="mx-auto mt-2 max-w-4xl text-center text-[11px] text-neutral-400">
-            Ctrl/Cmd + Enter to send — a new conversation is created on first message.
+            Enter to send · Shift+Enter for newline — a new conversation is created on first
+            message.
           </p>
         </div>
       </>
@@ -635,7 +646,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
             </Button>
           </div>
           <p className="mx-auto mt-2 max-w-4xl text-center text-[11px] text-neutral-400">
-            Ctrl/Cmd + Enter to send.
+            Enter to send · Shift+Enter for newline.
           </p>
         </div>
       </>
@@ -671,7 +682,12 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
         {convError ? (
           <Alert variant="destructive" className="mx-3 mt-3">
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{convError.message}</AlertDescription>
+            <AlertDescription>
+              <p className="mb-3 text-sm">{convError.message}</p>
+              <Button type="button" size="sm" variant="outline" onClick={refetchConversations}>
+                Try again
+              </Button>
+            </AlertDescription>
           </Alert>
         ) : null}
         <ScrollArea className="min-h-0 flex-1">

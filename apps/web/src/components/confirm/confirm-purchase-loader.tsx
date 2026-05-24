@@ -1,6 +1,5 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
@@ -8,6 +7,7 @@ import { ConfirmPageHeader } from "@/components/confirm/confirm-page-header";
 import { ConfirmPurchaseContent } from "@/components/confirm/confirm-purchase-content";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getPurchaseDetail, type PurchaseDetailDoc, PurchasesApiError } from "@/lib/api/purchases";
 
 /**
@@ -71,6 +71,17 @@ function isAwaitingExtraction(purchase: PurchaseDetailDoc): boolean {
   if (purchase.status !== "pending_confirmation") return false;
   const overallMin = purchase.extraction_confidence?.overall_min;
   return overallMin === 0 || overallMin === null || overallMin === undefined;
+}
+
+function ReceiptCardSkeleton() {
+  return (
+    <div className="mx-auto max-w-md px-4 py-16">
+      <Skeleton className="mx-auto aspect-[4/3] w-full max-w-sm rounded-xl" />
+      <Skeleton className="mx-auto mt-6 h-6 w-2/3" />
+      <Skeleton className="mx-auto mt-3 h-4 w-full max-w-xs" />
+      <Skeleton className="mx-auto mt-2 h-4 w-full max-w-xs" />
+    </div>
+  );
 }
 
 export function ConfirmPurchaseLoader({ purchaseId }: { purchaseId: string }) {
@@ -161,18 +172,14 @@ export function ConfirmPurchaseLoader({ purchaseId }: { purchaseId: string }) {
   }, [purchaseId, retryTick]);
 
   if (state.kind === "loading") {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <Loader2 className="size-6 animate-spin text-neutral-500" aria-label="Loading receipt" />
-      </div>
-    );
+    return <ReceiptCardSkeleton />;
   }
 
   if (state.kind === "analyzing") {
     return (
       <div className="mx-auto max-w-md px-4 py-16 text-center">
-        <Loader2 className="mx-auto size-8 animate-spin text-brand-primary-500" aria-hidden />
-        <h1 className="mt-4 text-lg font-semibold text-neutral-900">Analyzing your receipt…</h1>
+        <Skeleton className="mx-auto aspect-[4/3] w-full max-w-sm rounded-xl" />
+        <h1 className="mt-6 text-lg font-semibold text-neutral-900">Analyzing your receipt…</h1>
         <p className="mt-2 text-sm text-neutral-600">
           We&apos;re reading the purchase details. This usually takes a few seconds.
         </p>

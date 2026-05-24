@@ -133,6 +133,7 @@ export function UploadDialog() {
     setUploading(true);
     try {
       const { purchase } = await uploadPurchase(file);
+      toast.success("Receipt uploaded.");
       // Close before navigating so the dialog doesn't briefly flash
       // back over the confirm page during route transition.
       setOpen(false);
