@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { friendlyAuthError } from "@/lib/api/errors";
 import { signInWithGoogle } from "@/lib/auth-actions";
 import { useAuthStore } from "@/store";
 
@@ -61,7 +62,8 @@ export function LoginView() {
       // / timeout), AuthInit signs the user back out and the button is
       // re-enabled rather than stuck on "Opening Google…".
     } catch (err) {
-      toast.error("Sign-in failed", { description: (err as Error).message });
+      const msg = friendlyAuthError((err as { code?: string } | null)?.code);
+      if (msg) toast.error(msg);
     } finally {
       setIsLoading(false);
     }

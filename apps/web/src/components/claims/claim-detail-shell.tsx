@@ -100,6 +100,7 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
     const timer = window.setTimeout(
       () => {
         markTimedOut(claim.claim_id);
+        toast.error("Couldn't redraft. Please try again.");
       },
       Math.max(remaining, 0),
     );

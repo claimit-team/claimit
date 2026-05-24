@@ -21,3 +21,22 @@ export function friendlyMessage(status: number, code?: string): string {
   if (status >= 500) return "Something went wrong on our end. Please try again shortly.";
   return "Something went wrong. Please try again.";
 }
+
+// Firebase sign-in errors are not HTTP errors. Returns null when no toast should show
+// (user intentionally closed/cancelled the popup).
+export function friendlyAuthError(code?: string): string | null {
+  switch (code) {
+    case "auth/popup-closed-by-user":
+    case "auth/cancelled-popup-request":
+    case "auth/user-cancelled":
+      return null;
+    case "auth/network-request-failed":
+      return "Can't reach the server. Check your connection and try again.";
+    case "auth/too-many-requests":
+      return "Too many attempts. Please wait a moment and try again.";
+    case "auth/popup-blocked":
+      return "Your browser blocked the sign-in popup. Please allow popups and try again.";
+    default:
+      return "Couldn't sign in. Please try again.";
+  }
+}

@@ -413,6 +413,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
         convId = created._id;
         router.push(`/assistant/${convId}`);
       } catch {
+        toast.error("Couldn't start a new conversation. Please try again.");
         return;
       }
     }
