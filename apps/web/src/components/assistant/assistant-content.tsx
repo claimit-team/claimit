@@ -355,7 +355,24 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
   // components/ui/scroll-area.tsx:20). This isolates us from BaseUI's
   // internal class structure while still letting us measure scroll
   // position on the right element.
+  //
+  // Dep is `[active?._id]`, NOT `[]`: the active-conversation branch of
+  // mainPaneContent only mounts when a conversation is selected, so the
+  // bottomRef sentinel doesn't exist on the initial empty-state render.
+  // A `[]`-keyed effect would run once with `bottomRef.current === null`
+  // and never reattach when the active branch mounts. Keying on the id
+  // (the string, not the `active` object reference — the conversations
+  // array refetches periodically and replaces the object even when the
+  // id is unchanged) makes the effect rerun on conversation
+  // load / switch so the listener is always bound to the live viewport.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: active?._id is the intentional re-bind trigger; we don't read it inside the body
   useEffect(() => {
+    // Conversation switch: pin to bottom regardless of where the user
+    // left the previous conversation's scroll. A new conversation
+    // should always open at the most-recent message. Mirrors the
+    // force-pin in sendDraftIfPossible below.
+    isAtBottomRef.current = true;
+
     const sentinel = bottomRef.current;
     if (!sentinel) return;
     const viewport = sentinel.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
@@ -369,7 +386,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
     return () => {
       viewport.removeEventListener("scroll", handler);
     };
-  }, []);
+  }, [active?._id]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `messages` is the intentional trigger; isAtBottomRef.current is read fresh on each tick and intentionally NOT in the dep list
   useEffect(() => {
