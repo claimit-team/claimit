@@ -19,7 +19,7 @@
  *   - expired           → none
  */
 
-import { AlertCircle, ArrowLeft, Check, Clock, Edit, Send, XCircle } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, Clock, Edit, Printer, Send, XCircle } from "lucide-react";
 import Link from "next/link";
 import { type KeyboardEvent, type MouseEvent, type ReactNode, useEffect, useState } from "react";
 
@@ -38,6 +38,13 @@ interface ClaimHeaderProps {
   onClickCancel: () => void;
   /** Header → shell: open the approve-and-send confirm dialog. */
   onClickApprove: () => void;
+  /**
+   * Header → shell: trigger browser print-to-PDF for an in-store
+   * guide (ticket 5.16). Only invoked from the "Download PDF" button,
+   * which is rendered only when `claim.claim_type === "in_store_guide"`.
+   * Shell toggles `body.printing-in-store-guide` + calls `window.print()`.
+   */
+  onClickPrint: () => void;
 }
 
 // Tooltip copy for the two actions still missing backends today.
@@ -126,6 +133,7 @@ export function ClaimHeader({
   onClickEdit,
   onClickCancel,
   onClickApprove,
+  onClickPrint,
 }: ClaimHeaderProps) {
   // Hook called unconditionally (rules-of-hooks). When the claim isn't
   // queued the value is unused — `auto_send_at` will be null/absent
@@ -249,7 +257,14 @@ export function ClaimHeader({
   };
 
   return (
-    <div className="sticky top-0 z-10 flex h-16 items-center justify-between border-neutral-200 border-b bg-neutral-0 px-4 lg:px-6">
+    // `data-print-hide`: the in-page sticky chrome (back arrow,
+    // breadcrumb, status badge, action buttons including "Download PDF"
+    // itself) is collapsed in 5.16 print mode — see globals.css
+    // `@media print { body.printing-in-store-guide ... }`.
+    <div
+      data-print-hide
+      className="sticky top-0 z-10 flex h-16 items-center justify-between border-neutral-200 border-b bg-neutral-0 px-4 lg:px-6"
+    >
       <div className="flex items-center gap-3">
         <Link
           href="/claims"
@@ -287,7 +302,25 @@ export function ClaimHeader({
         </div>
       </div>
 
-      <div className="flex items-center gap-2">{renderActions()}</div>
+      <div className="flex items-center gap-2">
+        {/*
+         * "Download PDF" — ticket 5.16. Rendered OUTSIDE the status
+         * switch so it's available on any in-store guide regardless
+         * of workflow state (a `submitted` or `approved` in-store
+         * claim is still useful to re-print before walking into the
+         * store). Gated on the UI claim_type value `"in_store_guide"`
+         * (the view-model transform in `claim-detail-view.ts` maps
+         * the wire `"in_store"` → this string — see
+         * `mapClaimTypeToUi` at L363).
+         */}
+        {claim.claim_type === "in_store_guide" ? (
+          <Button variant="outline" size="sm" type="button" onClick={onClickPrint}>
+            <Printer className="mr-2 h-4 w-4" />
+            Download PDF
+          </Button>
+        ) : null}
+        {renderActions()}
+      </div>
     </div>
   );
 }
