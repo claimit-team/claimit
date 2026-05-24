@@ -48,6 +48,15 @@ class Claim(BaseDocument):
     evidence_screenshot_url: str | None
     send_override: SendMode | None
     auto_send_at: datetime | None = None
+    # `subject` and `recipient_email` are the LLM-generated email
+    # subject + the platform CS address that the draft generator
+    # (3.14) resolved at draft time. Persisted here so the send phase
+    # (4.18 — minutes-later via auto-send cron or user approval click)
+    # doesn't have to re-run the LLM or re-resolve policy. Both default
+    # to None because only EMAIL-type claims populate them; chat /
+    # in-store / self-service claims leave these null.
+    subject: str | None = None
+    recipient_email: str | None = None
     gmail_message_id: str | None = None
     submitted_at: datetime | None
     submitted_via: SubmittedVia | None

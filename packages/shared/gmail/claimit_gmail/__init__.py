@@ -23,8 +23,31 @@ Public surface:
 - `WatchRegistrationError` — the typed exception raised by `_or_raise`
   and by `exchange_refresh_for_access`. Carries a `terminal_message`
   attribute that's safe to render in the user-facing settings UI.
+
+- `gmail_send(user_id, to, subject, body, bcc, db, sm_client)` — send an
+  outbound email from the user's Gmail account (ticket 4.18). Returns
+  `GmailSendResult(message_id, thread_id, sent_at)`. Used by claim-agent
+  to dispatch Type A (email) claim drafts to platform CS addresses.
+
+- `GmailSendError` / `GmailTokenRevokedError` / `GmailQuotaExceededError` — typed
+  exceptions for the three failure classes the auto-send cron worker
+  treats differently (transient retry vs stop trying for this user).
+
+- `resolve_bcc_from_env()` — pull the optional audit-BCC address from
+  `CLAIMIT_BCC_EMAIL`. Opt-in: returns None when the env var is unset
+  so no environment silently leaks claim sends to an audit mailbox.
+  The demo BCC is wired explicitly in `infra/terraform/main.tf`'s
+  claim_agent env block.
 """
 
+from .send import (
+    GmailQuotaExceededError,
+    GmailSendError,
+    GmailSendResult,
+    GmailTokenRevokedError,
+    gmail_send,
+    resolve_bcc_from_env,
+)
 from .watch import (
     WatchRegistrationError,
     exchange_refresh_for_access,
@@ -33,8 +56,14 @@ from .watch import (
 )
 
 __all__ = [
+    "GmailQuotaExceededError",
+    "GmailSendError",
+    "GmailSendResult",
+    "GmailTokenRevokedError",
     "WatchRegistrationError",
     "exchange_refresh_for_access",
+    "gmail_send",
     "register_watch_or_raise",
     "register_watch_safe",
+    "resolve_bcc_from_env",
 ]

@@ -103,6 +103,8 @@ class ClaimReadTolerant(BaseDocument):
     evidence_screenshot_url: str | None = None
     send_override: str | None = None
     auto_send_at: datetime | None = None
+    subject: str | None = None
+    recipient_email: str | None = None
     gmail_message_id: str | None = None
     submitted_at: datetime | None = None
     submitted_via: str | None = None
