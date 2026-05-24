@@ -74,6 +74,21 @@ _FAKE_CHAT_JSON = json.dumps(
     }
 )
 
+_FAKE_EMAIL_UNFILLED_JSON = json.dumps(
+    {
+        "subject": "Price Adjustment Request for Order {{ORDER_ID}}",
+        "email_body": (
+            "Hello {{MERCHANT_NAME}} Customer Care,\n\n"
+            "I am writing to request a price match on Order {{ORDER_ID}} "
+            "for {{PRODUCT_NAME}} at {{ORIGINAL_PRICE}}.\n\n"
+            "The current price is {{CURRENT_PRICE}}, a difference of {{REFUND_AMOUNT}}.\n\n"
+            "Per your policy: {{POLICY_CITATION}}\n\n"
+            "Reference: {{UNFILLED}}\n\n"
+            "Thank you,\n{{USER_NAME}}"
+        ),
+    }
+)
+
 _FAKE_IN_STORE_JSON = json.dumps(
     {
         "opening_statement": (
@@ -128,6 +143,20 @@ def _make_fake_runner(fake_json: str) -> type:
             yield _FakeFinalEvent(fake_json)
 
     return _FakeRunner
+
+
+def _make_error_runner() -> type:
+    """Return a Runner replacement class that raises RuntimeError on first iteration."""
+
+    class _ErrorRunner:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def run_async(self, **_kwargs: object):
+            raise RuntimeError("Gemini API unavailable")
+            yield  # marks this as an async generator
+
+    return _ErrorRunner
 
 
 # ---------------------------------------------------------------------------
@@ -537,3 +566,113 @@ async def test_purchase_not_found_skips() -> None:
     assert result.get("reason") == "purchase_not_found"
     mock_publish.assert_not_awaited()
     mock_db.upsert_claim.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Test 7 — Unreplaced placeholder in draft: error before persisting
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_validate_fails_returns_error() -> None:
+    """handle_price_dropped() e2e: fake draft contains {{UNFILLED}} token.
+
+    _fill_email_placeholders leaves {{UNFILLED}} intact; type_a_email then
+    detects '{{' in the filled output and raises DraftGenerationError. The
+    outer except in handle_price_dropped returns status=error without calling
+    upsert_claim or publish_event.
+    """
+    mock_db = _make_mock_db(ClaimType.EMAIL)
+    mock_search = MagicMock()
+    mock_search.get_search_adapter.return_value = AsyncMock()
+
+    request = _make_mock_request(
+        _pubsub_body(_make_event_data(platform_id="best_buy", price_drop_amount=300.00))
+    )
+
+    with (
+        patch("src.main.MongoDBClient", return_value=mock_db),
+        patch("src.draft._shared.Runner", _make_fake_runner(_FAKE_EMAIL_UNFILLED_JSON)),
+        patch("src.send_mode.publish_event", new=AsyncMock()) as mock_publish,
+        patch("src.main.write_notification_event", new=AsyncMock(return_value="notif-id")),
+        patch.dict(sys.modules, {"search": mock_search}),
+    ):
+        result = await handle_price_dropped(request)
+
+    assert result["status"] == "error"
+    mock_db.upsert_claim.assert_not_awaited()
+    mock_publish.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Test 8 — Gemini runner raises: exception propagates before drafting completes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_gemini_generation_fails_returns_error() -> None:
+    """handle_price_dropped() e2e: Runner raises RuntimeError during draft generation.
+
+    The exception propagates out of _dispatch_generator to the outer except in
+    handle_price_dropped, which returns status=error without calling upsert_claim
+    or publish_event.
+    """
+    mock_db = _make_mock_db(ClaimType.EMAIL)
+    mock_search = MagicMock()
+    mock_search.get_search_adapter.return_value = AsyncMock()
+
+    request = _make_mock_request(
+        _pubsub_body(_make_event_data(platform_id="best_buy", price_drop_amount=300.00))
+    )
+
+    with (
+        patch("src.main.MongoDBClient", return_value=mock_db),
+        patch("src.draft._shared.Runner", _make_error_runner()),
+        patch("src.send_mode.publish_event", new=AsyncMock()) as mock_publish,
+        patch("src.main.write_notification_event", new=AsyncMock(return_value="notif-id")),
+        patch.dict(sys.modules, {"search": mock_search}),
+    ):
+        result = await handle_price_dropped(request)
+
+    assert result["status"] == "error"
+    mock_publish.assert_not_awaited()
+    mock_db.upsert_claim.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Test 9 — upsert_claim raises: DB write failure after successful draft
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_upsert_claim_fails_returns_error() -> None:
+    """handle_price_dropped() e2e: upsert_claim raises Exception after successful draft.
+
+    Draft generation and validate() both succeed. The exception from upsert_claim
+    propagates to the outer except and returns status=error; publish_event (inside
+    handle_approval_mode, called after upsert_claim) is never reached.
+    """
+    mock_db = _make_mock_db(ClaimType.EMAIL)
+    mock_db.upsert_claim.side_effect = Exception("DB write failed")
+    mock_search = MagicMock()
+    mock_search.get_search_adapter.return_value = AsyncMock()
+
+    request = _make_mock_request(
+        _pubsub_body(_make_event_data(platform_id="best_buy", price_drop_amount=300.00))
+    )
+
+    with (
+        patch("src.main.MongoDBClient", return_value=mock_db),
+        patch("src.draft._shared.Runner", _make_fake_runner(_FAKE_EMAIL_JSON)),
+        patch(
+            "src.main.evaluate_and_maybe_regenerate",
+            new=AsyncMock(side_effect=_passthrough_eval),
+        ),
+        patch("src.send_mode.publish_event", new=AsyncMock()) as mock_publish,
+        patch("src.main.write_notification_event", new=AsyncMock(return_value="notif-id")),
+        patch.dict(sys.modules, {"search": mock_search}),
+    ):
+        result = await handle_price_dropped(request)
+
+    assert result["status"] == "error"
+    mock_publish.assert_not_awaited()
