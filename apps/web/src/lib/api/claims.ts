@@ -20,6 +20,7 @@
  */
 
 import type { Category, ClaimOutcome, ClaimType, Platform } from "@claimit/mongodb-types";
+import { friendlyMessage } from "@/lib/api/errors";
 import { auth } from "@/lib/firebase";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
@@ -122,7 +123,7 @@ export class ClaimsApiError extends Error {
 async function _authedFetch(
   path: string,
   init: RequestInit,
-  failureMessage: string,
+  _failureMessage: string,
 ): Promise<Response> {
   if (!API_BASE_URL) {
     throw new ClaimsApiError("missing_api_base_url", "NEXT_PUBLIC_API_BASE_URL is not configured.");
@@ -164,16 +165,15 @@ async function _authedFetch(
     // balancer returning HTML) would leave `code` as the generic
     // `request_failed`. Same shape as the receipt-proxy helper.
     let code = response.status === 404 ? "not_found" : "request_failed";
-    let message = `${failureMessage} (${response.status})`;
     try {
       const body = (await response.json()) as {
         error?: { code?: string; message?: string };
       };
       code = body.error?.code ?? code;
-      message = body.error?.message ?? message;
     } catch {
       // Non-JSON body (e.g. binary evidence with non-200) — keep defaults.
     }
+    const message = friendlyMessage(response.status, code);
     throw new ClaimsApiError(code, message);
   }
 
