@@ -424,23 +424,14 @@ async def test_hilton_in_store_full_pipeline() -> None:
 
 @pytest.mark.asyncio
 async def test_auto_send_mode_queues_claim() -> None:
-    """handle_price_dropped() e2e: SendMode.AUTO triggers handle_auto_mode, not handle_approval_mode.
+    """handle_price_dropped() e2e: SendMode.AUTO runs the real handle_auto_mode.
 
-    NOTE: ClaimOutcome.QUEUED_FOR_SEND is present in the source of claimit_mongodb_models
-    but absent from the installed wheel.  handle_auto_mode is therefore mocked at
-    src.main to avoid the AttributeError, and the routing assertion is on the mock
-    call rather than on the Pub/Sub event payload.  The claim is still fully drafted
-    and persisted before the send-mode branch is reached.
-
-    NOTE: gmail_send() is NOT called from handle_price_dropped() -- actual email
-    delivery is a stub pending task 4.18.
+    handle_auto_mode writes outcome='queued_for_send' + auto_send_at to
+    partial_update and publishes claim.drafted with send_mode='auto'.
     """
     mock_db = _make_mock_db(ClaimType.EMAIL, send_mode=SendMode.AUTO)
     mock_search = MagicMock()
     mock_search.get_search_adapter.return_value = AsyncMock()
-
-    auto_send_at_dt = _NOW + timedelta(seconds=300)
-    mock_handle_auto = AsyncMock(return_value=(MagicMock(), auto_send_at_dt))
 
     request = _make_mock_request(
         _pubsub_body(_make_event_data(platform_id="best_buy", price_drop_amount=300.00))
@@ -453,8 +444,7 @@ async def test_auto_send_mode_queues_claim() -> None:
             "src.main.evaluate_and_maybe_regenerate",
             new=AsyncMock(side_effect=_passthrough_eval),
         ),
-        patch("src.main.handle_auto_mode", new=mock_handle_auto),
-        patch("src.main.handle_approval_mode", new=AsyncMock()) as mock_handle_approval,
+        patch("src.send_mode.publish_event", new=AsyncMock()) as mock_publish,
         patch(
             "src.main.write_notification_event", new=AsyncMock(return_value="notif-id")
         ) as mock_write,
@@ -464,15 +454,25 @@ async def test_auto_send_mode_queues_claim() -> None:
 
     assert result["status"] == "ok", f"Expected ok, got: {result}"
 
-    # Routing: handle_auto_mode called, handle_approval_mode NOT called
-    mock_handle_auto.assert_awaited_once()
-    mock_handle_approval.assert_not_awaited()
-
     # Claim was drafted and persisted before the send-mode branch
     mock_db.upsert_claim.assert_awaited_once()
     persisted = mock_db.upsert_claim.await_args.args[0]
     assert str(persisted.claim_type) == "email"
     assert persisted.draft_content != "Draft pending generation."
+
+    # partial_update called with outcome='queued_for_send' and a future auto_send_at
+    mock_db.partial_update.assert_awaited_once()
+    _, _, update_dict = mock_db.partial_update.await_args.args
+    assert update_dict["outcome"] == "queued_for_send"
+    assert isinstance(update_dict["auto_send_at"], datetime)
+    assert update_dict["auto_send_at"] > datetime.now(UTC)
+
+    # claim.drafted published once with send_mode='auto' and auto_send_at set
+    mock_publish.assert_awaited_once()
+    published_topic, published_event = mock_publish.await_args.args
+    assert published_topic == "claim.drafted"
+    assert published_event.send_mode == "auto"
+    assert published_event.auto_send_at is not None
 
     # write_notification_event called for both CLAIM_DRAFTED and CLAIM_QUEUED_AUTO
     assert mock_write.await_count >= 2
