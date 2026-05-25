@@ -58,7 +58,7 @@ async def evaluate_and_maybe_regenerate(
         _log.info(
             "self_eval.passed_on_retry claim_id=%s attempt=%d",
             claim.id,
-            attempt,
+            attempt + 1,
         )
     _log.info(
         "self_eval.complete claim_id=%s passed=%s total_attempts=%d",
