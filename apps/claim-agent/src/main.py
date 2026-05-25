@@ -164,6 +164,12 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             event.purchase_id,
             event.platform_id,
         )
+        _log.info(
+            "claim_agent.price_dropped.received event_id=%s platform_id=%s user_id=%s",
+            event.event_id,
+            event.platform_id,
+            event.user_id,
+        )
 
         db = MongoDBClient()
         claim_plan = await plan_claim(event, db)
@@ -549,6 +555,7 @@ async def handle_claim_approved(request: Request) -> dict[str, str]:
 
     Always returns 200 to ack the message.
     """
+    claim_id = None
     try:
         payload = await _decode_pubsub_push_data(request)
         claim_id = payload.get("claim_id")
@@ -557,12 +564,23 @@ async def handle_claim_approved(request: Request) -> dict[str, str]:
             _log.error("claim_agent.approved.missing_fields payload=%r", payload)
             return {"status": "error", "reason": "missing_fields"}
 
+        _log.info(
+            "claim_agent.approved.received claim_id=%s user_id=%s",
+            claim_id,
+            user_id,
+        )
         db = MongoDBClient()
         claim = await db.get_claim(str(claim_id))
         if claim is None:
             _log.error("claim_agent.approved.claim_not_found claim_id=%s", claim_id)
             return {"status": "error", "reason": "claim_not_found"}
 
+        _log.info(
+            "claim_agent.approved.claim_loaded claim_id=%s claim_type=%s outcome=%r",
+            claim_id,
+            claim.claim_type,
+            claim.outcome,
+        )
         if str(claim.user_id) != str(user_id):
             _log.error(
                 "claim_agent.approved.user_mismatch claim_id=%s event_user=%s claim_user=%s",
@@ -595,6 +613,7 @@ async def handle_claim_approved(request: Request) -> dict[str, str]:
             )
             return {"status": "error", "reason": "user_not_found"}
 
+        _log.info("claim_agent.approved.submit_start claim_id=%s", claim_id)
         try:
             await submit_claim(claim, user, db)
         except ClaimSubmissionError as submit_err:
@@ -624,7 +643,7 @@ async def handle_claim_approved(request: Request) -> dict[str, str]:
         return {"status": "ok"}
 
     except Exception:
-        _log.exception("Failed to process claim.approved event")
+        _log.exception("claim_agent.approved.internal_error claim_id=%s", claim_id)
         return {"status": "error", "reason": "internal_error"}
 
 
@@ -784,11 +803,18 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
     Always returns 200 to ack the message — errors are logged, never retried
     via a 5xx, to prevent Pub/Sub infinite-retry loops.
     """
+    event = None
     try:
         body_json = await request.json()
         push_body = _PubSubPushBody.model_validate(body_json)
         raw_data = base64.b64decode(push_body.message.data)
         event = ClaimRedraftRequestedEvent.model_validate_json(raw_data)
+        _log.info(
+            "claim_agent.redraft.received claim_id=%s event_id=%s feedback_len=%d",
+            event.claim_id,
+            event.event_id,
+            len(event.feedback or ""),
+        )
 
         db = MongoDBClient()
 
@@ -820,6 +846,13 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
             )
             return {"status": "error", "reason": "policy_not_found"}
 
+        _log.info(
+            "claim_agent.redraft.resources_loaded claim_id=%s platform=%s claim_type=%s redraft_count=%d",
+            event.claim_id,
+            claim.platform,
+            claim.claim_type,
+            claim.redraft_count or 0,
+        )
         user = await db.get_user(claim.user_id)
         user_name = (user.name or "").strip() or "Valued Customer" if user else "Valued Customer"
 
@@ -851,6 +884,11 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
             )
             return {"status": "ok", "reason": "already_processed"}
 
+        _log.info(
+            "claim_agent.redraft.idempotency_acquired claim_id=%s event_id=%s",
+            event.claim_id,
+            event.event_id,
+        )
         from search import get_search_adapter
 
         search_client = get_search_adapter()
@@ -871,7 +909,17 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
         if claim_type_enum == ClaimType.IN_STORE:
             gen_kwargs["user_location"] = getattr(user, "default_location", None)
 
+        _log.info(
+            "claim_agent.redraft.generator_dispatch claim_id=%s generator=%s",
+            event.claim_id,
+            claim_type_enum.value,
+        )
         draft = await generator(claim, purchase, policy, search_client, **gen_kwargs)
+        _log.info(
+            "claim_agent.redraft.draft_generated claim_id=%s content_len=%d",
+            event.claim_id,
+            len(str(draft.draft_content or "")),
+        )
 
         validation = validate(draft, claim, purchase)
         if not validation.valid:
@@ -899,6 +947,7 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
                 )
             return {"status": "error", "reason": "validation_failed"}
 
+        _log.info("claim_agent.redraft.validation_passed claim_id=%s", event.claim_id)
         _log.info("claim_agent.redraft.skip_self_eval claim_id=%s", event.claim_id)
         final_draft = draft
 
@@ -933,8 +982,18 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
             at=now,
         )
         await mark_redraft_event_done(db, event_id=event.event_id, version=next_version)
+        _log.info(
+            "claim_agent.redraft.version_persisted claim_id=%s version=%d",
+            event.claim_id,
+            next_version,
+        )
 
         mode = SendMode.APPROVAL if user is None else determine_send_mode(user, claim)
+        _log.info(
+            "claim_agent.redraft.send_mode claim_id=%s mode=%s",
+            event.claim_id,
+            mode.value if hasattr(mode, "value") else str(mode),
+        )
         notif_id = await write_notification_event(
             db=db,
             user_id=event.user_id,
@@ -950,9 +1009,7 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
             },
         )
         if notif_id is None:
-            _log.warning(
-                "Failed to write claim_drafted notification for redraft claim %s", event.claim_id
-            )
+            _log.warning("claim_agent.redraft.notification_failed claim_id=%s", event.claim_id)
 
         try:
             platform_enum = Platform(claim.platform)
@@ -1024,5 +1081,8 @@ async def handle_claim_redraft_requested(request: Request) -> dict[str, str]:
         return {"status": "ok"}
 
     except Exception as exc:
-        _log.exception("Failed to process claim.redraft_requested event")
+        _log.exception(
+            "claim_agent.redraft.internal_error claim_id=%s",
+            event.claim_id if event is not None else "unknown",
+        )
         return {"status": "error", "reason": str(exc)}

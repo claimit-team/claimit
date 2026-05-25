@@ -89,6 +89,11 @@ async def submit_claim(
     user: User,
     db: MongoDBClient,
 ) -> SubmitResult:
+    _log.info(
+        "submit_claim.start claim_id=%s claim_type=%s",
+        claim.id,
+        claim.claim_type,
+    )
     if claim.claim_type == ClaimType.EMAIL:
         submit_result = await _submit_email_claim(claim, db)
         submitted_via = submit_result.submitted_via
@@ -119,6 +124,11 @@ async def submit_claim(
 
     await db.partial_update("claims", claim.id, update)
 
+    _log.info(
+        "submit_claim.complete claim_id=%s submitted_via=%s",
+        claim.id,
+        submitted_via,
+    )
     return SubmitResult(
         submitted_via=submitted_via,
         submitted_at=submitted_at,

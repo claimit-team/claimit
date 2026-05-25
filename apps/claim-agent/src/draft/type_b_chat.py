@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -124,11 +125,15 @@ async def generate_chat_script(
     policy_clause = policy.policy_text_relevant_clause
 
     _log.info("type_b_chat.gemini_call.start: claim_id=%s", claim.id)
+    _t0 = time.perf_counter()
     raw_output = await _run_draft_agent(
         str(purchase.platform), policy_clause, _build_chat_script_agent, user_instruction
     )
     _log.info(
-        "type_b_chat.gemini_call.end: claim_id=%s raw_len=%d", claim.id, len(raw_output or "")
+        "type_b_chat.gemini_call.end: claim_id=%s raw_len=%d duration_ms=%d",
+        claim.id,
+        len(raw_output or ""),
+        int((time.perf_counter() - _t0) * 1000),
     )
     draft_output = _parse_chat_script_output(raw_output)
     _log.info(

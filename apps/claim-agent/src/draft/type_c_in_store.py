@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -161,6 +162,7 @@ async def generate_in_store_guide(
 
     store_info: StoreInfo | None = None
     if user_location is not None and not (user_location.lat == 0 and user_location.lon == 0):
+        _log.info("type_c_in_store.store_lookup claim_id=%s", claim.id)
         store_info = await find_nearest_store(
             user_location.lat, user_location.lon, str(purchase.platform)
         )
@@ -185,11 +187,15 @@ async def generate_in_store_guide(
         )
 
     _log.info("type_c_in_store.gemini_call.start: claim_id=%s", claim.id)
+    _t0 = time.perf_counter()
     raw_output = await _run_draft_agent(
         str(purchase.platform), policy_clause, _build_in_store_agent, user_instruction
     )
     _log.info(
-        "type_c_in_store.gemini_call.end: claim_id=%s raw_len=%d", claim.id, len(raw_output or "")
+        "type_c_in_store.gemini_call.end: claim_id=%s raw_len=%d duration_ms=%d",
+        claim.id,
+        len(raw_output or ""),
+        int((time.perf_counter() - _t0) * 1000),
     )
     output = _parse_in_store_guide_output(raw_output)
     _log.info(
