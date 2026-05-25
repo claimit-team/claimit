@@ -418,7 +418,7 @@ async def handle_price_dropped(request: Request) -> dict[str, str]:
             )
             if not eval_result.passed:
                 _log.warning(
-                    "claim %s proceeding with failed self_eval dims=%s after %d attempts",
+                    "claim_agent.self_eval.degraded_proceed claim_id=%s failed_dims=%s attempts=%d",
                     claim_id,
                     eval_result.failed_dimensions,
                     attempts,
@@ -655,6 +655,10 @@ async def handle_auto_send(request: Request) -> dict:
         limit=batch_size,
     )
 
+    _log.info("claim_agent.auto_send.scan claims_found=%d", len(overdue))
+    if not overdue:
+        _log.info("claim_agent.auto_send.skip_empty")
+
     results: dict[str, int] = {"processed": 0, "errors": 0}
     for claim in overdue:
         try:
@@ -669,9 +673,19 @@ async def handle_auto_send(request: Request) -> dict:
                 continue
 
             previous_auto_send_at = current.auto_send_at
+            _log.info(
+                "claim_agent.auto_send.sending claim_id=%s user_id=%s",
+                current.id,
+                current.user_id,
+            )
 
             try:
                 submit_result = await submit_claim(current, user, db)
+                _log.info(
+                    "claim_agent.auto_send.sent claim_id=%s gmail_message_id=%s",
+                    current.id,
+                    submit_result.gmail_message_id,
+                )
             except ClaimSubmissionError as submit_err:
                 # Terminal: claim cannot send without external intervention
                 # (revoked Gmail grant, missing subject/recipient from a
@@ -711,6 +725,7 @@ async def handle_auto_send(request: Request) -> dict:
                     submitted_via=submit_result.submitted_via,
                     approved_by="auto",
                 )
+                _log.info("claim_agent.auto_send.published claim_id=%s", current.id)
             except Exception:
                 _log.exception(
                     "Failed to publish claim.approved for claim %s; rolling back to queued_for_send",
