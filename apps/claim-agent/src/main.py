@@ -45,6 +45,11 @@ from .send_mode import determine_send_mode, handle_approval_mode, handle_auto_mo
 from .submit_claim import ClaimSubmissionError, publish_claim_approved, submit_claim
 from .validator import validate
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s %(name)s %(message)s",
+)
+
 _log = logging.getLogger(__name__)
 
 
@@ -677,7 +682,6 @@ async def handle_auto_send(request: Request) -> dict:
     _log.info("claim_agent.auto_send.scan claims_found=%d", len(overdue))
     if not overdue:
         _log.info("claim_agent.auto_send.skip_empty")
-
     results: dict[str, int] = {"processed": 0, "errors": 0}
     for claim in overdue:
         try:
