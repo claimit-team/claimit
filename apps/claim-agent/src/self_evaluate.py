@@ -264,19 +264,35 @@ async def _run_self_eval_agent(payload: dict) -> dict:
                 if event.is_final_response():
                     final_text = _extract_event_text(event)
     except TimeoutError as exc:
+        _log.warning(
+            "self_evaluate.timeout claim_id=%s session_id=%s",
+            payload.get("claim_id", "unknown"),
+            session_id,
+        )
         raise DraftGenerationError(f"Self-eval timed out for session {session_id}") from exc
 
     if not final_text or not final_text.strip():
+        _log.warning("self_evaluate.empty_output claim_id=%s", payload.get("claim_id", "unknown"))
         raise DraftGenerationError("Self-evaluator returned empty output")
 
     try:
         raw = json.loads(_strip_json_fence(final_text))
     except json.JSONDecodeError as exc:
+        _log.warning(
+            "self_evaluate.parse_error claim_id=%s reason=%s",
+            payload.get("claim_id", "unknown"),
+            str(exc),
+        )
         raise DraftGenerationError("Self-evaluator returned malformed JSON") from exc
 
     try:
         parsed = _SelfEvalOutput.model_validate(raw)
     except ValidationError as exc:
+        _log.warning(
+            "self_evaluate.schema_error claim_id=%s reason=%s",
+            payload.get("claim_id", "unknown"),
+            str(exc),
+        )
         raise DraftGenerationError("Self-evaluator returned invalid output schema") from exc
 
     return parsed.model_dump()

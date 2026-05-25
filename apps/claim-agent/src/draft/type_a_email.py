@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -213,10 +214,16 @@ async def generate_email_draft(
     try:
         category = Category(policy.category)
     except (ValueError, TypeError) as exc:
+        _log.warning(
+            "type_a_email.unsupported_category claim_id=%s category=%r",
+            claim.id,
+            policy.category,
+        )
         raise DraftGenerationError(f"Unsupported policy category: {policy.category!r}") from exc
     merchant_name = resolve_merchant_name(str(purchase.platform))
 
     _log.info("type_a_email.gemini_call.start: claim_id=%s category=%s", claim.id, category)
+    _t0 = time.perf_counter()
     raw_output = await _run_draft_agent(
         str(purchase.platform),
         policy_clause,
@@ -225,7 +232,10 @@ async def generate_email_draft(
         category=str(category.value),
     )
     _log.info(
-        "type_a_email.gemini_call.end: claim_id=%s raw_len=%d", claim.id, len(raw_output or "")
+        "type_a_email.gemini_call.end: claim_id=%s raw_len=%d duration_ms=%d",
+        claim.id,
+        len(raw_output or ""),
+        int((time.perf_counter() - _t0) * 1000),
     )
     draft_output = _parse_draft_output(raw_output)
     _log.info("type_a_email.parse.success: claim_id=%s", claim.id)

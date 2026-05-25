@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -194,8 +195,11 @@ def _parse_notes(raw: str | None, fallback_policy: Policy) -> list[str]:
             parsed = json.loads(cleaned)
             if isinstance(parsed, list) and all(isinstance(n, str) for n in parsed):
                 return parsed
-        except (json.JSONDecodeError, ValueError):
-            pass
+        except (json.JSONDecodeError, ValueError) as _parse_exc:
+            _log.warning(
+                "type_d_self_service.notes_parse_fallback reason=%s",
+                str(_parse_exc),
+            )
     key_exclusions = getattr(fallback_policy, "key_exclusions", None) or []
     return list(key_exclusions)
 
@@ -280,6 +284,7 @@ async def generate_self_service_walkthrough(
         )
 
     _log.info("type_d_self_service.gemini_call.start: claim_id=%s", claim.id)
+    _t0 = time.perf_counter()
     raw_notes = await _run_draft_agent(
         platform,
         getattr(policy, "policy_text_relevant_clause", "") or "",
@@ -287,9 +292,10 @@ async def generate_self_service_walkthrough(
         user_instruction,
     )
     _log.info(
-        "type_d_self_service.gemini_call.end: claim_id=%s raw_len=%d",
+        "type_d_self_service.gemini_call.end: claim_id=%s raw_len=%d duration_ms=%d",
         claim.id,
         len(raw_notes or ""),
+        int((time.perf_counter() - _t0) * 1000),
     )
     notes = _parse_notes(raw_notes, policy)
 

@@ -39,6 +39,12 @@ async def evaluate_and_maybe_regenerate(
         if last_result.passed:
             break
         if attempt < MAX_EVAL_RETRIES:
+            _log.info(
+                "self_eval.retry_start claim_id=%s attempt=%d failed_dims=%s",
+                claim.id,
+                attempt + 1,
+                last_result.failed_dimensions,
+            )
             feedback = _build_feedback_str(last_result)
             current_draft = await regenerate_fn(current_draft, feedback, claim)
         else:
@@ -48,6 +54,18 @@ async def evaluate_and_maybe_regenerate(
                 last_result.failed_dimensions,
             )
 
+    if last_result is not None and last_result.passed and attempt >= 1:
+        _log.info(
+            "self_eval.passed_on_retry claim_id=%s attempt=%d",
+            claim.id,
+            attempt,
+        )
+    _log.info(
+        "self_eval.complete claim_id=%s passed=%s total_attempts=%d",
+        claim.id,
+        last_result.passed if last_result is not None else False,
+        attempts,
+    )
     return current_draft, last_result, attempts  # type: ignore[return-value]
 
 
