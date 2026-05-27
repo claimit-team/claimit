@@ -41,6 +41,30 @@ tracer = get_tracer(__name__)
 # Soft ceiling on the per-run scan size. Demo scale is well below this.
 _SCAN_LIMIT = 1000
 
+# Machine-readable codes for `purchases.last_monitor_error_code`. Kept narrow
+# on purpose — the UI branches on these to choose between actionable copy
+# ("Add product URL") and a generic "monitoring couldn't fetch a price" line.
+_ERROR_CODE_MISSING_PRODUCT_URL = "missing_product_url"
+_ERROR_CODE_ADAPTER = "adapter_error"
+
+
+def _classify_fetch_error(reason: str) -> str:
+    """Bucket adapter failure reasons into a stable code.
+
+    Lives in cron (not the adapter) so the adapter contract (`PriceFetchError`
+    carries only a free-text reason) stays simple. If more codes are needed,
+    add cases here — don't push classification into adapters.
+
+    Reasons are free-text so a future adapter might phrase the missing-URL
+    case as "Product URL is required" instead of the current "...requires
+    product_url". Normalize before checking: strip, lowercase, collapse
+    spaces to underscores so both phrasings collapse to the same key.
+    """
+    normalized = reason.strip().lower().replace(" ", "_")
+    if "product_url" in normalized:
+        return _ERROR_CODE_MISSING_PRODUCT_URL
+    return _ERROR_CODE_ADAPTER
+
 
 def _as_utc_aware(value: datetime) -> datetime:
     """Treat naive MongoDB datetimes as UTC and convert aware values to UTC."""
@@ -215,6 +239,32 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
                 fetched += 1
                 if not await _persist_price_history(db, purchase, snap):
                     skipped_source += 1
+                # Successful fetch — clear any stale failure state so the UI
+                # recovers as soon as the adapter starts working again. Only
+                # write if at least one error field is non-null to avoid
+                # rewriting unchanged docs every tick.
+                if (
+                    purchase.last_monitor_error is not None
+                    or purchase.last_monitor_error_code is not None
+                    or purchase.last_monitor_error_at is not None
+                ):
+                    try:
+                        await db.partial_update(
+                            "purchases",
+                            purchase.id,
+                            {
+                                "last_monitor_error": None,
+                                "last_monitor_error_at": None,
+                                "last_monitor_error_code": None,
+                            },
+                            Purchase,
+                        )
+                    except Exception:
+                        errors += 1
+                        logger.exception(
+                            "cron.clear_monitor_error_failed purchase_id=%s",
+                            purchase.id,
+                        )
 
                 # Eligibility decision. compare_prices is the tier-aware
                 # has-drop gate from 3.10; validate_eligibility encodes
@@ -265,6 +315,24 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
             except PriceFetchError as exc:
                 errors += 1
                 logger.warning("cron.fetch_error purchase_id=%s reason=%s", purchase.id, exc.reason)
+                error_code = _classify_fetch_error(exc.reason)
+                try:
+                    await db.partial_update(
+                        "purchases",
+                        purchase.id,
+                        {
+                            "last_monitor_error": exc.reason,
+                            "last_monitor_error_at": now,
+                            "last_monitor_error_code": error_code,
+                        },
+                        Purchase,
+                    )
+                except Exception:
+                    errors += 1
+                    logger.exception(
+                        "cron.record_monitor_error_failed purchase_id=%s",
+                        purchase.id,
+                    )
             except Exception:
                 errors += 1
                 logger.exception("cron.unexpected_error purchase_id=%s", purchase.id)

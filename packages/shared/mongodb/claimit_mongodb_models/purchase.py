@@ -58,6 +58,9 @@ class Purchase(BaseDocument):
     claim_type: ClaimType
     monitoring_cadence_minutes: int
     last_checked_at: datetime | None = None
+    last_monitor_error: str | None = None
+    last_monitor_error_at: datetime | None = None
+    last_monitor_error_code: str | None = None
     ingested_at: datetime
     ingestion_source: IngestionSource
     receipt_storage_url: str | None

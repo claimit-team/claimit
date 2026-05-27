@@ -15,8 +15,15 @@ import { RelatedClaimsCard } from "./related-claims-card";
 
 export function PurchaseDetailContent({
   purchase: initial,
+  onPurchaseUpdated,
 }: {
   purchase: PurchaseDetailViewModel;
+  /**
+   * Trigger a refetch of the detail bundle. Wired to the parent page's
+   * `reloadTick` so child mutations (today: add-product-url) take effect
+   * without reaching for a router refresh.
+   */
+  onPurchaseUpdated: () => void;
 }) {
   // Header monitoring status is no longer locally mutable — the real
   // detail page reads it from the server response. "Stop monitoring"
@@ -67,6 +74,7 @@ export function PurchaseDetailContent({
         <PurchasePageHeader purchase={headerModel} />
 
         <PriceHistoryChart
+          purchaseId={initial.purchaseId}
           priceHistory={initial.priceHistory}
           pricePaid={initial.pricePaid}
           currency={initial.currency}
@@ -75,6 +83,10 @@ export function PurchaseDetailContent({
           highestSeen={initial.highestSeen}
           lastChecked={initial.lastCheckedIso}
           platform={initial.platform}
+          monitorError={initial.monitorError}
+          monitorErrorAt={initial.monitorErrorAt}
+          monitorErrorCode={initial.monitorErrorCode}
+          onPurchaseUpdated={onPurchaseUpdated}
         />
 
         <RefundEligibilityCard

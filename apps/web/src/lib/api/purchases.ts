@@ -101,6 +101,20 @@ export type PurchaseDetailDoc = {
   claim_type: ClaimType | string | null;
   monitoring_cadence_minutes: number | null;
   last_checked_at: string | null;
+  /**
+   * Monitor-failure trail written by `apps/monitor-agent/src/cron.py`
+   * when an adapter raises `PriceFetchError` (BUG-19). Cleared on the
+   * next successful fetch OR after `PATCH /purchases/:id` updates
+   * `product_url`. The UI reads these to replace the hopeful "waiting
+   * for snapshot" copy with a real explanation + remediation action.
+   *
+   * `last_monitor_error_code` is the FE branching key. Today it's one of
+   * `"missing_product_url"` or `"adapter_error"`; new codes may appear
+   * server-side without a type bump.
+   */
+  last_monitor_error: string | null;
+  last_monitor_error_at: string | null;
+  last_monitor_error_code: string | null;
   ingested_at: string | null;
   ingestion_source: IngestionSource | string | null;
   receipt_storage_url: string | null;
@@ -467,6 +481,32 @@ export type DismissPurchaseResponse = {
   reason: DismissReason;
   skiplist_written: boolean;
 };
+
+/**
+ * PATCH /api/v1/purchases/:id — narrow edit for BUG-19 remediation.
+ *
+ * Only `product_url` is editable today. The endpoint also clears the
+ * `last_monitor_error*` trail so the UI returns to the standard waiting
+ * state without having to round-trip through the monitor cron.
+ */
+export type UpdatePurchaseRequest = {
+  product_url: string | null;
+};
+
+export async function updatePurchase(
+  purchaseId: string,
+  body: UpdatePurchaseRequest,
+): Promise<PurchaseWriteResponse> {
+  return _request<PurchaseWriteResponse>(
+    `/api/v1/purchases/${encodeURIComponent(purchaseId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    "Update purchase failed",
+  );
+}
 
 export async function dismissPurchase(
   purchaseId: string,
