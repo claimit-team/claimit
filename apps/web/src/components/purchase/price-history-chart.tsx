@@ -1,7 +1,7 @@
 "use client";
 
-import { CircleDot, Sparkles, TrendingDown, TrendingUp } from "lucide-react";
-import type { ReactNode } from "react";
+import { AlertTriangle, CircleDot, Sparkles, TrendingDown, TrendingUp } from "lucide-react";
+import { type ReactNode, useState } from "react";
 import {
   Line,
   LineChart,
@@ -11,6 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   formatPurchaseCurrency,
@@ -18,8 +19,10 @@ import {
   getPurchaseRelativeTime,
   type PriceHistoryPointVm,
 } from "@/lib/purchase-detail-view";
+import { AddProductUrlDialog } from "./add-product-url-dialog";
 
 interface PriceHistoryChartProps {
+  purchaseId: string;
   priceHistory: PriceHistoryPointVm[];
   pricePaid: number;
   currency: string;
@@ -28,6 +31,18 @@ interface PriceHistoryChartProps {
   highestSeen: number | null;
   lastChecked: string | null;
   platform: string;
+  /**
+   * BUG-19: when the monitor cron is blocked the empty state renders a
+   * real explanation + (where actionable) a remediation button instead
+   * of the hopeful "waiting for snapshot" copy. `monitorErrorCode` is
+   * the FE branching key — today one of `"missing_product_url"` or
+   * `"adapter_error"`, with new codes accepted as the generic
+   * adapter-error branch.
+   */
+  monitorError: string | null;
+  monitorErrorAt: string | null;
+  monitorErrorCode: string | null;
+  onPurchaseUpdated: () => void;
 }
 
 interface CustomDotProps {
@@ -37,15 +52,6 @@ interface CustomDotProps {
   pricePaid: number;
 }
 
-/**
- * Custom dot: amber for any below-paid point, but the orientation of
- * the dot doesn't carry the "first drop" semantics — the
- * `dropDetected` flag on the point does (set only on the first
- * below-paid point by `buildPriceSeries`). Both this dot and the
- * tooltip respect the flag for the label; the visual amber tint applies
- * to ALL below-paid points so the chart still tells the "current price
- * is under what you paid" story at a glance.
- */
 function CustomDot({ cx, cy, payload, pricePaid }: CustomDotProps) {
   if (!payload) return null;
   const isBelowPaid = payload.price < pricePaid;
@@ -83,10 +89,6 @@ function CustomTooltip({ active, currency, payload }: CustomTooltipProps) {
         {formatPurchaseCurrency(row.value, currency)}
       </p>
       <p className="text-neutral-500 text-xs">on {formatPurchaseShortDate(point.date)}</p>
-      {/* Drop label is ONLY on the first below-paid point (decision 6).
-          Other below-paid points stay amber-styled but unlabeled so
-          the chart reads as a single drop story rather than a series
-          of warnings. */}
       {point.dropDetected && (
         <p className="mt-1 font-medium text-semantic-warning text-xs">Drop detected</p>
       )}
@@ -94,17 +96,75 @@ function CustomTooltip({ active, currency, payload }: CustomTooltipProps) {
   );
 }
 
+interface ChartEmptyStateProps {
+  platform: string;
+  monitorError: string | null;
+  monitorErrorCode: string | null;
+  onAddProductUrl: () => void;
+}
+
 /**
- * Calm empty state for purchases with zero plottable snapshots.
+ * Empty-state rendering for the chart.
  *
- * Real freshly-monitored purchases routinely have 0-1 snapshots — the
- * monitor cron sweep hasn't run yet, OR has run but the adapter didn't
- * return data, OR all rows have a non-matching tier price. None of
- * those are errors; the user should see a steady "tracking, no
- * snapshots yet" affordance rather than a broken/blank chart frame.
- * (Decision 5 in the review.)
+ * Three branches, picked by `monitorErrorCode`:
+ *
+ * 1. `"missing_product_url"` — actionable. The user can paste a URL and
+ *    unblock monitoring; show a button that opens the dialog.
+ * 2. any other non-null code — non-actionable adapter failure. Show the
+ *    backend's reason verbatim so the user understands they're not
+ *    just waiting for the next sweep.
+ * 3. null — the original hopeful copy (real freshly-monitored purchases
+ *    routinely have zero snapshots until the first sweep lands).
  */
-function ChartEmptyState({ platform }: { platform: string }) {
+function ChartEmptyState({
+  platform,
+  monitorError,
+  monitorErrorCode,
+  onAddProductUrl,
+}: ChartEmptyStateProps) {
+  if (monitorErrorCode === "missing_product_url") {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-md border border-semantic-warning/40 border-dashed bg-semantic-warning/5 px-4 py-10 text-center">
+        <div className="flex size-10 items-center justify-center rounded-full bg-semantic-warning/10 text-semantic-warning">
+          <AlertTriangle className="size-5" aria-hidden />
+        </div>
+        <p className="mt-3 font-medium text-neutral-900 text-sm">Monitoring is blocked</p>
+        <p className="mt-1 max-w-sm text-neutral-500 text-xs">
+          This purchase doesn&apos;t have a product URL yet, so ClaimIt can&apos;t check the live{" "}
+          {platform} price. Add a URL to start monitoring.
+        </p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="mt-4"
+          onClick={onAddProductUrl}
+        >
+          Add product URL
+        </Button>
+      </div>
+    );
+  }
+
+  // `!= null` (loose) instead of `!== null` so `undefined` from a backend
+  // that doesn't yet expose the field falls back to the healthy state
+  // instead of accidentally rendering this warning card on every purchase.
+  if (monitorErrorCode != null) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-md border border-semantic-warning/40 border-dashed bg-semantic-warning/5 px-4 py-10 text-center">
+        <div className="flex size-10 items-center justify-center rounded-full bg-semantic-warning/10 text-semantic-warning">
+          <AlertTriangle className="size-5" aria-hidden />
+        </div>
+        <p className="mt-3 font-medium text-neutral-900 text-sm">
+          Monitoring couldn&apos;t fetch a price yet
+        </p>
+        <p className="mt-1 max-w-sm text-neutral-500 text-xs">
+          {monitorError ?? `ClaimIt is having trouble reading ${platform}. We'll keep retrying.`}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col items-center justify-center rounded-md border border-neutral-200 border-dashed bg-neutral-50 px-4 py-10 text-center">
       <div className="flex size-10 items-center justify-center rounded-full bg-neutral-100 text-neutral-500">
@@ -120,6 +180,7 @@ function ChartEmptyState({ platform }: { platform: string }) {
 }
 
 export function PriceHistoryChart({
+  purchaseId,
   priceHistory,
   pricePaid,
   currency,
@@ -128,21 +189,19 @@ export function PriceHistoryChart({
   highestSeen,
   lastChecked,
   platform,
+  monitorError,
+  monitorErrorAt,
+  monitorErrorCode,
+  onPurchaseUpdated,
 }: PriceHistoryChartProps) {
   const hasData = priceHistory.length > 0;
+  const [urlDialogOpen, setUrlDialogOpen] = useState(false);
 
-  // Recharts needs a non-empty domain to render. When `priceHistory` is
-  // empty we render the calm empty state instead of forcing the
-  // LineChart to draw a single padded point.
   const chartData = priceHistory.map((point) => ({
     ...point,
     formattedDate: formatPurchaseShortDate(point.date),
   }));
 
-  // Compute y-axis bounds only when we have data; otherwise these
-  // values are unused (the empty-state branch returns early). Includes
-  // `pricePaid` in the min/max so the dashed ReferenceLine never
-  // falls outside the visible range.
   let yMin = 0;
   let yMax = 0;
   if (hasData) {
@@ -154,6 +213,14 @@ export function PriceHistoryChart({
     yMax = Math.ceil(maxPrice + padding);
   }
 
+  // BUG-19: when the monitor is in an error state, the cron's
+  // `last_checked_at` bump still happened (intentional, to throttle
+  // retries on a broken adapter) — so reusing it as the footer's
+  // "Updated …" timestamp would lie about the data state. Branch on
+  // `monitorErrorCode` to surface the error timestamp + "Last check
+  // failed" copy instead.
+  const inErrorState = monitorErrorCode != null;
+  const errorTimeAgo = monitorErrorAt !== null ? getPurchaseRelativeTime(monitorErrorAt) : null;
   const timeAgo = lastChecked !== null ? getPurchaseRelativeTime(lastChecked) : null;
 
   return (
@@ -211,7 +278,12 @@ export function PriceHistoryChart({
                 </LineChart>
               </ResponsiveContainer>
             ) : (
-              <ChartEmptyState platform={platform} />
+              <ChartEmptyState
+                platform={platform}
+                monitorError={monitorError}
+                monitorErrorCode={monitorErrorCode}
+                onAddProductUrl={() => setUrlDialogOpen(true)}
+              />
             )}
           </div>
 
@@ -237,7 +309,11 @@ export function PriceHistoryChart({
         </div>
 
         <p className="mt-4 text-neutral-500 text-xs">
-          {timeAgo !== null ? (
+          {inErrorState ? (
+            <>
+              Last check failed {errorTimeAgo ?? "recently"} · {platform}
+            </>
+          ) : timeAgo !== null ? (
             <>
               Updated {timeAgo} · from {platform}
             </>
@@ -246,6 +322,13 @@ export function PriceHistoryChart({
           )}
         </p>
       </CardContent>
+      <AddProductUrlDialog
+        purchaseId={purchaseId}
+        platform={platform}
+        open={urlDialogOpen}
+        onOpenChange={setUrlDialogOpen}
+        onUpdated={onPurchaseUpdated}
+      />
     </Card>
   );
 }

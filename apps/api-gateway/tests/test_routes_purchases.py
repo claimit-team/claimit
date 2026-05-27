@@ -2145,3 +2145,158 @@ async def test_receipt_proxy_returns_404_on_malformed_gs_uri(client: AsyncClient
         mock_uploader.download.assert_not_awaited()
     finally:
         _clear_overrides()
+
+
+# ---------------------------------------------------------------------------
+# PATCH /purchases/{id} — BUG-19 remediation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_patch_purchase_sets_product_url_and_clears_monitor_error(
+    client: AsyncClient,
+) -> None:
+    """Happy path: PATCH sets product_url and clears any stale monitor error."""
+    existing = _purchase_fixture(status="monitoring")
+    updated_doc = _purchase_fixture(status="monitoring")
+    object.__setattr__(updated_doc, "product_url", "https://www.bestbuy.com/site/foo.p")
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(side_effect=[existing, updated_doc])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    _set_overrides(mock_db)
+    try:
+        response = await client.patch(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"product_url": "https://www.bestbuy.com/site/foo.p"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["purchase"]["product_url"] == "https://www.bestbuy.com/site/foo.p"
+        updates = mock_db.partial_update.await_args.args[2]
+        assert updates["product_url"] == "https://www.bestbuy.com/site/foo.p"
+        # Stale failure trail is cleared in the same write.
+        assert updates["last_monitor_error"] is None
+        assert updates["last_monitor_error_at"] is None
+        assert updates["last_monitor_error_code"] is None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_patch_purchase_cross_user_404(client: AsyncClient) -> None:
+    """Ownership check: another user's purchase 404s without writing."""
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=_purchase_fixture(user_id=OTHER_USER_ID))
+    mock_db.partial_update = AsyncMock()
+    _set_overrides(mock_db)
+    try:
+        response = await client.patch(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"product_url": "https://example.com/foo"},
+        )
+        assert response.status_code == 404
+        mock_db.partial_update.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_patch_purchase_rejects_unknown_field(client: AsyncClient) -> None:
+    """The PATCH body is a narrow Pydantic model — unknown keys are ignored
+    by Pydantic (extra='ignore' by default), so confirm they never reach
+    partial_update. The allowlist is enforced by the model, not a runtime
+    check. (Pydantic v2 defaults — see field_set assertions below.)
+    """
+    existing = _purchase_fixture(status="monitoring")
+    updated_doc = _purchase_fixture(status="monitoring")
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(side_effect=[existing, updated_doc])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    _set_overrides(mock_db)
+    try:
+        response = await client.patch(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+            # `status` and `user_id` should be silently dropped, NOT written.
+            json={
+                "product_url": "https://example.com/x",
+                "status": "dismissed",
+                "user_id": str(OTHER_USER_ID),
+            },
+        )
+        assert response.status_code == 200
+        updates = mock_db.partial_update.await_args.args[2]
+        assert "status" not in updates
+        assert "user_id" not in updates
+        # And the in-scope field still went through.
+        assert updates["product_url"] == "https://example.com/x"
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_patch_purchase_empty_body_422(client: AsyncClient) -> None:
+    """Regression for CodeRabbit comment on PR #233: `product_url` is required
+    (`Field(...)`) so an omitted-key body cannot silently wipe an existing URL.
+    """
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock()
+    mock_db.partial_update = AsyncMock()
+    _set_overrides(mock_db)
+    try:
+        response = await client.patch(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+            json={},
+        )
+        assert response.status_code == 422
+        mock_db.get_purchase.assert_not_awaited()
+        mock_db.partial_update.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_patch_purchase_explicit_null_accepted(client: AsyncClient) -> None:
+    """A client may still pass `product_url: null` to intentionally clear the
+    URL. Required-with-null-allowed is the documented shape of
+    `UpdatePurchaseRequest`.
+    """
+    existing = _purchase_fixture(status="monitoring")
+    updated_doc = _purchase_fixture(status="monitoring")
+    object.__setattr__(updated_doc, "product_url", None)
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(side_effect=[existing, updated_doc])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    _set_overrides(mock_db)
+    try:
+        response = await client.patch(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"product_url": None},
+        )
+        assert response.status_code == 200
+        updates = mock_db.partial_update.await_args.args[2]
+        assert updates["product_url"] is None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_patch_purchase_missing_404(client: AsyncClient) -> None:
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=None)
+    mock_db.partial_update = AsyncMock()
+    _set_overrides(mock_db)
+    try:
+        response = await client.patch(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"product_url": "https://example.com/foo"},
+        )
+        assert response.status_code == 404
+        mock_db.partial_update.assert_not_awaited()
+    finally:
+        _clear_overrides()

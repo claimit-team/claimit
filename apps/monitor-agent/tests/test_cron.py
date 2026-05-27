@@ -282,6 +282,137 @@ class TestRunCron(unittest.IsolatedAsyncioTestCase):
         # The guarantee Chris flagged: a broken adapter must not hot-loop.
         self.assertIsNotNone(_last_checked_update(db, purchase.id))
 
+    async def test_adapter_error_records_monitor_error_fields(self) -> None:
+        """BUG-19: persistent adapter failures must leave a trail the UI can
+        read — code + human-readable reason + timestamp — so the purchase
+        detail page can replace its hopeful 'waiting for snapshot' copy with
+        a real explanation and (where applicable) a remediation action.
+        """
+        now = datetime.now(UTC)
+        purchase = _make_purchase(
+            last_checked_at=None,
+            window_expires=now + timedelta(days=3),
+        )
+        db = _FakeDB([purchase])
+
+        class _MissingUrlAdapter(PriceSourceAdapter):
+            async def fetch_current_price(
+                self,
+                platform: str,
+                product_id: str,
+                product_url: str | None = None,
+                member_tier: str | None = None,
+            ) -> PriceSnapshot:
+                raise PriceFetchError(platform, product_id, "Best Buy adapter requires product_url")
+
+        with patch.object(cron_module, "get_adapter", return_value=_MissingUrlAdapter()):
+            await run_cron(db)  # type: ignore[arg-type]
+
+        error_updates = [
+            u for pid, u in db.updates if pid == purchase.id and "last_monitor_error" in u
+        ]
+        self.assertEqual(len(error_updates), 1)
+        update = error_updates[0]
+        self.assertEqual(update["last_monitor_error_code"], "missing_product_url")
+        self.assertEqual(update["last_monitor_error"], "Best Buy adapter requires product_url")
+        self.assertIsNotNone(update["last_monitor_error_at"])
+
+    async def test_classify_fetch_error_matches_case_insensitive_phrasing(self) -> None:
+        """Regression for CodeRabbit comment on PR #233: a future adapter that
+        phrases the failure as "Product URL is required" must still classify
+        as missing_product_url, not as the generic adapter_error bucket.
+        """
+        from src.cron import _classify_fetch_error
+
+        # Current Best Buy phrasing.
+        self.assertEqual(
+            _classify_fetch_error("Best Buy adapter requires product_url"),
+            "missing_product_url",
+        )
+        # Hypothetical future phrasings — title case, with spaces, padding.
+        self.assertEqual(
+            _classify_fetch_error("Product URL is required"),
+            "missing_product_url",
+        )
+        self.assertEqual(
+            _classify_fetch_error("  Missing Product URL  "),
+            "missing_product_url",
+        )
+        # Sanity check: unrelated failure still goes to the generic bucket.
+        self.assertEqual(
+            _classify_fetch_error("Target adapter HTTP 500"),
+            "adapter_error",
+        )
+
+    async def test_adapter_error_uses_generic_code_for_other_failures(self) -> None:
+        now = datetime.now(UTC)
+        purchase = _make_purchase(
+            last_checked_at=None,
+            window_expires=now + timedelta(days=3),
+        )
+        db = _FakeDB([purchase])
+
+        with patch.object(cron_module, "get_adapter", return_value=_ErrorAdapter()):
+            await run_cron(db)  # type: ignore[arg-type]
+
+        error_updates = [
+            u for pid, u in db.updates if pid == purchase.id and "last_monitor_error" in u
+        ]
+        self.assertEqual(len(error_updates), 1)
+        self.assertEqual(error_updates[0]["last_monitor_error_code"], "adapter_error")
+        self.assertEqual(error_updates[0]["last_monitor_error"], "stubbed adapter failure")
+
+    async def test_successful_fetch_clears_stale_monitor_error_fields(self) -> None:
+        """Once an adapter recovers (or the user adds a product_url), the next
+        successful fetch must wipe the failure trail so the UI returns to the
+        standard waiting/healthy state.
+        """
+        now = datetime.now(UTC)
+        purchase = _make_purchase(
+            last_checked_at=None,
+            window_expires=now + timedelta(days=3),
+        )
+        # Seed prior failure state on the in-memory purchase.
+        object.__setattr__(purchase, "last_monitor_error", "Best Buy adapter requires product_url")
+        object.__setattr__(purchase, "last_monitor_error_at", now - timedelta(hours=1))
+        object.__setattr__(purchase, "last_monitor_error_code", "missing_product_url")
+        db = _FakeDB([purchase])
+        adapter = _StubAdapter()
+
+        with patch.object(cron_module, "get_adapter", return_value=adapter):
+            await run_cron(db)  # type: ignore[arg-type]
+
+        clears = [
+            u
+            for pid, u in db.updates
+            if pid == purchase.id and u.get("last_monitor_error_code", "skip") is None
+        ]
+        self.assertEqual(len(clears), 1)
+        cleared = clears[0]
+        self.assertIsNone(cleared["last_monitor_error"])
+        self.assertIsNone(cleared["last_monitor_error_at"])
+        self.assertIsNone(cleared["last_monitor_error_code"])
+
+    async def test_successful_fetch_does_not_rewrite_when_no_prior_error(self) -> None:
+        """Avoid unnecessary Mongo writes on the healthy path — the clear-error
+        partial_update only runs when at least one error field was non-null.
+        """
+        now = datetime.now(UTC)
+        purchase = _make_purchase(
+            last_checked_at=None,
+            window_expires=now + timedelta(days=3),
+        )
+        db = _FakeDB([purchase])
+        adapter = _StubAdapter()
+
+        with patch.object(cron_module, "get_adapter", return_value=adapter):
+            await run_cron(db)  # type: ignore[arg-type]
+
+        clears = [
+            u for pid, u in db.updates if pid == purchase.id and "last_monitor_error_code" in u
+        ]
+        self.assertEqual(clears, [])
+
     async def test_expired_window_is_skipped_without_fetch(self) -> None:
         now = datetime.now(UTC)
         purchase = _make_purchase(

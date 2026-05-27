@@ -52,6 +52,9 @@ export interface Purchase {
   claim_type: ClaimType;
   monitoring_cadence_minutes: number;
   last_checked_at: ISODateString | null;
+  last_monitor_error: string | null;
+  last_monitor_error_at: ISODateString | null;
+  last_monitor_error_code: string | null;
   ingested_at: ISODateString;
   ingestion_source: IngestionSource;
   receipt_storage_url: string | null;
