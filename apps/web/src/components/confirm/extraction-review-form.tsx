@@ -82,7 +82,18 @@ export function ExtractionReviewForm({
   lowConfidenceFields,
   disabled = false,
 }: ExtractionReviewFormProps) {
-  const [isAdditionalOpen, setIsAdditionalOpen] = useState(false);
+  // Auto-open Additional details on mount when product_url needs the
+  // user's attention: either the extractor flagged it low-confidence, or
+  // the field is empty for a platform whose scrape adapter hard-requires
+  // it (best_buy / target — see apps/monitor-agent adapter guards). This
+  // is a one-shot initializer (lazy `useState`); subsequent renders
+  // respect the user's manual open/close.
+  const [isAdditionalOpen, setIsAdditionalOpen] = useState(() => {
+    if (lowConfidenceFields.includes("product_url")) return true;
+    const scrapeRequiresUrl = state.platform === "best_buy" || state.platform === "target";
+    if (scrapeRequiresUrl && !state.productUrl.trim()) return true;
+    return false;
+  });
   const isLow = (field: string) => lowConfidenceFields.includes(field);
   const lowPlaceholder = (field: string, base: string) =>
     isLow(field) ? "Verify this — we weren't sure" : base;
@@ -256,6 +267,23 @@ export function ExtractionReviewForm({
               value={state.memberTier}
               onChange={(e) => update({ memberTier: e.target.value })}
               placeholder="e.g., Gold, Platinum"
+              disabled={disabled}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="productUrl" className="text-sm font-medium text-neutral-700">
+              Product URL
+            </Label>
+            <Input
+              id="productUrl"
+              type="url"
+              value={state.productUrl}
+              onChange={(e) => update({ productUrl: e.target.value })}
+              placeholder={lowPlaceholder("product_url", "https://www.bestbuy.com/site/...")}
+              className={cn(
+                isLow("product_url") && "placeholder:italic placeholder:text-neutral-400",
+              )}
               disabled={disabled}
             />
           </div>
