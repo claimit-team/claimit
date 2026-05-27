@@ -211,7 +211,7 @@ function safeCategory(raw: string | null): PurchaseCategory {
   return "retail";
 }
 
-function safePlatformLabel(raw: string | null): string {
+export function safePlatformLabel(raw: string | null): string {
   if (raw === null || raw === "") return "Unknown platform";
   // best_buy -> Best Buy. Reads as a brand label rather than a slug.
   return raw
