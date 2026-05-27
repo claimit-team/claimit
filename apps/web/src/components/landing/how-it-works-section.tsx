@@ -93,47 +93,44 @@ export function HowItWorksSection({ isLoading = false }: HowItWorksSectionProps)
             {/* Step 3 — expanded card with Assistant + Claim Draft mocks (merged from former AssistantSection) */}
             <Card className="mt-6 border-neutral-200 bg-neutral-0 p-6 lg:p-8">
               <div className="grid gap-8 lg:grid-cols-2 lg:gap-12">
-                <div className="flex flex-col">
-                  <div className="flex items-start gap-4">
-                    <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-neutral-200 bg-neutral-50">
-                      <FileCheck className="size-5 text-brand-primary-500" aria-hidden />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <span className="text-sm font-medium text-neutral-500">Step 3</span>
-                      <h3 className="mt-1 text-base font-semibold text-neutral-900">Claim</h3>
-                      <p className="mt-2 text-sm leading-relaxed text-neutral-700">
-                        When eligible, ClaimIt prepares claim material for your review. The
-                        assistant explains why, helps refine wording, and keeps approval gating on
-                        by default.
-                      </p>
-                    </div>
+                <div className="flex items-start gap-4">
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-neutral-200 bg-neutral-50">
+                    <FileCheck className="size-5 text-brand-primary-500" aria-hidden />
                   </div>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-sm font-medium text-neutral-500">Step 3</span>
+                    <h3 className="mt-1 text-base font-semibold text-neutral-900">Claim</h3>
+                    <p className="mt-2 text-sm leading-relaxed text-neutral-700">
+                      When eligible, ClaimIt prepares claim material for your review. The assistant
+                      explains why, helps refine wording, and keeps approval gating on by default.
+                    </p>
 
-                  <div className="mt-6 flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-neutral-200 text-neutral-700 gap-2"
-                    >
-                      <Sparkles className="size-4 shrink-0" aria-hidden />
-                      Explain Why
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-neutral-200 text-neutral-700 gap-2"
-                    >
-                      <Minimize2 className="size-4 shrink-0" aria-hidden />
-                      Make Shorter
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-neutral-200 text-neutral-700 gap-2"
-                    >
-                      <Eye className="size-4 shrink-0" aria-hidden />
-                      Review Draft
-                    </Button>
+                    <div className="mt-6 flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-neutral-200 text-neutral-700 gap-2"
+                      >
+                        <Sparkles className="size-4 shrink-0" aria-hidden />
+                        Explain Why
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-neutral-200 text-neutral-700 gap-2"
+                      >
+                        <Minimize2 className="size-4 shrink-0" aria-hidden />
+                        Make Shorter
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-neutral-200 text-neutral-700 gap-2"
+                      >
+                        <Eye className="size-4 shrink-0" aria-hidden />
+                        Review Draft
+                      </Button>
+                    </div>
                   </div>
                 </div>
 

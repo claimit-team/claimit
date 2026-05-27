@@ -70,7 +70,11 @@ export function ApprovalOutcomeLoop() {
                 <Button variant="outline" size="sm" className="border-neutral-200 text-neutral-700">
                   Mark denied
                 </Button>
-                <Button variant="ghost" size="sm" className="text-neutral-500">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-neutral-200 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-700"
+                >
                   Still waiting
                 </Button>
               </div>

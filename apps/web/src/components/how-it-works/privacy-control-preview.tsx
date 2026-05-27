@@ -44,7 +44,7 @@ export function PrivacyControlPreview() {
               href="/security"
               className={cn(
                 buttonVariants({ variant: "outline" }),
-                "border-neutral-200 text-neutral-700 inline-flex justify-center items-center px-6",
+                "border-neutral-200 text-neutral-700 hover:bg-neutral-50 hover:text-neutral-700 inline-flex justify-center items-center px-6",
               )}
             >
               Read security details
