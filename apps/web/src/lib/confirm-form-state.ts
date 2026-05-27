@@ -41,6 +41,12 @@ export type ConfirmFormState = {
   category: ConfirmCategory;
   /** Additional-details fields are optional + free-form. */
   memberTier: string;
+  /**
+   * Product page URL. Required server-side for `best_buy` / `target`
+   * monitoring (the scrape adapters raise PriceFetchError when null);
+   * other platforms tolerate empty. Empty string in form ↔ `null` on doc.
+   */
+  productUrl: string;
 };
 
 const ENUM_PLATFORMS: ReadonlySet<string> = new Set([
@@ -116,6 +122,7 @@ export function buildInitialFormState(purchase: PurchaseDetailDoc): ConfirmFormS
     orderId: purchase.order_id ?? "",
     category: coerceCategory(purchase.category),
     memberTier: purchase.member_tier_at_purchase ?? "",
+    productUrl: purchase.product_url ?? "",
   };
 }
 
@@ -178,9 +185,10 @@ function sameDay(a: Date | null, b: Date | null): boolean {
  *   - purchase_date is converted to an ISO string the
  *     `TypeAdapter(datetime)` step on the server accepts.
  *
- * Additional-details fields (variant / fare_class / room_type /
- * bed_type / rate_type / product_url / currency / product_id) are
- * NOT exposed by the v0 form — they stay on the doc as-is.
+ * Additional-details fields exposed by the form: member_tier_at_purchase,
+ * product_url. The remaining optional fields (variant / fare_class /
+ * room_type / bed_type / rate_type / currency / product_id) stay on
+ * the doc as-is.
  */
 export function buildCorrectedFields(
   initial: ConfirmFormState,
@@ -205,6 +213,9 @@ export function buildCorrectedFields(
   // string is fine — the server will overwrite the existing value.
   if (current.memberTier.trim() !== initial.memberTier.trim()) {
     patch.member_tier_at_purchase = current.memberTier.trim() || null;
+  }
+  if (current.productUrl.trim() !== initial.productUrl.trim()) {
+    patch.product_url = current.productUrl.trim() || null;
   }
 
   // Price is a number; the form holds it as a string for the input.
