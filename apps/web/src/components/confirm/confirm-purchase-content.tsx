@@ -6,6 +6,8 @@ import { ActionBar } from "@/components/confirm/action-bar";
 import { ConfidenceBanner } from "@/components/confirm/confidence-banner";
 import { ExtractionReviewForm } from "@/components/confirm/extraction-review-form";
 import { MissingReceiptFallback, ReceiptPreview } from "@/components/confirm/receipt-preview";
+import { WindowWarningBanner } from "@/components/confirm/window-warning-banner";
+import { usePlatformPolicy } from "@/hooks/use-platform-policy";
 import type { PurchaseDetailDoc } from "@/lib/api/purchases";
 import { buildInitialFormState, type ConfirmFormState } from "@/lib/confirm-form-state";
 
@@ -129,6 +131,10 @@ export function ConfirmPurchaseContent({ purchase }: { purchase: PurchaseDetailD
   const initialState = useMemo<ConfirmFormState>(() => buildInitialFormState(purchase), [purchase]);
   const [formState, setFormState] = useState<ConfirmFormState>(initialState);
 
+  // BUG-59: reactive policy lookup so the out-of-window banner stays in sync
+  // with edits to platform / purchase_date / member_tier on the form.
+  const { policy, loading: policyLoading } = usePlatformPolicy(formState.platform);
+
   return (
     <div className="flex min-h-[calc(100dvh-4rem)] flex-col">
       <div className="flex-1 px-4 py-6 lg:px-8 lg:py-8">
@@ -165,11 +171,18 @@ export function ConfirmPurchaseContent({ purchase }: { purchase: PurchaseDetailD
 
           <div className="flex-1 min-w-0">
             <div className="rounded-lg border border-neutral-200 bg-neutral-0 p-6">
-              <div className="mb-6">
+              <div className="mb-6 space-y-3">
                 <ConfidenceBanner
                   overallConfidence={overallConfidence}
                   lowConfidenceFields={lowConfidenceFields}
                   isMostlyFailed={isMostlyFailed}
+                />
+                <WindowWarningBanner
+                  platform={formState.platform}
+                  purchaseDate={formState.purchaseDate}
+                  memberTier={formState.memberTier}
+                  policy={policy}
+                  policyLoading={policyLoading}
                 />
               </div>
               <ExtractionReviewForm

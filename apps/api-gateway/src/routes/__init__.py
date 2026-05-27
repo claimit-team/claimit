@@ -10,6 +10,7 @@ from . import (
     events,
     gmail,
     notifications,
+    policies,
     purchases,
     settings,
 )
@@ -22,6 +23,7 @@ router.include_router(dashboard.router)
 router.include_router(events.router)
 router.include_router(gmail.router)
 router.include_router(notifications.router)
+router.include_router(policies.router)
 router.include_router(purchases.router)
 router.include_router(settings.router)
 
