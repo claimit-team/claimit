@@ -298,6 +298,7 @@ function PurchaseRow({ purchase }: { purchase: PurchaseListItem }) {
           size="sm"
           variant="outline"
           onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
         >
           View
         </Button>

@@ -240,6 +240,7 @@ function ClaimRow({ claim }: { claim: ClaimListItem }) {
           size="sm"
           variant="outline"
           onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
         >
           View
         </Button>
