@@ -103,22 +103,22 @@ function StatusBadge({ status }: { status: ClaimDetailWorkflowStatus }) {
 }
 
 /**
- * Live MM:SS countdown for the queued-for-send claim header branch.
- * Recomputes once a second; floors at 0:00 so a late re-render after
- * the scheduler fires shows "0:00" rather than a negative value.
- *
- * Re-running `setInterval` on every `autoSendAt` change cleanly
- * cancels a stale interval if the user navigates between queued
- * claims (claim-detail page can be reused across IDs).
+ * Live MM:SS countdown helpers for the queued-for-send claim header
+ * branch. Mirrors the dashboard `auto-send-banner` pair: a single
+ * always-on second ticker drives `now`, and a pure formatter floors
+ * the remaining time at "0:00" so a late re-render after the
+ * scheduler fires never shows a negative value.
  */
-function useAutoSendCountdown(autoSendAt: string | null | undefined): string {
+function useCurrentSecond(): number {
   const [now, setNow] = useState<number>(() => Date.now());
   useEffect(() => {
-    if (!autoSendAt) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [autoSendAt]);
-  if (!autoSendAt) return "0:00";
+  }, []);
+  return now;
+}
+
+function formatCountdown(autoSendAt: string, now: number): string {
   const target = new Date(autoSendAt).getTime();
   if (Number.isNaN(target)) return "0:00";
   const remainingMs = Math.max(0, target - now);
@@ -135,10 +135,10 @@ export function ClaimHeader({
   onClickApprove,
   onClickPrint,
 }: ClaimHeaderProps) {
-  // Hook called unconditionally (rules-of-hooks). When the claim isn't
-  // queued the value is unused — `auto_send_at` will be null/absent
-  // and the hook returns "0:00" without firing an interval.
-  const countdown = useAutoSendCountdown(claim.auto_send_at);
+  // Hook called unconditionally (rules-of-hooks). The interval is
+  // always on; `countdown` is only read on the queued_for_send branch.
+  const now = useCurrentSecond();
+  const countdown = claim.auto_send_at ? formatCountdown(claim.auto_send_at, now) : "0:00";
 
   const renderActions = () => {
     switch (claim.status) {

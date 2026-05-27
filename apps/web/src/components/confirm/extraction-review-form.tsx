@@ -113,7 +113,9 @@ export function ExtractionReviewForm({
           disabled={disabled}
         >
           <SelectTrigger id="platform" className="w-full min-w-0">
-            <SelectValue placeholder="Select platform" />
+            <SelectValue placeholder="Select platform">
+              {(value: Platform | "") => (value === "" ? null : PLATFORM_LABELS[value as Platform])}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent className="max-h-[min(320px,var(--spacing)*80)] overflow-y-auto">
             {PLATFORM_OPTIONS.map((opt) => (

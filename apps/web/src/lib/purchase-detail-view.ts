@@ -129,6 +129,17 @@ export interface PurchaseDetailViewModel {
   nonMemberPriceAtPurchase: number | null;
   sourceEmail: string | null;
   purchaseSource: PurchaseDetailOriginalSource;
+  /**
+   * BUG-19: monitor-failure trail surfaced from the wire `purchase` doc.
+   * The price-history card renders a real explanation + remediation
+   * action when `monitorErrorCode` is set, instead of the hopeful
+   * "waiting for snapshot" empty state. `null` everywhere means the
+   * monitor is healthy (or has never run yet).
+   */
+  productUrl: string | null;
+  monitorError: string | null;
+  monitorErrorAt: string | null;
+  monitorErrorCode: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -402,5 +413,14 @@ export function buildPurchaseDetailViewModel(
     nonMemberPriceAtPurchase: purchase.non_member_price_at_purchase,
     sourceEmail: purchase.sender,
     purchaseSource: inferOriginalSource(purchase.ingestion_source),
+    productUrl: purchase.product_url ?? null,
+    // `?? null` guards against a backend that doesn't yet expose the
+    // BUG-19 fields (older deployments, or the read-tolerant variant
+    // before it learned about them): wire `undefined` would otherwise
+    // tunnel through and flip the chart into its error empty-state on
+    // every healthy purchase. View-model contract is `string | null`.
+    monitorError: purchase.last_monitor_error ?? null,
+    monitorErrorAt: purchase.last_monitor_error_at ?? null,
+    monitorErrorCode: purchase.last_monitor_error_code ?? null,
   };
 }
