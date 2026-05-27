@@ -46,9 +46,16 @@ class UpdatePurchaseRequest(BaseModel):
     (a monitoring purchase missing `product_url` will never get a price
     snapshot). General edits still go through /confirm before monitoring
     starts.
+
+    `product_url` is REQUIRED (`Field(...)`), not defaulted to `None`. The
+    service writes the value through unconditionally, so a defaulted field
+    plus an omitted key in the request body would silently wipe an
+    existing URL on the doc. With required semantics a missing key 422s
+    at Pydantic validation; an explicit `null` is still accepted to allow
+    intentional clearing.
     """
 
-    product_url: str | None = Field(default=None)
+    product_url: str | None = Field(...)
 
 
 class DismissPurchaseRequest(BaseModel):

@@ -317,6 +317,33 @@ class TestRunCron(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(update["last_monitor_error"], "Best Buy adapter requires product_url")
         self.assertIsNotNone(update["last_monitor_error_at"])
 
+    async def test_classify_fetch_error_matches_case_insensitive_phrasing(self) -> None:
+        """Regression for CodeRabbit comment on PR #233: a future adapter that
+        phrases the failure as "Product URL is required" must still classify
+        as missing_product_url, not as the generic adapter_error bucket.
+        """
+        from src.cron import _classify_fetch_error
+
+        # Current Best Buy phrasing.
+        self.assertEqual(
+            _classify_fetch_error("Best Buy adapter requires product_url"),
+            "missing_product_url",
+        )
+        # Hypothetical future phrasings — title case, with spaces, padding.
+        self.assertEqual(
+            _classify_fetch_error("Product URL is required"),
+            "missing_product_url",
+        )
+        self.assertEqual(
+            _classify_fetch_error("  Missing Product URL  "),
+            "missing_product_url",
+        )
+        # Sanity check: unrelated failure still goes to the generic bucket.
+        self.assertEqual(
+            _classify_fetch_error("Target adapter HTTP 500"),
+            "adapter_error",
+        )
+
     async def test_adapter_error_uses_generic_code_for_other_failures(self) -> None:
         now = datetime.now(UTC)
         purchase = _make_purchase(

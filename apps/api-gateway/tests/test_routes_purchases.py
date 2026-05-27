@@ -2237,6 +2237,54 @@ async def test_patch_purchase_rejects_unknown_field(client: AsyncClient) -> None
 
 
 @pytest.mark.asyncio
+async def test_patch_purchase_empty_body_422(client: AsyncClient) -> None:
+    """Regression for CodeRabbit comment on PR #233: `product_url` is required
+    (`Field(...)`) so an omitted-key body cannot silently wipe an existing URL.
+    """
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock()
+    mock_db.partial_update = AsyncMock()
+    _set_overrides(mock_db)
+    try:
+        response = await client.patch(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+            json={},
+        )
+        assert response.status_code == 422
+        mock_db.get_purchase.assert_not_awaited()
+        mock_db.partial_update.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_patch_purchase_explicit_null_accepted(client: AsyncClient) -> None:
+    """A client may still pass `product_url: null` to intentionally clear the
+    URL. Required-with-null-allowed is the documented shape of
+    `UpdatePurchaseRequest`.
+    """
+    existing = _purchase_fixture(status="monitoring")
+    updated_doc = _purchase_fixture(status="monitoring")
+    object.__setattr__(updated_doc, "product_url", None)
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(side_effect=[existing, updated_doc])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    _set_overrides(mock_db)
+    try:
+        response = await client.patch(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"product_url": None},
+        )
+        assert response.status_code == 200
+        updates = mock_db.partial_update.await_args.args[2]
+        assert updates["product_url"] is None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
 async def test_patch_purchase_missing_404(client: AsyncClient) -> None:
     mock_db = AsyncMock(spec=MongoDBClient)
     mock_db.get_purchase = AsyncMock(return_value=None)

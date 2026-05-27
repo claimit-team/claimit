@@ -54,8 +54,14 @@ def _classify_fetch_error(reason: str) -> str:
     Lives in cron (not the adapter) so the adapter contract (`PriceFetchError`
     carries only a free-text reason) stays simple. If more codes are needed,
     add cases here — don't push classification into adapters.
+
+    Reasons are free-text so a future adapter might phrase the missing-URL
+    case as "Product URL is required" instead of the current "...requires
+    product_url". Normalize before checking: strip, lowercase, collapse
+    spaces to underscores so both phrasings collapse to the same key.
     """
-    if "product_url" in reason:
+    normalized = reason.strip().lower().replace(" ", "_")
+    if "product_url" in normalized:
         return _ERROR_CODE_MISSING_PRODUCT_URL
     return _ERROR_CODE_ADAPTER
 
