@@ -4,6 +4,7 @@ import { Menu, ShieldCheck, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -56,6 +57,7 @@ export function PublicHeader() {
         </div>
 
         <div className="hidden items-center gap-3 md:flex">
+          <ThemeToggle />
           <Link
             href="/login"
             className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-neutral-700")}
@@ -73,18 +75,21 @@ export function PublicHeader() {
           </Link>
         </div>
 
-        <button
-          type="button"
-          className="rounded-md p-2 text-neutral-700 md:hidden"
-          onClick={() => setMobileMenuOpen((o) => !o)}
-          aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
-        >
-          {mobileMenuOpen ? (
-            <X className="size-5" aria-hidden />
-          ) : (
-            <Menu className="size-5" aria-hidden />
-          )}
-        </button>
+        <div className="flex items-center gap-1 md:hidden">
+          <ThemeToggle />
+          <button
+            type="button"
+            className="rounded-md p-2 text-neutral-700"
+            onClick={() => setMobileMenuOpen((o) => !o)}
+            aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+          >
+            {mobileMenuOpen ? (
+              <X className="size-5" aria-hidden />
+            ) : (
+              <Menu className="size-5" aria-hidden />
+            )}
+          </button>
+        </div>
       </div>
 
       {mobileMenuOpen && (

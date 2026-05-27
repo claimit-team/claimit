@@ -8,13 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 
-// Brand marks (lucide-react v1.14 has no Twitter/LinkedIn/GitHub icons).
-// Single-color glyphs use currentColor so dark-mode color classes apply.
-function TwitterIcon(props: SVGProps<SVGSVGElement>) {
+// Brand marks (lucide-react v1.14 has no LinkedIn/GitHub/YouTube icons).
+// Single-color glyphs use currentColor so theme color classes apply.
+function XIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" role="img" {...props}>
-      <title>Twitter</title>
-      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+      <title>X</title>
+      <path d="M17.53 3H20.77L13.69 11.09L22 21.99H15.46L10.34 15.31L4.5 21.99H1.26L8.83 13.34L0.86 3H7.55L12.18 9.11L17.53 3ZM16.39 20.04H18.18L6.71 4.85H4.79L16.39 20.04Z" />
     </svg>
   );
 }
@@ -33,6 +33,15 @@ function GithubIcon(props: SVGProps<SVGSVGElement>) {
     <svg viewBox="0 0 24 24" fill="currentColor" role="img" {...props}>
       <title>GitHub</title>
       <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+    </svg>
+  );
+}
+
+function YoutubeIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" role="img" {...props}>
+      <title>YouTube</title>
+      <path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.4.6A3 3 0 0 0 .5 6.2 31.7 31.7 0 0 0 0 12a31.7 31.7 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.6 9.4.6 9.4.6s7.5 0 9.4-.6a3 3 0 0 0 2.1-2.1A31.7 31.7 0 0 0 24 12a31.7 31.7 0 0 0-.5-5.8zM9.75 15.02V8.98L15.5 12l-5.75 3.02z" />
     </svg>
   );
 }
@@ -72,9 +81,10 @@ const footerGroups = [
 ] as const;
 
 const socialLinks = [
-  { href: "#", label: "Twitter", icon: TwitterIcon },
-  { href: "#", label: "LinkedIn", icon: LinkedinIcon },
-  { href: "#", label: "GitHub", icon: GithubIcon },
+  { href: "https://x.com/claimitbeta", label: "X", icon: XIcon },
+  { href: "https://www.linkedin.com/company/claimitai/", label: "LinkedIn", icon: LinkedinIcon },
+  { href: "https://github.com/claimit-team/claimit", label: "GitHub", icon: GithubIcon },
+  { href: "https://www.youtube.com/@Claimit-f6m", label: "YouTube", icon: YoutubeIcon },
 ] as const;
 
 function NewsletterColumn() {
@@ -87,10 +97,13 @@ function NewsletterColumn() {
   };
 
   return (
-    <div>
+    <div className="min-w-0 lg:min-w-[14rem]">
       <h3 className="text-sm font-semibold text-neutral-900">Newsletter</h3>
       <p className="mt-4 text-sm text-neutral-700">Updates on new claim categories and features.</p>
-      <form onSubmit={handleSubmit} className="mt-3 flex flex-col gap-2 sm:flex-row sm:gap-2">
+      <form
+        onSubmit={handleSubmit}
+        className="mt-3 flex w-full flex-col gap-2 sm:flex-row sm:gap-2"
+      >
         <Input
           type="email"
           required
@@ -98,9 +111,9 @@ function NewsletterColumn() {
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
           aria-label="Email address"
-          className="flex-1"
+          className="w-full min-w-0 flex-1 sm:min-w-[11rem]"
         />
-        <Button type="submit" variant="default" className="sm:shrink-0">
+        <Button type="submit" variant="default" className="w-full sm:w-auto sm:shrink-0">
           Subscribe
         </Button>
       </form>
@@ -151,6 +164,8 @@ export function PublicFooter() {
               <Link
                 key={social.label}
                 href={social.href}
+                target="_blank"
+                rel="noopener noreferrer"
                 aria-label={social.label}
                 className="flex size-9 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
               >
