@@ -170,7 +170,7 @@ export function ActionBar({ purchase, initialFormState, formState }: ActionBarPr
   };
 
   return (
-    <div className="sticky bottom-0 z-30 border-t border-neutral-200 bg-neutral-0 px-4 py-4 lg:px-6">
+    <div className="sticky bottom-0 z-30 border-t border-neutral-200 bg-neutral-0 px-4 py-4 pr-20 lg:px-6 lg:pr-24">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <p className="text-sm text-neutral-500">
           {submitBlocker ?? "All your edits are local until you confirm"}
