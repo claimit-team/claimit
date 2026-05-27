@@ -21,6 +21,7 @@
 import type { Category, IngestionSource, PurchaseStatus } from "@claimit/mongodb-types";
 import { Hotel, Mail, Plane, Search, ShoppingBag, Upload } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { PlatformLogo } from "@/components/claims/platform-logo";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -242,8 +243,21 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
 // --- row renderers -------------------------------------------------------
 
 function PurchaseRow({ purchase }: { purchase: PurchaseListItem }) {
+  const router = useRouter();
+  const href = `/purchases/${purchase._id}`;
   return (
-    <TableRow>
+    <TableRow
+      role="link"
+      tabIndex={0}
+      onClick={() => router.push(href)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          router.push(href);
+        }
+      }}
+      className="cursor-pointer"
+    >
       <TableCell className="w-[40px]">
         <SourceIcon source={purchase.ingestion_source} />
       </TableCell>
@@ -279,7 +293,12 @@ function PurchaseRow({ purchase }: { purchase: PurchaseListItem }) {
         {formatWindowRemaining(purchase.window_expires)}
       </TableCell>
       <TableCell className="text-right">
-        <Button render={<Link href={`/purchases/${purchase._id}`} />} size="sm" variant="outline">
+        <Button
+          render={<Link href={href} />}
+          size="sm"
+          variant="outline"
+          onClick={(e) => e.stopPropagation()}
+        >
           View
         </Button>
       </TableCell>
@@ -288,8 +307,21 @@ function PurchaseRow({ purchase }: { purchase: PurchaseListItem }) {
 }
 
 function PurchaseCard({ purchase }: { purchase: PurchaseListItem }) {
+  const router = useRouter();
+  const href = `/purchases/${purchase._id}`;
   return (
-    <Card className="overflow-hidden">
+    <Card
+      role="link"
+      tabIndex={0}
+      onClick={() => router.push(href)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          router.push(href);
+        }
+      }}
+      className="cursor-pointer overflow-hidden"
+    >
       <CardContent className="space-y-3 py-4">
         <div className="flex items-center justify-between">
           <StatusCell status={purchase.status} />
@@ -312,7 +344,8 @@ function PurchaseCard({ purchase }: { purchase: PurchaseListItem }) {
         <div className="flex items-center justify-between border-t border-neutral-100 pt-3 text-xs text-neutral-500">
           <span>{formatWindowRemaining(purchase.window_expires)}</span>
           <Link
-            href={`/purchases/${purchase._id}`}
+            href={href}
+            onClick={(e) => e.stopPropagation()}
             className="font-medium text-brand-primary-500 hover:underline"
           >
             View
