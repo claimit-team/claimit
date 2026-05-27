@@ -341,6 +341,13 @@ function buildResolutionFields(claim: ClaimDetailDoc): {
 // View-model builder
 // ---------------------------------------------------------------------------
 
+const STATUSES_WITHOUT_WINDOW = new Set<ClaimDetailWorkflowStatus>([
+  "expired", // covers: no_response, expired, user_self_service
+  "cancelled", // covers: user_cancelled
+  "approved", // refund confirmed
+  "denied", // claim rejected
+]);
+
 /**
  * Map the enriched wire `ClaimDetailResponse` into the render-friendly
  * `ClaimDetail` shape `ClaimDetailShell` + its panes consume.
@@ -353,19 +360,22 @@ export function buildClaimDetailViewModel(response: ClaimDetailResponse): ClaimD
   const { claim, purchase } = response;
   const draftVersions = mapDraftVersions(claim);
   const resolution = buildResolutionFields(claim);
+  const status = mapOutcomeToWorkflowStatus(claim.outcome);
 
   return {
     // `_id` could theoretically be null on the tolerant model, but the
     // route would have 404ed before reaching the page if the doc had
     // no `_id`. Fall back to empty string to keep the type honest.
     claim_id: claim._id ?? "",
-    status: mapOutcomeToWorkflowStatus(claim.outcome),
+    status,
     claim_type: mapClaimTypeToUi(claim.claim_type),
     platform: safePlatformLabel(claim.platform),
     product_name: purchase?.product_name ?? "—",
     refund_amount: claim.claim_amount ?? 0,
     currency: claim.currency ?? "USD",
-    window_remaining_hours: hoursUntil(purchase?.window_expires),
+    window_remaining_hours: STATUSES_WITHOUT_WINDOW.has(status)
+      ? 0
+      : hoursUntil(purchase?.window_expires),
     draft_versions: draftVersions,
     // `DraftPane` indexes via `selectedVersion - 1`; zero would break.
     // Empty draft_versions -> 1 so the index lands on the empty body
