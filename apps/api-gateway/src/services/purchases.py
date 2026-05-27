@@ -277,6 +277,61 @@ async def get_purchase_detail(
     return purchase, price_history, claims
 
 
+async def update_purchase_product_url(
+    db: MongoDBClient,
+    user: User,
+    purchase_id: UUID,
+    product_url: str | None,
+) -> PurchaseReadTolerant:
+    """Set `product_url` on a confirmed purchase and clear monitor-failure state.
+
+    Narrow allowlist on purpose — this route is the remediation lane for
+    BUG-19 (monitor agent blocked when product_url is missing) and is not a
+    general-purpose edit endpoint. Pre-confirmation edits still flow through
+    `/confirm` with `corrected_fields`.
+
+    Side effect: clears `last_monitor_error`, `last_monitor_error_at`,
+    `last_monitor_error_code` so the UI returns to the standard waiting
+    state immediately rather than carrying the stale "blocked" badge until
+    the next cron tick.
+
+    Raises:
+        ApiError(not_found, 404) if the purchase is missing or not owned.
+        ApiError(invalid_field, 400) if `product_url` fails Pydantic validation.
+    """
+    purchase = await get_purchase_for_user(db, user.id, purchase_id)
+
+    updates: dict[str, Any] = {
+        "product_url": product_url,
+        "last_monitor_error": None,
+        "last_monitor_error_at": None,
+        "last_monitor_error_code": None,
+    }
+    try:
+        matched = await db.partial_update("purchases", purchase_id, updates, model=Purchase)
+    except ValidationError as err:
+        raise ApiError(
+            "invalid_field",
+            "product_url failed validation",
+            status_code=400,
+            details=_validation_error_details(err),
+        ) from err
+    if not matched:
+        raise ApiError("not_found", "Purchase not found", status_code=404)
+
+    updated = await db.get_purchase(purchase_id)
+    if updated is None:
+        raise ApiError("not_found", "Purchase not found", status_code=404)
+
+    _log.info(
+        "Purchase product_url updated purchase_id=%s user_id=%s had_url=%s",
+        purchase_id,
+        user.id,
+        purchase.product_url is not None,
+    )
+    return updated
+
+
 async def confirm_purchase(
     db: MongoDBClient,
     user: User,

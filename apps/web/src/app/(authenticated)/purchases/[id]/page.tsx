@@ -103,7 +103,12 @@ export default function PurchaseDetailPage({ params }: PurchaseDetailRouteProps)
       />
     );
   }
-  return <PurchaseDetailContent purchase={state.vm} />;
+  return (
+    <PurchaseDetailContent
+      purchase={state.vm}
+      onPurchaseUpdated={() => setReloadTick((tick) => tick + 1)}
+    />
+  );
 }
 
 // ---------------------------------------------------------------------------

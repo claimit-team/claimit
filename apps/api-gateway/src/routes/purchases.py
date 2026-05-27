@@ -39,6 +39,18 @@ class ConfirmPurchaseRequest(BaseModel):
     corrected_fields: dict[str, Any] | None = Field(default=None)
 
 
+class UpdatePurchaseRequest(BaseModel):
+    """Body for PATCH /purchases/{id}.
+
+    Narrow on purpose — this endpoint is the remediation lane for BUG-19
+    (a monitoring purchase missing `product_url` will never get a price
+    snapshot). General edits still go through /confirm before monitoring
+    starts.
+    """
+
+    product_url: str | None = Field(default=None)
+
+
 class DismissPurchaseRequest(BaseModel):
     reason: DismissReason
     remember_sender: bool = Field(default=False)
@@ -199,6 +211,29 @@ async def get_purchase(
         db=db, user_id=user.id, purchase_id=uid
     )
     return serialize_purchase_detail(purchase, price_history, claims)
+
+
+@router.patch("/{purchase_id}")
+async def update_purchase(
+    purchase_id: Annotated[str, Path()],
+    body: UpdatePurchaseRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[MongoDBClient, Depends(get_db)],
+) -> dict[str, object]:
+    """Set `product_url` on a confirmed purchase (BUG-19 remediation).
+
+    Narrow on purpose — only `product_url` is editable. The endpoint also
+    clears `last_monitor_error*` so the UI returns to the waiting state
+    without having to wait for the next monitor cron tick to recover.
+    """
+    uid = purchases_service.parse_purchase_id(purchase_id)
+    purchase = await purchases_service.update_purchase_product_url(
+        db=db,
+        user=user,
+        purchase_id=uid,
+        product_url=body.product_url,
+    )
+    return {"purchase": serialize_purchase(purchase)}
 
 
 @router.post("/{purchase_id}/confirm")
