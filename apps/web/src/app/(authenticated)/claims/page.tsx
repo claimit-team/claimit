@@ -3,6 +3,7 @@
 import type { ClaimOutcome } from "@claimit/mongodb-types";
 import { Search } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { ClaimOutcomeBadge } from "@/components/claims/claim-outcome-badge";
 import { PlatformLogo } from "@/components/claims/platform-logo";
@@ -192,8 +193,21 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
 // --- row renderers -------------------------------------------------------
 
 function ClaimRow({ claim }: { claim: ClaimListItem }) {
+  const router = useRouter();
+  const href = `/claims/${claim._id}`;
   return (
-    <TableRow>
+    <TableRow
+      role="link"
+      tabIndex={0}
+      onClick={() => router.push(href)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          router.push(href);
+        }
+      }}
+      className="cursor-pointer"
+    >
       <TableCell>
         <ClaimOutcomeBadge outcome={claim.outcome} />
       </TableCell>
@@ -221,7 +235,13 @@ function ClaimRow({ claim }: { claim: ClaimListItem }) {
         {formatDateShort(claim.submitted_at)}
       </TableCell>
       <TableCell className="text-right">
-        <Button render={<Link href={`/claims/${claim._id}`} />} size="sm" variant="outline">
+        <Button
+          render={<Link href={href} />}
+          size="sm"
+          variant="outline"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
           View
         </Button>
       </TableCell>
@@ -230,8 +250,21 @@ function ClaimRow({ claim }: { claim: ClaimListItem }) {
 }
 
 function ClaimCard({ claim }: { claim: ClaimListItem }) {
+  const router = useRouter();
+  const href = `/claims/${claim._id}`;
   return (
-    <Card className="overflow-hidden">
+    <Card
+      role="link"
+      tabIndex={0}
+      onClick={() => router.push(href)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          router.push(href);
+        }
+      }}
+      className="cursor-pointer overflow-hidden"
+    >
       <CardContent className="space-y-3 py-4">
         <div className="flex items-center justify-between">
           <ClaimOutcomeBadge outcome={claim.outcome} />
@@ -253,7 +286,8 @@ function ClaimCard({ claim }: { claim: ClaimListItem }) {
         <div className="flex items-center justify-between border-t border-neutral-100 pt-3 text-xs text-neutral-500">
           <span>{windowOrResolvedCell(claim)}</span>
           <Link
-            href={`/claims/${claim._id}`}
+            href={href}
+            onClick={(e) => e.stopPropagation()}
             className="font-medium text-brand-primary-500 hover:underline"
           >
             View
