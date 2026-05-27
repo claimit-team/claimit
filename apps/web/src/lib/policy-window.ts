@@ -36,6 +36,21 @@ export function computeWindowDays(
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+/**
+ * Project the LOCAL calendar day of `date` to a UTC-midnight timestamp
+ * for whole-day arithmetic.
+ *
+ * Local getters are intentional: `purchaseDate` is constructed elsewhere
+ * via `new Date(year, month, day)` (the calendar picker) i.e. midnight
+ * LOCAL representing a calendar date. Reading those components with
+ * `getUTCFullYear` etc. would roll the day backward for any positive UTC
+ * offset (JST user picks Jan 24 → UTC reads Jan 23). Same applies to the
+ * `now` side — the user's "today" is their local calendar day, not UTC.
+ *
+ * Matches the symmetric-tz convention in `confirm-form-state.ts` (see
+ * the long-form comment around `toIsoMidnightUtc` / `sameDay`): read =
+ * UTC components from wire ISOs, compare/write = local components.
+ */
 function toUtcMidnight(date: Date): number {
   return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
 }

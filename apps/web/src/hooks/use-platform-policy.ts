@@ -41,7 +41,11 @@ export function usePlatformPolicy(platform: Platform | ""): {
     if (promise === undefined) {
       promise = getPolicyWindow(platform).catch((err) => {
         // Swallow: error path is identical to "no policy" downstream.
+        // Evict on failure so a transient network blip on the first edit
+        // doesn't permanently pin this platform to the 15-day default
+        // for the rest of the session — next platform change retries.
         console.warn(`[usePlatformPolicy] policy fetch failed for ${platform}:`, err);
+        cache.delete(platform);
         return null;
       });
       cache.set(platform, promise);
