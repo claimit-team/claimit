@@ -15,7 +15,10 @@
 import type { ClaimOutcome, ClaimType } from "@claimit/mongodb-types";
 import type { StatusGroup } from "@/lib/api/claims";
 import { formatClaimRemainingTime } from "@/lib/claim-detail";
+import type { ClaimDetailWorkflowStatus } from "@/lib/claim-detail-types";
 import { getPlatformLabel } from "@/lib/platform-labels";
+
+export const EDITABLE_STATUSES = new Set<ClaimDetailWorkflowStatus>(["awaiting_approval"]);
 
 /**
  * Convert an unknown enum-ish string into a human-friendly Title Case
@@ -106,7 +109,7 @@ export function formatWindowRemaining(windowExpires: string | null): string {
   if (windowExpires === null) return "—";
   const expiresMs = Date.parse(windowExpires);
   if (Number.isNaN(expiresMs)) return "—";
-  const hoursRemaining = Math.floor((expiresMs - Date.now()) / (60 * 60 * 1000));
+  const hoursRemaining = Math.ceil((expiresMs - Date.now()) / (60 * 60 * 1000));
   return formatClaimRemainingTime(hoursRemaining);
 }
 
