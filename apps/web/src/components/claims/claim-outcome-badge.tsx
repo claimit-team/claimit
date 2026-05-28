@@ -83,7 +83,8 @@ const OUTCOME_DISPLAY: Record<
 // Applied to every badge so sizing is uniform regardless of outcome.
 // Placed after extraClassName in cn() so tailwind-merge gives these
 // priority over the CVA variant's px-2 / rounded-4xl defaults.
-const BASE_BADGE_CLASSES = "text-xs font-medium px-2.5 py-0.5 rounded-full whitespace-nowrap";
+const BASE_BADGE_CLASSES =
+  "text-xs font-medium px-2.5 py-0.5 rounded-full whitespace-nowrap min-w-[6.5rem] text-center";
 
 /**
  * Resolve the display config for a possibly-unknown outcome string.
