@@ -373,7 +373,7 @@ export function PricingView() {
         </div>
       </section>
 
-      <section className="border-t border-neutral-200 bg-neutral-50 py-24 sm:py-32 lg:py-40">
+      <section className="border-t border-neutral-200 bg-neutral-0 py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-2xl px-4 text-center sm:px-6 lg:px-8">
           <h2 className="text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
             Start with One Receipt
