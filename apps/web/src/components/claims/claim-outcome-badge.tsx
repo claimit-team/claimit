@@ -80,6 +80,11 @@ const OUTCOME_DISPLAY: Record<
   },
 };
 
+// Applied to every badge so sizing is uniform regardless of outcome.
+// Placed after extraClassName in cn() so tailwind-merge gives these
+// priority over the CVA variant's px-2 / rounded-4xl defaults.
+const BASE_BADGE_CLASSES = "text-xs font-medium px-2.5 py-0.5 rounded-full whitespace-nowrap";
+
 /**
  * Resolve the display config for a possibly-unknown outcome string.
  *
@@ -117,7 +122,7 @@ export function ClaimOutcomeBadge({
 }) {
   const { label, variant, extraClassName } = resolveOutcomeDisplay(outcome);
   return (
-    <Badge variant={variant} className={cn(extraClassName, className)}>
+    <Badge variant={variant} className={cn(extraClassName, BASE_BADGE_CLASSES, className)}>
       {label}
     </Badge>
   );
