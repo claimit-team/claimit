@@ -1,7 +1,7 @@
 "use client";
 
 import type { ClaimOutcome } from "@claimit/mongodb-types";
-import { Search } from "lucide-react";
+import { Search, SearchX } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -158,7 +158,20 @@ function LoadingSkeleton() {
   );
 }
 
-function EmptyState({ chip }: { chip: ChipKey }) {
+function EmptyState({ chip, hasSearch }: { chip: ChipKey; hasSearch: boolean }) {
+  if (hasSearch) {
+    return (
+      <Card className="mx-auto max-w-md">
+        <CardContent className="py-10 text-center">
+          <SearchX className="mx-auto mb-3 h-10 w-10 text-neutral-300" aria-hidden />
+          <h3 className="text-base font-medium text-neutral-900">No results found</h3>
+          <p className="mt-2 text-sm text-neutral-600">
+            Try adjusting your search term or clearing filters.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
   const copy = EMPTY_COPY[chip];
   return (
     <Card className="mx-auto max-w-md">
@@ -303,6 +316,8 @@ export default function ClaimsPage() {
     setStatusGroup,
     q,
     setQ,
+    debouncedQ,
+    counts,
     refetch,
     loadMore,
   } = useClaims();
@@ -329,13 +344,14 @@ export default function ClaimsPage() {
           <div className="flex flex-wrap gap-2">
             {CHIPS.map((chip) => {
               const isActive = chip.key === activeChip;
+              const count = counts[chip.key];
               return (
                 <button
                   key={chip.key}
                   type="button"
                   onClick={() => setStatusGroup(chip.key === "all" ? null : chip.key)}
                   className={cn(
-                    "rounded-full border px-3 py-1.5 text-sm transition-colors",
+                    "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors",
                     isActive
                       ? "border-brand-primary-500 bg-brand-primary-500 text-primary-foreground"
                       : "border-neutral-200 bg-neutral-0 text-neutral-700 hover:bg-neutral-50",
@@ -343,6 +359,18 @@ export default function ClaimsPage() {
                   aria-pressed={isActive}
                 >
                   {chip.label}
+                  {count != null && (
+                    <span
+                      className={cn(
+                        "inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1 text-xs font-medium",
+                        isActive
+                          ? "bg-white/20 text-primary-foreground"
+                          : "bg-neutral-100 text-neutral-600",
+                      )}
+                    >
+                      {count}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -368,7 +396,7 @@ export default function ClaimsPage() {
       ) : isLoading ? (
         <LoadingSkeleton />
       ) : claims.length === 0 ? (
-        <EmptyState chip={emptyChipKey} />
+        <EmptyState chip={emptyChipKey} hasSearch={!!debouncedQ} />
       ) : (
         <>
           <div className="hidden rounded-xl border border-neutral-200 bg-neutral-0 shadow-sm md:block">

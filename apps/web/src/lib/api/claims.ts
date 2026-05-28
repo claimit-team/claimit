@@ -100,6 +100,7 @@ export type ListClaimsParams = {
 export type ListClaimsResponse = {
   claims: ClaimListItem[];
   next_cursor: string | null;
+  counts: Record<string, number>;
 };
 
 export class ClaimsApiError extends Error {
