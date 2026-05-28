@@ -1,10 +1,34 @@
+"use client";
+
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { toast } from "sonner";
 import { FlowPreview } from "@/components/onboarding/flow-preview";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { signOutUser } from "@/lib/auth-actions";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/store";
 
 export function WelcomeCard() {
+  const router = useRouter();
+  const [isSwitchingAccount, setIsSwitchingAccount] = useState(false);
+
+  const handleUseDifferentAccount = async () => {
+    if (isSwitchingAccount) return;
+    setIsSwitchingAccount(true);
+    try {
+      await signOutUser();
+      useAuthStore.getState().signOut();
+      router.push("/login");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Sign out failed.";
+      toast.error(message);
+      setIsSwitchingAccount(false);
+    }
+  };
+
   return (
     <Card className="w-full border-neutral-200 bg-neutral-0 shadow-sm">
       <CardContent className="flex flex-col gap-6">
@@ -34,13 +58,14 @@ export function WelcomeCard() {
           </Link>
 
           <p className="text-center text-xs text-neutral-500">
-            Already have an account?{" "}
-            <Link
-              href="/login"
-              className="text-brand-primary-600 underline-offset-4 hover:underline"
+            <button
+              type="button"
+              onClick={() => void handleUseDifferentAccount()}
+              disabled={isSwitchingAccount}
+              className="text-brand-primary-600 underline-offset-4 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Sign in
-            </Link>
+              {isSwitchingAccount ? "Signing out…" : "Use a different account"}
+            </button>
           </p>
         </div>
       </CardContent>
