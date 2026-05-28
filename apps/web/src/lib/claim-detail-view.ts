@@ -390,6 +390,7 @@ export function buildClaimDetailViewModel(response: ClaimDetailResponse): ClaimD
     // the live countdown. Null when not queued — the header's branch
     // guards on the value before computing MM:SS.
     auto_send_at: claim.auto_send_at,
+    subject: claim.subject ?? null,
     ...resolution,
   };
 }

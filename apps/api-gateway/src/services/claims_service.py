@@ -915,6 +915,7 @@ async def edit_claim_draft(
     user_id: UUID,
     claim_id: UUID,
     draft_content: str,
+    subject: str | None = None,
 ) -> dict[str, object]:
     """Append a user-edited DraftVersion and update draft_content in sync.
 
@@ -949,13 +950,16 @@ async def edit_claim_draft(
         generated_by=DraftGeneratedBy.USER_EDIT,
         at=now,
     )
+    set_fields: dict[str, Any] = {"draft_content": draft_content}
+    if subject is not None:
+        set_fields["subject"] = subject
     success = await db.array_push(
         "claims",
         claim_id,
         field="draft_versions",
         element=new_version,
         element_model=DraftVersion,
-        set_fields={"draft_content": draft_content},
+        set_fields=set_fields,
         parent_model=Claim,
     )
     if not success:
