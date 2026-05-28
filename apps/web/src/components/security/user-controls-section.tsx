@@ -1,5 +1,4 @@
 import { Bell, CheckSquare, Unplug, Upload } from "lucide-react";
-import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -8,25 +7,21 @@ const controls = [
     title: "Disconnect Gmail",
     description: "Revoke Gmail access at any time from your settings.",
     icon: Unplug,
-    href: "/settings/gmail",
   },
   {
     title: "Use upload instead",
     description: "Skip Gmail entirely and manually upload receipts.",
     icon: Upload,
-    href: "/settings/gmail",
   },
   {
     title: "Choose approval mode",
     description: "Control whether claims require manual approval or auto-send.",
     icon: CheckSquare,
-    href: "/settings/preferences",
   },
   {
     title: "Manage notifications",
     description: "Configure how and when ClaimIt alerts you about claims.",
     icon: Bell,
-    href: "/settings/notifications",
   },
 ];
 
@@ -48,21 +43,19 @@ export function UserControlsSection() {
         </div>
         <div className="grid gap-6 sm:grid-cols-2">
           {controls.map((control) => (
-            <Link key={control.title} href={control.href}>
-              <Card className="h-full bg-card transition-all duration-300 hover:-translate-y-1 hover:shadow-md">
-                <CardHeader>
-                  <div className="flex size-10 items-center justify-center rounded-lg bg-secondary">
-                    <control.icon className="size-5 text-foreground" />
-                  </div>
-                  <CardTitle className="mt-4">{control.title}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <CardDescription className="text-sm leading-relaxed">
-                    {control.description}
-                  </CardDescription>
-                </CardContent>
-              </Card>
-            </Link>
+            <Card key={control.title} className="h-full bg-card">
+              <CardHeader>
+                <div className="flex size-10 items-center justify-center rounded-lg bg-secondary">
+                  <control.icon className="size-5 text-foreground" />
+                </div>
+                <CardTitle className="mt-4">{control.title}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <CardDescription className="text-sm leading-relaxed">
+                  {control.description}
+                </CardDescription>
+              </CardContent>
+            </Card>
           ))}
         </div>
       </div>
