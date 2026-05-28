@@ -37,6 +37,7 @@ import type {
   DraftVersion,
   OutcomeStatus,
 } from "@/lib/claim-detail-types";
+import { getPlatformLabel } from "@/lib/platform-labels";
 
 // ---------------------------------------------------------------------------
 // Outcome -> workflow-status mapping
@@ -162,25 +163,6 @@ export function mapClaimTypeToUi(claimType: string | null | undefined): ClaimDet
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Convert a snake-case backend platform value to a brand-style label.
- * `best_buy` -> `Best Buy`; `null`/`""` -> `Unknown platform`.
- * Mirrors `safePlatformLabel` in `purchase-detail-view.ts`.
- *
- * TODO(refactor): hoist this + the `purchase-detail-view.ts` copy to a
- * shared helper in `lib/utils.ts` so the two detail VMs share one
- * definition. Out of scope for this demo-breaker fix; tracked in a
- * follow-up cleanup PR.
- */
-function safePlatformLabel(raw: string | null | undefined): string {
-  if (raw === null || raw === undefined || raw === "") return "Unknown platform";
-  return raw
-    .split("_")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
 
 /**
  * Hours until `iso`, clamped at 0 (so the header's
@@ -369,7 +351,7 @@ export function buildClaimDetailViewModel(response: ClaimDetailResponse): ClaimD
     claim_id: claim._id ?? "",
     status,
     claim_type: mapClaimTypeToUi(claim.claim_type),
-    platform: safePlatformLabel(claim.platform),
+    platform: getPlatformLabel(claim.platform),
     product_name: purchase?.product_name ?? "—",
     refund_amount: claim.claim_amount ?? 0,
     currency: claim.currency ?? "USD",
