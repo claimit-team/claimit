@@ -46,6 +46,7 @@ import type {
   ClaimPolicy,
   DraftVersion,
 } from "@/lib/claim-detail-types";
+import { EDITABLE_STATUSES } from "@/lib/claims-status";
 import { toSafeExternalHref } from "@/lib/safe-url";
 import { cn } from "@/lib/utils";
 
@@ -648,6 +649,7 @@ export function DraftPane({
   // #168). The empty-draft Alert in `renderPreview` already covers the
   // user-facing message; the header navigation stays calm.
   const onLatestVersion = totalVersions === 0 || selectedVersion === totalVersions;
+  const isEditable = EDITABLE_STATUSES.has(claim.status);
   // When the user browses an older version, force preview-only — editing
   // an older version is not a supported rollback flow in 5.7.
   useEffect(() => {
@@ -891,11 +893,11 @@ export function DraftPane({
             <TabsTrigger value="preview" className="data-active:bg-neutral-100">
               Preview
             </TabsTrigger>
-            {onLatestVersion ? (
+            {isEditable && onLatestVersion ? (
               <TabsTrigger value="edit" className="data-active:bg-neutral-100">
                 Edit
               </TabsTrigger>
-            ) : (
+            ) : isEditable ? (
               <Tooltip>
                 <TooltipTrigger
                   type="button"
@@ -908,7 +910,7 @@ export function DraftPane({
                 </TooltipTrigger>
                 <TooltipContent>Switch to the latest version to edit.</TooltipContent>
               </Tooltip>
-            )}
+            ) : null}
           </TabsList>
         </div>
 
