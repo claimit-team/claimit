@@ -656,12 +656,6 @@ export function DraftPane({
     }
   }, [onLatestVersion, draftMode, setDraftMode]);
 
-  useEffect(() => {
-    if (claim.claim_type === "email") {
-      setEditSubject(deriveEmailSubject(claim.purchase.order_id));
-    }
-  }, [claim.claim_type, claim.purchase.order_id]);
-
   const Icon = claimTypeIcons[claim.claim_type];
 
   const policy = claim.policy ?? FALLBACK_POLICY;
@@ -754,6 +748,9 @@ export function DraftPane({
     if (pendingTab !== null) setDraftMode(pendingTab);
     if (pendingVersion !== null) setSelectedVersion(pendingVersion);
     setEditBuffer(nextBaseline);
+    if (claim.claim_type === "email") {
+      setEditSubject(claim.subject ?? deriveEmailSubject(claim.purchase.order_id));
+    }
     clearPending();
   };
 

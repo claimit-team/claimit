@@ -416,7 +416,7 @@ export async function cancelClaim(
 
 export type EditClaimDraftBody = {
   draft_content: string;
-  subject?: string;
+  subject?: string | null;
 };
 
 export type EditClaimDraftResponse = {
