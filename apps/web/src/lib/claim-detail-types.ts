@@ -150,6 +150,7 @@ export interface ClaimDetail {
    * by the dashboard auto-send banner (WI-9).
    */
   auto_send_at?: string | null;
+  subject?: string | null;
 }
 
 export interface ClaimMessage {

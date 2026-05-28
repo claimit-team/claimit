@@ -44,6 +44,7 @@ class RecordClaimOutcomeRequest(BaseModel):
 
 class EditClaimDraftRequest(BaseModel):
     draft_content: str = Field(min_length=1)
+    subject: str | None = None
 
 
 @router.get("")
@@ -213,5 +214,9 @@ async def edit_claim_draft(
     DRAFT_PENDING.
     """
     return await claims_service.edit_claim_draft(
-        db=db, user_id=user.id, claim_id=claim_id, draft_content=body.draft_content
+        db=db,
+        user_id=user.id,
+        claim_id=claim_id,
+        draft_content=body.draft_content,
+        subject=body.subject,
     )
