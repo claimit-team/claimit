@@ -9,7 +9,8 @@ for two cases motivated by issue #183:
   1. Multi-item receipt → status `pending_user_edit`, no purchase.ingested,
      no LOW_CONFIDENCE_EXTRACT notification, price_paid is the picked item's
      price (NOT the grand total), price_paid confidence clamped <= 0.4.
-  2. Single-item receipt → status `monitoring`, purchase.ingested published.
+  2. Single-item receipt → status `pending_confirmation` (review screen per
+     BUG-83), purchase.ingested published.
 
 Gemini is stubbed in both cases — the goal is to verify the wiring around
 `extract_from_blob`, not the model itself. A separate live OCR smoke
