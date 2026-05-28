@@ -255,7 +255,7 @@ export default function BillingPage() {
                   type="button"
                   variant="destructive"
                   onClick={handleCancelConfirm}
-                  className="bg-semantic-danger hover:bg-semantic-danger/90"
+                  className="bg-semantic-danger text-neutral-0 hover:bg-semantic-danger/90"
                 >
                   Cancel subscription
                 </Button>
