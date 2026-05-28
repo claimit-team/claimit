@@ -40,6 +40,44 @@ from claimit_pubsub import (
 logger = logging.getLogger(__name__)
 
 _REASONING_TRACE_TIMEOUT_SECONDS = 5.0
+# Mongo MCP calls inside the same VPC should resolve in well under a
+# second; 5s is a generous outer bound so a wedged MCP server can never
+# hang the tool call indefinitely (BUG-61).
+_MONGO_TIMEOUT_SECONDS = 5.0
+
+
+async def _safe_db_call(
+    op_name: str,
+    log_ctx: dict[str, Any],
+    coro_factory: Callable[[], Awaitable[Any]],
+) -> tuple[Any, dict[str, Any] | None]:
+    """Run a single Mongo call with timeout + structured-error fallback.
+
+    Returns `(result, None)` on success or `(None, error_dict)` on timeout
+    or exception. Caller propagates the error dict directly to the LLM so
+    the model can tell the user the system is slow instead of inventing
+    an answer (BUG-31 user-visible symptom carried over from search_tools).
+
+    `coro_factory` is a zero-arg callable returning a fresh coroutine —
+    needed because asyncio.wait_for can only consume each coroutine once
+    and we want one clean retry-free attempt per call.
+    """
+    try:
+        result = await asyncio.wait_for(coro_factory(), timeout=_MONGO_TIMEOUT_SECONDS)
+    except TimeoutError:
+        logger.warning("%s timed out ctx=%s", op_name, log_ctx)
+        return None, {
+            "error": f"{op_name}_timeout",
+            "message": "Claim system is temporarily slow, please try again.",
+        }
+    except Exception:
+        logger.exception("%s failed ctx=%s", op_name, log_ctx)
+        return None, {
+            "error": f"{op_name}_failed",
+            "message": "Claim system is temporarily unavailable, please try again.",
+        }
+    return result, None
+
 
 # Type aliases — every tool is async-returning-dict for ADK FunctionTool.
 _ToolResult = dict[str, Any]
@@ -83,7 +121,10 @@ def make_get_claim_context(
         reachable from this tool.
         """
         db = db_factory()
-        claim = await db.get_claim(claim_id)
+        ctx = {"tool": "get_claim_context", "claim_id": claim_id}
+        claim, err = await _safe_db_call("get_claim", ctx, lambda: db.get_claim(claim_id))
+        if err is not None:
+            return err
         if claim is None:
             return {"error": "claim_not_found"}
         if not _matches_user(claim.user_id, user_id):
@@ -97,11 +138,22 @@ def make_get_claim_context(
 
         purchase = None
         if claim.purchase_id is not None:
-            purchase = await db.get_purchase(claim.purchase_id)
+            purchase, perr = await _safe_db_call(
+                "get_purchase", ctx, lambda: db.get_purchase(claim.purchase_id)
+            )
+            # Purchase fetch is best-effort — the LLM can still summarize the
+            # claim itself if the linked purchase doc happens to be slow,
+            # so we degrade to None rather than failing the whole bundle.
+            if perr is not None:
+                purchase = None
 
         policy = None
         if claim.platform is not None:
-            policy = await db.get_policy(str(claim.platform))
+            policy, polerr = await _safe_db_call(
+                "get_policy", ctx, lambda: db.get_policy(str(claim.platform))
+            )
+            if polerr is not None:
+                policy = None
 
         return {
             "claim": claim.model_dump(mode="json", by_alias=True),
@@ -142,7 +194,10 @@ def make_update_send_override(
             }
 
         db = db_factory()
-        claim = await db.get_claim(claim_id)
+        ctx = {"tool": "update_send_override", "claim_id": claim_id}
+        claim, err = await _safe_db_call("get_claim", ctx, lambda: db.get_claim(claim_id))
+        if err is not None:
+            return err
         if claim is None:
             return {"error": "claim_not_found"}
         if not _matches_user(claim.user_id, user_id):
@@ -154,12 +209,18 @@ def make_update_send_override(
             )
             return {"error": "not_authorized"}
 
-        ok = await db.partial_update(
-            "claims",
-            claim_id,
-            {"send_override": normalized},
-            model=Claim,
+        ok, uerr = await _safe_db_call(
+            "partial_update",
+            ctx,
+            lambda: db.partial_update(
+                "claims",
+                claim_id,
+                {"send_override": normalized},
+                model=Claim,
+            ),
         )
+        if uerr is not None:
+            return uerr
         return {"ok": ok, "send_override": mode}
 
     return update_send_override
@@ -199,7 +260,10 @@ def make_request_redraft(
             cleaned = cleaned[:500]
 
         db = db_factory()
-        claim = await db.get_claim(claim_id)
+        ctx = {"tool": "request_redraft", "claim_id": claim_id}
+        claim, err = await _safe_db_call("get_claim", ctx, lambda: db.get_claim(claim_id))
+        if err is not None:
+            return err
         if claim is None:
             return {"error": "claim_not_found"}
         if not _matches_user(claim.user_id, user_id):
