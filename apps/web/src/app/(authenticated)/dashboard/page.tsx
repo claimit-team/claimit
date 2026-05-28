@@ -49,6 +49,7 @@ import {
   formatWindowRemaining,
   snakeToTitleLabel,
 } from "@/lib/claims-status";
+import { getPlatformLabel } from "@/lib/platform-labels";
 import { getListStatusBadge, isMonitoringDegraded } from "@/lib/purchase-status";
 import { cn } from "@/lib/utils";
 import { useAuthStore, useUIStore } from "@/store";
@@ -409,22 +410,6 @@ type AwaitingOutcomeItem = {
 type NeedsAttentionItem = ReviewDraftItem | ConfirmExtractionItem | AwaitingOutcomeItem;
 
 /**
- * `best_buy` → `Best Buy` (Title Case). `snakeToTitleLabel` is
- * sentence-case (`Best buy`) and would visually disagree with the
- * detail page's `safePlatformLabel` helper, so we duplicate the
- * Title-Case logic locally rather than re-import (Bugbot LOW, PR
- * #168 — dashboard / detail casing mismatch).
- */
-function toPlatformLabel(raw: string | null | undefined): string {
-  if (raw === null || raw === undefined || raw === "") return "";
-  return raw
-    .split("_")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-/**
  * Map an `outcome=draft_pending` claim row to the dashboard's
  * `ReviewDraftCard` shape. Falls back to neutral defaults so a
  * partial / read-tolerant row never crashes the section.
@@ -441,7 +426,7 @@ function buildReviewDraftItems(claims: ClaimListItem[]): ReviewDraftItem[] {
     .map((c) => ({
       type: "review_draft" as const,
       claimId: c._id,
-      platform: toPlatformLabel(c.platform),
+      platform: getPlatformLabel(c.platform),
       title: c.product_name ?? "Untitled claim",
       claimType: typeof c.claim_type === "string" ? c.claim_type : "email",
       windowRemaining: formatWindowRemaining(c.window_expires),
@@ -461,7 +446,7 @@ function buildAwaitingOutcomeItems(claims: ClaimListItem[]): AwaitingOutcomeItem
     .map((c) => ({
       type: "awaiting_outcome" as const,
       claimId: c._id,
-      platform: toPlatformLabel(c.platform),
+      platform: getPlatformLabel(c.platform),
       title: c.product_name ?? "Untitled claim",
       claimAmount: c.claim_amount ?? 0,
       submittedLabel: formatRelativeFromNow(c.submitted_at),
@@ -525,7 +510,7 @@ function buildConfirmExtractionItems(purchases: PurchaseListItem[]): ConfirmExtr
     out.push({
       type: "confirm_extraction",
       purchaseId: p._id,
-      platform: snakeToTitleLabel(p.platform),
+      platform: getPlatformLabel(p.platform),
       title: p.product_name ?? "Untitled purchase",
       lowConfidenceFields: lowFields.length > 0 ? lowFields : ["Review extracted details"],
     });
@@ -555,7 +540,7 @@ function humanizeField(field: string): string {
 }
 
 function buildRecentActivityText(item: RecentResolvedClaim): string {
-  const platform = toPlatformLabel(item.platform);
+  const platform = getPlatformLabel(item.platform);
   const outcome = snakeToTitleLabel(item.outcome);
   const isWinning = item.outcome === "approved" || item.outcome === "user_self_service";
   return isWinning
@@ -746,7 +731,7 @@ function MonitoredPurchasesSection({
                       <tr key={purchase._id} className="hover:bg-neutral-50 transition-colors">
                         <td className="px-4 py-3 text-sm font-medium text-neutral-900">
                           <Link href={`/purchases/${purchase._id}`} className="hover:underline">
-                            {snakeToTitleLabel(purchase.platform)}
+                            {getPlatformLabel(purchase.platform)}
                           </Link>
                         </td>
                         <td className="px-4 py-3 text-sm text-neutral-700">

@@ -23,6 +23,7 @@ import {
 import { useClaims } from "@/hooks/useClaims";
 import type { ClaimListItem, StatusGroup } from "@/lib/api/claims";
 import { claimTypeLabel, formatRelativeFromNow, formatWindowRemaining } from "@/lib/claims-status";
+import { getPlatformLabel } from "@/lib/platform-labels";
 import { cn } from "@/lib/utils";
 
 // --- chip group config ---------------------------------------------------
@@ -74,13 +75,6 @@ function formatMoney(amount: number | null, currency: string | null): string {
   } catch {
     return `${currency} ${amount}`;
   }
-}
-
-// `claim.platform` may be null on legacy data — render the same em-dash
-// rather than calling `.replace` on a nullish value.
-function platformLabel(platform: string | null): string {
-  if (platform === null || platform === "") return "—";
-  return platform.replace(/_/g, " ");
 }
 
 function formatDateShort(iso: string | null): string {
@@ -218,9 +212,7 @@ function ClaimRow({ claim }: { claim: ClaimListItem }) {
             <span className="truncate font-medium text-neutral-900">
               {claim.product_name ?? "Unlinked claim"}
             </span>
-            <span className="text-xs text-neutral-500 capitalize">
-              {platformLabel(claim.platform)}
-            </span>
+            <span className="text-xs text-neutral-500">{getPlatformLabel(claim.platform)}</span>
           </div>
         </div>
       </TableCell>
@@ -278,8 +270,8 @@ function ClaimCard({ claim }: { claim: ClaimListItem }) {
             <span className="truncate font-medium text-neutral-900">
               {claim.product_name ?? "Unlinked claim"}
             </span>
-            <span className="text-xs text-neutral-500 capitalize">
-              {platformLabel(claim.platform)} · {claimTypeLabel(claim.claim_type)}
+            <span className="text-xs text-neutral-500">
+              {getPlatformLabel(claim.platform)} · {claimTypeLabel(claim.claim_type)}
             </span>
           </div>
         </div>

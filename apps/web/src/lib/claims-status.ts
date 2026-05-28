@@ -15,6 +15,7 @@
 import type { ClaimOutcome, ClaimType } from "@claimit/mongodb-types";
 import type { StatusGroup } from "@/lib/api/claims";
 import { formatClaimRemainingTime } from "@/lib/claim-detail";
+import { getPlatformLabel } from "@/lib/platform-labels";
 
 /**
  * Convert an unknown enum-ish string into a human-friendly Title Case
@@ -43,17 +44,9 @@ export function snakeToTitleLabel(raw: string | null | undefined): string {
 
 /**
  * Brand-style platform label: `best_buy` → `Best Buy`, `hilton` → `Hilton`.
- * Matches the detail VM's `safePlatformLabel` and the dashboard's local
- * `toPlatformLabel` helper (Title Case on each `_`-segment).
+ * Delegates to the canonical `getPlatformLabel` in `lib/platform-labels.ts`.
  */
-export function toPlatformLabel(raw: string | null | undefined): string {
-  if (raw === null || raw === undefined || raw === "") return "Unknown platform";
-  return raw
-    .split("_")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
+export const toPlatformLabel = getPlatformLabel;
 
 /**
  * `outcome` may be `null` (legacy doc never populated it) or a string

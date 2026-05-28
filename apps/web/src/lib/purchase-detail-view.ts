@@ -29,6 +29,7 @@ import type {
   PurchaseDetailDoc,
   PurchaseDetailResponse,
 } from "@/lib/api/purchases";
+import { getPlatformLabel } from "@/lib/platform-labels";
 import { deriveMonitoringStatus, isMonitoringDegraded } from "@/lib/purchase-status";
 
 // ---------------------------------------------------------------------------
@@ -223,13 +224,7 @@ function safeCategory(raw: string | null): PurchaseCategory {
 }
 
 export function safePlatformLabel(raw: string | null): string {
-  if (raw === null || raw === "") return "Unknown platform";
-  // best_buy -> Best Buy. Reads as a brand label rather than a slug.
-  return raw
-    .split("_")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  return getPlatformLabel(raw);
 }
 
 /**
