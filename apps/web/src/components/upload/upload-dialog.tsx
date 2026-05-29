@@ -1,8 +1,8 @@
 "use client";
 
-import { FileText, ImageIcon, UploadCloud, X } from "lucide-react";
+import { FileText, ImageIcon, Loader2, UploadCloud, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { type FileRejection, useDropzone } from "react-dropzone";
 import { toast } from "sonner";
 
@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { PurchasesApiError, uploadPurchase } from "@/lib/api/purchases";
-import { stashUploadDraft } from "@/lib/confirm-staging";
+import { setStagedReceiptFile, stashUploadDraft } from "@/lib/confirm-staging";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store";
 
@@ -35,10 +35,14 @@ import { useUIStore } from "@/store";
  *     up-front; rejections surface as toast errors and never reach
  *     `uploadPurchase`.
  *   - On submit the dialog calls `uploadPurchase(file)` (multipart
- *     POST → api-gateway). Indeterminate progress is rendered because
- *     `fetch` cannot expose XHR-style upload progress events; the
- *     `Progress` bar oscillates to indicate liveness rather than
- *     misleading the user with a real-percent number we can't supply.
+ *     POST → api-gateway). `fetch` cannot expose XHR-style upload
+ *     progress events AND the request also runs the synchronous OCR
+ *     extraction server-side (multi-second), so we drive a faked
+ *     determinate bar that creeps toward ~90% and snaps to 100% on
+ *     success — it signals "we're working" (upload + reading the
+ *     receipt) without a real-percent number we can't compute. A
+ *     spinner + "reading your receipt" copy reinforce the processing
+ *     state (the bar alone read as empty/stalled).
  *   - On success → `router.push(/confirm/:id)` and the dialog closes.
  *     The confirm page handles the async-extraction poll itself
  *     (B3); we don't poll here.
@@ -74,6 +78,23 @@ export function UploadDialog() {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  // Faked upload+extraction progress. `fetch` exposes no real upload
+  // progress and the request runs synchronous OCR, so we creep toward a
+  // ~90% ceiling while in flight and snap to 100% on success. Held in a
+  // ref so the climb interval can be cleared from any exit path.
+  const [progress, setProgress] = useState(0);
+  const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopProgress = useCallback(() => {
+    if (progressTimer.current) {
+      clearInterval(progressTimer.current);
+      progressTimer.current = null;
+    }
+  }, []);
+
+  // Defensive unmount cleanup so a climb interval can't fire setState
+  // after the dialog has gone (e.g. strict-mode double-invoke).
+  useEffect(() => stopProgress, [stopProgress]);
 
   // Revoke the previous object URL whenever the file changes / the
   // dialog closes, so we don't leak preview blobs across attempts.
@@ -93,8 +114,10 @@ export function UploadDialog() {
     if (!open) {
       setFile(null);
       setUploading(false);
+      stopProgress();
+      setProgress(0);
     }
-  }, [open]);
+  }, [open, stopProgress]);
 
   const onDrop = useCallback((accepted: File[], rejections: FileRejection[]) => {
     if (rejections.length > 0) {
@@ -132,6 +155,15 @@ export function UploadDialog() {
   const handleSubmit = useCallback(async () => {
     if (!file || uploading) return;
     setUploading(true);
+    // Start the bar at a small nonzero value so the track paints
+    // immediately (no flash of empty bar), then creep toward 90% with a
+    // decelerating step so it never looks stalled but also never claims
+    // to be done before the response lands.
+    setProgress(8);
+    stopProgress();
+    progressTimer.current = setInterval(() => {
+      setProgress((p) => Math.min(90, p + Math.max(1, (90 - p) * 0.08)));
+    }, 250);
     try {
       const draft = await uploadPurchase(file);
       // Write-after-confirm: nothing is persisted yet. Stash the
@@ -145,9 +177,18 @@ export function UploadDialog() {
         toast.error(
           "We couldn't continue to the confirm step in this browser. Try disabling private/incognito mode or another browser.",
         );
+        stopProgress();
+        setProgress(0);
         setUploading(false);
         return;
       }
+      // Carry the picked File into the confirm step (module singleton, keyed
+      // by the staging key) so the confirm page can preview the receipt while
+      // the user reviews the extracted details — the GCS blob isn't proxy-
+      // fetchable until the purchase is created (write-after-confirm).
+      setStagedReceiptFile(stagingKey, file);
+      stopProgress();
+      setProgress(100);
       toast.success("Receipt uploaded.");
       // Close before navigating so the dialog doesn't briefly flash
       // back over the confirm page during route transition.
@@ -172,9 +213,11 @@ export function UploadDialog() {
         }
       }
       toast.error(message);
+      stopProgress();
+      setProgress(0);
       setUploading(false);
     }
-  }, [file, uploading, router, setOpen]);
+  }, [file, uploading, router, setOpen, stopProgress]);
 
   const isPdf = file?.type === "application/pdf";
 
@@ -222,13 +265,16 @@ export function UploadDialog() {
               <p className="text-xs text-neutral-500">{formatBytes(file.size)}</p>
               {uploading ? (
                 <div className="mt-2 space-y-1">
-                  {/* Indeterminate progress: `fetch` cannot expose upload
-                      progress. Base-ui's Progress renders an indeterminate
-                      shimmer when `value` is null; we use that so the bar
-                      indicates liveness rather than misleading the user
-                      with a fake percentage we can't actually compute. */}
-                  <Progress value={null} className="h-1.5" />
-                  <p className="text-xs text-neutral-500">Uploading…</p>
+                  {/* Faked determinate progress — see the component header
+                      comment. `fetch` exposes no real upload progress and
+                      the request also runs synchronous OCR, so the bar
+                      creeps to ~90% then snaps to 100% on success. The
+                      spinner + copy make the processing state explicit. */}
+                  <Progress value={progress} className="h-1.5" aria-label="Uploading receipt" />
+                  <p className="flex items-center gap-1.5 text-xs text-neutral-500">
+                    <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                    Uploading &amp; reading your receipt…
+                  </p>
                 </div>
               ) : null}
             </div>

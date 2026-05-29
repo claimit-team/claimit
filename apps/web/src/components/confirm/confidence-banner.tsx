@@ -68,13 +68,40 @@ interface ConfidenceBannerProps {
    * of fields are technically below threshold.
    */
   isMostlyFailed?: boolean;
+  /**
+   * OCR produced NOTHING (the upload extractor failed entirely, so the
+   * draft carries no extraction at all). Distinct from `isMostlyFailed`
+   * (which means "extracted, but low confidence"): here there are no
+   * fields and no confidence record, so without this flag the banner
+   * would render nothing and the user would face a blank form with no
+   * explanation. Gated by the parent on the upload-draft signal so it
+   * never misfires on a real persisted doc that merely lacks confidence.
+   */
+  extractionFailed?: boolean;
 }
 
 export function ConfidenceBanner({
   overallConfidence,
   lowConfidenceFields,
   isMostlyFailed = false,
+  extractionFailed = false,
 }: ConfidenceBannerProps) {
+  // State 0 — OCR failed entirely. Honest "we couldn't read this"
+  // surface so the empty form reads as a manual-fill, not a bug.
+  if (extractionFailed) {
+    return (
+      <div className="flex items-start gap-3 rounded-lg bg-neutral-50 p-4">
+        <FileQuestion className="mt-0.5 size-5 shrink-0 text-neutral-500" aria-hidden />
+        <div>
+          <p className="text-sm font-medium text-neutral-700">We couldn&apos;t read this receipt</p>
+          <p className="mt-0.5 text-sm text-neutral-500">
+            Please fill in the purchase details manually before confirming.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   // State 1 — all-high. No banner so the form reads as a clean
   // accept-this surface; the parent rendered the same form either
   // way (uniform labels, no field-level coloring).

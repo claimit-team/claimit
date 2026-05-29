@@ -10,7 +10,7 @@ import { WindowWarningBanner } from "@/components/confirm/window-warning-banner"
 import { usePlatformPolicy } from "@/hooks/use-platform-policy";
 import type { PurchaseDetailDoc } from "@/lib/api/purchases";
 import { buildInitialFormState, type ConfirmFormState } from "@/lib/confirm-form-state";
-import type { ConfirmDraftContext } from "@/lib/confirm-staging";
+import { type ConfirmDraftContext, getStagedReceiptFile } from "@/lib/confirm-staging";
 
 /**
  * Real-purchase confirm shell (ticket 5.14 B3).
@@ -127,6 +127,12 @@ export function ConfirmPurchaseContent({
   const { fields: lowConfidenceFields, isMostlyFailed } = deriveLowConfidenceFields(
     purchase.extraction_confidence,
   );
+  // Upload draft whose extractor returned nothing (extraction === null):
+  // the synthesized doc has all-null fields + null confidence, so the
+  // confidence banner would otherwise render nothing and the user would
+  // see a blank form with no explanation. Gate on `draft` so a real
+  // persisted doc that merely lacks a confidence record never trips this.
+  const extractionFailed = Boolean(draft) && !draft?.extraction;
   const receiptFilename = deriveReceiptFilename(purchase);
   const overallConfidence = purchase.extraction_confidence?.overall_min ?? 0;
   // We ALWAYS reserve the left column. Pre-fix, a `receipt_storage_url
@@ -138,10 +144,17 @@ export function ConfirmPurchaseContent({
   // isn't, we render the compact "Original receipt not available"
   // fallback directly so the user still sees source context next to
   // the form they're being asked to confirm.
-  // For an upload draft the blob exists in GCS but no purchase doc backs
-  // the `/purchases/:id/receipt` proxy yet, so we never mount ReceiptPreview
-  // pre-confirm — the draft fallback note covers it.
+  // For an upload draft the GCS blob isn't proxy-fetchable until the purchase
+  // is created, so we can't mount the fetch-backed ReceiptPreview. But the
+  // browser still holds the File the user just uploaded (stashed by the upload
+  // dialog, keyed by the staging key) — preview that directly so they can see
+  // the receipt while confirming. Read once at mount: it's set before this
+  // page navigates in and stays stable for the page's lifetime. Absent only
+  // after a hard reload, where we fall back to the "ready to attach" note.
   const hasReceipt = !draft && purchase.receipt_storage_url !== null;
+  const [stagedReceipt] = useState<File | null>(() =>
+    draft ? getStagedReceiptFile(draft.stagingKey) : null,
+  );
 
   // Form state lives here (ticket 5.14 B4). The form is purely
   // controlled and ActionBar reads the same state object to compute
@@ -177,6 +190,15 @@ export function ConfirmPurchaseContent({
                   filename={receiptFilename}
                   ingestionSource={purchase.ingestion_source}
                 />
+              ) : draft && stagedReceipt ? (
+                // Upload draft: preview the File the browser still holds. Same
+                // ReceiptPreview chrome as the persisted path, just fed bytes
+                // directly instead of the `/purchases/:id/receipt` proxy.
+                <ReceiptPreview
+                  blob={stagedReceipt}
+                  filename={stagedReceipt.name}
+                  ingestionSource={purchase.ingestion_source}
+                />
               ) : (
                 // Same outer card chrome as ReceiptPreview so the
                 // column reads as "the receipt area" even when there
@@ -205,6 +227,7 @@ export function ConfirmPurchaseContent({
                   overallConfidence={overallConfidence}
                   lowConfidenceFields={lowConfidenceFields}
                   isMostlyFailed={isMostlyFailed}
+                  extractionFailed={extractionFailed}
                 />
                 <WindowWarningBanner
                   platform={formState.platform}

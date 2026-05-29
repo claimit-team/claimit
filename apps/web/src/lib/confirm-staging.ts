@@ -53,8 +53,38 @@ export function readUploadDraft(key: string): ConfirmDraft | null {
   }
 }
 
+/**
+ * In-memory carrier for an uploaded receipt's File, keyed by the same staging
+ * key as the draft. The write-after-confirm flow holds the receipt bytes in
+ * the browser (the user just picked the file) but no purchase doc exists yet,
+ * so the `/purchases/:id/receipt` proxy can't serve it. Stashing the File here
+ * lets the confirm page preview the receipt client-side while the user reviews
+ * the extracted details.
+ *
+ * Unlike the draft (sessionStorage), this is a plain module singleton — a File
+ * can't be JSON-serialized anyway. It survives soft navigation (upload dialog →
+ * /confirm, and between per-line confirms of a multi-item receipt) but is
+ * intentionally gone on a hard reload, at which point the confirm page falls
+ * back to the "receipt ready to attach" note (the bytes are safely in GCS
+ * regardless). Dropped together with the draft via `clearUploadDraft`.
+ */
+const stagedReceiptFiles = new Map<string, File>();
+
+/** Remember the uploaded File so the confirm page can preview it pre-confirm. */
+export function setStagedReceiptFile(stagingKey: string, file: File): void {
+  stagedReceiptFiles.set(stagingKey, file);
+}
+
+/** Read the stashed upload File, or null if absent (e.g. after a hard reload). */
+export function getStagedReceiptFile(stagingKey: string): File | null {
+  return stagedReceiptFiles.get(stagingKey) ?? null;
+}
+
 /** Drop a stashed draft once it has been confirmed or abandoned. */
 export function clearUploadDraft(key: string): void {
+  // Drop the in-memory receipt File alongside the draft — they share the
+  // staging key and the same "this upload session is done" lifetime.
+  stagedReceiptFiles.delete(key);
   try {
     sessionStorage.removeItem(STAGING_PREFIX + key);
   } catch {

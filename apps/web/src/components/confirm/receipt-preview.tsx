@@ -42,7 +42,19 @@ type LoadState =
   | { kind: "ready"; url: string; contentType: string };
 
 export interface ReceiptPreviewProps {
-  purchaseId: string;
+  /**
+   * Fetch the receipt via the api-gateway proxy
+   * (`GET /api/v1/purchases/:id/receipt`) — the persisted-purchase path.
+   * Omit when rendering a pre-supplied `blob` instead.
+   */
+  purchaseId?: string;
+  /**
+   * Render these bytes directly instead of fetching — the write-after-confirm
+   * upload path. The receipt lives in GCS but no purchase doc backs the proxy
+   * yet, so the confirm page hands us the File the browser still holds. The
+   * content type is read off the blob (`File`/`Blob` both carry `.type`).
+   */
+  blob?: Blob | null;
   /**
    * Best-effort filename for the header (and PDF iframe title).
    * Optional — when the doc carries no original filename we fall
@@ -68,7 +80,12 @@ function isImageContentType(contentType: string): boolean {
   return contentType.toLowerCase().startsWith("image/");
 }
 
-export function ReceiptPreview({ purchaseId, filename, ingestionSource }: ReceiptPreviewProps) {
+export function ReceiptPreview({
+  purchaseId,
+  blob,
+  filename,
+  ingestionSource,
+}: ReceiptPreviewProps) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [zoomOpen, setZoomOpen] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
@@ -82,6 +99,27 @@ export function ReceiptPreview({ purchaseId, filename, ingestionSource }: Receip
     let createdUrl: string | null = null;
 
     setState({ kind: "loading" });
+
+    // Pre-supplied bytes (upload draft): render straight from the blob, no
+    // round trip. We still own the object-URL lifecycle so the cleanup below
+    // revokes it on unmount, exactly like the fetched path.
+    if (blob) {
+      createdUrl = URL.createObjectURL(blob);
+      setState({
+        kind: "ready",
+        url: createdUrl,
+        contentType: blob.type || "application/octet-stream",
+      });
+      return () => {
+        cancelled = true;
+        if (createdUrl) URL.revokeObjectURL(createdUrl);
+      };
+    }
+
+    if (!purchaseId) {
+      setState({ kind: "missing" });
+      return;
+    }
 
     fetchReceiptBlob(purchaseId)
       .then((result) => {
@@ -107,7 +145,7 @@ export function ReceiptPreview({ purchaseId, filename, ingestionSource }: Receip
       // (the cleanup runs before the next effect body executes).
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
-  }, [purchaseId, reloadTick]);
+  }, [purchaseId, blob, reloadTick]);
 
   const headerName = filename || "Receipt";
   const headerIcon =
