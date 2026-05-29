@@ -27,13 +27,13 @@ const controls = [
 
 export function UserControlsSection() {
   return (
-    <section className="border-b border-border">
-      <div className="mx-auto max-w-6xl px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
+    <section>
+      <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-28">
         <div className="mb-12">
           <Badge variant="secondary" className="mb-4">
             User Controls
           </Badge>
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+          <h2 className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
             You&apos;re in control
           </h2>
           <p className="mt-4 max-w-3xl leading-relaxed text-muted-foreground">
@@ -43,7 +43,7 @@ export function UserControlsSection() {
         </div>
         <div className="grid gap-6 sm:grid-cols-2">
           {controls.map((control) => (
-            <Card key={control.title} className="h-full bg-card">
+            <Card key={control.title} className="flex h-full flex-col bg-card">
               <CardHeader>
                 <div className="flex size-10 items-center justify-center rounded-lg bg-secondary">
                   <control.icon className="size-5 text-foreground" />
