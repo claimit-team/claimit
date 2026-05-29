@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Bot, Loader2, Send, Sparkles, User } from "lucide-react";
+import { AlertCircle, Bot, ExternalLink, Loader2, Send, Sparkles, User } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { MarkdownMessage } from "@/components/assistant/markdown-message";
@@ -124,6 +124,17 @@ function MessageBubble({ message }: { message: UIMessage }) {
         ) : null}
         {message.error ? (
           <p className="mt-1 text-[11px] text-semantic-danger">{message.error}</p>
+        ) : null}
+        {isAssistant && message.trace_id && !message.streaming ? (
+          <a
+            href={`https://app.phoenix.arize.com/s/claimitbeta/projects/claimit/traces/${message.trace_id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-1.5 inline-flex items-center gap-1 text-neutral-400 text-xs transition-colors hover:text-brand-primary-500"
+          >
+            <ExternalLink className="h-3 w-3" />
+            View trace
+          </a>
         ) : null}
       </div>
       {!isAssistant ? (

@@ -24,6 +24,20 @@ from .mode_b_client import stream_mode_b_response
 
 logger = logging.getLogger(__name__)
 
+
+def _current_trace_id() -> str | None:
+    """Return the hex trace-id from the active OTel span, or None."""
+    try:
+        from opentelemetry import trace
+
+        ctx = trace.get_current_span().get_span_context()
+        if ctx and ctx.trace_id:
+            return format(ctx.trace_id, "032x")
+    except Exception:
+        pass
+    return None
+
+
 # Resource names are in the form
 # `projects/{project}/locations/{location}/reasoningEngines/{id}`.
 # We parse project + location from this string to drive vertexai.init()
@@ -317,7 +331,17 @@ async def stream_agent_response(
             user_message,
             history,
         ):
-            yield frame
+            if frame.get("event") == "done":
+                try:
+                    payload = json.loads(frame.get("data", "{}"))
+                except json.JSONDecodeError:
+                    payload = {}
+                tid = _current_trace_id()
+                if tid and "trace_id" not in payload:
+                    payload["trace_id"] = tid
+                yield {"event": "done", "data": json.dumps(payload)}
+            else:
+                yield frame
         return
 
     # -------- Phase 1: setup (Mode A / general) --------
@@ -467,7 +491,11 @@ async def stream_agent_response(
             # Empty response — avoid the dreaded silent assistant bubble.
             fallback = "I wasn't able to generate a response. Could you rephrase your question?"
             yield {"event": "text_chunk", "data": json.dumps({"text": fallback})}
-        yield {"event": "done", "data": json.dumps({})}
+        done_payload: dict[str, Any] = {}
+        tid = _current_trace_id()
+        if tid:
+            done_payload["trace_id"] = tid
+        yield {"event": "done", "data": json.dumps(done_payload)}
 
     except google.api_core.exceptions.NotFound:
         # Almost always a stale session_id (agent redeployed between
