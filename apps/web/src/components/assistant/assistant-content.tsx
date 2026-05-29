@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Loader2, Menu, MoreHorizontal, Search } from "lucide-react";
+import { AlertCircle, Loader2, Menu, MoreHorizontal, Search, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -35,10 +35,51 @@ import { cn } from "@/lib/utils";
 import type { Conversation, UIMessage, WireConversationMessage } from "@/types/assistant";
 
 const EXAMPLE_PROMPTS: string[] = [
-  "Summarize Hilton best-rate rules for Waikiki prepaid stays.",
-  "What screenshots should I upload for Southwest refund chat?",
-  "Rewrite Delta schedule-change email politely but firmly.",
+  "Check my Best Buy claim status",
+  "What's the Hilton price match policy?",
+  "Help me understand my refund eligibility",
 ];
+
+function EmptyConversationState({ onPromptSelect }: { onPromptSelect: (text: string) => void }) {
+  return (
+    <div className="flex flex-col items-center gap-6">
+      <div
+        className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-primary-100 text-brand-primary-600"
+        aria-hidden
+      >
+        <Sparkles className="h-6 w-6" />
+      </div>
+      <div className="max-w-lg text-center">
+        <p className="text-xs font-semibold uppercase tracking-wide text-brand-primary-600">
+          ClaimIt Assistant
+        </p>
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+          What do you want to tackle?
+        </h1>
+        <p className="mt-3 text-sm leading-relaxed text-neutral-600">
+          Ask about airlines, hospitality policies, drafting chat scripts — or riff on an open
+          claim.
+        </p>
+      </div>
+      <div className="w-full max-w-lg">
+        <p className="mb-3 text-xs font-medium text-neutral-500">Try:</p>
+        <div className="flex flex-col gap-2">
+          {EXAMPLE_PROMPTS.map((prompt) => (
+            <Button
+              key={prompt}
+              type="button"
+              variant="secondary"
+              className="h-auto justify-start whitespace-normal py-3 text-left"
+              onClick={() => onPromptSelect(prompt)}
+            >
+              {prompt}
+            </Button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type Bucket = "Today" | "Yesterday" | "Last 7 days" | "Older";
 const BUCKET_ORDER: Bucket[] = ["Today", "Yesterday", "Last 7 days", "Older"];
@@ -500,37 +541,10 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
   } else if (!active) {
     mainPaneContent = (
       <>
-        <div className="flex flex-1 flex-col px-8 py-12 overflow-y-auto">
+        <div className="flex flex-1 flex-col overflow-y-auto px-8 py-12">
           <div className="mx-auto flex max-w-lg flex-col gap-6">
             <ProactiveCard />
-            <div className="text-center md:text-left">
-              <p className="text-xs font-semibold uppercase tracking-wide text-brand-primary-600">
-                ClaimIt Assistant
-              </p>
-              <h1 className="mt-2 text-2xl font-semibold tracking-tight text-neutral-950">
-                What do you want to tackle?
-              </h1>
-              <p className="mt-3 text-neutral-600 text-sm leading-relaxed">
-                Ask about airlines, hospitality policies, drafting chat scripts — or riff on an open
-                claim.
-              </p>
-            </div>
-            <div>
-              <p className="mb-3 text-xs font-medium text-neutral-500">Try:</p>
-              <div className="flex flex-col gap-2">
-                {EXAMPLE_PROMPTS.map((prompt) => (
-                  <Button
-                    key={prompt}
-                    type="button"
-                    variant="secondary"
-                    className="justify-start text-left whitespace-normal h-auto py-3"
-                    onClick={() => setDraft(prompt)}
-                  >
-                    {prompt}
-                  </Button>
-                ))}
-              </div>
-            </div>
+            <EmptyConversationState onPromptSelect={setDraft} />
           </div>
         </div>
         <div className="border-t border-neutral-200 bg-neutral-0 px-4 py-3 lg:px-8 shrink-0">
@@ -542,7 +556,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
               placeholder="Type a message to start a new conversation…"
               aria-label="Draft assistant message"
               className="min-h-[56px]"
-              rows={3}
+              rows={2}
               disabled={streaming}
             />
             <Button
@@ -575,6 +589,11 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
         <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-4 px-4 py-6 lg:px-10">
             <ProactiveCard />
+            {messages.length === 0 ? (
+              <div className="mx-auto max-w-lg pt-8">
+                <EmptyConversationState onPromptSelect={setDraft} />
+              </div>
+            ) : null}
             {messages.map((msg) => (
               <article
                 key={msg.id}
@@ -633,7 +652,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
               placeholder="Message the assistant..."
               aria-label="Message the assistant"
               className="min-h-[56px]"
-              rows={3}
+              rows={2}
               disabled={streaming}
             />
             <Button
