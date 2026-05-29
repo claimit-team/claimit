@@ -97,6 +97,14 @@ resource "google_apikeys_key" "firebase_web" {
     api_targets {
       service = "firebase.googleapis.com"
     }
+    # Required for ID-token refresh. The Firebase Web SDK silently calls
+    # securetoken.googleapis.com/v1/token (granttoken) ~hourly to mint a
+    # new ID token from the stored refresh_token. Omitting this from the
+    # API-targets allowlist breaks every authenticated API call ~1h after
+    # sign-in (BUG-33).
+    api_targets {
+      service = "securetoken.googleapis.com"
+    }
 
     browser_key_restrictions {
       allowed_referrers = [
