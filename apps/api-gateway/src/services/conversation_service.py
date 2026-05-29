@@ -25,19 +25,6 @@ from .mode_b_client import stream_mode_b_response
 logger = logging.getLogger(__name__)
 
 
-def _current_trace_id() -> str | None:
-    """Return the hex trace-id from the active OTel span, or None."""
-    try:
-        from opentelemetry import trace
-
-        ctx = trace.get_current_span().get_span_context()
-        if ctx and ctx.trace_id:
-            return format(ctx.trace_id, "032x")
-    except Exception:
-        pass
-    return None
-
-
 # Resource names are in the form
 # `projects/{project}/locations/{location}/reasoningEngines/{id}`.
 # We parse project + location from this string to drive vertexai.init()

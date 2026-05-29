@@ -14,6 +14,7 @@ from claimit_mongodb_models.conversation import Conversation, ToolCall
 from claimit_mongodb_models.enums import ConversationMode, ConversationStatus, MessageRole
 from claimit_mongodb_models.user import User
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from opentelemetry import trace as otel_trace
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -21,7 +22,6 @@ from ..deps import get_db
 from ..middleware.auth import get_current_user
 from ..middleware.errors import ApiError
 from ..services.conversation_service import (
-    _current_trace_id,
     append_message,
     create_conversation,
     get_conversation_for_user,
@@ -31,6 +31,7 @@ from ..services.conversation_service import (
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 logger = logging.getLogger(__name__)
+_tracer = otel_trace.get_tracer("claimit.api-gateway.conversations")
 
 
 class CreateConversationRequest(BaseModel):
@@ -170,9 +171,16 @@ async def send_message(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[MongoDBClient, Depends(get_db)],
 ) -> EventSourceResponse:
-    # Capture at route level — the OTel span is active here but NOT inside
-    # the async generator (generators don't inherit span context).
-    route_trace_id = _current_trace_id()
+    # Create a manual span to obtain a valid trace_id. We can't rely on
+    # an active request span (FastAPIInstrumentor is not wired), and
+    # _current_trace_id() inside a generator always returns None because
+    # async generators don't inherit the caller's OTel context.
+    # When PHOENIX_API_KEY is unset, init_phoenix() skips registering a
+    # TracerProvider, so get_tracer() returns a no-op tracer (trace_id=0).
+    _span = _tracer.start_span("conversations.send_message")
+    _ctx = _span.get_span_context()
+    route_trace_id = format(_ctx.trace_id, "032x") if _ctx.trace_id != 0 else None
+    _span.end()
 
     async def event_generator():
         def _augment_done(ev: dict) -> dict:
