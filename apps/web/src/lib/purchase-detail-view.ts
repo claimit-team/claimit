@@ -128,6 +128,18 @@ export interface PurchaseDetailViewModel {
   memberTier: string | null;
   memberPriceAtPurchase: number | null;
   nonMemberPriceAtPurchase: number | null;
+  /**
+   * Category-specific fields (BUG-107). Flat nullable columns on the
+   * Purchase doc: `fareClass` is populated for airline purchases,
+   * `roomType` / `bedType` / `rateType` for hotel purchases; all `null`
+   * for retail (and for the inapplicable category). The detail view
+   * surfaces them only when the purchase category matches AND the value
+   * is non-null, mirroring the member-tier conditional rows.
+   */
+  fareClass: string | null;
+  roomType: string | null;
+  bedType: string | null;
+  rateType: string | null;
   sourceEmail: string | null;
   purchaseSource: PurchaseDetailOriginalSource;
   /**
@@ -406,6 +418,10 @@ export function buildPurchaseDetailViewModel(
     memberTier: purchase.member_tier_at_purchase,
     memberPriceAtPurchase: purchase.member_price_at_purchase,
     nonMemberPriceAtPurchase: purchase.non_member_price_at_purchase,
+    fareClass: purchase.fare_class ?? null,
+    roomType: purchase.room_type ?? null,
+    bedType: purchase.bed_type ?? null,
+    rateType: purchase.rate_type ?? null,
     sourceEmail: purchase.sender,
     purchaseSource: inferOriginalSource(purchase.ingestion_source),
     productUrl: purchase.product_url ?? null,

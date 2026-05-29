@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/table";
 import { usePurchases } from "@/hooks/usePurchases";
 import type { PurchaseListItem } from "@/lib/api/purchases";
+import { BADGE_BASE_CLASSES } from "@/lib/badge-styles";
 import { formatWindowRemaining, snakeToTitleLabel } from "@/lib/claims-status";
 import { getPlatformLabel } from "@/lib/platform-labels";
 import { getListStatusBadge, isMonitoringDegraded } from "@/lib/purchase-status";
@@ -161,7 +162,7 @@ function StatusCell({ status }: { status: PurchaseStatus | string | null }) {
   const degraded = isMonitoringDegraded(status);
   return (
     <span className="inline-flex items-center gap-1.5">
-      <Badge variant="outline" className={cn("shrink-0 capitalize", badge.className)}>
+      <Badge variant="outline" className={cn(badge.className, BADGE_BASE_CLASSES, "shrink-0")}>
         {badge.label}
       </Badge>
       {degraded ? (
@@ -259,6 +260,9 @@ function PurchaseRow({ purchase }: { purchase: PurchaseListItem }) {
       }}
       className="cursor-pointer"
     >
+      <TableCell className="w-[140px]">
+        <StatusCell status={purchase.status} />
+      </TableCell>
       <TableCell className="w-[40px]">
         <SourceIcon source={purchase.ingestion_source} />
       </TableCell>
@@ -284,9 +288,6 @@ function PurchaseRow({ purchase }: { purchase: PurchaseListItem }) {
       </TableCell>
       <TableCell className="text-sm text-neutral-500">
         {formatDateShort(purchase.purchase_date)}
-      </TableCell>
-      <TableCell>
-        <StatusCell status={purchase.status} />
       </TableCell>
       <TableCell className="text-sm text-neutral-700">
         {formatWindowRemaining(purchase.window_expires)}
@@ -436,12 +437,12 @@ export default function PurchasesPage() {
             <Table className="min-w-[860px]">
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
+                  <TableHead className="w-[140px]">Status</TableHead>
                   <TableHead className="w-[40px]" />
                   <TableHead>Platform / Product</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead className="text-right">Price paid</TableHead>
                   <TableHead>Purchase date</TableHead>
-                  <TableHead className="w-[200px]">Status</TableHead>
                   <TableHead>Window</TableHead>
                   <TableHead className="w-[100px] text-right">Action</TableHead>
                 </TableRow>
