@@ -331,17 +331,7 @@ async def stream_agent_response(
             user_message,
             history,
         ):
-            if frame.get("event") == "done":
-                try:
-                    payload = json.loads(frame.get("data", "{}"))
-                except json.JSONDecodeError:
-                    payload = {}
-                tid = _current_trace_id()
-                if tid and "trace_id" not in payload:
-                    payload["trace_id"] = tid
-                yield {"event": "done", "data": json.dumps(payload)}
-            else:
-                yield frame
+            yield frame
         return
 
     # -------- Phase 1: setup (Mode A / general) --------
@@ -491,11 +481,7 @@ async def stream_agent_response(
             # Empty response — avoid the dreaded silent assistant bubble.
             fallback = "I wasn't able to generate a response. Could you rephrase your question?"
             yield {"event": "text_chunk", "data": json.dumps({"text": fallback})}
-        done_payload: dict[str, Any] = {}
-        tid = _current_trace_id()
-        if tid:
-            done_payload["trace_id"] = tid
-        yield {"event": "done", "data": json.dumps(done_payload)}
+        yield {"event": "done", "data": json.dumps({})}
 
     except google.api_core.exceptions.NotFound:
         # Almost always a stale session_id (agent redeployed between
