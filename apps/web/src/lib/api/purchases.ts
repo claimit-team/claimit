@@ -475,7 +475,6 @@ export async function uploadPurchase(file: File): Promise<UploadReceiptResponse>
 export type CreatePurchaseRequest = {
   storage_url: string;
   content_type: string;
-  receipt_hash?: string | null;
   extraction?: UploadExtraction | null;
   corrected_fields?: Record<string, unknown>;
 };

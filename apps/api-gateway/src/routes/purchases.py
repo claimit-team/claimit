@@ -42,16 +42,16 @@ class ConfirmPurchaseRequest(BaseModel):
 class CreatePurchaseRequest(BaseModel):
     """Body for POST /purchases/confirm-create (write-after-confirm upload).
 
-    Carries the upload-time `storage_url` / `content_type` / `receipt_hash`
-    plus the `extraction` the FE received from /upload and any user
-    `corrected_fields`. The Purchase is created here on confirm — nothing
-    was persisted at upload time. `extraction` is null when the extractor
-    failed and the user filled the form by hand.
+    Carries the upload-time `storage_url` / `content_type` plus the
+    `extraction` the FE received from /upload and any user `corrected_fields`.
+    The Purchase is created here on confirm — nothing was persisted at upload
+    time. `extraction` is null when the extractor failed and the user filled
+    the form by hand. The receipt hash is recomputed server-side from the GCS
+    object (never trusted from the client), so it isn't part of this body.
     """
 
     storage_url: str = Field(min_length=1)
     content_type: str = Field(min_length=1)
-    receipt_hash: str | None = Field(default=None)
     extraction: dict[str, Any] | None = Field(default=None)
     corrected_fields: dict[str, Any] | None = Field(default=None)
 
@@ -185,7 +185,6 @@ async def confirm_create_purchase(
         user=user,
         storage_url=body.storage_url,
         content_type=body.content_type,
-        receipt_hash=body.receipt_hash,
         extraction=body.extraction,
         corrected_fields=body.corrected_fields,
     )

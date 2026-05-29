@@ -25,14 +25,18 @@ export type ConfirmDraft = UploadReceiptResponse;
 /** A draft plus the staging key it's stored under — passed to the confirm UI. */
 export type ConfirmDraftContext = ConfirmDraft & { stagingKey: string };
 
-/** Persist an upload draft and return its staging key (`upload-<uuid>`). */
-export function stashUploadDraft(draft: ConfirmDraft): string {
+/**
+ * Persist an upload draft and return its staging key (`upload-<uuid>`), or
+ * `null` when sessionStorage is unavailable (private mode / quota / disabled).
+ * Returning null lets the caller surface a clear error instead of navigating
+ * to `/confirm/<key>` that would immediately dead-end on "session expired".
+ */
+export function stashUploadDraft(draft: ConfirmDraft): string | null {
   const key = `upload-${crypto.randomUUID()}`;
   try {
     sessionStorage.setItem(STAGING_PREFIX + key, JSON.stringify(draft));
   } catch {
-    // Private-mode / quota errors: the loader's UUID fallback handles a
-    // missing draft gracefully, so swallow rather than block the upload.
+    return null;
   }
   return key;
 }

@@ -140,7 +140,6 @@ export function ActionBar({ purchase, initialFormState, formState, draft }: Acti
         ? await createPurchase({
             storage_url: draft.storage_url,
             content_type: draft.content_type,
-            receipt_hash: draft.receipt_hash,
             extraction: draft.extraction,
             ...(patch === undefined ? {} : { corrected_fields: patch }),
           })

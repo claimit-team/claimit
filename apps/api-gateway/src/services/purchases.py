@@ -935,7 +935,6 @@ async def create_purchase_from_confirm(
     user: User,
     storage_url: str,
     content_type: str,
-    receipt_hash: str | None,
     extraction: dict[str, Any] | None,
     corrected_fields: dict[str, Any] | None,
 ) -> Purchase:
@@ -952,16 +951,35 @@ async def create_purchase_from_confirm(
     are the user's edits — validated against `_ALLOWED_CORRECTABLE_FIELDS`,
     same as `confirm_purchase`.
 
+    `receipt_hash` is recomputed server-side from the GCS object (NOT trusted
+    from the client), so a forged/omitted hash can't bypass same-receipt
+    dedup or poison the global unique index.
+
     Raises:
         ApiError(unsupported_media_type, 415) for a bad content_type.
         ApiError(invalid_field, 400) for a disallowed corrected key, a
             receipt URL that isn't the user's own, or fields that fail
             Purchase validation (missing/invalid after merge).
+        ApiError(receipt_missing, 400) when the uploaded blob is gone.
         ApiError(duplicate, 409) when the receipt duplicates a committed
             purchase (pre-check) or hits the unique index (backstop).
     """
     ingestion_source = validate_upload_content_type(content_type)
     _validate_receipt_storage_url(storage_url, user_id=user.id, bucket_name=uploader.bucket_name)
+
+    # Recompute the receipt hash from the stored object — never trust the
+    # client-carried value (it could be forged to bypass dedup or poison the
+    # global receipt_hash unique index against another user's receipt).
+    _bucket, blob_path = _parse_gs_uri(storage_url)
+    try:
+        receipt_bytes, _blob_ct = await uploader.download(blob_path=blob_path)
+    except ReceiptObjectMissingError as err:
+        raise ApiError(
+            "receipt_missing",
+            "Uploaded receipt is no longer available; please re-upload.",
+            status_code=400,
+        ) from err
+    receipt_hash = f"sha256:{hashlib.sha256(receipt_bytes).hexdigest()}"
 
     if corrected_fields:
         for key in corrected_fields:

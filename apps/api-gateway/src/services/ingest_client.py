@@ -10,6 +10,7 @@ call is a single non-streaming POST.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import threading
@@ -96,7 +97,11 @@ async def extract_receipt(
     # INTERNAL_AUTH_DISABLED=1 and `fetch_id_token` cannot mint a token
     # for a non-Google audience — skip the Authorization header.
     if not _is_local(base_url):
-        headers["Authorization"] = f"Bearer {_get_id_token(base_url)}"
+        # `_get_id_token` does blocking network I/O on a cache miss
+        # (fetches Google's metadata/signing endpoint). Offload to a
+        # thread so we never stall the event loop mid-request.
+        token = await asyncio.to_thread(_get_id_token, base_url)
+        headers["Authorization"] = f"Bearer {token}"
 
     payload = {
         "user_id": user_id,
@@ -120,7 +125,19 @@ async def extract_receipt(
         ) from err
 
     if response.status_code == 200:
-        body = response.json()
+        # A non-JSON 200 (e.g. an HTML error page from a proxy/LB) must NOT
+        # escape as a raw ValueError — `upload_receipt` only catches
+        # IngestExtractError, so an unguarded decode error would 500 instead
+        # of falling back to the manual-fill (extraction=None) path.
+        try:
+            body = response.json()
+        except ValueError as err:
+            logger.warning("Ingest extract returned a non-JSON 200 body")
+            raise IngestExtractError(
+                "extract returned a non-JSON body",
+                code="malformed_response",
+                rejected=False,
+            ) from err
         extraction = body.get("extraction")
         if not isinstance(extraction, dict):
             raise IngestExtractError(

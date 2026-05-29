@@ -134,11 +134,21 @@ export function UploadDialog() {
     setUploading(true);
     try {
       const draft = await uploadPurchase(file);
-      toast.success("Receipt uploaded.");
       // Write-after-confirm: nothing is persisted yet. Stash the
       // extracted fields client-side and route to /confirm/<stagingKey>;
       // the Purchase is created only when the user confirms there.
       const stagingKey = stashUploadDraft(draft);
+      if (!stagingKey) {
+        // sessionStorage unavailable (private mode / quota / disabled) —
+        // we can't carry the draft to the confirm step, so don't navigate
+        // to a page that would immediately dead-end on "session expired".
+        toast.error(
+          "We couldn't continue to the confirm step in this browser. Try disabling private/incognito mode or another browser.",
+        );
+        setUploading(false);
+        return;
+      }
+      toast.success("Receipt uploaded.");
       // Close before navigating so the dialog doesn't briefly flash
       // back over the confirm page during route transition.
       setOpen(false);

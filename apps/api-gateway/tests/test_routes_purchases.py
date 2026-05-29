@@ -7,6 +7,7 @@ dependency_overrides[get_db]/[get_current_user]/[get_receipts_uploader].
 from __future__ import annotations
 
 import copy
+import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from unittest.mock import AsyncMock
@@ -1977,6 +1978,9 @@ def _confirm_create_db(*, dedup_hit: bool = False, policy_window_days: int = 30)
 def _confirm_create_uploader() -> AsyncMock:
     mock_uploader = AsyncMock(spec=ReceiptsUploader)
     mock_uploader.bucket_name = "test-bucket"
+    # confirm-create recomputes receipt_hash from the stored object (it does
+    # not trust a client-supplied hash), so the blob must be downloadable.
+    mock_uploader.download = AsyncMock(return_value=(b"%PDF-1.4 receipt bytes", "application/pdf"))
     return mock_uploader
 
 
@@ -1992,7 +1996,6 @@ async def test_confirm_create_writes_monitoring_and_publishes(client: AsyncClien
             json={
                 "storage_url": _RECEIPT_URL,
                 "content_type": "application/pdf",
-                "receipt_hash": "sha256:deadbeef",
                 "extraction": _extraction_fixture(),
                 "corrected_fields": None,
             },
@@ -2002,7 +2005,11 @@ async def test_confirm_create_writes_monitoring_and_publishes(client: AsyncClien
         assert purchase["status"] == "monitoring"
         assert purchase["ingestion_source"] == "upload_pdf"
         assert purchase["receipt_storage_url"] == _RECEIPT_URL
-        assert purchase["receipt_hash"] == "sha256:deadbeef"
+        # Hash is recomputed server-side from the downloaded blob bytes.
+        assert (
+            purchase["receipt_hash"]
+            == f"sha256:{hashlib.sha256(b'%PDF-1.4 receipt bytes').hexdigest()}"
+        )
         mock_db.upsert.assert_awaited_once()
         # purchase.ingested fires so the monitor-agent starts tracking.
         topic, body = publisher.publish.await_args.args
@@ -2023,7 +2030,6 @@ async def test_confirm_create_duplicate_returns_409(client: AsyncClient) -> None
             json={
                 "storage_url": _RECEIPT_URL,
                 "content_type": "application/pdf",
-                "receipt_hash": "sha256:deadbeef",
                 "extraction": _extraction_fixture(),
             },
         )
@@ -2045,7 +2051,6 @@ async def test_confirm_create_applies_corrected_fields(client: AsyncClient) -> N
             json={
                 "storage_url": _RECEIPT_URL,
                 "content_type": "application/pdf",
-                "receipt_hash": "sha256:deadbeef",
                 "extraction": _extraction_fixture(product_name="Wrong"),
                 "corrected_fields": {"product_name": "Corrected Name", "price_paid": 99.5},
             },
@@ -2115,7 +2120,6 @@ async def test_confirm_create_manual_fill_no_extraction(client: AsyncClient) -> 
             json={
                 "storage_url": _RECEIPT_URL,
                 "content_type": "image/png",
-                "receipt_hash": "sha256:manual",
                 "extraction": None,
                 "corrected_fields": {
                     "platform": "best_buy",
@@ -2133,6 +2137,32 @@ async def test_confirm_create_manual_fill_no_extraction(client: AsyncClient) -> 
         assert purchase["status"] == "monitoring"
         assert purchase["product_name"] == "Hand Typed"
         assert purchase["ingestion_source"] == "upload_image"
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_create_missing_blob_returns_400(client: AsyncClient) -> None:
+    """Blob gone at confirm (can't recompute hash) → 400 receipt_missing."""
+    from src.services.receipts_storage import ReceiptObjectMissingError
+
+    mock_db = _confirm_create_db()
+    uploader = _confirm_create_uploader()
+    uploader.download = AsyncMock(side_effect=ReceiptObjectMissingError("gone"))
+    _set_overrides(mock_db, uploader, _publisher_mock())
+    try:
+        response = await client.post(
+            "/api/v1/purchases/confirm-create",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(),
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "receipt_missing"
+        mock_db.upsert.assert_not_awaited()
     finally:
         _clear_overrides()
 
