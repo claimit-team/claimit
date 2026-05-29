@@ -58,7 +58,8 @@ function PaneHeader({ onDoubleClick }: { onDoubleClick?: () => void }) {
   return (
     <button
       type="button"
-      className="flex w-full cursor-default items-center justify-between border-neutral-200 border-b bg-neutral-0 px-4 py-3 text-left outline-none"
+      title="Double-click to maximize"
+      className="flex w-full cursor-pointer items-center justify-between border-neutral-200 border-b bg-neutral-0 px-4 py-3 text-left outline-none transition-colors hover:bg-neutral-50"
       onDoubleClick={onDoubleClick}
     >
       <div className="flex items-center gap-2">
