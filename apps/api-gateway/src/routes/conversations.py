@@ -21,6 +21,7 @@ from ..deps import get_db
 from ..middleware.auth import get_current_user
 from ..middleware.errors import ApiError
 from ..services.conversation_service import (
+    _current_trace_id,
     append_message,
     create_conversation,
     get_conversation_for_user,
@@ -169,14 +170,31 @@ async def send_message(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[MongoDBClient, Depends(get_db)],
 ) -> EventSourceResponse:
+    # Capture at route level — the OTel span is active here but NOT inside
+    # the async generator (generators don't inherit span context).
+    route_trace_id = _current_trace_id()
+
     async def event_generator():
+        def _augment_done(ev: dict) -> dict:
+            if not route_trace_id:
+                return ev
+            try:
+                payload = json.loads(ev.get("data", "{}"))
+                if "trace_id" not in payload:
+                    payload["trace_id"] = route_trace_id
+                return {"event": "done", "data": json.dumps(payload)}
+            except json.JSONDecodeError:
+                return ev
+
         try:
             conv = await get_conversation_for_user(db, conversation_id, user.id)
         except ValueError:
-            yield {"event": "done", "data": json.dumps({"error": "Conversation not found"})}
+            yield _augment_done(
+                {"event": "done", "data": json.dumps({"error": "Conversation not found"})}
+            )
             return
         except PermissionError:
-            yield {"event": "done", "data": json.dumps({"error": "Access denied"})}
+            yield _augment_done({"event": "done", "data": json.dumps({"error": "Access denied"})})
             return
 
         conv = await append_message(db, conv, MessageRole.USER, body.content)
@@ -191,6 +209,8 @@ async def send_message(
         while True:
             try:
                 event = await asyncio.wait_for(agent_stream.__anext__(), timeout=15.0)
+                if event.get("event") == "done":
+                    event = _augment_done(event)
                 yield event
                 _accumulate_stream_event(
                     event,
@@ -213,7 +233,7 @@ async def send_message(
                 continue
             except Exception as e:
                 logger.exception("Stream error in send_message")
-                yield {"event": "done", "data": json.dumps({"error": str(e)})}
+                yield _augment_done({"event": "done", "data": json.dumps({"error": str(e)})})
                 break
 
         if done_error:
