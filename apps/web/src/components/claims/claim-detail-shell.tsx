@@ -245,7 +245,8 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
       }
       return next;
     });
-  }, []);
+    setEmbeddedExpanded(false);
+  }, [setEmbeddedExpanded]);
 
   const toggleEvidenceMax = useCallback(() => {
     setPaneMax((prev) => {
