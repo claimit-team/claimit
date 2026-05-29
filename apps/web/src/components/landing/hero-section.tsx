@@ -19,7 +19,7 @@ const fadeUp = (delay: number) => ({
 
 export function HeroSection({ isLoading = false }: HeroSectionProps) {
   return (
-    <section className="relative flex min-h-[75vh] flex-col justify-center overflow-hidden px-4 py-16 sm:min-h-[85vh] sm:px-6 lg:px-8">
+    <section className="relative flex min-h-[75vh] flex-col justify-center overflow-hidden py-16 sm:min-h-[85vh]">
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 -z-10"
@@ -28,7 +28,7 @@ export function HeroSection({ isLoading = false }: HeroSectionProps) {
             "radial-gradient(ellipse 800px 600px at 90% 10%, hsl(217 50% 30% / 0.08), transparent 70%)",
         }}
       />
-      <div className="mx-auto w-full max-w-6xl">
+      <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
         <div className="grid items-center gap-12 lg:grid-cols-5 lg:gap-16">
           <div className="text-center lg:col-span-2 lg:text-left">
             <motion.h1

@@ -9,6 +9,12 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getPurchaseDetail, type PurchaseDetailDoc, PurchasesApiError } from "@/lib/api/purchases";
+import {
+  type ConfirmDraft,
+  type ConfirmDraftContext,
+  isStagingKey,
+  readUploadDraft,
+} from "@/lib/confirm-staging";
 
 /**
  * Client-side loader for /confirm/[purchaseId] (ticket 5.14 B3).
@@ -60,8 +66,62 @@ type LoadState =
   | { kind: "loading" }
   | { kind: "analyzing" }
   | { kind: "analyzing_timeout" }
-  | { kind: "ready"; purchase: PurchaseDetailDoc }
+  | { kind: "ready"; purchase: PurchaseDetailDoc; draft?: ConfirmDraftContext }
   | { kind: "error"; message: string };
+
+/** Upload content-type → Purchase.ingestion_source (display + fallback copy). */
+function inferIngestionSource(contentType: string): string {
+  return contentType === "application/pdf" ? "upload_pdf" : "upload_image";
+}
+
+/**
+ * Build a `PurchaseDetailDoc`-shaped object from an upload draft so the
+ * confirm form renders immediately from carried data (write-after-confirm —
+ * no doc exists yet). `_id` is the staging key; `receipt_storage_url` stays
+ * null because the blob isn't proxy-fetchable until the purchase is created.
+ * Null fields drive the manual-fill form when extraction failed.
+ */
+function synthesizePurchaseFromDraft(draft: ConfirmDraft, stagingKey: string): PurchaseDetailDoc {
+  const e = draft.extraction;
+  return {
+    _id: stagingKey,
+    updated_at: null,
+    user_id: null,
+    platform: e?.platform ?? null,
+    category: e?.category ?? null,
+    product_name: e?.product_name ?? null,
+    product_id: e?.product_id ?? null,
+    product_url: e?.product_url ?? null,
+    variant: e?.variant ?? null,
+    fare_class: e?.fare_class ?? null,
+    room_type: e?.room_type ?? null,
+    bed_type: e?.bed_type ?? null,
+    rate_type: e?.rate_type ?? null,
+    price_paid: e?.price_paid ?? null,
+    member_price_at_purchase: e?.member_price_at_purchase ?? null,
+    non_member_price_at_purchase: e?.non_member_price_at_purchase ?? null,
+    currency: e?.currency ?? "USD",
+    purchase_date: e?.purchase_date ?? null,
+    purchase_date_basis: e?.purchase_date_basis ?? null,
+    window_expires: null,
+    order_id: e?.order_id ?? null,
+    member_tier_at_purchase: e?.member_tier_at_purchase ?? null,
+    status: e?.status ?? "pending_confirmation",
+    claim_type: null,
+    monitoring_cadence_minutes: null,
+    last_checked_at: null,
+    last_monitor_error: null,
+    last_monitor_error_at: null,
+    last_monitor_error_code: null,
+    ingested_at: null,
+    ingestion_source: inferIngestionSource(draft.content_type),
+    receipt_storage_url: null,
+    receipt_hash: draft.receipt_hash,
+    format_hash: null,
+    sender: null,
+    extraction_confidence: e?.extraction_confidence ?? null,
+  };
+}
 
 /**
  * The upload route writes a sentinel `pending_confirmation` purchase
@@ -112,6 +172,29 @@ export function ConfirmPurchaseLoader({ purchaseId }: { purchaseId: string }) {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `retryTick` is the manual refetch trigger; it isn't read inside the effect body but its state change must re-run the fetch.
   useEffect(() => {
+    // Write-after-confirm upload path: the route param is a staging key
+    // and the extracted fields were stashed client-side by the upload
+    // dialog. Render the form immediately from the carried draft — there
+    // is no doc to fetch and no extraction to poll for.
+    if (isStagingKey(purchaseId)) {
+      const draft = readUploadDraft(purchaseId);
+      if (draft) {
+        setState({
+          kind: "ready",
+          purchase: synthesizePurchaseFromDraft(draft, purchaseId),
+          draft: { ...draft, stagingKey: purchaseId },
+        });
+      } else {
+        // Draft evicted (refresh after sessionStorage cleared, or a stale
+        // link). Nothing was persisted, so the only recovery is re-upload.
+        setState({
+          kind: "error",
+          message: "This upload session has expired. Please upload the receipt again.",
+        });
+      }
+      return;
+    }
+
     let cancelled = false;
     const startedAt = Date.now();
 
@@ -256,7 +339,7 @@ export function ConfirmPurchaseLoader({ purchaseId }: { purchaseId: string }) {
   return (
     <div className="flex flex-col gap-4">
       <ConfirmPageHeader />
-      <ConfirmPurchaseContent purchase={state.purchase} />
+      <ConfirmPurchaseContent purchase={state.purchase} draft={state.draft} />
     </div>
   );
 }

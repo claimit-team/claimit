@@ -20,7 +20,8 @@
  * hook in.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { GroupImperativeHandle } from "react-resizable-panels";
 import { toast } from "sonner";
 
 import { ApproveConfirmDialog } from "@/components/claims/approve-confirm-dialog";
@@ -37,12 +38,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import type { ClaimDetailDoc } from "@/lib/api/claims";
 import type { ClaimDetail } from "@/lib/claim-detail-types";
+import { EDITABLE_STATUSES } from "@/lib/claims-status";
 import { useUIStore } from "@/store";
 import {
   normalizeClaimId,
   REDRAFT_TIMEOUT_MS,
   useClaimRedraftProgressStore,
 } from "@/store/claim-redraft-progress";
+
+const LAYOUT = {
+  outerDefault: { draft: 40, "right-column": 60 },
+  draftMax: { draft: 80, "right-column": 20 },
+  innerDefault: { evidence: 60, assistant: 40 },
+  evidenceMax: { evidence: 90, assistant: 10 },
+  assistantMax: { evidence: 10, assistant: 90 },
+};
 
 interface ClaimDetailShellProps {
   /** Derived view-model (built from the page-owned wire response). */
@@ -54,7 +64,7 @@ interface ClaimDetailShellProps {
 }
 
 export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetailShellProps) {
-  const [paneMax, setPaneMax] = useState<"draft" | "evidence" | null>(null);
+  const [_paneMax, setPaneMax] = useState<"draft" | "evidence" | null>(null);
   const [mobileTab, setMobileTab] = useState<"draft" | "evidence" | "assistant">("draft");
   const [tabletTab, setTabletTab] = useState<"evidence" | "assistant">("evidence");
 
@@ -149,7 +159,14 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
   const [approveOpen, setApproveOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
 
+  useEffect(() => {
+    if (!EDITABLE_STATUSES.has(claim.status)) {
+      setDraftMode("preview");
+    }
+  }, [claim.status]);
+
   const handleClickEdit = () => {
+    if (!EDITABLE_STATUSES.has(claim.status)) return;
     // Jump to the latest version before flipping to edit mode — older
     // versions are read-only in DraftPane (it forces preview-only via
     // a guard `useEffect`), so without this the header's "Edit draft"
@@ -200,52 +217,56 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
   const setEmbeddedExpanded = useUIStore((s) => s.setClaimEmbeddedAssistantExpanded);
   const toggleEmbedded = useUIStore((s) => s.toggleClaimEmbeddedAssistant);
 
+  const outerGroupRef = useRef<GroupImperativeHandle | null>(null);
+  const innerGroupRef = useRef<GroupImperativeHandle | null>(null);
+
   const isDesktop = useMediaQuery("(min-width: 1024px)");
   const isTablet = useMediaQuery("(min-width: 768px)");
 
-  // Pane-layout sync (preserved from the pre-real-ification shell —
-  // this is NOT a write-action handler, do NOT delete alongside the
-  // approve/cancel/edit/mark callbacks).
-  //
-  // The global `claimEmbeddedAssistantExpanded` flag can be flipped to
-  // `true` from OUTSIDE this component — specifically the floating
-  // assistant pill in `components/layout/floating-assistant.tsx` which
-  // calls `toggleClaimEmbeddedAssistant` on the same UI store. When it
-  // flips while the user has evidence maximized, the desktop layout
-  // ternary below would otherwise pin the assistant to the 10% bottom
-  // row because `evidenceFull` wins:
-  //
-  //   const rightTop    = evidenceFull ? 90 : assistantExpanded ? 10 : 60;
-  //   const rightBottom = evidenceFull ? 10 : assistantExpanded ? 90 : 40;
-  //
-  // Releasing `paneMax` from `"evidence"` lets the assistantExpanded
-  // branch take effect so the pane actually grows.
+  // Pane-layout sync: the global `claimEmbeddedAssistantExpanded` flag can
+  // be flipped to `true` from OUTSIDE this component — specifically the
+  // floating assistant pill — so we must respond imperatively rather than
+  // relying on defaultSize re-renders (which the library ignores).
   useEffect(() => {
-    if (assistantExpanded) setPaneMax((prev) => (prev === "evidence" ? null : prev));
+    if (assistantExpanded) {
+      setPaneMax((prev) => (prev === "evidence" ? null : prev));
+      innerGroupRef.current?.setLayout(LAYOUT.assistantMax);
+    }
   }, [assistantExpanded]);
 
-  const toggleHorizontalMax = () => {
-    setPaneMax((prev) => (prev === "draft" ? null : "draft"));
-  };
-
-  const toggleEvidenceMax = () => {
+  const toggleHorizontalMax = useCallback(() => {
     setPaneMax((prev) => {
-      const next = prev === "evidence" ? null : "evidence";
+      const next = prev === "draft" ? null : "draft";
+      if (next === "draft") {
+        outerGroupRef.current?.setLayout(LAYOUT.draftMax);
+        innerGroupRef.current?.setLayout(LAYOUT.innerDefault);
+      } else {
+        outerGroupRef.current?.setLayout(LAYOUT.outerDefault);
+      }
       return next;
     });
     setEmbeddedExpanded(false);
-  };
+  }, [setEmbeddedExpanded]);
+
+  const toggleEvidenceMax = useCallback(() => {
+    setPaneMax((prev) => {
+      const next = prev === "evidence" ? null : "evidence";
+      if (next === "evidence") {
+        innerGroupRef.current?.setLayout(LAYOUT.evidenceMax);
+        outerGroupRef.current?.setLayout({ draft: 20, "right-column": 80 });
+      } else {
+        innerGroupRef.current?.setLayout(LAYOUT.innerDefault);
+        outerGroupRef.current?.setLayout(LAYOUT.outerDefault);
+      }
+      return next;
+    });
+    setEmbeddedExpanded(false);
+  }, [setEmbeddedExpanded]);
 
   const renderDesktopLayout = () => {
-    const defaultSizes = paneMax === "draft" ? [80, 20] : [40, 60];
-
-    const evidenceFull = paneMax === "evidence";
-    const rightTop = evidenceFull ? 90 : assistantExpanded ? 10 : 60;
-    const rightBottom = evidenceFull ? 10 : assistantExpanded ? 90 : 40;
-
     return (
-      <ResizablePanelGroup orientation="horizontal" className="h-full">
-        <ResizablePanel defaultSize={defaultSizes[0]} minSize={20}>
+      <ResizablePanelGroup orientation="horizontal" className="h-full" groupRef={outerGroupRef}>
+        <ResizablePanel id="draft" defaultSize={40} minSize={20}>
           <DraftPane
             claim={claim}
             refetch={refetch}
@@ -269,22 +290,30 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
             entire subtree collapsed by 5.16 print stylesheet so the
             DraftPane (which contains the [data-print-target] InStoreGuide)
             fills the page. */}
-        <ResizablePanel defaultSize={defaultSizes[1]} minSize={20} data-print-hide>
-          <ResizablePanelGroup orientation="vertical" className="h-full">
-            <ResizablePanel defaultSize={rightTop} minSize={15}>
+        <ResizablePanel id="right-column" defaultSize={60} minSize={20} data-print-hide>
+          <ResizablePanelGroup orientation="vertical" className="h-full" groupRef={innerGroupRef}>
+            <ResizablePanel id="evidence" defaultSize={60} minSize={15}>
               <EvidencePane claim={claim} onDoubleClickHeader={toggleEvidenceMax} />
             </ResizablePanel>
 
             <ResizableHandle withHandle />
 
-            <ResizablePanel defaultSize={rightBottom} minSize={15}>
+            <ResizablePanel id="assistant" defaultSize={40} minSize={15}>
               <AssistantPane
                 claimId={claim.claim_id}
                 currentVersion={claim.current_version}
                 refetch={refetch}
                 onDoubleClickHeader={() => {
+                  const willExpand = !assistantExpanded;
                   toggleEmbedded();
                   setPaneMax(null);
+                  if (willExpand) {
+                    innerGroupRef.current?.setLayout(LAYOUT.assistantMax);
+                    outerGroupRef.current?.setLayout({ draft: 20, "right-column": 80 });
+                  } else {
+                    innerGroupRef.current?.setLayout(LAYOUT.innerDefault);
+                    outerGroupRef.current?.setLayout(LAYOUT.outerDefault);
+                  }
                 }}
               />
             </ResizablePanel>

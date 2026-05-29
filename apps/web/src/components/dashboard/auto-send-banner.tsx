@@ -42,6 +42,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { approveClaim, ClaimsApiError, cancelClaim } from "@/lib/api/claims";
+import { getPlatformLabel } from "@/lib/platform-labels";
 import { cn } from "@/lib/utils";
 import { type AutoSendBannerRow, useAutoSendBannerStore } from "@/store/auto-send-banner";
 
@@ -146,6 +147,7 @@ export function AutoSendBanner() {
 function AutoSendBannerRowView({ row, now }: { row: AutoSendBannerRow; now: number }) {
   const removeRow = useAutoSendBannerStore((s) => s.removeRow);
   const [isActing, setIsActing] = useState(false);
+  const platformLabel = getPlatformLabel(row.platform);
 
   if (row.state === "sent") {
     return (
@@ -159,7 +161,7 @@ function AutoSendBannerRowView({ row, now }: { row: AutoSendBannerRow; now: numb
       >
         <span className="flex items-center gap-2 font-medium">
           <Check className="h-4 w-4" aria-hidden />
-          Sent {row.platform} claim
+          Sent {platformLabel} claim
         </span>
       </div>
     );
@@ -173,7 +175,7 @@ function AutoSendBannerRowView({ row, now }: { row: AutoSendBannerRow; now: numb
     try {
       await approveClaim(row.claimId);
       removeRow(row.claimId);
-      toast.success(`${row.platform} claim sent`);
+      toast.success(`${platformLabel} claim sent`);
     } catch (err) {
       if (isAlreadyResolvedError(err)) {
         // Already submitted by the scheduler — same end state, no error toast.
@@ -198,14 +200,14 @@ function AutoSendBannerRowView({ row, now }: { row: AutoSendBannerRow; now: numb
     // path for a low-stakes cancel where the reason isn't needed
     // (the dialog's required-reason picker is for the claim-page
     // flow's outcome_note).
-    if (typeof window !== "undefined" && !window.confirm(`Cancel ${row.platform} claim?`)) {
+    if (typeof window !== "undefined" && !window.confirm(`Cancel ${platformLabel} claim?`)) {
       return;
     }
     setIsActing(true);
     try {
       await cancelClaim(row.claimId, { reason: "Cancelled from auto-send banner" });
       removeRow(row.claimId);
-      toast.success(`${row.platform} claim cancelled`);
+      toast.success(`${platformLabel} claim cancelled`);
     } catch (err) {
       if (isAlreadyResolvedError(err)) {
         removeRow(row.claimId);
@@ -229,7 +231,7 @@ function AutoSendBannerRowView({ row, now }: { row: AutoSendBannerRow; now: numb
       <div className="flex min-w-0 items-center gap-2">
         <Clock className="h-4 w-4 flex-shrink-0" aria-hidden />
         <span className="truncate">
-          Sending {row.platform} claim in{" "}
+          Sending {platformLabel} claim in{" "}
           <span className="font-semibold tabular-nums">{countdown}</span>
         </span>
       </div>

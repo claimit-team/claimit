@@ -94,6 +94,9 @@ class PurchaseReadTolerant(BaseDocument):
     claim_type: str | None = None
     monitoring_cadence_minutes: int | None = None
     last_checked_at: datetime | None = None
+    last_monitor_error: str | None = None
+    last_monitor_error_at: datetime | None = None
+    last_monitor_error_code: str | None = None
     ingested_at: datetime | None = None
     ingestion_source: str | None = None
     receipt_storage_url: str | None = None

@@ -42,10 +42,9 @@ const EDGE_MASK =
   "linear-gradient(to right, transparent, black 80px, black calc(100% - 80px), transparent)";
 
 const LOGO_CLASSES =
-  "h-10 w-auto shrink-0 grayscale opacity-65 transition duration-300 " +
-  "hover:grayscale-0 hover:opacity-100 " +
-  "dark:invert-[.85] dark:grayscale dark:opacity-50 " +
-  "dark:hover:invert-0 dark:hover:grayscale-0 dark:hover:opacity-100";
+  "h-10 w-auto shrink-0 opacity-60 grayscale transition-opacity duration-300 " +
+  "hover:opacity-80 " +
+  "dark:opacity-50 dark:invert dark:hover:opacity-70";
 
 function MarqueeRow({
   logos,
@@ -102,9 +101,7 @@ export function LogoWallSection() {
         transition={{ duration: 0.6, ease: "easeOut" }}
         className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8"
       >
-        <p className="text-center text-sm font-medium text-neutral-500">
-          Trusted across 26 platforms
-        </p>
+        <p className="text-center text-sm text-neutral-500">Trusted across 26 platforms</p>
         <div className="mt-8 space-y-4 sm:space-y-8">
           <MarqueeRow logos={row1} direction="left" prefix="r1" />
           <MarqueeRow logos={row2} direction="right" prefix="r2" />

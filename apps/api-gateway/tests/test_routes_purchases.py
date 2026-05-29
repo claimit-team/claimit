@@ -7,6 +7,7 @@ dependency_overrides[get_db]/[get_current_user]/[get_receipts_uploader].
 from __future__ import annotations
 
 import copy
+import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from unittest.mock import AsyncMock
@@ -1791,10 +1792,46 @@ def _publisher_mock(*, fail: bool = False) -> AsyncMock:
     return publisher
 
 
+def _extraction_fixture(**overrides: object) -> dict:
+    """Shape the ingest-agent /internal/extract endpoint returns."""
+    now = datetime.now(UTC)
+    base = {
+        "platform": "best_buy",
+        "category": "retail",
+        "product_name": "Widget",
+        "product_id": "W123",
+        "product_url": None,
+        "variant": None,
+        "fare_class": None,
+        "room_type": None,
+        "bed_type": None,
+        "rate_type": None,
+        "price_paid": 24.99,
+        "member_price_at_purchase": None,
+        "non_member_price_at_purchase": None,
+        "purchase_date": now.isoformat(),
+        "purchase_date_basis": "order_date",
+        "order_id": "A123",
+        "member_tier_at_purchase": None,
+        "status": "pending_confirmation",
+        "currency": "USD",
+        "extraction_confidence": {"platform": 0.9, "price": 0.9, "overall_min": 0.9},
+    }
+    base.update(overrides)
+    return base
+
+
 @pytest.mark.asyncio
-async def test_upload_pdf_creates_pending_purchase(client: AsyncClient) -> None:
+async def test_upload_pdf_returns_extraction_without_persisting(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Upload extracts synchronously and writes NOTHING to Mongo/Pub-Sub."""
+    extraction = _extraction_fixture()
+    monkeypatch.setattr(
+        "src.services.purchases.ingest_client.extract_receipt",
+        AsyncMock(return_value=extraction),
+    )
     mock_db = AsyncMock(spec=MongoDBClient)
-    mock_db.upsert = AsyncMock(return_value="00000000-0000-4000-8000-000000000000")
     mock_uploader = AsyncMock(spec=ReceiptsUploader)
     mock_uploader.upload = AsyncMock(return_value="gs://test-bucket/receipts/x.pdf")
     publisher = _publisher_mock()
@@ -1807,30 +1844,30 @@ async def test_upload_pdf_creates_pending_purchase(client: AsyncClient) -> None:
         )
         assert response.status_code == 200, response.text
         payload = response.json()
-        assert payload["purchase"]["status"] == "pending_confirmation"
-        assert payload["purchase"]["ingestion_source"] == "upload_pdf"
-        assert payload["purchase"]["receipt_storage_url"] == "gs://test-bucket/receipts/x.pdf"
+        assert payload["storage_url"] == "gs://test-bucket/receipts/x.pdf"
+        assert payload["content_type"] == "application/pdf"
+        assert payload["receipt_hash"].startswith("sha256:")
+        assert payload["extraction"]["product_name"] == "Widget"
         assert mock_uploader.upload.await_count == 1
-        assert mock_db.upsert.await_count == 1
-        # The purchase.uploaded event must fire with the post-upload values.
-        publisher.publish.assert_awaited_once()
-        topic, body = publisher.publish.await_args.args
-        assert topic == "purchase.uploaded"
-        assert body["event_type"] == "purchase.uploaded"
-        assert body["receipt_storage_url"] == "gs://test-bucket/receipts/x.pdf"
-        assert body["content_type"] == "application/pdf"
+        # Write-after-confirm: NO Mongo write, NO Pub/Sub on upload.
+        mock_db.upsert.assert_not_awaited()
+        publisher.publish.assert_not_awaited()
     finally:
         _clear_overrides()
 
 
 @pytest.mark.asyncio
-async def test_upload_jpeg_sets_image_ingestion_source(client: AsyncClient) -> None:
+async def test_upload_image_echoes_content_type(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "src.services.purchases.ingest_client.extract_receipt",
+        AsyncMock(return_value=_extraction_fixture()),
+    )
     mock_db = AsyncMock(spec=MongoDBClient)
-    mock_db.upsert = AsyncMock(return_value="00000000-0000-4000-8000-000000000000")
     mock_uploader = AsyncMock(spec=ReceiptsUploader)
     mock_uploader.upload = AsyncMock(return_value="gs://test/x.jpg")
-    publisher = _publisher_mock()
-    _set_overrides(mock_db, mock_uploader, publisher)
+    _set_overrides(mock_db, mock_uploader, _publisher_mock())
     try:
         response = await client.post(
             "/api/v1/purchases/upload",
@@ -1838,11 +1875,7 @@ async def test_upload_jpeg_sets_image_ingestion_source(client: AsyncClient) -> N
             files={"file": ("r.jpg", b"\xff\xd8\xff\xe0jpeg", "image/jpeg")},
         )
         assert response.status_code == 200
-        assert response.json()["purchase"]["ingestion_source"] == "upload_image"
-        # content_type in the event is the uploaded mime, NOT a synthetic
-        # ingestion_source — ingest-agent uses it to pick the multimodal part.
-        body = publisher.publish.await_args.args[1]
-        assert body["content_type"] == "image/jpeg"
+        assert response.json()["content_type"] == "image/jpeg"
     finally:
         _clear_overrides()
 
@@ -1891,14 +1924,20 @@ async def test_upload_rejects_file_larger_than_10mb(client: AsyncClient) -> None
 
 
 @pytest.mark.asyncio
-async def test_upload_rolls_back_doc_on_publish_failure(client: AsyncClient) -> None:
-    """Publish failure → 503 + the doc that was just upserted is deleted."""
+async def test_upload_extractor_failure_returns_null_extraction(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Extractor failure → 200 with extraction=null (FE opens manual fill)."""
+    from src.services.ingest_client import IngestExtractError
+
+    monkeypatch.setattr(
+        "src.services.purchases.ingest_client.extract_receipt",
+        AsyncMock(side_effect=IngestExtractError("boom", code="extractor_failed", rejected=False)),
+    )
     mock_db = AsyncMock(spec=MongoDBClient)
-    mock_db.upsert = AsyncMock(return_value="00000000-0000-4000-8000-000000000000")
-    mock_db.delete = AsyncMock(return_value=True)
     mock_uploader = AsyncMock(spec=ReceiptsUploader)
     mock_uploader.upload = AsyncMock(return_value="gs://test-bucket/receipts/x.pdf")
-    publisher = _publisher_mock(fail=True)
+    publisher = _publisher_mock()
     _set_overrides(mock_db, mock_uploader, publisher)
     try:
         response = await client.post(
@@ -1906,40 +1945,224 @@ async def test_upload_rolls_back_doc_on_publish_failure(client: AsyncClient) -> 
             headers={"Authorization": "Bearer valid-token"},
             files={"file": ("receipt.pdf", b"%PDF-1.4 ...", "application/pdf")},
         )
-        assert response.status_code == 503
-        assert response.json()["error"]["code"] == "publish_failed"
-        # Upsert succeeded, publish failed → we must have rolled back the doc.
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["extraction"] is None
+        assert payload["storage_url"] == "gs://test-bucket/receipts/x.pdf"
+        mock_db.upsert.assert_not_awaited()
+        publisher.publish.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+# ---------------------------------------------------------------------------
+# POST /purchases/confirm-create — write-after-confirm
+# ---------------------------------------------------------------------------
+
+_RECEIPT_URL = f"gs://test-bucket/receipts/{USER_ID}/staging/x.pdf"
+
+
+def _confirm_create_db(*, dedup_hit: bool = False, policy_window_days: int = 30) -> AsyncMock:
+    from claimit_mongodb_models import Policy
+
+    mock_db = AsyncMock(spec=MongoDBClient)
+    existing = _purchase_fixture(status="monitoring") if dedup_hit else None
+    mock_db.find_one = AsyncMock(return_value=existing)
+    mock_db.get_policy = AsyncMock(
+        return_value=Policy.model_validate(_policy_fixture(window_days=policy_window_days))
+    )
+    mock_db.upsert = AsyncMock(return_value=str(USER_ID))
+    return mock_db
+
+
+def _confirm_create_uploader() -> AsyncMock:
+    mock_uploader = AsyncMock(spec=ReceiptsUploader)
+    mock_uploader.bucket_name = "test-bucket"
+    # confirm-create recomputes receipt_hash from the stored object (it does
+    # not trust a client-supplied hash), so the blob must be downloadable.
+    mock_uploader.download = AsyncMock(return_value=(b"%PDF-1.4 receipt bytes", "application/pdf"))
+    return mock_uploader
+
+
+@pytest.mark.asyncio
+async def test_confirm_create_writes_monitoring_and_publishes(client: AsyncClient) -> None:
+    mock_db = _confirm_create_db()
+    publisher = _publisher_mock()
+    _set_overrides(mock_db, _confirm_create_uploader(), publisher)
+    try:
+        response = await client.post(
+            "/api/v1/purchases/confirm-create",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(),
+                "corrected_fields": None,
+            },
+        )
+        assert response.status_code == 200, response.text
+        purchase = response.json()["purchase"]
+        assert purchase["status"] == "monitoring"
+        assert purchase["ingestion_source"] == "upload_pdf"
+        assert purchase["receipt_storage_url"] == _RECEIPT_URL
+        # Hash is recomputed server-side from the downloaded blob bytes.
+        assert (
+            purchase["receipt_hash"]
+            == f"sha256:{hashlib.sha256(b'%PDF-1.4 receipt bytes').hexdigest()}"
+        )
         mock_db.upsert.assert_awaited_once()
-        publisher.publish.assert_awaited_once()
-        mock_db.delete.assert_awaited_once()
-        delete_args = mock_db.delete.await_args.args
-        assert delete_args[0] == "purchases"
+        # purchase.ingested fires so the monitor-agent starts tracking.
+        topic, body = publisher.publish.await_args.args
+        assert topic == "purchase.ingested"
+        assert body["status"] == "monitoring"
     finally:
         _clear_overrides()
 
 
 @pytest.mark.asyncio
-async def test_upload_publish_failure_doc_rollback_failure_still_returns_503(
-    client: AsyncClient,
-) -> None:
-    """Doc-delete also failing must NOT mask the user-facing 503."""
-    mock_db = AsyncMock(spec=MongoDBClient)
-    mock_db.upsert = AsyncMock(return_value="00000000-0000-4000-8000-000000000000")
-    mock_db.delete = AsyncMock(side_effect=RuntimeError("mongo down"))
-    mock_uploader = AsyncMock(spec=ReceiptsUploader)
-    mock_uploader.upload = AsyncMock(return_value="gs://test-bucket/receipts/x.pdf")
-    publisher = _publisher_mock(fail=True)
-    _set_overrides(mock_db, mock_uploader, publisher)
+async def test_confirm_create_duplicate_returns_409(client: AsyncClient) -> None:
+    mock_db = _confirm_create_db(dedup_hit=True)
+    _set_overrides(mock_db, _confirm_create_uploader(), _publisher_mock())
     try:
         response = await client.post(
-            "/api/v1/purchases/upload",
+            "/api/v1/purchases/confirm-create",
             headers={"Authorization": "Bearer valid-token"},
-            files={"file": ("receipt.pdf", b"%PDF-1.4 ...", "application/pdf")},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(),
+            },
         )
-        # User-facing surface is still 503 — operator logs catch the
-        # stranded doc.
-        assert response.status_code == 503
-        assert response.json()["error"]["code"] == "publish_failed"
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "duplicate"
+        mock_db.upsert.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_create_applies_corrected_fields(client: AsyncClient) -> None:
+    mock_db = _confirm_create_db()
+    _set_overrides(mock_db, _confirm_create_uploader(), _publisher_mock())
+    try:
+        response = await client.post(
+            "/api/v1/purchases/confirm-create",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(product_name="Wrong"),
+                "corrected_fields": {"product_name": "Corrected Name", "price_paid": 99.5},
+            },
+        )
+        assert response.status_code == 200, response.text
+        purchase = response.json()["purchase"]
+        assert purchase["product_name"] == "Corrected Name"
+        assert purchase["price_paid"] == 99.5
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_create_rejects_non_correctable_field(client: AsyncClient) -> None:
+    mock_db = _confirm_create_db()
+    _set_overrides(mock_db, _confirm_create_uploader(), _publisher_mock())
+    try:
+        response = await client.post(
+            "/api/v1/purchases/confirm-create",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(),
+                "corrected_fields": {"status": "monitoring"},
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "invalid_field"
+        mock_db.upsert.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_create_rejects_foreign_receipt_url(client: AsyncClient) -> None:
+    """A storage_url under another user's prefix is rejected (400)."""
+    mock_db = _confirm_create_db()
+    _set_overrides(mock_db, _confirm_create_uploader(), _publisher_mock())
+    try:
+        response = await client.post(
+            "/api/v1/purchases/confirm-create",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": f"gs://test-bucket/receipts/{OTHER_USER_ID}/staging/x.pdf",
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(),
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "invalid_field"
+        mock_db.upsert.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_create_manual_fill_no_extraction(client: AsyncClient) -> None:
+    """extraction=null → build from corrected_fields, status monitoring."""
+    mock_db = _confirm_create_db()
+    _set_overrides(mock_db, _confirm_create_uploader(), _publisher_mock())
+    now_iso = datetime.now(UTC).isoformat()
+    try:
+        response = await client.post(
+            "/api/v1/purchases/confirm-create",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "image/png",
+                "extraction": None,
+                "corrected_fields": {
+                    "platform": "best_buy",
+                    "category": "retail",
+                    "product_name": "Hand Typed",
+                    "price_paid": 12.0,
+                    "purchase_date": now_iso,
+                    "purchase_date_basis": "order_date",
+                    "order_id": "M-1",
+                },
+            },
+        )
+        assert response.status_code == 200, response.text
+        purchase = response.json()["purchase"]
+        assert purchase["status"] == "monitoring"
+        assert purchase["product_name"] == "Hand Typed"
+        assert purchase["ingestion_source"] == "upload_image"
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_create_missing_blob_returns_400(client: AsyncClient) -> None:
+    """Blob gone at confirm (can't recompute hash) → 400 receipt_missing."""
+    from src.services.receipts_storage import ReceiptObjectMissingError
+
+    mock_db = _confirm_create_db()
+    uploader = _confirm_create_uploader()
+    uploader.download = AsyncMock(side_effect=ReceiptObjectMissingError("gone"))
+    _set_overrides(mock_db, uploader, _publisher_mock())
+    try:
+        response = await client.post(
+            "/api/v1/purchases/confirm-create",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(),
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "receipt_missing"
+        mock_db.upsert.assert_not_awaited()
     finally:
         _clear_overrides()
 
@@ -2143,5 +2366,160 @@ async def test_receipt_proxy_returns_404_on_malformed_gs_uri(client: AsyncClient
         )
         assert response.status_code == 404
         mock_uploader.download.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+# ---------------------------------------------------------------------------
+# PATCH /purchases/{id} — BUG-19 remediation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_patch_purchase_sets_product_url_and_clears_monitor_error(
+    client: AsyncClient,
+) -> None:
+    """Happy path: PATCH sets product_url and clears any stale monitor error."""
+    existing = _purchase_fixture(status="monitoring")
+    updated_doc = _purchase_fixture(status="monitoring")
+    object.__setattr__(updated_doc, "product_url", "https://www.bestbuy.com/site/foo.p")
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(side_effect=[existing, updated_doc])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    _set_overrides(mock_db)
+    try:
+        response = await client.patch(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"product_url": "https://www.bestbuy.com/site/foo.p"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["purchase"]["product_url"] == "https://www.bestbuy.com/site/foo.p"
+        updates = mock_db.partial_update.await_args.args[2]
+        assert updates["product_url"] == "https://www.bestbuy.com/site/foo.p"
+        # Stale failure trail is cleared in the same write.
+        assert updates["last_monitor_error"] is None
+        assert updates["last_monitor_error_at"] is None
+        assert updates["last_monitor_error_code"] is None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_patch_purchase_cross_user_404(client: AsyncClient) -> None:
+    """Ownership check: another user's purchase 404s without writing."""
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=_purchase_fixture(user_id=OTHER_USER_ID))
+    mock_db.partial_update = AsyncMock()
+    _set_overrides(mock_db)
+    try:
+        response = await client.patch(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"product_url": "https://example.com/foo"},
+        )
+        assert response.status_code == 404
+        mock_db.partial_update.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_patch_purchase_rejects_unknown_field(client: AsyncClient) -> None:
+    """The PATCH body is a narrow Pydantic model — unknown keys are ignored
+    by Pydantic (extra='ignore' by default), so confirm they never reach
+    partial_update. The allowlist is enforced by the model, not a runtime
+    check. (Pydantic v2 defaults — see field_set assertions below.)
+    """
+    existing = _purchase_fixture(status="monitoring")
+    updated_doc = _purchase_fixture(status="monitoring")
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(side_effect=[existing, updated_doc])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    _set_overrides(mock_db)
+    try:
+        response = await client.patch(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+            # `status` and `user_id` should be silently dropped, NOT written.
+            json={
+                "product_url": "https://example.com/x",
+                "status": "dismissed",
+                "user_id": str(OTHER_USER_ID),
+            },
+        )
+        assert response.status_code == 200
+        updates = mock_db.partial_update.await_args.args[2]
+        assert "status" not in updates
+        assert "user_id" not in updates
+        # And the in-scope field still went through.
+        assert updates["product_url"] == "https://example.com/x"
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_patch_purchase_empty_body_422(client: AsyncClient) -> None:
+    """Regression for CodeRabbit comment on PR #233: `product_url` is required
+    (`Field(...)`) so an omitted-key body cannot silently wipe an existing URL.
+    """
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock()
+    mock_db.partial_update = AsyncMock()
+    _set_overrides(mock_db)
+    try:
+        response = await client.patch(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+            json={},
+        )
+        assert response.status_code == 422
+        mock_db.get_purchase.assert_not_awaited()
+        mock_db.partial_update.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_patch_purchase_explicit_null_accepted(client: AsyncClient) -> None:
+    """A client may still pass `product_url: null` to intentionally clear the
+    URL. Required-with-null-allowed is the documented shape of
+    `UpdatePurchaseRequest`.
+    """
+    existing = _purchase_fixture(status="monitoring")
+    updated_doc = _purchase_fixture(status="monitoring")
+    object.__setattr__(updated_doc, "product_url", None)
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(side_effect=[existing, updated_doc])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    _set_overrides(mock_db)
+    try:
+        response = await client.patch(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"product_url": None},
+        )
+        assert response.status_code == 200
+        updates = mock_db.partial_update.await_args.args[2]
+        assert updates["product_url"] is None
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_patch_purchase_missing_404(client: AsyncClient) -> None:
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=None)
+    mock_db.partial_update = AsyncMock()
+    _set_overrides(mock_db)
+    try:
+        response = await client.patch(
+            f"/api/v1/purchases/{PURCHASE_ID}",
+            headers={"Authorization": "Bearer valid-token"},
+            json={"product_url": "https://example.com/foo"},
+        )
+        assert response.status_code == 404
+        mock_db.partial_update.assert_not_awaited()
     finally:
         _clear_overrides()

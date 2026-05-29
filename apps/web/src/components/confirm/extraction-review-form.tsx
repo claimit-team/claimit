@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { ConfirmCategory, ConfirmFormState } from "@/lib/confirm-form-state";
+import { PLATFORM_LABELS } from "@/lib/platform-labels";
 import { cn } from "@/lib/utils";
 
 /**
@@ -45,19 +46,6 @@ import { cn } from "@/lib/utils";
  * the closest match. Widening the enum will surface the additional
  * options here automatically (no FE change required).
  */
-
-const PLATFORM_LABELS: Record<Platform, string> = {
-  best_buy: "Best Buy",
-  amazon: "Amazon",
-  target: "Target",
-  walmart: "Walmart",
-  marriott: "Marriott",
-  hilton: "Hilton",
-  delta: "Delta",
-  united: "United Airlines",
-  american: "American Airlines",
-  southwest: "Southwest",
-};
 
 const PLATFORM_OPTIONS: ReadonlyArray<{ value: Platform; label: string }> = (
   Object.entries(PLATFORM_LABELS) as Array<[Platform, string]>
@@ -113,7 +101,9 @@ export function ExtractionReviewForm({
           disabled={disabled}
         >
           <SelectTrigger id="platform" className="w-full min-w-0">
-            <SelectValue placeholder="Select platform" />
+            <SelectValue placeholder="Select platform">
+              {(value: Platform | "") => (value === "" ? null : PLATFORM_LABELS[value as Platform])}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent className="max-h-[min(320px,var(--spacing)*80)] overflow-y-auto">
             {PLATFORM_OPTIONS.map((opt) => (

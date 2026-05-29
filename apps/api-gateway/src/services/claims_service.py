@@ -275,6 +275,7 @@ async def list_claims(
         {
           "claims": list[dict],          # ClaimListItem JSON (by_alias)
           "next_cursor": str | None,
+          "counts": dict,               # {all, pending, in_progress, resolved}
         }
     """
     match: dict[str, Any] = {"user_id": user_id}
@@ -320,17 +321,14 @@ async def list_claims(
     limit_stage: dict[str, Any] = {"$limit": limit + 1}
 
     q_clean = q.strip() if q is not None else None
-    pipeline: list[dict[str, Any]]
+
+    # Build the q-filter stage once so it can be shared by both the main
+    # pipeline and the parallel count pipeline (avoids recompiling the
+    # re.escape pattern twice).
+    q_match_stage: dict[str, Any] | None = None
     if q_clean:
-        # q path: must $lookup before filtering on joined product_name.
-        # Sort/limit run after the q $match so the cursor page reflects
-        # post-filter results; this is the same shape as before this
-        # commit and the result set is unchanged from the pre-fix code.
-        # re.escape makes `q` a literal substring match — no metachar
-        # injection, no ReDoS. Mongo's $regex uses Perl-compatible syntax,
-        # so Python's re.escape produces a compatible literal pattern.
         pattern = re.escape(q_clean)
-        q_match_stage: dict[str, Any] = {
+        q_match_stage = {
             "$match": {
                 "$or": [
                     {"platform": {"$regex": pattern, "$options": "i"}},
@@ -338,6 +336,16 @@ async def list_claims(
                 ]
             }
         }
+
+    pipeline: list[dict[str, Any]]
+    if q_match_stage is not None:
+        # q path: must $lookup before filtering on joined product_name.
+        # Sort/limit run after the q $match so the cursor page reflects
+        # post-filter results; this is the same shape as before this
+        # commit and the result set is unchanged from the pre-fix code.
+        # re.escape makes `q` a literal substring match — no metachar
+        # injection, no ReDoS. Mongo's $regex uses Perl-compatible syntax,
+        # so Python's re.escape produces a compatible literal pattern.
         pipeline = [
             {"$match": match},
             _CLAIMS_PURCHASE_LOOKUP_STAGE,
@@ -362,7 +370,44 @@ async def list_claims(
             _CLAIM_LIST_PROJECT_STAGE,
         ]
 
-    raw_docs = await db.aggregate("claims", pipeline)
+    # Count pipeline — mirrors user_id + platform + q filters but does NOT
+    # apply the outcome/status_group filter so all chips always show correct
+    # totals regardless of which chip is active. Run in parallel with the
+    # main pipeline to avoid a serial round-trip.
+    count_match: dict[str, Any] = {"user_id": user_id}
+    if platform is not None:
+        count_match["platform"] = platform.value
+
+    if q_match_stage is not None:
+        count_pipeline: list[dict[str, Any]] = [
+            {"$match": count_match},
+            _CLAIMS_PURCHASE_LOOKUP_STAGE,
+            _CLAIMS_PURCHASE_UNWIND_STAGE,
+            q_match_stage,
+            {"$group": {"_id": "$outcome", "n": {"$sum": 1}}},
+        ]
+    else:
+        count_pipeline = [
+            {"$match": count_match},
+            {"$group": {"_id": "$outcome", "n": {"$sum": 1}}},
+        ]
+
+    raw_docs, count_docs = await asyncio.gather(
+        db.aggregate("claims", pipeline),
+        db.aggregate("claims", count_pipeline),
+    )
+
+    # Map per-outcome counts → status-group buckets.
+    _outcome_to_group: dict[str, str] = {
+        o.value: group for group, outcomes in STATUS_GROUP_OUTCOMES.items() for o in outcomes
+    }
+    counts: dict[str, int] = {"all": 0, "pending": 0, "in_progress": 0, "resolved": 0}
+    for row in count_docs:
+        n = int(row.get("n", 0))
+        counts["all"] += n
+        group = _outcome_to_group.get(str(row.get("_id") or ""))
+        if group is not None:
+            counts[group] += n
 
     has_more = len(raw_docs) > limit
     visible = raw_docs[:limit]
@@ -378,7 +423,7 @@ async def list_claims(
         next_cursor = encode_cursor(doc_id=str(last["_id"]), sort_key=sort_key_out)
 
     items = [dump_model_json_utc(ClaimListItem.model_validate(d)) for d in visible]
-    return {"claims": items, "next_cursor": next_cursor}
+    return {"claims": items, "next_cursor": next_cursor, "counts": counts}
 
 
 # Hard cap on per-purchase claims surfaced by the enriched detail bundle.
@@ -915,6 +960,7 @@ async def edit_claim_draft(
     user_id: UUID,
     claim_id: UUID,
     draft_content: str,
+    subject: str | None = None,
 ) -> dict[str, object]:
     """Append a user-edited DraftVersion and update draft_content in sync.
 
@@ -949,13 +995,16 @@ async def edit_claim_draft(
         generated_by=DraftGeneratedBy.USER_EDIT,
         at=now,
     )
+    set_fields: dict[str, Any] = {"draft_content": draft_content}
+    if subject is not None:
+        set_fields["subject"] = subject
     success = await db.array_push(
         "claims",
         claim_id,
         field="draft_versions",
         element=new_version,
         element_model=DraftVersion,
-        set_fields={"draft_content": draft_content},
+        set_fields=set_fields,
         parent_model=Claim,
     )
     if not success:

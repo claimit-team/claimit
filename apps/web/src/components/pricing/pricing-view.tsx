@@ -206,20 +206,20 @@ function PricingCard({
 function FeatureComparisonTable() {
   return (
     <div className="overflow-hidden rounded-lg border border-neutral-200">
-      <Table>
+      <Table className="table-fixed">
         <TableHeader>
           <TableRow className="bg-neutral-50">
             <TableHead className="w-[40%] text-neutral-900">Feature</TableHead>
-            <TableHead className="text-center text-neutral-900">Free</TableHead>
-            <TableHead className="text-center text-neutral-900">Pro</TableHead>
-            <TableHead className="text-center text-neutral-900">Family</TableHead>
+            <TableHead className="w-[20%] text-center text-neutral-900">Free</TableHead>
+            <TableHead className="w-[20%] text-center text-neutral-900">Pro</TableHead>
+            <TableHead className="w-[20%] text-center text-neutral-900">Family</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {comparisonFeatures.map((feature) => (
             <TableRow key={feature.name}>
               <TableCell className="font-medium text-neutral-700">{feature.name}</TableCell>
-              <TableCell className="text-center">
+              <TableCell className="w-[20%] text-center">
                 {typeof feature.free === "boolean" ? (
                   feature.free ? (
                     <CheckCircle2 className="mx-auto size-4 text-brand-primary-500" />
@@ -230,7 +230,7 @@ function FeatureComparisonTable() {
                   <span className="text-sm text-neutral-700">{feature.free}</span>
                 )}
               </TableCell>
-              <TableCell className="text-center">
+              <TableCell className="w-[20%] text-center">
                 {typeof feature.pro === "boolean" ? (
                   feature.pro ? (
                     <CheckCircle2 className="mx-auto size-4 text-brand-primary-500" />
@@ -241,7 +241,7 @@ function FeatureComparisonTable() {
                   <span className="text-sm text-neutral-700">{feature.pro}</span>
                 )}
               </TableCell>
-              <TableCell className="text-center">
+              <TableCell className="w-[20%] whitespace-normal text-center">
                 {typeof feature.family === "boolean" ? (
                   feature.family ? (
                     <CheckCircle2 className="mx-auto size-4 text-brand-primary-500" />
@@ -296,16 +296,16 @@ export function PricingView() {
 
   return (
     <div className="bg-neutral-0">
-      <section className="flex min-h-[75vh] flex-col justify-center border-b border-neutral-200 sm:min-h-[85vh]">
+      <section className="border-b border-neutral-200 py-12 sm:py-16 lg:py-20">
         <div className="mx-auto w-full max-w-3xl px-4 text-center sm:px-6 lg:px-8">
-          <h1 className="text-balance text-5xl font-semibold leading-[0.95] tracking-tighter text-neutral-900 sm:text-6xl lg:text-7xl">
+          <h1 className="text-balance text-4xl font-semibold leading-[0.95] tracking-tighter text-neutral-900 sm:text-5xl lg:text-6xl">
             Pricing
           </h1>
-          <p className="mt-6 text-lg leading-relaxed text-neutral-600 sm:text-xl">
+          <p className="mt-4 text-base leading-relaxed text-neutral-600 sm:text-lg">
             ClaimIt offers a forever-free tier. Paid plans unlock broader monitoring and claim
             drafts. We help you prepare materials, but we do not guarantee refunds.
           </p>
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-4">
             <Link
               href="/login"
               className={cn(
@@ -325,7 +325,7 @@ export function PricingView() {
         </div>
       </section>
 
-      <section className="py-24 sm:py-32 lg:py-40">
+      <section className="pt-12 pb-24 sm:pt-16 sm:pb-32 lg:pt-20 lg:pb-40">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <div className="mb-10 flex justify-center">
             <Tabs
@@ -373,7 +373,7 @@ export function PricingView() {
         </div>
       </section>
 
-      <section className="border-t border-neutral-200 bg-neutral-50 py-24 sm:py-32 lg:py-40">
+      <section className="border-t border-neutral-200 bg-neutral-0 py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-2xl px-4 text-center sm:px-6 lg:px-8">
           <h2 className="text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
             Start with One Receipt

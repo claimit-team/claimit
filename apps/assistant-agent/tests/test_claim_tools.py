@@ -687,3 +687,102 @@ async def test_get_reasoning_trace_outer_timeout() -> None:
     assert out["phoenix_query_status"] == "timeout"
     assert "trace_summary" in out
     assert len(out["trace_summary"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# BUG-31 / BUG-61 — Mongo failure resilience
+#
+# Pre-fix the Mongo-backed tools (`get_claim_context`, `update_send_override`,
+# `request_redraft`) raised on any DB blip and never bounded their own call
+# time. Both issues let a wedged or transiently-failing MongoDB MCP take down
+# the whole assistant turn. The tools now wrap each DB call in
+# `_safe_db_call` (5s wait_for + try/except → structured error).
+# ---------------------------------------------------------------------------
+
+
+async def test_get_claim_context_returns_error_when_db_raises() -> None:
+    db = AsyncMock()
+    db.get_claim.side_effect = RuntimeError("mongo down")
+
+    tool = make_get_claim_context(user_id=_USER_ID, claim_id=_CLAIM_ID, db_factory=lambda: db)
+    out = await tool()
+
+    assert out["error"] == "get_claim_failed"
+    assert "message" in out
+
+
+async def test_get_claim_context_returns_timeout_when_db_hangs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A wedged Mongo MCP must not hang the tool indefinitely (BUG-61)."""
+    monkeypatch.setattr("src.tools.claim_tools._MONGO_TIMEOUT_SECONDS", 0.05)
+
+    async def never(*_args: object, **_kwargs: object) -> None:
+        await asyncio.sleep(5)
+
+    db = AsyncMock()
+    db.get_claim.side_effect = never
+
+    tool = make_get_claim_context(user_id=_USER_ID, claim_id=_CLAIM_ID, db_factory=lambda: db)
+    out = await tool()
+
+    assert out["error"] == "get_claim_timeout"
+
+
+async def test_get_claim_context_degrades_purchase_to_none_when_lookup_fails() -> None:
+    """Purchase fetch is best-effort — if it fails, the LLM should still get
+    the claim summary so it can answer "what's this claim about" without
+    waiting for a retry the user didn't ask for."""
+    claim = _fake_claim()
+    db = AsyncMock()
+    db.get_claim = AsyncMock(return_value=claim)
+    db.get_purchase = AsyncMock(side_effect=RuntimeError("purchase shard slow"))
+    db.get_policy = AsyncMock(return_value=None)
+
+    tool = make_get_claim_context(user_id=_USER_ID, claim_id=_CLAIM_ID, db_factory=lambda: db)
+    out = await tool()
+
+    assert out["claim"]["user_id"] == _USER_ID
+    assert out["purchase"] is None
+    assert out["policy"] is None
+
+
+async def test_update_send_override_returns_error_when_db_raises() -> None:
+    db = AsyncMock()
+    db.get_claim.side_effect = RuntimeError("mongo down")
+
+    tool = make_update_send_override(user_id=_USER_ID, claim_id=_CLAIM_ID, db_factory=lambda: db)
+    out = await tool("auto")
+
+    assert out["error"] == "get_claim_failed"
+    db.partial_update.assert_not_called()
+
+
+async def test_update_send_override_returns_error_when_partial_update_raises() -> None:
+    """get_claim succeeds but the write fails — surface a structured error
+    rather than raising so the LLM tells the user to try again."""
+    claim = _fake_claim()
+    db = _fake_db(claim=claim)
+    db.partial_update = AsyncMock(side_effect=RuntimeError("write failed"))
+
+    tool = make_update_send_override(user_id=_USER_ID, claim_id=_CLAIM_ID, db_factory=lambda: db)
+    out = await tool("auto")
+
+    assert out["error"] == "partial_update_failed"
+
+
+async def test_request_redraft_returns_error_when_db_raises() -> None:
+    publish = AsyncMock(return_value="should-not-be-used")
+    db = AsyncMock()
+    db.get_claim.side_effect = RuntimeError("mongo down")
+
+    tool = make_request_redraft(
+        user_id=_USER_ID,
+        claim_id=_CLAIM_ID,
+        db_factory=lambda: db,
+        publish=publish,
+    )
+    out = await tool("make it friendlier")
+
+    assert out["error"] == "get_claim_failed"
+    publish.assert_not_awaited()

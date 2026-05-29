@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Bot, Loader2, Send, Sparkles, User } from "lucide-react";
+import { AlertCircle, Bot, ExternalLink, Loader2, Send, Sparkles, User } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { MarkdownMessage } from "@/components/assistant/markdown-message";
@@ -58,7 +58,8 @@ function PaneHeader({ onDoubleClick }: { onDoubleClick?: () => void }) {
   return (
     <button
       type="button"
-      className="flex w-full cursor-default items-center justify-between border-neutral-200 border-b bg-neutral-0 px-4 py-3 text-left outline-none"
+      title="Double-click to maximize"
+      className="flex w-full cursor-pointer items-center justify-between border-neutral-200 border-b bg-neutral-0 px-4 py-3 text-left outline-none transition-colors hover:bg-neutral-50"
       onDoubleClick={onDoubleClick}
     >
       <div className="flex items-center gap-2">
@@ -124,6 +125,17 @@ function MessageBubble({ message }: { message: UIMessage }) {
         {message.error ? (
           <p className="mt-1 text-[11px] text-semantic-danger">{message.error}</p>
         ) : null}
+        {isAssistant && message.trace_id && !message.streaming ? (
+          <a
+            href={`https://app.phoenix.arize.com/s/claimitbeta/projects/claimit/traces/${message.trace_id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-1.5 inline-flex items-center gap-1 text-neutral-400 text-xs transition-colors hover:text-brand-primary-500"
+          >
+            <ExternalLink className="h-3 w-3" />
+            View trace
+          </a>
+        ) : null}
       </div>
       {!isAssistant ? (
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-primary-500">
@@ -164,29 +176,40 @@ export function AssistantPane({
   const [createError, setCreateError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const hydratedForRef = useRef<string | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: claimId is the intentional trigger
   useEffect(() => {
     setCreateError(null);
     setActiveId(null);
+    hydratedForRef.current = null;
     reset();
   }, [claimId, reset]);
 
   useEffect(() => {
     if (convLoading) return;
-    if (streaming) return;
+
     const existing = conversations.find((c) => c.claim_id === claimId);
+
     if (existing) {
+      // Only hydrate once per conversation. After the initial load,
+      // useAssistantStream owns the messages state — optimistic appends
+      // and streaming accumulation must not be clobbered by re-hydrating
+      // from the (stale) conversations cache.
+      if (hydratedForRef.current === existing._id) return;
+
+      hydratedForRef.current = existing._id;
       setActiveId(existing._id);
       hydrate(wireToUI(existing.messages));
       return;
     }
-    if (creating) return;
-    if (createError) return;
+
+    if (creating || createError) return;
     setCreating(true);
     void (async () => {
       try {
         const created = await createConversation("claim_focused", claimId);
+        hydratedForRef.current = created._id;
         setActiveId(created._id);
         hydrate([]);
       } catch (err) {
@@ -197,16 +220,7 @@ export function AssistantPane({
         setCreating(false);
       }
     })();
-  }, [
-    conversations,
-    convLoading,
-    claimId,
-    creating,
-    createError,
-    createConversation,
-    hydrate,
-    streaming,
-  ]);
+  }, [conversations, convLoading, claimId, creating, createError, createConversation, hydrate]);
 
   useEffect(() => {
     return () => {

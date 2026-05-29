@@ -101,6 +101,20 @@ export type PurchaseDetailDoc = {
   claim_type: ClaimType | string | null;
   monitoring_cadence_minutes: number | null;
   last_checked_at: string | null;
+  /**
+   * Monitor-failure trail written by `apps/monitor-agent/src/cron.py`
+   * when an adapter raises `PriceFetchError` (BUG-19). Cleared on the
+   * next successful fetch OR after `PATCH /purchases/:id` updates
+   * `product_url`. The UI reads these to replace the hopeful "waiting
+   * for snapshot" copy with a real explanation + remediation action.
+   *
+   * `last_monitor_error_code` is the FE branching key. Today it's one of
+   * `"missing_product_url"` or `"adapter_error"`; new codes may appear
+   * server-side without a type bump.
+   */
+  last_monitor_error: string | null;
+  last_monitor_error_at: string | null;
+  last_monitor_error_code: string | null;
   ingested_at: string | null;
   ingestion_source: IngestionSource | string | null;
   receipt_storage_url: string | null;
@@ -371,21 +385,65 @@ export type PurchaseWriteResponse = {
 };
 
 /**
+ * Fields the ingest extractor returns for an uploaded receipt. Maps 1:1
+ * onto the editable `PurchaseDetailDoc` fields plus the server-computed
+ * `status` / `extraction_confidence`. `null` for the whole object means
+ * the extractor could not read the receipt — the FE opens the confirm
+ * form in manual-fill mode.
+ */
+export type UploadExtraction = {
+  platform: Platform | string | null;
+  category: Category | string | null;
+  product_name: string | null;
+  product_id: string | null;
+  product_url: string | null;
+  variant: string | null;
+  fare_class: string | null;
+  room_type: string | null;
+  bed_type: string | null;
+  rate_type: string | null;
+  price_paid: number | null;
+  member_price_at_purchase: number | null;
+  non_member_price_at_purchase: number | null;
+  purchase_date: string | null;
+  purchase_date_basis: PurchaseDateBasis | string | null;
+  order_id: string | null;
+  member_tier_at_purchase: string | null;
+  status: PurchaseStatus | string | null;
+  currency: string | null;
+  extraction_confidence: ExtractionConfidenceDoc | null;
+};
+
+/**
+ * Response of POST /api/v1/purchases/upload under the write-after-confirm
+ * flow. NOTHING is persisted on upload — the bytes go to GCS, the
+ * ingest-agent extracts the fields synchronously, and they're returned
+ * here. The FE carries this client-side to the confirm form and calls
+ * `createPurchase` (POST /confirm-create) only when the user confirms.
+ */
+export type UploadReceiptResponse = {
+  storage_url: string;
+  content_type: string;
+  receipt_hash: string | null;
+  extraction: UploadExtraction | null;
+};
+
+/**
  * POST /api/v1/purchases/upload — multipart receipt upload.
  *
  * The api-gateway validates content-type (PDF / PNG / JPEG only) and
- * file size (≤ MAX_UPLOAD_BYTES = 10 MB), writes a sentinel
- * `pending_confirmation` Purchase row, uploads the bytes to GCS, and
- * publishes `purchase.uploaded` so the ingest-agent extracts the
- * fields asynchronously. Returns the freshly-created purchase doc;
- * the FE then routes the user to `/confirm/:id` where the analyzing
- * poll waits for extraction to finalize (B3).
+ * file size (≤ MAX_UPLOAD_BYTES = 10 MB), uploads the bytes to GCS, and
+ * extracts the fields synchronously via the ingest-agent. It writes
+ * NOTHING to MongoDB — the Purchase is created only when the user
+ * confirms (`createPurchase`). The FE stashes this response and routes
+ * to `/confirm/:stagingKey`, where the form renders immediately from the
+ * carried `extraction` (no analyzing poll).
  *
- * Upload timeout is widened to 60s — a slow upstream + a 10 MB PDF
- * comfortably exceeds the 10s JSON-default in `PURCHASES_TIMEOUT_MS`.
- * Error envelope uses the same `code` discriminator as JSON 4xx
- * responses: `file_too_large` (413), `unsupported_media_type` (415),
- * everything else surfaces with `failureMessage` + the HTTP status.
+ * Upload timeout is widened to 60s — a slow upstream + a 10 MB PDF plus
+ * the synchronous Gemini extraction comfortably exceeds the 10s
+ * JSON-default in `PURCHASES_TIMEOUT_MS`. Error envelope uses the same
+ * `code` discriminator: `file_too_large` (413),
+ * `unsupported_media_type` (415).
  *
  * The `Content-Type` header is intentionally NOT set here — the
  * browser must build the `multipart/form-data; boundary=…` value
@@ -393,14 +451,43 @@ export type PurchaseWriteResponse = {
  */
 const UPLOAD_TIMEOUT_MS = 60_000;
 
-export async function uploadPurchase(file: File): Promise<PurchaseWriteResponse> {
+export async function uploadPurchase(file: File): Promise<UploadReceiptResponse> {
   const form = new FormData();
   form.append("file", file, file.name);
-  return _request<PurchaseWriteResponse>(
+  return _request<UploadReceiptResponse>(
     "/api/v1/purchases/upload",
     { method: "POST", body: form },
     "Receipt upload failed",
     { timeoutMs: UPLOAD_TIMEOUT_MS },
+  );
+}
+
+/**
+ * POST /api/v1/purchases/confirm-create — create the Purchase for a
+ * confirmed upload (the first MongoDB write under write-after-confirm).
+ *
+ * Carries the upload-time `storage_url` / `content_type` / `receipt_hash`
+ * plus the `extraction` returned by /upload and any user `corrected_fields`.
+ * The server dedups against already-committed purchases (409 `duplicate`
+ * on a true re-add), creates the doc in `monitoring`, and kicks off
+ * monitoring. `extraction` is null on manual fill.
+ */
+export type CreatePurchaseRequest = {
+  storage_url: string;
+  content_type: string;
+  extraction?: UploadExtraction | null;
+  corrected_fields?: Record<string, unknown>;
+};
+
+export async function createPurchase(body: CreatePurchaseRequest): Promise<PurchaseWriteResponse> {
+  return _request<PurchaseWriteResponse>(
+    "/api/v1/purchases/confirm-create",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    "Create purchase failed",
   );
 }
 
@@ -467,6 +554,32 @@ export type DismissPurchaseResponse = {
   reason: DismissReason;
   skiplist_written: boolean;
 };
+
+/**
+ * PATCH /api/v1/purchases/:id — narrow edit for BUG-19 remediation.
+ *
+ * Only `product_url` is editable today. The endpoint also clears the
+ * `last_monitor_error*` trail so the UI returns to the standard waiting
+ * state without having to round-trip through the monitor cron.
+ */
+export type UpdatePurchaseRequest = {
+  product_url: string | null;
+};
+
+export async function updatePurchase(
+  purchaseId: string,
+  body: UpdatePurchaseRequest,
+): Promise<PurchaseWriteResponse> {
+  return _request<PurchaseWriteResponse>(
+    `/api/v1/purchases/${encodeURIComponent(purchaseId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    "Update purchase failed",
+  );
+}
 
 export async function dismissPurchase(
   purchaseId: string,

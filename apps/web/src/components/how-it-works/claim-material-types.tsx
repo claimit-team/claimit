@@ -1,4 +1,7 @@
+"use client";
+
 import { Mail, MapPin, MessageSquare, Monitor } from "lucide-react";
+import { motion } from "motion/react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -39,13 +42,19 @@ const materialTypes = [
 
 export function ClaimMaterialTypes() {
   return (
-    <section className="border-t border-neutral-200 bg-neutral-50 py-24 sm:py-32 lg:py-40">
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+    <section className="bg-neutral-0 py-24 sm:py-32 lg:py-40">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8"
+      >
         <div className="text-center">
-          <h2 className="text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+          <h2 className="text-balance text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
             The output matches the platform.
           </h2>
-          <p className="mx-auto mt-3 max-w-2xl text-neutral-700">
+          <p className="mx-auto mt-3 max-w-3xl text-balance text-neutral-700">
             ClaimIt generates the right type of claim material based on how each retailer handles
             requests.
           </p>
@@ -53,7 +62,10 @@ export function ClaimMaterialTypes() {
 
         <div className="mt-12 grid gap-6 sm:grid-cols-2">
           {materialTypes.map((material) => (
-            <Card key={material.title} className="border-neutral-200 bg-neutral-0">
+            <Card
+              key={material.title}
+              className="flex h-full flex-col border-neutral-200 bg-neutral-0"
+            >
               <CardHeader>
                 <div className="mb-3 flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-neutral-100">
@@ -65,28 +77,30 @@ export function ClaimMaterialTypes() {
                   <span className="font-medium">When used:</span> {material.whenUsed}
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="flex flex-1 flex-col">
                 <p className="text-sm text-neutral-700">
                   <span className="font-medium">What you see:</span> {material.whatUserSees}
                 </p>
-                <div className="flex items-start gap-2">
-                  <Badge
-                    variant={material.canAutoSend ? "secondary" : "outline"}
-                    className={
-                      material.canAutoSend
-                        ? "bg-neutral-100 text-neutral-700"
-                        : "border-neutral-200 text-neutral-600"
-                    }
-                  >
-                    {material.canAutoSend ? "Auto-send eligible" : "Manual action required"}
-                  </Badge>
+                <div className="mt-auto pt-4">
+                  <div className="flex items-start gap-2">
+                    <Badge
+                      variant={material.canAutoSend ? "secondary" : "outline"}
+                      className={
+                        material.canAutoSend
+                          ? "bg-neutral-100 text-neutral-700"
+                          : "border-neutral-200 text-neutral-600"
+                      }
+                    >
+                      {material.canAutoSend ? "Auto-send eligible" : "Manual action required"}
+                    </Badge>
+                  </div>
+                  <p className="mt-2 text-xs text-neutral-500">{material.autoSendNote}</p>
                 </div>
-                <p className="text-xs text-neutral-500">{material.autoSendNote}</p>
               </CardContent>
             </Card>
           ))}
         </div>
-      </div>
+      </motion.div>
     </section>
   );
 }

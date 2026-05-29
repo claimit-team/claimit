@@ -103,22 +103,22 @@ function StatusBadge({ status }: { status: ClaimDetailWorkflowStatus }) {
 }
 
 /**
- * Live MM:SS countdown for the queued-for-send claim header branch.
- * Recomputes once a second; floors at 0:00 so a late re-render after
- * the scheduler fires shows "0:00" rather than a negative value.
- *
- * Re-running `setInterval` on every `autoSendAt` change cleanly
- * cancels a stale interval if the user navigates between queued
- * claims (claim-detail page can be reused across IDs).
+ * Live MM:SS countdown helpers for the queued-for-send claim header
+ * branch. Mirrors the dashboard `auto-send-banner` pair: a single
+ * always-on second ticker drives `now`, and a pure formatter floors
+ * the remaining time at "0:00" so a late re-render after the
+ * scheduler fires never shows a negative value.
  */
-function useAutoSendCountdown(autoSendAt: string | null | undefined): string {
+function useCurrentSecond(): number {
   const [now, setNow] = useState<number>(() => Date.now());
   useEffect(() => {
-    if (!autoSendAt) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [autoSendAt]);
-  if (!autoSendAt) return "0:00";
+  }, []);
+  return now;
+}
+
+function formatCountdown(autoSendAt: string, now: number): string {
   const target = new Date(autoSendAt).getTime();
   if (Number.isNaN(target)) return "0:00";
   const remainingMs = Math.max(0, target - now);
@@ -135,17 +135,23 @@ export function ClaimHeader({
   onClickApprove,
   onClickPrint,
 }: ClaimHeaderProps) {
-  // Hook called unconditionally (rules-of-hooks). When the claim isn't
-  // queued the value is unused — `auto_send_at` will be null/absent
-  // and the hook returns "0:00" without firing an interval.
-  const countdown = useAutoSendCountdown(claim.auto_send_at);
+  // Hook called unconditionally (rules-of-hooks). The interval is
+  // always on; `countdown` is only read on the queued_for_send branch.
+  const now = useCurrentSecond();
+  const countdown = claim.auto_send_at ? formatCountdown(claim.auto_send_at, now) : "0:00";
 
   const renderActions = () => {
     switch (claim.status) {
       case "awaiting_approval":
         return (
           <>
-            <Button variant="ghost" size="sm" type="button" onClick={onClickEdit}>
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={onClickEdit}
+              className="w-full sm:w-auto"
+            >
               <Edit className="mr-2 h-4 w-4" />
               Edit draft
             </Button>
@@ -154,12 +160,12 @@ export function ClaimHeader({
               size="sm"
               type="button"
               onClick={onClickCancel}
-              className="text-semantic-danger"
+              className="w-full text-semantic-danger sm:w-auto"
             >
               <XCircle className="mr-2 h-4 w-4" />
               Cancel claim
             </Button>
-            <Button size="sm" type="button" onClick={onClickApprove}>
+            <Button size="sm" type="button" onClick={onClickApprove} className="w-full sm:w-auto">
               <Send className="mr-2 h-4 w-4" />
               Approve and send
             </Button>
@@ -184,12 +190,12 @@ export function ClaimHeader({
               size="sm"
               type="button"
               onClick={onClickCancel}
-              className="text-semantic-danger"
+              className="w-full text-semantic-danger sm:w-auto"
             >
               <XCircle className="mr-2 h-4 w-4" />
               Cancel
             </Button>
-            <Button size="sm" type="button" onClick={onClickApprove}>
+            <Button size="sm" type="button" onClick={onClickApprove} className="w-full sm:w-auto">
               <Send className="mr-2 h-4 w-4" />
               Send now
             </Button>
@@ -263,63 +269,73 @@ export function ClaimHeader({
     // `@media print { body.printing-in-store-guide ... }`.
     <div
       data-print-hide
-      className="sticky top-0 z-10 flex h-16 items-center justify-between border-neutral-200 border-b bg-neutral-0 px-4 lg:px-6"
+      className="sticky top-0 z-10 border-neutral-200 border-b bg-neutral-0 px-4 py-3 lg:px-6"
     >
-      <div className="flex items-center gap-3">
-        <Link
-          href="/claims"
-          className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8")}
-        >
-          <ArrowLeft className="h-4 w-4" />
-          <span className="sr-only">Back to claims</span>
-        </Link>
-        <nav className="flex items-center gap-2 text-sm">
-          <Link href="/claims" className="text-neutral-500 hover:text-neutral-700">
-            Claims
+      <div className="space-y-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <Link
+            href="/claims"
+            className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8 shrink-0")}
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span className="sr-only">Back to claims</span>
           </Link>
-          <span className="text-neutral-300">/</span>
-          <span className="font-medium text-neutral-900">{claim.product_name}</span>
-        </nav>
-      </div>
-
-      <div className="hidden items-center gap-4 md:flex">
-        <StatusBadge status={claim.status} />
-        <div className="flex items-center gap-2 text-neutral-500 text-sm">
-          <span>{claim.platform}</span>
-          <span>·</span>
-          <span className="font-medium text-neutral-700">
-            {formatClaimCurrency(claim.refund_amount, claim.currency)}
-          </span>
-          {claim.window_remaining_hours > 0 && (
-            <>
-              <span>·</span>
-              <span className="flex items-center gap-1 text-semantic-warning">
-                <Clock className="h-4 w-4" />
-                {formatClaimRemainingTime(claim.window_remaining_hours)}
-              </span>
-            </>
-          )}
+          <nav className="flex min-w-0 items-center gap-2 text-sm">
+            <Link href="/claims" className="shrink-0 text-neutral-500 hover:text-neutral-700">
+              Claims
+            </Link>
+            <span className="shrink-0 text-neutral-300">/</span>
+            <span className="truncate font-medium text-neutral-900">{claim.product_name}</span>
+          </nav>
         </div>
-      </div>
 
-      <div className="flex items-center gap-2">
-        {/*
-         * "Download PDF" — ticket 5.16. Rendered OUTSIDE the status
-         * switch so it's available on any in-store guide regardless
-         * of workflow state (a `submitted` or `approved` in-store
-         * claim is still useful to re-print before walking into the
-         * store). Gated on the UI claim_type value `"in_store_guide"`
-         * (the view-model transform in `claim-detail-view.ts` maps
-         * the wire `"in_store"` → this string — see
-         * `mapClaimTypeToUi` at L363).
-         */}
-        {claim.claim_type === "in_store_guide" ? (
-          <Button variant="outline" size="sm" type="button" onClick={onClickPrint}>
-            <Printer className="mr-2 h-4 w-4" />
-            Download PDF
-          </Button>
-        ) : null}
-        {renderActions()}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <StatusBadge status={claim.status} />
+            <div className="flex flex-wrap items-center gap-2 text-neutral-500 text-sm">
+              <span>{claim.platform}</span>
+              <span>·</span>
+              <span className="font-medium text-neutral-700">
+                {formatClaimCurrency(claim.refund_amount, claim.currency)}
+              </span>
+              {claim.window_remaining_hours > 0 && (
+                <>
+                  <span>·</span>
+                  <span className="flex items-center gap-1 text-semantic-warning">
+                    <Clock className="h-4 w-4" />
+                    {formatClaimRemainingTime(claim.window_remaining_hours)}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+            {/*
+             * "Download PDF" — ticket 5.16. Rendered OUTSIDE the status
+             * switch so it's available on any in-store guide regardless
+             * of workflow state (a `submitted` or `approved` in-store
+             * claim is still useful to re-print before walking into the
+             * store). Gated on the UI claim_type value `"in_store_guide"`
+             * (the view-model transform in `claim-detail-view.ts` maps
+             * the wire `"in_store"` → this string — see
+             * `mapClaimTypeToUi` at L363).
+             */}
+            {claim.claim_type === "in_store_guide" ? (
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={onClickPrint}
+                className="w-full sm:w-auto"
+              >
+                <Printer className="mr-2 h-4 w-4" />
+                Download PDF
+              </Button>
+            ) : null}
+            {renderActions()}
+          </div>
+        </div>
       </div>
     </div>
   );
