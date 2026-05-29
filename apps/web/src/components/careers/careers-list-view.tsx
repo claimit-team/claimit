@@ -350,7 +350,7 @@ export function CareersListView() {
       </section>
 
       {/* Final CTA Section */}
-      <section className="border-t border-neutral-200 bg-neutral-100/50 py-24 sm:py-32 lg:py-40">
+      <section className="border-t border-neutral-200 bg-neutral-0 py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-2xl px-6 text-center">
           <h2 className="text-xl font-semibold text-neutral-900">
             Want to understand the product first?

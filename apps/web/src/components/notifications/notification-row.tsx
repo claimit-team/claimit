@@ -4,6 +4,7 @@ import type { NotificationEvent } from "@claimit/mongodb-types";
 import { formatDistanceToNow } from "date-fns";
 
 import { EVENT_ICONS, EVENT_LABELS } from "@/lib/notifications/event-labels";
+import { getPlatformLabel } from "@/lib/platform-labels";
 import { cn } from "@/lib/utils";
 
 const iconWrap =
@@ -28,7 +29,9 @@ function buildBody(notification: NotificationEvent): string {
 
   const parts: string[] = [];
   if (itemTitle) parts.push(itemTitle);
-  if (platform || merchant) parts.push(`on ${platform ?? merchant}`);
+  if (platform || merchant) {
+    parts.push(`on ${platform ? getPlatformLabel(platform) : merchant}`);
+  }
   if (typeof amount === "number") parts.push(`(${formatUSD(amount)})`);
   if (reason) parts.push(`— ${reason}`);
 

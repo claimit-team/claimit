@@ -14,7 +14,7 @@ import { PostCard } from "./post-card";
 import { RelatedResources } from "./related-resources";
 
 function postCardKey(post: BlogPost): string {
-  return `${post.category}-${post.title}`;
+  return post.slug;
 }
 
 export function BlogView() {
@@ -29,7 +29,7 @@ export function BlogView() {
     <div className="bg-neutral-0">
       <section className="flex min-h-[40vh] flex-col justify-center border-b border-neutral-200 bg-neutral-0 sm:min-h-[50vh]">
         <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
-          <h1 className="text-balance text-4xl font-semibold leading-[1.05] tracking-tight text-neutral-900 sm:text-5xl">
+          <h1 className="text-balance text-4xl font-semibold leading-[1.05] tracking-tight text-neutral-900 sm:text-5xl lg:text-6xl">
             ClaimIt blog
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-relaxed text-neutral-600 sm:text-xl">
@@ -52,13 +52,19 @@ export function BlogView() {
       </section>
 
       <section className="border-b border-neutral-200">
-        <div className="mx-auto max-w-6xl px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
+        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-24 lg:px-8 lg:py-28">
+          <h2 className="mb-8 text-sm font-semibold uppercase tracking-wider text-neutral-500">
+            Featured
+          </h2>
           <FeaturedPost post={featuredPost} />
         </div>
       </section>
 
       <section className="border-b border-neutral-200">
-        <div className="mx-auto max-w-6xl px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
+        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-24 lg:px-8 lg:py-28">
+          <h2 className="mb-8 text-sm font-semibold uppercase tracking-wider text-neutral-500">
+            Latest posts
+          </h2>
           <div className="mb-8">
             <CategoryFilter
               selectedCategory={selectedCategory}
@@ -81,7 +87,10 @@ export function BlogView() {
       </section>
 
       <section>
-        <div className="mx-auto max-w-6xl px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
+        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-24 lg:px-8 lg:py-28">
+          <h2 className="mb-8 text-sm font-semibold uppercase tracking-wider text-neutral-500">
+            Stay in the loop
+          </h2>
           <div className="grid gap-8 lg:grid-cols-2">
             <NewsletterCard />
             <RelatedResources />

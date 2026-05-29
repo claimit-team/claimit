@@ -164,29 +164,40 @@ export function AssistantPane({
   const [createError, setCreateError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const hydratedForRef = useRef<string | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: claimId is the intentional trigger
   useEffect(() => {
     setCreateError(null);
     setActiveId(null);
+    hydratedForRef.current = null;
     reset();
   }, [claimId, reset]);
 
   useEffect(() => {
     if (convLoading) return;
-    if (streaming) return;
+
     const existing = conversations.find((c) => c.claim_id === claimId);
+
     if (existing) {
+      // Only hydrate once per conversation. After the initial load,
+      // useAssistantStream owns the messages state — optimistic appends
+      // and streaming accumulation must not be clobbered by re-hydrating
+      // from the (stale) conversations cache.
+      if (hydratedForRef.current === existing._id) return;
+
+      hydratedForRef.current = existing._id;
       setActiveId(existing._id);
       hydrate(wireToUI(existing.messages));
       return;
     }
-    if (creating) return;
-    if (createError) return;
+
+    if (creating || createError) return;
     setCreating(true);
     void (async () => {
       try {
         const created = await createConversation("claim_focused", claimId);
+        hydratedForRef.current = created._id;
         setActiveId(created._id);
         hydrate([]);
       } catch (err) {
@@ -197,16 +208,7 @@ export function AssistantPane({
         setCreating(false);
       }
     })();
-  }, [
-    conversations,
-    convLoading,
-    claimId,
-    creating,
-    createError,
-    createConversation,
-    hydrate,
-    streaming,
-  ]);
+  }, [conversations, convLoading, claimId, creating, createError, createConversation, hydrate]);
 
   useEffect(() => {
     return () => {

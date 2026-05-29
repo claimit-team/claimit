@@ -20,7 +20,7 @@ const securityPoints = [
 
 export function PrivacyControlPreview() {
   return (
-    <section className="border-t border-neutral-200 bg-neutral-50 py-24 sm:py-32 lg:py-40">
+    <section className="border-t border-neutral-200 bg-neutral-0 py-24 sm:py-32 lg:py-40">
       <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
         <div className="rounded-xl border border-neutral-200 bg-neutral-0 p-6 sm:p-8">
           <div className="flex items-center gap-3">

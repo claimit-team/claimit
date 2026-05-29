@@ -100,6 +100,7 @@ export type ListClaimsParams = {
 export type ListClaimsResponse = {
   claims: ClaimListItem[];
   next_cursor: string | null;
+  counts: Record<string, number>;
 };
 
 export class ClaimsApiError extends Error {
@@ -256,6 +257,7 @@ export type ClaimDetailDoc = {
   denial_reason_extracted: string | null;
   resolved_at: string | null;
   trace_id: string | null;
+  subject: string | null;
 };
 
 /**
@@ -415,6 +417,7 @@ export async function cancelClaim(
 
 export type EditClaimDraftBody = {
   draft_content: string;
+  subject?: string | null;
 };
 
 export type EditClaimDraftResponse = {

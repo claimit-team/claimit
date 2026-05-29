@@ -41,6 +41,7 @@ import {
 import { usePurchases } from "@/hooks/usePurchases";
 import type { PurchaseListItem } from "@/lib/api/purchases";
 import { formatWindowRemaining, snakeToTitleLabel } from "@/lib/claims-status";
+import { getPlatformLabel } from "@/lib/platform-labels";
 import { getListStatusBadge, isMonitoringDegraded } from "@/lib/purchase-status";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store";
@@ -268,9 +269,7 @@ function PurchaseRow({ purchase }: { purchase: PurchaseListItem }) {
             <span className="truncate font-medium text-neutral-900">
               {purchase.product_name ?? "—"}
             </span>
-            <span className="text-xs text-neutral-500 capitalize">
-              {snakeToTitleLabel(purchase.platform)}
-            </span>
+            <span className="text-xs text-neutral-500">{getPlatformLabel(purchase.platform)}</span>
           </div>
         </div>
       </TableCell>
@@ -336,8 +335,8 @@ function PurchaseCard({ purchase }: { purchase: PurchaseListItem }) {
             <span className="truncate font-medium text-neutral-900">
               {purchase.product_name ?? "—"}
             </span>
-            <span className="text-xs text-neutral-500 capitalize">
-              {snakeToTitleLabel(purchase.platform)} · {snakeToTitleLabel(purchase.category)}
+            <span className="text-xs text-neutral-500">
+              {getPlatformLabel(purchase.platform)} · {snakeToTitleLabel(purchase.category)}
             </span>
           </div>
           <SourceIcon source={purchase.ingestion_source} />

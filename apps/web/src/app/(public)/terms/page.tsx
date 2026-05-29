@@ -41,7 +41,7 @@ const relatedLinks = [
 export default function TermsPage() {
   return (
     <div className="min-h-screen bg-neutral-0">
-      <section className="border-b border-neutral-200 bg-neutral-50 py-12 md:py-16">
+      <section className="border-b border-neutral-200 bg-neutral-0 py-12 md:py-16">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-3xl text-center">
             <Badge
@@ -70,7 +70,7 @@ export default function TermsPage() {
         </div>
       </section>
 
-      <section className="border-t border-neutral-200 bg-neutral-50 py-12 md:py-16">
+      <section className="border-t border-neutral-200 bg-neutral-0 py-12 md:py-16">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <h2 className="mb-8 text-center text-2xl font-semibold text-neutral-900">
             Related Resources

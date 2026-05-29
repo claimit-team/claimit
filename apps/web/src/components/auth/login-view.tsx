@@ -9,8 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { friendlyAuthError } from "@/lib/api/errors";
-import { signInWithGoogle } from "@/lib/auth-actions";
+import { signInWithGoogle, signOutUser } from "@/lib/auth-actions";
 import { useAuthStore } from "@/store";
+import { PostOAuthOverlay } from "./post-oauth-overlay";
 
 // Brand asset exception per design-system.md §2.5: the Google logo uses the
 // official multicolor SVG and intentionally does NOT inherit currentColor.
@@ -41,7 +42,10 @@ function GoogleMark({ className }: { className?: string }) {
 export function LoginView() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
+  const signInError = useAuthStore((s) => s.signInError);
+  const setSignInError = useAuthStore((s) => s.setSignInError);
   const [isLoading, setIsLoading] = useState(false);
+  const [postOAuthState, setPostOAuthState] = useState<"idle" | "awaiting" | "error">("idle");
 
   useEffect(() => {
     if (user) {
@@ -49,10 +53,17 @@ export function LoginView() {
     }
   }, [user, router]);
 
+  useEffect(() => {
+    if (signInError && postOAuthState === "awaiting") {
+      setPostOAuthState("error");
+    }
+  }, [signInError, postOAuthState]);
+
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
     try {
       await signInWithGoogle();
+      setPostOAuthState("awaiting");
       // Redirect is handled by the useEffect above once AuthInit hydrates
       // the user from getMe(); branching on user.onboarded sends new users
       // to /onboarding and returning users to /dashboard. The brief window
@@ -69,6 +80,18 @@ export function LoginView() {
     }
   };
 
+  const handleRetry = () => {
+    setSignInError(null);
+    setPostOAuthState("idle");
+    void handleGoogleSignIn();
+  };
+
+  const handleUseDifferentAccount = async () => {
+    await signOutUser();
+    setSignInError(null);
+    setPostOAuthState("idle");
+  };
+
   const handleEmailSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     toast.info("Email login coming soon", {
@@ -77,100 +100,111 @@ export function LoginView() {
   };
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-4 py-8">
-      <Card className="w-full max-w-[420px] border-neutral-200">
-        <CardContent className="space-y-6">
-          <div className="space-y-3 text-center">
-            <div className="mx-auto flex size-10 items-center justify-center rounded-lg bg-neutral-100">
-              <ShieldCheck className="size-5 text-neutral-700" />
+    <>
+      <div className="flex flex-1 flex-col items-center justify-center px-4 py-8">
+        <Card className="w-full max-w-[420px] border-neutral-200">
+          <CardContent className="space-y-6">
+            <div className="space-y-3 text-center">
+              <div className="mx-auto flex size-10 items-center justify-center rounded-lg bg-neutral-100">
+                <ShieldCheck className="size-5 text-neutral-700" />
+              </div>
+              <div className="space-y-1">
+                <h1 className="text-xl font-semibold text-neutral-900">Sign in to ClaimIt</h1>
+                <p className="text-sm leading-relaxed text-neutral-700">
+                  Continue to monitor purchases, review claims, and manage your claim preferences.
+                </p>
+              </div>
             </div>
-            <div className="space-y-1">
-              <h1 className="text-xl font-semibold text-neutral-900">Sign in to ClaimIt</h1>
-              <p className="text-sm leading-relaxed text-neutral-700">
-                Continue to monitor purchases, review claims, and manage your claim preferences.
+
+            <Button
+              onClick={() => void handleGoogleSignIn()}
+              disabled={isLoading}
+              className="w-full gap-3 bg-neutral-900 text-neutral-0 hover:bg-neutral-800"
+              size="lg"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Opening Google…
+                </>
+              ) : (
+                <>
+                  <GoogleMark />
+                  Continue with Google
+                </>
+              )}
+            </Button>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-neutral-200" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-neutral-0 px-2 text-neutral-500">or</span>
+              </div>
+            </div>
+
+            <form onSubmit={handleEmailSubmit} className="space-y-3">
+              <Input
+                type="email"
+                placeholder="Email address"
+                disabled
+                className="border-neutral-200 bg-neutral-50 text-neutral-500"
+              />
+              <Button
+                type="submit"
+                variant="outline"
+                className="w-full border-neutral-200 text-neutral-500"
+                size="lg"
+                disabled
+              >
+                Continue with email
+                <span className="ml-2 rounded bg-neutral-100 px-1.5 py-0.5 text-xs font-medium text-neutral-500">
+                  Coming soon
+                </span>
+              </Button>
+            </form>
+
+            <p className="text-center text-xs text-neutral-500">
+              New users continue to onboarding. Returning users go to the dashboard.
+            </p>
+
+            <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+              <p className="text-xs leading-relaxed text-neutral-600">
+                ClaimIt uses Gmail connection only after you authorize it during onboarding or
+                settings. You can also use receipt upload without connecting Gmail.{" "}
+                <Link
+                  href="/security"
+                  className="font-medium text-brand-primary-500 hover:text-brand-primary-600"
+                >
+                  Read security details
+                </Link>
               </p>
             </div>
-          </div>
 
-          <Button
-            onClick={handleGoogleSignIn}
-            disabled={isLoading}
-            className="w-full gap-3 bg-neutral-900 text-neutral-0 hover:bg-neutral-800"
-            size="lg"
-          >
-            {isLoading ? (
-              <>
-                <Loader2 className="size-4 animate-spin" />
-                Opening Google…
-              </>
-            ) : (
-              <>
-                <GoogleMark />
-                Continue with Google
-              </>
-            )}
-          </Button>
-
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-neutral-200" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-neutral-0 px-2 text-neutral-500">or</span>
-            </div>
-          </div>
-
-          <form onSubmit={handleEmailSubmit} className="space-y-3">
-            <Input
-              type="email"
-              placeholder="Email address"
-              disabled
-              className="border-neutral-200 bg-neutral-50 text-neutral-500"
-            />
-            <Button
-              type="submit"
-              variant="outline"
-              className="w-full border-neutral-200 text-neutral-500"
-              size="lg"
-              disabled
-            >
-              Continue with email
-              <span className="ml-2 rounded bg-neutral-100 px-1.5 py-0.5 text-xs font-medium text-neutral-500">
-                Coming soon
-              </span>
-            </Button>
-          </form>
-
-          <p className="text-center text-xs text-neutral-500">
-            New users continue to onboarding. Returning users go to the dashboard.
-          </p>
-
-          <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
-            <p className="text-xs leading-relaxed text-neutral-600">
-              ClaimIt uses Gmail connection only after you authorize it during onboarding or
-              settings. You can also use receipt upload without connecting Gmail.{" "}
-              <Link
-                href="/security"
-                className="font-medium text-brand-primary-500 hover:text-brand-primary-600"
-              >
-                Read security details
+            <p className="text-center text-xs text-neutral-500">
+              By continuing, you agree to the{" "}
+              <Link href="/terms" className="text-brand-primary-500 hover:text-brand-primary-600">
+                Terms
+              </Link>{" "}
+              and acknowledge the{" "}
+              <Link href="/privacy" className="text-brand-primary-500 hover:text-brand-primary-600">
+                Privacy Policy
               </Link>
+              .
             </p>
-          </div>
+          </CardContent>
+        </Card>
+      </div>
 
-          <p className="text-center text-xs text-neutral-500">
-            By continuing, you agree to the{" "}
-            <Link href="/terms" className="text-brand-primary-500 hover:text-brand-primary-600">
-              Terms
-            </Link>{" "}
-            and acknowledge the{" "}
-            <Link href="/privacy" className="text-brand-primary-500 hover:text-brand-primary-600">
-              Privacy Policy
-            </Link>
-            .
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+      {postOAuthState !== "idle" ? (
+        <PostOAuthOverlay
+          state={postOAuthState === "error" ? "error" : "loading"}
+          error={signInError}
+          onRetry={handleRetry}
+          onUseDifferentAccount={() => void handleUseDifferentAccount()}
+        />
+      ) : null}
+    </>
   );
 }

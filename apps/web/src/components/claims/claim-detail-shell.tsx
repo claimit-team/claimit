@@ -37,6 +37,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import type { ClaimDetailDoc } from "@/lib/api/claims";
 import type { ClaimDetail } from "@/lib/claim-detail-types";
+import { EDITABLE_STATUSES } from "@/lib/claims-status";
 import { useUIStore } from "@/store";
 import {
   normalizeClaimId,
@@ -149,7 +150,14 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
   const [approveOpen, setApproveOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
 
+  useEffect(() => {
+    if (!EDITABLE_STATUSES.has(claim.status)) {
+      setDraftMode("preview");
+    }
+  }, [claim.status]);
+
   const handleClickEdit = () => {
+    if (!EDITABLE_STATUSES.has(claim.status)) return;
     // Jump to the latest version before flipping to edit mode — older
     // versions are read-only in DraftPane (it forces preview-only via
     // a guard `useEffect`), so without this the header's "Edit draft"
