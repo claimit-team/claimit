@@ -3,10 +3,10 @@
 import { ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { type FormEvent, type SVGProps, useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { subscribeNewsletter } from "@/lib/api/newsletter";
 
 // Brand marks (lucide-react v1.14 has no LinkedIn/GitHub/YouTube icons).
 // Single-color glyphs use currentColor so theme color classes apply.
@@ -89,34 +89,75 @@ const socialLinks = [
 
 function NewsletterColumn() {
   const [email, setEmail] = useState("");
+  const [website, setWebsite] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    toast.success("Subscribed (mock).");
-    setEmail("");
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setErrorMessage(null);
+    setIsSubmitting(true);
+
+    try {
+      await subscribeNewsletter({
+        email: email.trim(),
+        website: website.trim() || undefined,
+      });
+      setIsSubscribed(true);
+      setEmail("");
+      setWebsite("");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Couldn't subscribe right now. Try again shortly.",
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <div className="min-w-0 lg:min-w-[14rem]">
       <h3 className="text-sm font-semibold text-neutral-900">Newsletter</h3>
       <p className="mt-4 text-sm text-neutral-700">Updates on new claim categories and features.</p>
-      <form
-        onSubmit={handleSubmit}
-        className="mt-3 flex w-full flex-col gap-2 sm:flex-row sm:gap-2"
-      >
-        <Input
-          type="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@example.com"
-          aria-label="Email address"
-          className="w-full min-w-0 flex-1 sm:min-w-[11rem]"
-        />
-        <Button type="submit" variant="default" className="w-full sm:w-auto sm:shrink-0">
-          Subscribe
-        </Button>
-      </form>
+      {isSubscribed ? (
+        <p className="mt-3 text-sm text-neutral-700">Subscribed. Watch for updates from ClaimIt.</p>
+      ) : (
+        <form
+          onSubmit={handleSubmit}
+          className="mt-3 flex w-full flex-col gap-2 sm:flex-row sm:gap-2"
+        >
+          <input
+            type="text"
+            name="website"
+            tabIndex={-1}
+            autoComplete="off"
+            aria-hidden
+            value={website}
+            onChange={(event) => setWebsite(event.target.value)}
+            className="sr-only"
+          />
+          <Input
+            type="email"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="you@example.com"
+            aria-label="Email address"
+            disabled={isSubmitting}
+            className="w-full min-w-0 flex-1 sm:min-w-[11rem]"
+          />
+          <Button
+            type="submit"
+            variant="default"
+            disabled={isSubmitting}
+            className="w-full sm:w-auto sm:shrink-0"
+          >
+            {isSubmitting ? "Subscribing..." : "Subscribe"}
+          </Button>
+          {errorMessage && <p className="text-sm text-neutral-600">{errorMessage}</p>}
+        </form>
+      )}
     </div>
   );
 }
