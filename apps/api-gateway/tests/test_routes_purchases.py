@@ -135,6 +135,9 @@ async def test_list_purchases_returns_page(client: AsyncClient) -> None:
     mock_db = AsyncMock(spec=MongoDBClient)
     mock_db.count = AsyncMock(return_value=2)
     mock_db.find_many = AsyncMock(return_value=[purchase_a, purchase_b])
+    # Per-category chip counts come from a $group aggregate over the
+    # status/q scope (no category filter) — mirrors the /claims chips.
+    mock_db.aggregate = AsyncMock(return_value=[{"_id": "retail", "n": 2}])
     _set_overrides(mock_db)
     try:
         response = await client.get(
@@ -146,12 +149,18 @@ async def test_list_purchases_returns_page(client: AsyncClient) -> None:
         assert payload["total_count"] == 2
         assert payload["next_cursor"] is None
         assert len(payload["purchases"]) == 2
+        # `counts` buckets the per-category aggregate; `all` is the sum.
+        assert payload["counts"] == {"all": 2, "retail": 2, "airline": 0, "hotel": 0}
 
         count_filter = mock_db.count.await_args.args[1]
         assert count_filter == {"user_id": USER_ID}
         find_filter = mock_db.find_many.await_args.args[1]
         assert find_filter == {"user_id": USER_ID}
         assert mock_db.find_many.await_args.kwargs["sort"] == [("_id", 1)]
+        # The count aggregate matches the same scope MINUS any category
+        # filter so every chip count stays correct regardless of selection.
+        count_pipeline = mock_db.aggregate.await_args.args[1]
+        assert count_pipeline[0] == {"$match": {"user_id": USER_ID}}
     finally:
         _clear_overrides()
 
@@ -2036,6 +2045,75 @@ async def test_confirm_create_duplicate_returns_409(client: AsyncClient) -> None
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "duplicate"
         mock_db.upsert.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_create_multi_item_line_sets_key_and_suffixed_hash(
+    client: AsyncClient,
+) -> None:
+    """A per-line confirm carries receipt_line_key onto the doc and suffixes
+    the internal receipt_hash so multiple lines off one receipt don't collide.
+    The dedup pre-check is scoped to the line, leaving order_id clean."""
+    mock_db = _confirm_create_db()
+    _set_overrides(mock_db, _confirm_create_uploader(), _publisher_mock())
+    try:
+        response = await client.post(
+            "/api/v1/purchases/confirm-create",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(),
+                "receipt_line_key": "line-1",
+            },
+        )
+        assert response.status_code == 200, response.text
+        purchase = response.json()["purchase"]
+        assert purchase["receipt_line_key"] == "line-1"
+        base = f"sha256:{hashlib.sha256(b'%PDF-1.4 receipt bytes').hexdigest()}"
+        assert purchase["receipt_hash"] == f"{base}#line-1"
+
+        # order_id stays the clean merchant number (NOT suffixed) — the
+        # claim-agent submits it downstream.
+        extraction = _extraction_fixture()
+        assert purchase["order_id"] == extraction["order_id"]
+
+        # The (user_id, platform, order_id) dedup pre-check is scoped to the
+        # line so a different line of the same order won't false-positive.
+        order_query = mock_db.find_one.await_args_list[0].args[1]
+        assert order_query["receipt_line_key"] == "line-1"
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_create_single_item_has_null_line_key_and_bare_hash(
+    client: AsyncClient,
+) -> None:
+    """Omitting receipt_line_key (single-item / manual fill) keeps the
+    pre-existing behavior: null line key, un-suffixed receipt_hash."""
+    mock_db = _confirm_create_db()
+    _set_overrides(mock_db, _confirm_create_uploader(), _publisher_mock())
+    try:
+        response = await client.post(
+            "/api/v1/purchases/confirm-create",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(),
+            },
+        )
+        assert response.status_code == 200, response.text
+        purchase = response.json()["purchase"]
+        assert purchase["receipt_line_key"] is None
+        assert purchase["receipt_hash"] == (
+            f"sha256:{hashlib.sha256(b'%PDF-1.4 receipt bytes').hexdigest()}"
+        )
+        order_query = mock_db.find_one.await_args_list[0].args[1]
+        assert order_query["receipt_line_key"] is None
     finally:
         _clear_overrides()
 

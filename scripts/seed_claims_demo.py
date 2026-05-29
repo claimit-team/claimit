@@ -615,6 +615,25 @@ _SOURCE_BY_CATEGORY: dict[Category, PriceSource] = {
     Category.HOTEL: PriceSource.DIRECT,
 }
 
+# Category-specific Purchase fields (BUG-107). These are flat nullable
+# columns on the Purchase model — populated only for the matching
+# category so the detail page's "Original purchase details" can surface
+# a "Fare class" row for airlines and "Room type / Bed type / Rate type"
+# rows for hotels. Keyed by platform for a little per-purchase variety
+# (deterministic, so re-running the seed converges on the same values).
+_FARE_CLASS_BY_PLATFORM: dict[Platform, str] = {
+    Platform.SOUTHWEST: "Wanna Get Away",
+    Platform.DELTA: "Main Cabin",
+    Platform.UNITED: "Economy",
+    Platform.AMERICAN: "Main Cabin",
+}
+# (room_type, bed_type) per hotel platform; rate_type is derived from
+# whether the purchase carried a loyalty tier at booking.
+_HOTEL_ROOM_BY_PLATFORM: dict[Platform, tuple[str, str]] = {
+    Platform.HILTON: ("King Deluxe", "King"),
+    Platform.MARRIOTT: ("Queen Standard", "Two Queens"),
+}
+
 # Number of price-history snapshots per purchase. Enough to make the
 # chart line look like a real timeline (vs a two-point spike) without
 # bloating the seeded fixture.
@@ -649,15 +668,21 @@ def _build_price_history_series(
     # `gt=0` constraint on the price columns).
     low = max(paid - claim_amount, 1.0)
     snapshots = max(_PRICE_SNAPSHOTS_PER_PURCHASE, 2)
-    # Series spans from ingested_at to now; the gradient is linear from
-    # paid -> low. A real adapter would have noise, but a smooth curve
-    # reads more clearly in the chart's calm styling.
-    start = purchase.ingested_at
+    # Series spans from the PURCHASE DATE to now; the gradient is linear
+    # from paid -> low. A real adapter would have noise, but a smooth
+    # curve reads more clearly in the chart's calm styling.
+    #
+    # BUG-106: anchor to `purchase_date` (≈10 days before now in the
+    # seed) rather than `ingested_at`. SPECS sets `ingested_at = now -
+    # rank_minutes`, so anchoring there compressed all 8 snapshots into a
+    # few minutes near "now" and the chart read as a vertical spike
+    # instead of a real multi-day timeline.
+    start = purchase.purchase_date
     if start.tzinfo is None:
         start = start.replace(tzinfo=UTC)
     span = (now - start).total_seconds()
     if span <= 0:
-        # Defensive: degenerate purchase_date == now. Spread over 8 days
+        # Defensive: degenerate purchase_date >= now. Spread over 8 days
         # backwards so the chart still has a timeline.
         start = now - timedelta(days=snapshots)
         span = (now - start).total_seconds()
@@ -826,6 +851,20 @@ def _build_purchase(
     # populates `price_member`.
     member_price = price if member_tier_at_purchase is not None else None
     purchase_id = uuid4()
+    # Category-specific fields (BUG-107). Only the matching category's
+    # fields are populated; everything else stays None (matches the
+    # model's flat-nullable-column contract).
+    fare_class = _FARE_CLASS_BY_PLATFORM.get(platform) if category == Category.AIRLINE else None
+    room_type: str | None = None
+    bed_type: str | None = None
+    rate_type: str | None = None
+    if category == Category.HOTEL:
+        room_type, bed_type = _HOTEL_ROOM_BY_PLATFORM.get(platform, ("Standard Room", "King"))
+        # A tier member booked the member rate; everyone else the
+        # standard rate — keeps the rate_type coherent with the
+        # member-tier rows + the chart's matching-tier line.
+        has_tier = member_tier_at_purchase is not None
+        rate_type = "Member rate" if has_tier else "Standard rate"
     return Purchase(
         _id=purchase_id,
         user_id=user_id,
@@ -835,10 +874,10 @@ def _build_purchase(
         product_id=f"demo-prod-{purchase_id.hex[:8]}",
         product_url=_product_url_for(platform, product_name),
         variant=None,
-        fare_class=None,
-        room_type=None,
-        bed_type=None,
-        rate_type=None,
+        fare_class=fare_class,
+        room_type=room_type,
+        bed_type=bed_type,
+        rate_type=rate_type,
         price_paid=price,
         member_price_at_purchase=member_price,
         non_member_price_at_purchase=non_member_price_at_purchase,
@@ -1487,12 +1526,28 @@ async def _run() -> int:
         )
         purchase_models.append(hilton_queued_purchase)
         claim_models.append(("queued", hilton_queued_claim))
-        # Track so the price_history verification below can skip this
-        # purchase (queued claim demo doesn't need a price series). The
-        # status_group verification (EXPECTED_COUNTS) is also unaffected
-        # because QUEUED_FOR_SEND isn't part of any STATUS_GROUP_OUTCOMES
-        # bucket (it lives in its own banner-driven surface).
-        extra_purchase_ids: set[UUID] = {hilton_queued_purchase.id}
+        # BUG-106: the queued Hilton Waikiki is a genuinely-monitored
+        # purchase (status=monitoring), so it gets a real price series
+        # too — it was previously left without one and the detail page
+        # showed "No price snapshots yet". Built here (after the main
+        # zip loop above) because the purchase is constructed late;
+        # anchored to its purchase_date like the rest. This brings the
+        # total to 12 purchases x 8 = 96 price_history rows.
+        price_history_models.extend(
+            _build_price_history_series(
+                purchase=hilton_queued_purchase,
+                claim_amount=hilton_queued_claim.claim_amount,
+                now=now,
+            )
+        )
+        # No purchases are excluded from the price_history verification
+        # anymore — every claim-linked purchase (including the queued
+        # Hilton) now carries a series. Kept as an (empty) set so the
+        # verification loop's `in extra_purchase_ids` guard still reads
+        # cleanly and a future intentionally-seriesless purchase can be
+        # added back here. QUEUED_FOR_SEND is still absent from
+        # EXPECTED_COUNTS (it isn't in any STATUS_GROUP_OUTCOMES bucket).
+        extra_purchase_ids: set[UUID] = set()
 
         # Ticket 5.14: build the pending_confirmation rows alongside the
         # claim-linked purchases above. These rows DO NOT have linked

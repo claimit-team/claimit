@@ -160,27 +160,52 @@ async def list_purchases(
       here anyway so unit tests calling the service directly behave
       the same as the HTTP entry point.
     """
-    base_filter: dict[str, Any] = {"user_id": user_id}
+    # `count_match` is everything EXCEPT the category filter — the
+    # per-category chip counts (mirrors the /claims status-group chip
+    # counts) must always reflect every category regardless of which one
+    # is active, but still respect the status scope + search `q` so the
+    # numbers match what the list would show when that chip is selected.
+    count_match: dict[str, Any] = {"user_id": user_id}
     if status:
         # `$in` whether status is a single-element list (backward-compat
         # path for `?status=x`) or multi-element. A length-1 `$in` is
         # semantically equivalent to equality and Mongo's planner uses
         # the same index either way — no perf regression for the common
         # single-value caller.
-        base_filter["status"] = {"$in": [s.value for s in status]}
-    if category is not None:
-        base_filter["category"] = category.value
+        count_match["status"] = {"$in": [s.value for s in status]}
 
     q_clean = q.strip() if q is not None else None
     if q_clean:
         pattern = re.escape(q_clean)
-        base_filter["$or"] = [
+        count_match["$or"] = [
             {"platform": {"$regex": pattern, "$options": "i"}},
             {"product_name": {"$regex": pattern, "$options": "i"}},
             {"order_id": {"$regex": pattern, "$options": "i"}},
         ]
 
-    total_count = await db.count("purchases", base_filter)
+    base_filter: dict[str, Any] = dict(count_match)
+    if category is not None:
+        base_filter["category"] = category.value
+
+    count_pipeline: list[dict[str, Any]] = [
+        {"$match": count_match},
+        {"$group": {"_id": "$category", "n": {"$sum": 1}}},
+    ]
+    total_count, count_docs = await asyncio.gather(
+        db.count("purchases", base_filter),
+        db.aggregate("purchases", count_pipeline),
+    )
+
+    # Map per-category counts → chip buckets. `all` is the sum across
+    # categories (within the status/q scope); unknown/legacy category
+    # values still roll into `all` but no specific chip.
+    counts: dict[str, int] = {"all": 0, "retail": 0, "airline": 0, "hotel": 0}
+    for row in count_docs:
+        n = int(row.get("n") or 0)
+        counts["all"] += n
+        cat = str(row.get("_id") or "")
+        if cat in counts:
+            counts[cat] += n
 
     page_filter = apply_cursor_to_query(base_filter, cursor)
     fetched = await db.find_many(
@@ -202,6 +227,7 @@ async def list_purchases(
         "purchases": [p.model_dump(mode="json", by_alias=True) for p in visible],
         "next_cursor": next_cursor,
         "total_count": total_count,
+        "counts": counts,
     }
 
 
@@ -925,15 +951,21 @@ async def _assert_not_duplicate_purchase(
     platform: Any,
     order_id: str | None,
     receipt_hash: str | None,
+    receipt_line_key: str | None = None,
     exclude_purchase_id: UUID | None = None,
 ) -> None:
     """Block confirm-create when this receipt duplicates a committed purchase.
 
     Two checks, both scoped to `_COMMITTED_PURCHASE_STATUSES` so a user can
     still re-upload freely before confirming:
-      1. `(user_id, platform, order_id)` for a non-empty order_id — mirrors
-         the unique partial index (`order_id > ""`).
-      2. `receipt_hash` — identical receipt bytes already confirmed.
+      1. `(user_id, platform, order_id, receipt_line_key)` for a non-empty
+         order_id — mirrors the unique partial index. `receipt_line_key`
+         scopes the check to ONE line of a multi-item receipt, so two
+         different items off the same order_id don't false-positive each
+         other; re-confirming the SAME line still matches (desired).
+      2. `receipt_hash` — identical receipt bytes already confirmed. The
+         caller passes the per-line-suffixed hash for multi-item lines, so
+         this is automatically line-scoped too.
     Raises ApiError(duplicate, 409) on the first match.
 
     `exclude_purchase_id` excludes a single document from BOTH checks. The
@@ -952,6 +984,7 @@ async def _assert_not_duplicate_purchase(
                 "user_id": user_id,
                 "platform": platform_value,
                 "order_id": order_id,
+                "receipt_line_key": receipt_line_key,
                 "status": {"$in": _COMMITTED_PURCHASE_STATUSES},
                 **exclude_clause,
             },
@@ -1012,6 +1045,7 @@ async def create_purchase_from_confirm(
     content_type: str,
     extraction: dict[str, Any] | None,
     corrected_fields: dict[str, Any] | None,
+    receipt_line_key: str | None = None,
 ) -> Purchase:
     """Create the Purchase for a confirmed upload — the first Mongo write.
 
@@ -1055,6 +1089,14 @@ async def create_purchase_from_confirm(
             status_code=400,
         ) from err
     receipt_hash = f"sha256:{hashlib.sha256(receipt_bytes).hexdigest()}"
+    # Multi-item receipt: every selected line shares the same bytes (and
+    # the same real order_id), so suffix the INTERNAL-only receipt_hash per
+    # line to keep each line's Purchase distinct under the global
+    # receipt_hash unique index. order_id stays the clean merchant number.
+    # Re-confirming the SAME line yields the same suffixed hash → the
+    # unique index backstops a double-track.
+    if receipt_line_key:
+        receipt_hash = f"{receipt_hash}#{receipt_line_key}"
 
     if corrected_fields:
         for key in corrected_fields:
@@ -1082,6 +1124,7 @@ async def create_purchase_from_confirm(
         platform=eff_platform,
         order_id=eff_order_id,
         receipt_hash=receipt_hash,
+        receipt_line_key=receipt_line_key,
     )
 
     now = datetime.now(UTC)
@@ -1111,6 +1154,7 @@ async def create_purchase_from_confirm(
             "ingestion_source": ingestion_source,
             "receipt_storage_url": storage_url,
             "receipt_hash": receipt_hash,
+            "receipt_line_key": receipt_line_key,
             "ingested_at": now,
             "updated_at": now,
             "window_expires": window_expires or now,
