@@ -9,6 +9,8 @@ export function friendlyMessage(status: number, code?: string): string {
       return "That took too long. Please try again.";
     case "network_error":
       return "Can't reach the server. Check your connection and try again.";
+    case "duplicate":
+      return "You've already added this receipt.";
   }
   if (status === 401) return "Your session expired. Please sign in again.";
   if (status === 403) return "You don't have access to that.";

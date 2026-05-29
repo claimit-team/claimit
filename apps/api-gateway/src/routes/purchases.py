@@ -39,6 +39,23 @@ class ConfirmPurchaseRequest(BaseModel):
     corrected_fields: dict[str, Any] | None = Field(default=None)
 
 
+class CreatePurchaseRequest(BaseModel):
+    """Body for POST /purchases/confirm-create (write-after-confirm upload).
+
+    Carries the upload-time `storage_url` / `content_type` plus the
+    `extraction` the FE received from /upload and any user `corrected_fields`.
+    The Purchase is created here on confirm — nothing was persisted at upload
+    time. `extraction` is null when the extractor failed and the user filled
+    the form by hand. The receipt hash is recomputed server-side from the GCS
+    object (never trusted from the client), so it isn't part of this body.
+    """
+
+    storage_url: str = Field(min_length=1)
+    content_type: str = Field(min_length=1)
+    extraction: dict[str, Any] | None = Field(default=None)
+    corrected_fields: dict[str, Any] | None = Field(default=None)
+
+
 class UpdatePurchaseRequest(BaseModel):
     """Body for PATCH /purchases/{id}.
 
@@ -118,29 +135,58 @@ async def list_purchases(
     )
 
 
-# Upload route must be declared before `/{purchase_id}` so FastAPI does
-# not try to interpret "upload" as a UUID path parameter and 422 the
-# request — same pattern as notifications.py ack-all.
+# Upload + confirm-create routes must be declared before `/{purchase_id}`
+# so FastAPI does not try to interpret "upload"/"confirm-create" as a UUID
+# path parameter and 422 the request — same pattern as notifications.py
+# ack-all.
 @router.post("/upload")
 async def upload_purchase_receipt(
     user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[MongoDBClient, Depends(get_db)],
     uploader: Annotated[ReceiptsUploader, Depends(get_receipts_uploader)],
-    publisher: Annotated[PubSubPublisher, Depends(get_pubsub_publisher)],
     file: Annotated[UploadFile, File(description="Receipt file (PDF/PNG/JPEG, ≤10 MB).")],
 ) -> dict[str, object]:
-    """Persist a manually-uploaded receipt and create a pending Purchase doc."""
+    """Store a receipt in GCS + extract its fields — NO Mongo write.
+
+    Write-after-confirm: returns the extracted fields straight to the
+    browser. The Purchase is created only when the user confirms via
+    POST /purchases/confirm-create. Response shape:
+    `{storage_url, content_type, receipt_hash, extraction}` where
+    `extraction` is null if the receipt could not be read (manual fill).
+    """
     content_type = file.content_type or "application/octet-stream"
     purchases_service.validate_upload_content_type(content_type)
     file_bytes = await _read_limited_upload(file)
-    purchase = await purchases_service.upload_receipt(
-        db=db,
+    return await purchases_service.upload_receipt(
         uploader=uploader,
-        publisher=publisher,
         user=user,
         file_bytes=file_bytes,
         content_type=content_type,
         filename=file.filename,
+    )
+
+
+@router.post("/confirm-create")
+async def confirm_create_purchase(
+    body: CreatePurchaseRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[MongoDBClient, Depends(get_db)],
+    uploader: Annotated[ReceiptsUploader, Depends(get_receipts_uploader)],
+    publisher: Annotated[PubSubPublisher, Depends(get_pubsub_publisher)],
+) -> dict[str, object]:
+    """Create the Purchase for a confirmed upload (the first Mongo write).
+
+    Dedups against already-committed purchases (409 on a true duplicate),
+    transitions to monitoring, and publishes `purchase.ingested`.
+    """
+    purchase = await purchases_service.create_purchase_from_confirm(
+        db=db,
+        uploader=uploader,
+        publisher=publisher,
+        user=user,
+        storage_url=body.storage_url,
+        content_type=body.content_type,
+        extraction=body.extraction,
+        corrected_fields=body.corrected_fields,
     )
     return {"purchase": serialize_purchase(purchase)}
 

@@ -1,4 +1,4 @@
-"""Pub/Sub push authentication (ticket 4.15).
+"""Pub/Sub push authentication (ticket 4.15) + internal gateway OIDC.
 
 Pub/Sub-side IAM (run.invoker grant on the pubsub-pusher service account)
 already gates *what* can reach this endpoint at the Cloud Run platform layer.
@@ -8,9 +8,18 @@ caller is the specific service account we expect, defending against:
   callers than intended.
 - A future split where some non-Pub/Sub caller hits the same URL.
 
-Bypass via PUBSUB_AUTH_DISABLED=1 is only intended for tests and local
-development. In Cloud Run we never set that env var, so production calls
-always go through full verification.
+This module exposes two verifiers:
+- `verify_pubsub_oidc` — for Pub/Sub push handlers; audience is the full
+  push-endpoint URL Pub/Sub was configured with.
+- `verify_gateway_oidc` — for the synchronous `/internal/extract` endpoint
+  the api-gateway calls; audience is the bare service origin
+  (`scheme://netloc`), matching how api-gateway mints the token against
+  `INGEST_AGENT_URL`. Mirrors `apps/assistant-agent/src/auth.py`.
+
+Bypass via PUBSUB_AUTH_DISABLED=1 (Pub/Sub) or INTERNAL_AUTH_DISABLED=1
+(gateway) is only intended for tests and local development. In Cloud Run
+we never set those env vars, so production calls always go through full
+verification.
 
 The token's `aud` claim is set by Pub/Sub to the configured push endpoint
 URL — we derive the same URL from `request.url` at runtime so the
@@ -37,6 +46,12 @@ _log = logging.getLogger(__name__)
 _EXPECTED_SA_EMAIL_ENV: Final = "PUBSUB_PUSHER_SA_EMAIL"
 _DEFAULT_PUSHER_SA: Final = "pubsub-pusher"  # account_id; project-suffix appended below
 _DISABLE_ENV: Final = "PUBSUB_AUTH_DISABLED"
+
+# Service account that fronts the api-gateway BFF. The synchronous
+# `/internal/extract` endpoint only trusts tokens minted by this SA.
+_GATEWAY_SA_EMAIL_ENV: Final = "GATEWAY_SA_EMAIL"
+_DEFAULT_GATEWAY_SA: Final = "claimit-api-gateway"  # account_id; project-suffix appended below
+_GATEWAY_DISABLE_ENV: Final = "INTERNAL_AUTH_DISABLED"
 
 
 def _expected_pusher_email() -> str:
@@ -163,6 +178,90 @@ async def verify_pubsub_oidc(request: Request) -> None:
         # `email` field reflects the actual SA identity. Without it the
         # email check above is meaningless.
         _log.warning("Pub/Sub OIDC token has email_verified=false; email=%s", actual_email)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="OIDC token email not verified",
+        )
+
+
+def _expected_gateway_email() -> str:
+    explicit = os.environ.get(_GATEWAY_SA_EMAIL_ENV, "").strip()
+    if explicit:
+        return explicit
+    project = os.environ.get("GCP_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+    if not project:
+        raise RuntimeError(
+            f"Cannot resolve expected gateway SA email: set {_GATEWAY_SA_EMAIL_ENV} "
+            "or GCP_PROJECT_ID."
+        )
+    return f"{_DEFAULT_GATEWAY_SA}@{project}.iam.gserviceaccount.com"
+
+
+def _expected_gateway_audience(request: Request) -> str:
+    """Service origin (`scheme://netloc`, no path) the gateway minted against.
+
+    Cloud Run OIDC audience for a service-to-service call is the bare
+    service origin — api-gateway mints the token with
+    audience=INGEST_AGENT_URL, which has no path component. Same
+    X-Forwarded-Proto handling as `_expected_audience` so the
+    TLS-terminating load balancer's plain-HTTP forward doesn't break
+    the audience match.
+    """
+    forwarded_proto_raw = request.headers.get("x-forwarded-proto", "")
+    forwarded_proto = forwarded_proto_raw.split(",", 1)[0].strip().lower()
+    if forwarded_proto not in {"http", "https"}:
+        forwarded_proto = ""
+    url = (
+        request.url.replace(scheme=forwarded_proto, query="")
+        if forwarded_proto
+        else request.url.replace(query="")
+    )
+    return f"{url.scheme}://{url.netloc}"
+
+
+async def verify_gateway_oidc(request: Request) -> None:
+    """Validate the api-gateway OIDC token on the internal extract request.
+
+    Raises 401 on any verification failure. Returns None on success.
+
+    Bypassed when INTERNAL_AUTH_DISABLED=1 (tests + local dev only — the
+    Cloud Run module never sets this env var).
+    """
+    if os.environ.get(_GATEWAY_DISABLE_ENV) == "1":
+        return
+
+    token = _extract_bearer_token(request)
+    expected_audience = _expected_gateway_audience(request)
+    expected_email = _expected_gateway_email()
+
+    try:
+        claims = await run_in_threadpool(
+            id_token.verify_oauth2_token,
+            token,
+            GoogleAuthRequest(),
+            audience=expected_audience,
+        )
+    except ValueError as err:
+        _log.warning("Gateway OIDC verification failed: %s", err)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid OIDC token",
+        ) from err
+
+    actual_email = claims.get("email", "")
+    if actual_email != expected_email:
+        _log.warning(
+            "Gateway OIDC token from unexpected SA: got=%s expected=%s",
+            actual_email,
+            expected_email,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="OIDC token from unexpected service account",
+        )
+
+    if not claims.get("email_verified", False):
+        _log.warning("Gateway OIDC token has email_verified=false; email=%s", actual_email)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="OIDC token email not verified",

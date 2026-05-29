@@ -209,6 +209,11 @@ module "ingest_agent" {
     # services in lockstep so a future topic rename only updates one
     # var reference per service.
     GMAIL_INBOUND_TOPIC = google_pubsub_topic.gmail_inbound.id
+    # Write-after-confirm uploads: verify_gateway_oidc on POST
+    # /internal/extract only trusts tokens minted by the api-gateway SA.
+    # Set explicitly (rather than relying on the GCP_PROJECT_ID-derived
+    # default) to mirror the assistant-agent wiring.
+    GATEWAY_SA_EMAIL = "claimit-api-gateway@${var.project_id}.iam.gserviceaccount.com"
   }
   # Hackathon scope; flip to true once services handle real data.
   deletion_protection = false
@@ -368,6 +373,10 @@ module "api_gateway" {
     GMAIL_INBOUND_TOPIC = google_pubsub_topic.gmail_inbound.id
     # Ticket 5.9: claim_focused chat → assistant-agent Cloud Run Mode B.
     ASSISTANT_AGENT_URL = module.assistant_agent.service_url
+    # Write-after-confirm uploads: POST /purchases/upload calls ingest-agent's
+    # synchronous /internal/extract. Bare service origin (no path) — the
+    # OIDC audience verify_gateway_oidc checks is the origin.
+    INGEST_AGENT_URL = module.ingest_agent.service_url
   }
   deletion_protection = false
 
