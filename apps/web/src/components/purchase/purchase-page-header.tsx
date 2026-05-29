@@ -4,7 +4,7 @@ import { ArrowLeft, StopCircle, Upload } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 
 import { PlatformLogo } from "@/components/claims/platform-logo";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +19,8 @@ import {
 } from "@/lib/purchase-detail-view";
 import { getMonitoringStatusBadge } from "@/lib/purchase-status";
 import { cn } from "@/lib/utils";
+import { ReuploadReceiptDialog } from "./reupload-receipt-dialog";
+import { StopMonitoringDialog } from "./stop-monitoring-dialog";
 
 export interface PurchasePageHeaderModel {
   productTitle: string;
@@ -44,33 +46,41 @@ export interface PurchasePageHeaderModel {
 
 interface PurchasePageHeaderProps {
   purchase: PurchasePageHeaderModel;
+  /** Purchase id — drives the stop-monitoring + re-upload mutations. */
+  purchaseId: string;
+  /** Refetch the detail bundle after a header mutation succeeds. */
+  onPurchaseUpdated: () => void;
 }
 
 /**
- * Disabled-action tooltip copy. Both "Stop monitoring" and "Re-upload
- * receipt" are intentionally disabled in PR 1 (decision 3 in the
- * review):
+ * "Stop monitoring" and "Re-upload receipt" are live while a purchase is
+ * actively monitoring (BUG-85):
  *
- *   - "Stop monitoring" does NOT shoehorn into POST /purchases/:id/dismiss
- *     because the dismiss reason enum is `not_an_order | duplicate |
- *     other` (no `user_dismissed` value) and dismiss carries a
- *     "this was misidentified" semantic, NOT the "I'm done watching this"
- *     semantic the stop button advertises. A future dedicated endpoint
- *     is the right home (TODO).
+ *   - "Stop monitoring" → POST /purchases/:id/stop-monitoring (a
+ *     dedicated endpoint, NOT /dismiss — dismiss carries a "this was
+ *     misidentified" reason enum + skiplist semantic). Transitions the
+ *     purchase to `dismissed`, rendered as a neutral "Stopped" badge.
  *
- *   - "Re-upload receipt" lives in the 5.13 receipt-upload flow; once
- *     that ticket lands the button can wire into it.
+ *   - "Re-upload receipt" → a multi-step dialog (upload → review/edit →
+ *     POST /purchases/:id/reupload-receipt) that replaces the stored
+ *     receipt and applies any corrected fields in place.
  *
- * Showing these visibly-disabled (with explanatory tooltips) is
- * preferred over hiding them — preserves spatial expectation for the
- * v0-prompt header and surfaces upcoming functionality.
+ * Both actions only make sense on a live purchase, so in the terminal
+ * `window_expired` / `stopped` states the re-upload button stays
+ * disabled with explanatory copy (re-upload as a reactivation path is a
+ * future follow-up). Showing it visibly-disabled preserves the header's
+ * spatial layout and signals the capability.
  */
-const STOP_MONITORING_TODO =
-  "Coming soon. A dedicated 'stop monitoring' endpoint is on the roadmap; the dismiss endpoint has a different semantic and isn't wired here.";
-const REUPLOAD_TODO = "Coming soon. The receipt re-upload flow will ship alongside ticket 5.13.";
+const REUPLOAD_DISABLED_COPY = "Re-upload is available while a purchase is being monitored.";
 
-export function PurchasePageHeader({ purchase }: PurchasePageHeaderProps) {
+export function PurchasePageHeader({
+  purchase,
+  purchaseId,
+  onPurchaseUpdated,
+}: PurchasePageHeaderProps) {
   const router = useRouter();
+  const [stopDialogOpen, setStopDialogOpen] = useState(false);
+  const [reuploadDialogOpen, setReuploadDialogOpen] = useState(false);
 
   const statusBadge = getMonitoringStatusBadge(purchase.monitoringStatus);
 
@@ -116,18 +126,26 @@ export function PurchasePageHeader({ purchase }: PurchasePageHeaderProps) {
       case "monitoring":
         return (
           <div className="flex flex-col gap-2 sm:flex-row">
-            <DisabledTooltipButton
-              label="Stop monitoring"
-              icon={<StopCircle className="size-4" />}
-              tooltip={STOP_MONITORING_TODO}
+            <Button
+              type="button"
               variant="ghost"
-            />
-            <DisabledTooltipButton
-              label="Re-upload receipt"
-              icon={<Upload className="size-4" />}
-              tooltip={REUPLOAD_TODO}
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setStopDialogOpen(true)}
+            >
+              <StopCircle className="size-4" />
+              Stop monitoring
+            </Button>
+            <Button
+              type="button"
               variant="outline"
-            />
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setReuploadDialogOpen(true)}
+            >
+              <Upload className="size-4" />
+              Re-upload receipt
+            </Button>
           </div>
         );
 
@@ -160,7 +178,7 @@ export function PurchasePageHeader({ purchase }: PurchasePageHeaderProps) {
           <DisabledTooltipButton
             label="Re-upload"
             icon={<Upload className="size-4" />}
-            tooltip={REUPLOAD_TODO}
+            tooltip={REUPLOAD_DISABLED_COPY}
             variant="outline"
           />
         );
@@ -224,6 +242,21 @@ export function PurchasePageHeader({ purchase }: PurchasePageHeaderProps) {
 
         <div className="shrink-0">{renderActions()}</div>
       </div>
+
+      <StopMonitoringDialog
+        purchaseId={purchaseId}
+        platform={purchase.platform}
+        open={stopDialogOpen}
+        onOpenChange={setStopDialogOpen}
+        onUpdated={onPurchaseUpdated}
+      />
+      <ReuploadReceiptDialog
+        purchaseId={purchaseId}
+        platform={purchase.platform}
+        open={reuploadDialogOpen}
+        onOpenChange={setReuploadDialogOpen}
+        onUpdated={onPurchaseUpdated}
+      />
     </div>
   );
 }

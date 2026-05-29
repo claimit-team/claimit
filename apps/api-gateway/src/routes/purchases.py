@@ -56,6 +56,23 @@ class CreatePurchaseRequest(BaseModel):
     corrected_fields: dict[str, Any] | None = Field(default=None)
 
 
+class ReuploadReceiptRequest(BaseModel):
+    """Body for POST /purchases/{id}/reupload-receipt (BUG-85).
+
+    Carries the upload-time `storage_url` / `content_type` plus the
+    `extraction` the FE received from /upload and any user `corrected_fields`
+    from the review form. Same shape as CreatePurchaseRequest — the
+    difference is the target: this updates an EXISTING monitored purchase in
+    place rather than creating a new one. The receipt hash is recomputed
+    server-side from the GCS object (never trusted from the client).
+    """
+
+    storage_url: str = Field(min_length=1)
+    content_type: str = Field(min_length=1)
+    extraction: dict[str, Any] | None = Field(default=None)
+    corrected_fields: dict[str, Any] | None = Field(default=None)
+
+
 class UpdatePurchaseRequest(BaseModel):
     """Body for PATCH /purchases/{id}.
 
@@ -304,6 +321,56 @@ async def confirm_purchase(
         user=user,
         purchase_id=uid,
         corrected_fields=corrected,
+    )
+    return {"purchase": serialize_purchase(purchase)}
+
+
+@router.post("/{purchase_id}/stop-monitoring")
+async def stop_monitoring(
+    purchase_id: Annotated[str, Path()],
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[MongoDBClient, Depends(get_db)],
+) -> dict[str, object]:
+    """Stop tracking a monitored purchase → dismissed (BUG-85).
+
+    Dedicated endpoint (NOT /dismiss): only valid from `monitoring` /
+    `monitoring_degraded`; 409 otherwise. The frontend renders the
+    resulting `dismissed` status as a neutral "Stopped" badge.
+    """
+    uid = purchases_service.parse_purchase_id(purchase_id)
+    purchase = await purchases_service.stop_monitoring(
+        db=db,
+        user=user,
+        purchase_id=uid,
+    )
+    return {"purchase": serialize_purchase(purchase)}
+
+
+@router.post("/{purchase_id}/reupload-receipt")
+async def reupload_receipt(
+    purchase_id: Annotated[str, Path()],
+    body: ReuploadReceiptRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[MongoDBClient, Depends(get_db)],
+    uploader: Annotated[ReceiptsUploader, Depends(get_receipts_uploader)],
+) -> dict[str, object]:
+    """Replace the receipt on a monitored purchase and apply its fields (BUG-85).
+
+    The receipt blob was already stored (+ extracted) by POST /upload; this
+    swaps it onto the existing purchase, applies the reviewed fields,
+    recomputes the window, clears stale monitor errors, and keeps monitoring.
+    Only valid from `monitoring` / `monitoring_degraded` (409 otherwise).
+    """
+    uid = purchases_service.parse_purchase_id(purchase_id)
+    purchase = await purchases_service.reupload_receipt(
+        db=db,
+        uploader=uploader,
+        user=user,
+        purchase_id=uid,
+        storage_url=body.storage_url,
+        content_type=body.content_type,
+        extraction=body.extraction,
+        corrected_fields=body.corrected_fields,
     )
     return {"purchase": serialize_purchase(purchase)}
 
