@@ -12,6 +12,7 @@ import {
   Laptop,
   Loader2,
   Mail,
+  Maximize2,
   MessageSquare,
 } from "lucide-react";
 import { type ElementType, useEffect, useState } from "react";
@@ -105,11 +106,13 @@ function PaneHeader({
   return (
     <button
       type="button"
-      className="flex w-full cursor-default items-center gap-2 border-neutral-200 border-b bg-neutral-0 px-4 py-3 text-left"
+      title="Double-click to maximize"
+      className="group flex w-full cursor-pointer items-center gap-2 border-neutral-200 border-b bg-neutral-0 px-4 py-3 text-left transition-colors hover:bg-neutral-50"
       onDoubleClick={onDoubleClick}
     >
       <Icon className="h-4 w-4 text-neutral-500" />
       <h3 className="font-medium text-neutral-900 text-sm">{title}</h3>
+      <Maximize2 className="ml-auto h-3.5 w-3.5 text-neutral-400 opacity-0 transition-opacity group-hover:opacity-100" />
     </button>
   );
 }
