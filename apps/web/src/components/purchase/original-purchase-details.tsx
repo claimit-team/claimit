@@ -39,6 +39,13 @@ export interface PurchaseOriginalDetailsModel {
    * Both are null on a no-tier purchase. */
   memberPriceAtPurchase: number | null;
   nonMemberPriceAtPurchase: number | null;
+  /** Category-specific fields (BUG-107). Surfaced only when the category
+   * matches AND the value is non-null: `fareClass` for airline,
+   * `roomType` / `bedType` / `rateType` for hotel. */
+  fareClass: string | null;
+  roomType: string | null;
+  bedType: string | null;
+  rateType: string | null;
   sourceEmail?: string;
 }
 
@@ -101,6 +108,22 @@ export function OriginalPurchaseDetails({
       label: "Category",
       value: `${purchase.category.charAt(0).toUpperCase()}${purchase.category.slice(1)}`,
     },
+    // Category-specific rows (BUG-107). Only surface when the purchase
+    // category matches and the value is present — keeps retail rows tight
+    // and avoids "—" for inherently-inapplicable fields, mirroring the
+    // member-tier conditional rows above.
+    ...(purchase.category === "airline" && purchase.fareClass
+      ? [{ label: "Fare class", value: purchase.fareClass }]
+      : []),
+    ...(purchase.category === "hotel" && purchase.roomType
+      ? [{ label: "Room type", value: purchase.roomType }]
+      : []),
+    ...(purchase.category === "hotel" && purchase.bedType
+      ? [{ label: "Bed type", value: purchase.bedType }]
+      : []),
+    ...(purchase.category === "hotel" && purchase.rateType
+      ? [{ label: "Rate type", value: purchase.rateType }]
+      : []),
   ];
 
   return (

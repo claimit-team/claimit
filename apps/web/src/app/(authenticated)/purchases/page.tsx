@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/table";
 import { usePurchases } from "@/hooks/usePurchases";
 import type { PurchaseListItem } from "@/lib/api/purchases";
+import { BADGE_BASE_CLASSES } from "@/lib/badge-styles";
 import { formatWindowRemaining, snakeToTitleLabel } from "@/lib/claims-status";
 import { getPlatformLabel } from "@/lib/platform-labels";
 import { getListStatusBadge, isMonitoringDegraded } from "@/lib/purchase-status";
@@ -161,7 +162,7 @@ function StatusCell({ status }: { status: PurchaseStatus | string | null }) {
   const degraded = isMonitoringDegraded(status);
   return (
     <span className="inline-flex items-center gap-1.5">
-      <Badge variant="outline" className={cn("shrink-0 capitalize", badge.className)}>
+      <Badge variant="outline" className={cn(badge.className, BADGE_BASE_CLASSES, "shrink-0")}>
         {badge.label}
       </Badge>
       {degraded ? (
@@ -259,6 +260,9 @@ function PurchaseRow({ purchase }: { purchase: PurchaseListItem }) {
       }}
       className="cursor-pointer"
     >
+      <TableCell className="w-[140px]">
+        <StatusCell status={purchase.status} />
+      </TableCell>
       <TableCell className="w-[40px]">
         <SourceIcon source={purchase.ingestion_source} />
       </TableCell>
@@ -284,9 +288,6 @@ function PurchaseRow({ purchase }: { purchase: PurchaseListItem }) {
       </TableCell>
       <TableCell className="text-sm text-neutral-500">
         {formatDateShort(purchase.purchase_date)}
-      </TableCell>
-      <TableCell>
-        <StatusCell status={purchase.status} />
       </TableCell>
       <TableCell className="text-sm text-neutral-700">
         {formatWindowRemaining(purchase.window_expires)}
@@ -369,6 +370,7 @@ export default function PurchasesPage() {
     setCategory,
     q,
     setQ,
+    counts,
     refetch,
     loadMore,
   } = usePurchases();
@@ -390,13 +392,14 @@ export default function PurchasesPage() {
           <div className="flex flex-wrap gap-2">
             {CATEGORY_CHIPS.map((chip) => {
               const isActive = chip.key === activeChip;
+              const count = counts[chip.key];
               return (
                 <button
                   key={chip.key}
                   type="button"
                   onClick={() => setCategory(chip.key === "all" ? null : chip.key)}
                   className={cn(
-                    "rounded-full border px-3 py-1.5 text-sm transition-colors",
+                    "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors",
                     isActive
                       ? "border-brand-primary-500 bg-brand-primary-500 text-primary-foreground"
                       : "border-neutral-200 bg-neutral-0 text-neutral-700 hover:bg-neutral-50",
@@ -404,6 +407,18 @@ export default function PurchasesPage() {
                   aria-pressed={isActive}
                 >
                   {chip.label}
+                  {count != null && (
+                    <span
+                      className={cn(
+                        "inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1 text-xs font-medium",
+                        isActive
+                          ? "bg-white/20 text-primary-foreground"
+                          : "bg-neutral-100 text-neutral-600",
+                      )}
+                    >
+                      {count}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -436,12 +451,12 @@ export default function PurchasesPage() {
             <Table className="min-w-[860px]">
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
+                  <TableHead className="w-[140px]">Status</TableHead>
                   <TableHead className="w-[40px]" />
                   <TableHead>Platform / Product</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead className="text-right">Price paid</TableHead>
                   <TableHead>Purchase date</TableHead>
-                  <TableHead className="w-[200px]">Status</TableHead>
                   <TableHead>Window</TableHead>
                   <TableHead className="w-[100px] text-right">Action</TableHead>
                 </TableRow>

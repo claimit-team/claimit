@@ -330,6 +330,14 @@ export type ListPurchasesResponse = {
   purchases: PurchaseListItem[];
   next_cursor: string | null;
   /**
+   * Per-category chip counts (mirrors the /claims status-group chip
+   * counts): `{ all, retail, airline, hotel }`. Always reflects every
+   * category within the active status/search scope regardless of which
+   * category filter is applied, so the filter chips can show a stable
+   * count beside each label.
+   */
+  counts: Record<string, number>;
+  /**
    * Server-computed total over the FILTERED set (status + category + q
    * are honored). Not rendered today (v0 §4 forbids money totals) —
    * kept on the type for parity with the wire shape so a future

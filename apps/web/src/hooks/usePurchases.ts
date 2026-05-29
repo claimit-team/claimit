@@ -37,6 +37,24 @@ import { useAuthStore } from "@/store";
 const DEFAULT_PAGE_SIZE = 20;
 const DEBOUNCE_MS = 300;
 
+// The /purchases fleet view shows MONITORED + RESOLVED purchases only.
+// `pending_confirmation` / `pending_user_edit` are pre-monitoring states
+// the user actions from the dashboard "Needs your attention" surface +
+// the /confirm flow — surfacing them here lets a user open a detail page
+// for an unconfirmed purchase that has no price history and (for a
+// low-confidence extraction) blank product/order fields. Filtering them
+// out keeps the list to purchases that actually have a meaningful detail
+// view (BUG-105 / BUG-106). The backend accepts repeated `?status=` keys
+// and translates them to a `$in` filter.
+const LIST_STATUSES = [
+  "monitoring",
+  "monitoring_degraded",
+  "claimed",
+  "refunded",
+  "expired",
+  "dismissed",
+] as const;
+
 type UsePurchasesArgs = {
   pageSize?: number;
 };
@@ -45,6 +63,8 @@ type UsePurchasesResult = {
   purchases: PurchaseListItem[];
   nextCursor: string | null;
   totalCount: number;
+  /** Per-category chip counts: `{ all, retail, airline, hotel }`. */
+  counts: Record<string, number>;
   isLoading: boolean;
   isLoadingMore: boolean;
   error: PurchasesApiError | null;
@@ -65,6 +85,7 @@ export function usePurchases({
   const [purchases, setPurchases] = useState<PurchaseListItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState<number>(0);
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [error, setError] = useState<PurchasesApiError | null>(null);
@@ -130,6 +151,7 @@ export function usePurchases({
     setError(null);
 
     listPurchases({
+      status: [...LIST_STATUSES],
       category: category ?? undefined,
       q: debouncedQ.length > 0 ? debouncedQ : undefined,
       limit: pageSize,
@@ -140,6 +162,7 @@ export function usePurchases({
         setPurchases(page.purchases);
         setNextCursor(page.next_cursor);
         setTotalCount(page.total_count);
+        setCounts(page.counts ?? {});
         setError(null);
       })
       .catch((err: unknown) => {
@@ -174,6 +197,7 @@ export function usePurchases({
     setIsLoadingMore(true);
     try {
       const page = await listPurchases({
+        status: [...LIST_STATUSES],
         category: category ?? undefined,
         q: debouncedQ.length > 0 ? debouncedQ : undefined,
         limit: pageSize,
@@ -207,6 +231,7 @@ export function usePurchases({
     purchases,
     nextCursor,
     totalCount,
+    counts,
     isLoading,
     isLoadingMore,
     error,

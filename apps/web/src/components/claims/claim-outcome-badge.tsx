@@ -19,6 +19,7 @@
 import type { ClaimOutcome } from "@claimit/mongodb-types";
 
 import { Badge } from "@/components/ui/badge";
+import { BADGE_BASE_CLASSES } from "@/lib/badge-styles";
 import { snakeToTitleLabel } from "@/lib/claims-status";
 import { cn } from "@/lib/utils";
 
@@ -82,9 +83,10 @@ const OUTCOME_DISPLAY: Record<
 
 // Applied to every badge so sizing is uniform regardless of outcome.
 // Placed after extraClassName in cn() so tailwind-merge gives these
-// priority over the CVA variant's px-2 / rounded-4xl defaults.
-const BASE_BADGE_CLASSES =
-  "text-xs font-medium px-2.5 py-0.5 rounded-full whitespace-nowrap min-w-[6.5rem] text-center";
+// priority over the CVA variant's px-2 / rounded-4xl defaults. Shared
+// with the /purchases status badge (lib/badge-styles.ts) so both list
+// pages read as one design system.
+const BASE_BADGE_CLASSES = BADGE_BASE_CLASSES;
 
 /**
  * Resolve the display config for a possibly-unknown outcome string.
