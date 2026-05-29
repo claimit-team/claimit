@@ -62,7 +62,17 @@ MODEL_NAME = "gemini-2.5-flash"
 APP_NAME = "claimit-ingest-extractor"
 MAX_BODY_CHARS = 16_000
 MAX_ATTACHMENT_CHARS = 12_000
-EXTRACTOR_TIMEOUT_SECONDS = 30
+# Wall-clock cap on the Gemini extraction run (both the email and the
+# upload/vision blob paths). Multi-item receipts emit one block per line, so
+# they run materially slower than single-item ones — at 30s they routinely hit
+# this wall and 502 (observed: successes land in 7-18s, failures clustered
+# exactly at the 30s cap), which drops the user onto the empty manual-fill
+# form. Raised to 40s to clear that band. The ceiling is the upload timeout
+# chain: extractor 40s < api-gateway client 45s (ingest_client
+# `_EXTRACT_TIMEOUT_SECONDS`) < browser upload 60s (web `UPLOAD_TIMEOUT_MS`);
+# keep this strictly below 45s so the gateway always receives our 502/200
+# rather than itself timing out first.
+EXTRACTOR_TIMEOUT_SECONDS = 40
 DEFAULT_MONITORING_CADENCE_MINUTES = 360
 FALLBACK_PRODUCT_ID_CONFIDENCE = 0.2
 

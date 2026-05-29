@@ -30,6 +30,24 @@ _REFRESH_CUSHION_SECONDS = 300
 # give the synchronous call headroom for the GCS read + network on top.
 _EXTRACT_TIMEOUT_SECONDS = 45.0
 
+# One retry on TRANSIENT failures (project rule: retry 5xx / incomplete once
+# before escalating). 422 `extractor_rejected_input` is deterministic — a
+# second attempt can't help — and the config errors (bucket_mismatch,
+# malformed_receipt_url, receipt_blob_missing) point at data/setup problems a
+# retry would only mask, so none of those are retried.
+_RETRYABLE_CODES = frozenset({"extractor_failed", "transport_error", "malformed_response"})
+_MAX_ATTEMPTS = 2
+
+# Budget guard: a single attempt can burn ~30s (the extractor's own timeout)
+# and the browser's upload request times out at 60s (web UPLOAD_TIMEOUT_MS).
+# A retry's worst case is a fresh _EXTRACT_TIMEOUT_SECONDS (45s) window, so we
+# only retry when the FIRST attempt failed FAST — otherwise first-attempt
+# elapsed + 45s would blow past the 60s the browser is willing to wait. This
+# deliberately does NOT retry slow timeouts (there's no budget for it); it
+# rescues genuinely transient fast failures (refused connection, a quick 502,
+# a malformed body).
+_RETRY_ELAPSED_BUDGET_SECONDS = 15.0
+
 _token_lock = threading.Lock()
 _cached_token: str | None = None
 _token_expiry: float = 0.0
@@ -85,6 +103,11 @@ async def extract_receipt(
     Returns the `extraction` payload (extracted fields + computed status +
     extraction_confidence) the upload route hands to the browser.
 
+    Retries ONCE on a transient failure (`_RETRYABLE_CODES`) when the first
+    attempt failed fast enough to leave budget (`_RETRY_ELAPSED_BUDGET_SECONDS`);
+    422 rejections and config errors are not retried. The extract endpoint is
+    a pure read, so retrying is idempotent.
+
     Raises:
         IngestExtractError: on 422 (extractor rejected the receipt;
             `rejected=True`), 502 (extractor failed), any other non-200,
@@ -95,7 +118,8 @@ async def extract_receipt(
     headers: dict[str, str] = {}
     # Local dev (uvicorn on localhost) runs the agent with
     # INTERNAL_AUTH_DISABLED=1 and `fetch_id_token` cannot mint a token
-    # for a non-Google audience — skip the Authorization header.
+    # for a non-Google audience — skip the Authorization header. Minted
+    # once outside the retry loop so a retry doesn't re-do blocking token I/O.
     if not _is_local(base_url):
         # `_get_id_token` does blocking network I/O on a cache miss
         # (fetches Google's metadata/signing endpoint). Offload to a
@@ -109,6 +133,40 @@ async def extract_receipt(
         "content_type": content_type,
     }
 
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        started = time.monotonic()
+        try:
+            return await _extract_attempt(base_url, payload, headers)
+        except IngestExtractError as err:
+            elapsed = time.monotonic() - started
+            retryable = err.code in _RETRYABLE_CODES and not err.rejected
+            if (
+                attempt >= _MAX_ATTEMPTS
+                or not retryable
+                or elapsed >= _RETRY_ELAPSED_BUDGET_SECONDS
+            ):
+                raise
+            logger.warning(
+                "Ingest extract attempt %d failed (code=%s, %.1fs) — retrying once",
+                attempt,
+                err.code,
+                elapsed,
+            )
+
+    # Unreachable: the final attempt either returns or re-raises above.
+    raise AssertionError("extract_receipt retry loop exited without a result")
+
+
+async def _extract_attempt(
+    base_url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+) -> dict[str, Any]:
+    """One `POST /internal/extract` round-trip — returns extraction or raises.
+
+    Raises IngestExtractError on transport error, non-200, or a malformed
+    200 body. `extract_receipt` owns the retry policy around this.
+    """
     try:
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(_EXTRACT_TIMEOUT_SECONDS, connect=10.0)
