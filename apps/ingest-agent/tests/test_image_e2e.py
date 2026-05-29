@@ -9,7 +9,8 @@ for two cases motivated by issue #183:
   1. Multi-item receipt → status `pending_user_edit`, no purchase.ingested,
      no LOW_CONFIDENCE_EXTRACT notification, price_paid is the picked item's
      price (NOT the grand total), price_paid confidence clamped <= 0.4.
-  2. Single-item receipt → status `monitoring`, purchase.ingested published.
+  2. Single-item receipt → status `pending_confirmation` (review screen per
+     BUG-83), purchase.ingested published.
 
 Gemini is stubbed in both cases — the goal is to verify the wiring around
 `extract_from_blob`, not the model itself. A separate live OCR smoke
@@ -201,10 +202,11 @@ def test_handler_image_multi_item_routes_to_pending_user_edit(
 def test_handler_image_single_item_happy_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Regression guard: a normal single-item image receipt must still
-    auto-start monitoring and publish purchase.ingested, never landing
-    in pending_user_edit. This is the case the issue's author asked us
-    to protect when adding the multi-item routing.
+    """Regression guard: a normal single-item image receipt must reach
+    pending_confirmation (so the user sees the review screen per BUG-83)
+    and publish purchase.ingested, never landing in pending_user_edit.
+    This is the case the issue's author asked us to protect when adding
+    the multi-item routing.
     """
     image_bytes = _image_bytes()
 
@@ -238,7 +240,7 @@ def test_handler_image_single_item_happy_path(
 
         assert resp.status_code == 200
         update_dict = db.partial_update.await_args.args[2]
-        assert update_dict["status"] == "monitoring"
+        assert update_dict["status"] == "pending_confirmation"
         assert update_dict["price_paid"] == 349.99
         # Confidence is left intact when line_items_detected == 1.
         assert update_dict["extraction_confidence"]["price_paid"] == 0.97
@@ -246,7 +248,7 @@ def test_handler_image_single_item_happy_path(
         publish.assert_awaited_once()
         _topic, event = publish.await_args.args
         assert isinstance(event, PurchaseIngestedEvent)
-        assert event.status == "monitoring"
+        assert event.status == "pending_confirmation"
         assert event.user_id == str(USER_ID)
         assert event.purchase_id == str(PURCHASE_ID)
     finally:

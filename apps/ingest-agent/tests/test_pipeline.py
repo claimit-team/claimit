@@ -70,7 +70,11 @@ def _stub_collection(find_one_result: Any = None) -> AsyncMock:
     return collection
 
 
-async def test_publishes_event_when_monitoring(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_publishes_event_for_high_confidence(monkeypatch: pytest.MonkeyPatch) -> None:
+    # BUG-83: high-confidence ingest now lands at pending_confirmation
+    # (not monitoring) so the user always gets a review step. The publish
+    # contract is unchanged because PUBLISHABLE_STATUSES already includes
+    # pending_confirmation.
     _patch_extractor(monkeypatch, _sample_extracted_payload(overall_min=0.95))
     collection = _stub_collection()
     publish_mock = AsyncMock(return_value="msg-1")
@@ -78,13 +82,13 @@ async def test_publishes_event_when_monitoring(monkeypatch: pytest.MonkeyPatch) 
 
     result = await pipeline.ingest_email(_sample_email(), purchases_collection=collection)
 
-    assert result["status"] == "monitoring"
+    assert result["status"] == "pending_confirmation"
     collection.insert_one.assert_awaited_once_with(result)
     publish_mock.assert_awaited_once()
     topic, event = publish_mock.await_args.args
     assert topic == TOPIC_PURCHASE_INGESTED
     assert isinstance(event, PurchaseIngestedEvent)
-    assert event.status == "monitoring"
+    assert event.status == "pending_confirmation"
     assert event.user_id == str(result["user_id"])
     assert event.purchase_id == str(result["_id"])
     assert event.platform == result["platform"]
