@@ -49,15 +49,22 @@ function AnimatedAmount({ target }: { target: number }) {
 
 export function SocialProofSection() {
   return (
-    <section className="border-t border-neutral-200 bg-neutral-0 px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
+    <section className="bg-neutral-0 py-24 sm:py-32 lg:py-40">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, amount: 0.2 }}
         transition={{ duration: 0.6, ease: "easeOut" }}
-        className="mx-auto max-w-4xl"
+        className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8"
       >
-        <div className="grid gap-6 sm:grid-cols-3">
+        <h2 className="text-balance text-center text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+          What ClaimIt covers
+        </h2>
+        <p className="mx-auto mt-4 max-w-2xl text-center text-neutral-700">
+          Across claim formats, industries, and dashboards.
+        </p>
+
+        <div className="mt-12 grid gap-6 sm:grid-cols-3">
           {socialProofData.stats.map((stat) => (
             <Card
               key={stat.label}
