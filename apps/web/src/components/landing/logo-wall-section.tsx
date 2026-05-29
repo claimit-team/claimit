@@ -101,9 +101,7 @@ export function LogoWallSection() {
         transition={{ duration: 0.6, ease: "easeOut" }}
         className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8"
       >
-        <p className="text-center text-sm font-medium text-neutral-500">
-          Trusted across 26 platforms
-        </p>
+        <p className="text-center text-sm text-neutral-500">Trusted across 26 platforms</p>
         <div className="mt-8 space-y-4 sm:space-y-8">
           <MarqueeRow logos={row1} direction="left" prefix="r1" />
           <MarqueeRow logos={row2} direction="right" prefix="r2" />
