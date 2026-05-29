@@ -140,7 +140,6 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
     }
   }, [isClaimDetail, setClaimEmbeddedAssistantExpanded]);
 
-  const floatingAssistantVariant = isClaimDetail ? ("pill" as const) : ("default" as const);
   const displayName = user?.name ?? user?.email ?? "User";
   const email = user?.email ?? "";
   const initials = getInitials(user?.name);
@@ -298,9 +297,9 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
       {/* Floating assistant — wrapped so `data-print-hide` removes it
           from 5.16 print output (FloatingAssistant uses `position:fixed`
           internally; hiding the wrapper removes it from layout entirely). */}
-      {!isAssistant ? (
+      {!isAssistant && !isClaimDetail ? (
         <div data-print-hide>
-          <FloatingAssistant variant={floatingAssistantVariant} />
+          <FloatingAssistant variant="default" />
         </div>
       ) : null}
 

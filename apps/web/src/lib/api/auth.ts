@@ -17,9 +17,14 @@ import { auth } from "@/lib/firebase";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
-// 10s balances Cloud Run cold-start tolerance (3-5s in practice) against UX
-// (users perceive >5s as broken). On hung connections without this timeout
-// the auth resolution would stall indefinitely with no recovery path.
+function logAuthEvent(event: string, attemptId: string, data?: Record<string, unknown>) {
+  console.info("[auth.signin]", { event, attemptId, ts: Date.now(), ...data });
+}
+
+// Staged budget: 5s token + 10s fetch = 15s upper bound.
+// Post-mitigation (Cloud Run min-instances=1), p99 fetch is ~50ms; this
+// ceiling exists for DEPLOYMENT_ROLLOUT cold-start windows.
+const TOKEN_TIMEOUT_MS = 5000;
 const AUTH_ME_TIMEOUT_MS = 10000;
 
 /**
@@ -48,6 +53,12 @@ export class AuthApiError extends Error {
 }
 
 export async function getMe(): Promise<User> {
+  const overallStart = Date.now();
+  const attemptId =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `attempt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
   if (!API_BASE_URL) {
     throw new AuthApiError("missing_api_base_url", "NEXT_PUBLIC_API_BASE_URL is not configured.");
   }
@@ -56,10 +67,37 @@ export async function getMe(): Promise<User> {
     throw new AuthApiError("unauthenticated", "User must be signed in.");
   }
 
-  const token = await currentUser.getIdToken();
+  const tokenStart = Date.now();
+  logAuthEvent("getIdToken.start", attemptId);
+  let token: string;
+  try {
+    token = await Promise.race([
+      currentUser.getIdToken(),
+      new Promise<string>((_, reject) => {
+        setTimeout(() => {
+          reject(
+            new AuthApiError(
+              "token_timeout",
+              "Sign-in is taking longer than expected. Please try again.",
+            ),
+          );
+        }, TOKEN_TIMEOUT_MS);
+      }),
+    ]);
+    logAuthEvent("getIdToken.end", attemptId, { durationMs: Date.now() - tokenStart });
+  } catch (err) {
+    logAuthEvent("getIdToken.error", attemptId, {
+      durationMs: Date.now() - tokenStart,
+      error: String(err),
+    });
+    throw err;
+  }
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), AUTH_ME_TIMEOUT_MS);
+
+  const fetchStart = Date.now();
+  logAuthEvent("fetch.start", attemptId);
 
   let response: Response;
   try {
@@ -67,13 +105,22 @@ export async function getMe(): Promise<User> {
       headers: { Authorization: `Bearer ${token}` },
       signal: controller.signal,
     });
+    logAuthEvent("fetch.end", attemptId, {
+      durationMs: Date.now() - fetchStart,
+      status: response.status,
+    });
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
+      logAuthEvent("fetch.timeout", attemptId, { durationMs: Date.now() - fetchStart });
       throw new AuthApiError(
         "request_timeout",
         "Timed out loading your profile. Please try again.",
       );
     }
+    logAuthEvent("fetch.error", attemptId, {
+      durationMs: Date.now() - fetchStart,
+      error: String(err),
+    });
     throw err;
   } finally {
     clearTimeout(timeoutId);
@@ -92,6 +139,7 @@ export async function getMe(): Promise<User> {
   }
 
   const body = (await response.json()) as { user: User };
+  logAuthEvent("overall.success", attemptId, { totalMs: Date.now() - overallStart });
   return body.user;
 }
 

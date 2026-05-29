@@ -20,7 +20,7 @@ const agentReasons = [
 
 export function WhyAgents() {
   return (
-    <section className="bg-neutral-50 py-24 sm:py-32 lg:py-40">
+    <section className="bg-neutral-0 py-24 sm:py-32 lg:py-40">
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <h2 className="mb-4 text-center text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
           Why this product needs agents

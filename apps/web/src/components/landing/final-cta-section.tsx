@@ -8,13 +8,13 @@ import { cn } from "@/lib/utils";
 
 export function FinalCtaSection() {
   return (
-    <section className="px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
+    <section className="py-24 sm:py-32 lg:py-40">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, amount: 0.2 }}
         transition={{ duration: 0.6, ease: "easeOut" }}
-        className="mx-auto max-w-2xl text-center"
+        className="mx-auto max-w-2xl px-4 text-center sm:px-6 lg:px-8"
       >
         <h2 className="text-balance text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
           Start with one receipt
