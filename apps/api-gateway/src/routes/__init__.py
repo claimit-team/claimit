@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from . import (
     auth,
+    careers,
     claims,
     conversations,
     dashboard,
@@ -17,6 +18,7 @@ from . import (
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth.router)
+router.include_router(careers.router)
 router.include_router(claims.router)
 router.include_router(conversations.router)
 router.include_router(dashboard.router)

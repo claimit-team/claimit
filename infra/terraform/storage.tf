@@ -125,3 +125,45 @@ resource "google_storage_bucket_iam_member" "ingest_agent_receipts_reader" {
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${module.ingest_agent.service_account_email}"
 }
+
+# Careers interest-form resume attachments (BUG-71 / BUG-77).
+# Public submissions land here via api-gateway; bucket stays private
+# (public_access_prevention=enforced) — no direct browser access.
+resource "google_storage_bucket" "careers_resumes" {
+  name          = "${var.project_id}-careers-resumes"
+  location      = var.region
+  force_destroy = false
+
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+
+  lifecycle_rule {
+    condition {
+      age = 365
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  versioning {
+    enabled = false
+  }
+
+  labels = {
+    purpose = "careers-resumes"
+    managed = "terraform"
+  }
+}
+
+resource "google_storage_bucket_iam_member" "api_gateway_careers_writer" {
+  bucket = google_storage_bucket.careers_resumes.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${module.api_gateway.service_account_email}"
+}
+
+resource "google_storage_bucket_iam_member" "api_gateway_careers_reader" {
+  bucket = google_storage_bucket.careers_resumes.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${module.api_gateway.service_account_email}"
+}
