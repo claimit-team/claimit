@@ -617,25 +617,24 @@ def _resolve_status(
 ) -> str:
     """Pick the initial purchase status based on extraction outcome.
 
-    Priority order (highest wins):
-      1. `pending_user_edit` — either product_id was missing and we synthesized a
-         fallback, OR the receipt itemized more than one purchasable line. Both
-         cases require the user to edit before monitoring can be useful: a
-         fallback product_id is unmonitorable, and a multi-item receipt means
-         `price_paid` is for ONE picked line out of many — the user must
-         confirm which line (or correct the price) before we monitor anything.
-      2. `pending_confirmation` — a critical field (platform, price_paid, order_id,
-         purchase_date) scored strictly below the configured threshold per master
-         doc 5.1; the user must confirm before monitoring starts.
-      3. `monitoring` — all critical fields cleared the threshold; auto-start
-         monitoring.
+    Per BUG-83: every ingested purchase routes through the review screen
+    before monitoring begins. The initial-status decision is therefore
+    two-state — `pending_user_edit` vs `pending_confirmation`. `monitoring`
+    is only ever entered post-confirmation (manual confirm in
+    `confirm_purchase`, monitor-agent transitions, …).
+
+      1. `pending_user_edit` — product_id was missing and we synthesized a
+         fallback, OR the receipt itemized more than one purchasable line.
+         A fallback product_id is unmonitorable, and a multi-item receipt
+         means `price_paid` is for ONE picked line out of many; in both
+         cases the user must edit before monitoring can be useful.
+      2. `pending_confirmation` — every other case. Confidence numbers
+         still flow to the FE so the review form can call out fields the
+         model wasn't sure about, but they no longer gate the status.
     """
     if fallback_used or multi_item:
         return "pending_user_edit"
-    agg = compute_overall_min(confidence)
-    if agg["critical_field_below_threshold"] is not None:
-        return "pending_confirmation"
-    return "monitoring"
+    return "pending_confirmation"
 
 
 def _normalize_order_fallback_id(order_id: str) -> str:

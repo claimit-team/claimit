@@ -95,7 +95,7 @@ def test_extract_returns_purchase_shaped_dict_for_fixtures(
     assert result["extraction_confidence"]["price_paid"] is not None
 
 
-def test_extract_high_confidence_starts_monitoring(
+def test_extract_high_confidence_sets_pending_confirmation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     payload = _sample_extracted_payload()
@@ -117,7 +117,7 @@ def test_extract_high_confidence_starts_monitoring(
 
     result = asyncio.run(extract(_sample_email()))
 
-    assert result["status"] == "monitoring"
+    assert result["status"] == "pending_confirmation"
     assert result["extraction_confidence"]["overall_min"] == pytest.approx(0.99)
     assert (
         compute_overall_min(result["extraction_confidence"])["critical_field_below_threshold"]
@@ -187,8 +187,9 @@ def test_extract_handles_missing_optional_fields(monkeypatch: pytest.MonkeyPatch
     assert result["variant"] is None
     assert result["member_tier_at_purchase"] is None
     assert result["member_price_at_purchase"] is None
-    # Sample payload has every critical confidence >= 0.95, so it should auto-start monitoring.
-    assert result["status"] == "monitoring"
+    # Per BUG-83 every ingested purchase routes through the review screen,
+    # so even high-confidence extractions land in `pending_confirmation`.
+    assert result["status"] == "pending_confirmation"
 
 
 def test_extract_uses_product_id_fallback_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -341,7 +342,8 @@ def test_resolve_status_multi_item_overrides_high_confidence() -> None:
         "purchase_date": 1.0,
     }
     assert extractor._resolve_status(False, high_conf, multi_item=True) == "pending_user_edit"
-    # Single-item path still derives status from confidence.
+    # Single-item, non-fallback path always lands at pending_confirmation
+    # (BUG-83: every ingest routes through the review screen).
     assert extractor._resolve_status(False, high_conf, multi_item=False) == "pending_confirmation"
 
 
