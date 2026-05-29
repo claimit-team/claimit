@@ -1,3 +1,6 @@
+"use client";
+
+import { motion } from "motion/react";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -26,13 +29,19 @@ const scopes = [
 
 export function OAuthScopesSection() {
   return (
-    <section className="border-b border-border">
-      <div className="mx-auto max-w-6xl px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
+    <section>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-28"
+      >
         <div className="mb-8">
           <Badge variant="secondary" className="mb-4">
             OAuth Scopes
           </Badge>
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+          <h2 className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
             Gmail permissions we request
           </h2>
           <p className="mt-4 max-w-3xl leading-relaxed text-muted-foreground">
@@ -62,7 +71,7 @@ export function OAuthScopesSection() {
             </TableBody>
           </Table>
         </div>
-      </div>
+      </motion.div>
     </section>
   );
 }
