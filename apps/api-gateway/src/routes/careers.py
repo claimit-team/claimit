@@ -85,7 +85,7 @@ async def submit_interest(
         return InterestSubmissionResponse(id="rejected", submitted_at=now)
 
     client_ip = get_client_ip(request)
-    if not check_ip_rate_limit(client_ip):
+    if not check_ip_rate_limit(client_ip, "careers"):
         raise ApiError(
             "rate_limited",
             "Please wait a few minutes before submitting again.",

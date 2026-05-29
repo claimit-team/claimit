@@ -50,11 +50,16 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
-def check_ip_rate_limit(client_ip: str) -> bool:
-    """Return True if allowed; record the attempt when allowed."""
+def check_ip_rate_limit(client_ip: str, endpoint_key: str = "default") -> bool:
+    """Return True if allowed; record the attempt when allowed.
+
+    endpoint_key scopes the limit per endpoint so a user can submit
+    to /help/contact and /marketing/newsletter independently.
+    """
     now = time()
     window_start = now - _RATE_LIMIT_WINDOW_SECONDS
-    log = _ip_submission_log[client_ip]
+    log_key = f"{endpoint_key}:{client_ip}"
+    log = _ip_submission_log[log_key]
     while log and log[0] < window_start:
         log.popleft()
     if len(log) >= _RATE_LIMIT_MAX_SUBMISSIONS:
