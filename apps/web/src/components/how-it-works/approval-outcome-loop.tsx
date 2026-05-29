@@ -1,4 +1,7 @@
+"use client";
+
 import { AlertCircle } from "lucide-react";
+import { motion } from "motion/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,10 +26,16 @@ const controlPoints = [
 
 export function ApprovalOutcomeLoop() {
   return (
-    <section className="border-t border-neutral-200 bg-neutral-0 py-24 sm:py-32 lg:py-40">
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+    <section className="bg-neutral-0 py-24 sm:py-32 lg:py-40">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8"
+      >
         <div className="text-center">
-          <h2 className="text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+          <h2 className="text-balance text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
             You stay in control.
           </h2>
           <p className="mx-auto mt-3 max-w-2xl text-neutral-700">
@@ -81,7 +90,7 @@ export function ApprovalOutcomeLoop() {
             </CardContent>
           </Card>
         </div>
-      </div>
+      </motion.div>
     </section>
   );
 }
