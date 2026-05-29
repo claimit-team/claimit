@@ -29,7 +29,7 @@ from src.middleware.auth import get_current_user
 from src.middleware.errors import ApiError
 from src.routes import purchases as purchases_route
 from src.services.pubsub_publisher import PubSubPublisher
-from src.services.receipts_storage import ReceiptsUploader
+from src.services.receipts_storage import ReceiptObjectMissingError, ReceiptsUploader
 
 from ._fixtures import USER_FIXTURE
 
@@ -2527,6 +2527,330 @@ async def test_patch_purchase_missing_404(client: AsyncClient) -> None:
             f"/api/v1/purchases/{PURCHASE_ID}",
             headers={"Authorization": "Bearer valid-token"},
             json={"product_url": "https://example.com/foo"},
+        )
+        assert response.status_code == 404
+        mock_db.partial_update.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+# ---------------------------------------------------------------------------
+# POST /purchases/{id}/stop-monitoring (BUG-85)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["monitoring", "monitoring_degraded"])
+async def test_stop_monitoring_transitions_to_dismissed(client: AsyncClient, status: str) -> None:
+    active = _purchase_fixture(status=status)
+    dismissed = _purchase_fixture(status="dismissed")
+    mock_db = AsyncMock(spec=MongoDBClient)
+    # get_purchase: 1st for ownership check, 2nd for the post-update read.
+    mock_db.get_purchase = AsyncMock(side_effect=[active, dismissed])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    _set_overrides(mock_db)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/stop-monitoring",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["purchase"]["status"] == PurchaseStatus.DISMISSED
+        updates = mock_db.partial_update.await_args.args[2]
+        assert updates["status"] == PurchaseStatus.DISMISSED
+        assert "_id" not in updates
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status",
+    ["pending_confirmation", "pending_user_edit", "claimed", "expired", "refunded", "dismissed"],
+)
+async def test_stop_monitoring_rejects_wrong_status(client: AsyncClient, status: str) -> None:
+    """Only the two live monitoring states can be stopped."""
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=_purchase_fixture(status=status))
+    mock_db.partial_update = AsyncMock()
+    _set_overrides(mock_db)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/stop-monitoring",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "invalid_status"
+        mock_db.partial_update.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_stop_monitoring_cross_user_404(client: AsyncClient) -> None:
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=_purchase_fixture(user_id=OTHER_USER_ID))
+    mock_db.partial_update = AsyncMock()
+    _set_overrides(mock_db)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/stop-monitoring",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 404
+        mock_db.partial_update.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_stop_monitoring_invalid_uuid_400(client: AsyncClient) -> None:
+    mock_db = AsyncMock(spec=MongoDBClient)
+    _set_overrides(mock_db)
+    try:
+        response = await client.post(
+            "/api/v1/purchases/not-a-uuid/stop-monitoring",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "invalid_purchase_id"
+    finally:
+        _clear_overrides()
+
+
+# ---------------------------------------------------------------------------
+# POST /purchases/{id}/reupload-receipt (BUG-85)
+# ---------------------------------------------------------------------------
+
+
+def _reupload_db(*, status: str = "monitoring", dedup_hit: bool = False) -> AsyncMock:
+    from claimit_mongodb_models import Policy
+
+    active = _purchase_fixture(status=status)
+    updated = _purchase_fixture(status="monitoring")
+    mock_db = AsyncMock(spec=MongoDBClient)
+    # 1st get_purchase = ownership/status guard, 2nd = post-update read.
+    mock_db.get_purchase = AsyncMock(side_effect=[active, updated])
+    mock_db.find_one = AsyncMock(
+        return_value=_purchase_fixture(purchase_id=OTHER_USER_PURCHASE_ID, status="monitoring")
+        if dedup_hit
+        else None
+    )
+    mock_db.get_policy = AsyncMock(return_value=Policy.model_validate(_policy_fixture()))
+    mock_db.partial_update = AsyncMock(return_value=True)
+    return mock_db
+
+
+@pytest.mark.asyncio
+async def test_reupload_receipt_swaps_receipt_and_clears_errors(client: AsyncClient) -> None:
+    mock_db = _reupload_db()
+    _set_overrides(mock_db, _confirm_create_uploader())
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/reupload-receipt",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(),
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["purchase"]["status"] == "monitoring"
+        updates = mock_db.partial_update.await_args.args[2]
+        assert updates["receipt_storage_url"] == _RECEIPT_URL
+        # Hash recomputed server-side from the downloaded blob, not trusted.
+        assert (
+            updates["receipt_hash"]
+            == f"sha256:{hashlib.sha256(b'%PDF-1.4 receipt bytes').hexdigest()}"
+        )
+        assert updates["ingestion_source"] == "upload_pdf"
+        assert updates["last_monitor_error"] is None
+        assert updates["last_monitor_error_at"] is None
+        assert updates["last_monitor_error_code"] is None
+        assert "status" not in updates  # stays monitoring; never written here
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_reupload_receipt_applies_corrected_fields(client: AsyncClient) -> None:
+    mock_db = _reupload_db()
+    _set_overrides(mock_db, _confirm_create_uploader())
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/reupload-receipt",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(product_name="Wrong"),
+                "corrected_fields": {"product_name": "Corrected Name", "price_paid": 99.5},
+            },
+        )
+        assert response.status_code == 200, response.text
+        updates = mock_db.partial_update.await_args.args[2]
+        assert updates["product_name"] == "Corrected Name"
+        assert updates["price_paid"] == 99.5
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_reupload_receipt_same_receipt_excludes_self_from_dedup(client: AsyncClient) -> None:
+    """Re-uploading the identical receipt must not 409 against the purchase's
+    own committed row — the dedup pre-check carries the self-exclusion."""
+    mock_db = _reupload_db()
+    _set_overrides(mock_db, _confirm_create_uploader())
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/reupload-receipt",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(),
+            },
+        )
+        assert response.status_code == 200, response.text
+        # Every dedup query excluded this purchase id.
+        assert mock_db.find_one.await_count >= 1
+        for call in mock_db.find_one.await_args_list:
+            assert call.args[1]["_id"] == {"$ne": PURCHASE_ID}
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_reupload_receipt_duplicate_of_other_purchase_409(client: AsyncClient) -> None:
+    mock_db = _reupload_db(dedup_hit=True)
+    _set_overrides(mock_db, _confirm_create_uploader())
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/reupload-receipt",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(),
+            },
+        )
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "duplicate"
+        mock_db.partial_update.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status", ["pending_confirmation", "claimed", "dismissed", "expired", "refunded"]
+)
+async def test_reupload_receipt_rejects_wrong_status(client: AsyncClient, status: str) -> None:
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=_purchase_fixture(status=status))
+    mock_db.partial_update = AsyncMock()
+    uploader = _confirm_create_uploader()
+    _set_overrides(mock_db, uploader)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/reupload-receipt",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(),
+            },
+        )
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "invalid_status"
+        mock_db.partial_update.assert_not_awaited()
+        uploader.download.assert_not_awaited()  # guard is before any blob read
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_reupload_receipt_rejects_disallowed_field(client: AsyncClient) -> None:
+    mock_db = _reupload_db()
+    _set_overrides(mock_db, _confirm_create_uploader())
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/reupload-receipt",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(),
+                "corrected_fields": {"status": "monitoring"},
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "invalid_field"
+        mock_db.partial_update.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_reupload_receipt_rejects_foreign_receipt_url(client: AsyncClient) -> None:
+    mock_db = _reupload_db()
+    _set_overrides(mock_db, _confirm_create_uploader())
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/reupload-receipt",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": f"gs://test-bucket/receipts/{OTHER_USER_ID}/staging/x.pdf",
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(),
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "invalid_field"
+        mock_db.partial_update.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_reupload_receipt_missing_blob_returns_400(client: AsyncClient) -> None:
+    mock_db = _reupload_db()
+    uploader = _confirm_create_uploader()
+    uploader.download = AsyncMock(side_effect=ReceiptObjectMissingError("gone"))
+    _set_overrides(mock_db, uploader)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/reupload-receipt",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(),
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "receipt_missing"
+        mock_db.partial_update.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_reupload_receipt_cross_user_404(client: AsyncClient) -> None:
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(return_value=_purchase_fixture(user_id=OTHER_USER_ID))
+    mock_db.partial_update = AsyncMock()
+    _set_overrides(mock_db, _confirm_create_uploader())
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/reupload-receipt",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(),
+            },
         )
         assert response.status_code == 404
         mock_db.partial_update.assert_not_awaited()

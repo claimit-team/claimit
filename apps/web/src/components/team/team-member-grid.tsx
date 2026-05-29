@@ -1,84 +1,181 @@
 "use client";
 
-import { Card } from "@/components/ui/card";
+import { Globe } from "lucide-react";
+import { motion } from "motion/react";
+import Image from "next/image";
+import type { SVGProps } from "react";
 
-// Team photos: drop {name}.png (lowercase) in apps/web/public/team/
-// Aspect ratio is auto-cropped to a circle from center — any source size works
-// Missing photos automatically fallback to initials
-const mockTeamMembers = [
+type TeamMemberLinks = {
+  linkedin?: string;
+  github?: string;
+  website?: string;
+  youtube?: string;
+};
+
+type TeamMember = {
+  name: string;
+  role: string;
+  photo: string;
+  links: TeamMemberLinks;
+};
+
+const teamMembers: TeamMember[] = [
   {
-    name: "Erdun",
+    name: "Erdun E",
     role: "Co-Founder & CEO",
-    bio: "Leads product direction, frontend, infrastructure planning, and demo execution.",
-    avatarUrl: "/team/erdun.png",
+    photo: "/team/erdun.png",
+    links: {
+      linkedin: "https://www.linkedin.com/in/erdune/",
+      github: "https://github.com/ErdunE",
+      website: "https://erdun.me/",
+      youtube: "https://www.youtube.com/@ErdunE-w5u",
+    },
   },
   {
     name: "Raj Kavathekar",
     role: "Co-Founder & CMO",
-    bio: "Builds agent prompts, tool routing, and policy-aware workflow logic.",
-    avatarUrl: "/team/raj.png",
+    photo: "/team/raj.png",
+    links: {
+      linkedin: "https://www.linkedin.com/in/raj-kavathekar/",
+      github: "https://github.com/kimblewick",
+    },
   },
   {
     name: "Will Wan",
     role: "Co-Founder & CTO",
-    bio: "Owns cloud infrastructure, data services, deployment, and reliability.",
-    avatarUrl: "/team/will.png",
+    photo: "/team/will.png",
+    links: {
+      linkedin: "https://www.linkedin.com/in/qingyuan-wan-b240b2231/",
+      github: "https://github.com/QingyuanWan",
+      website: "https://qingyuanwan.github.io/QingyuanWan_personal_website/",
+    },
   },
   {
-    name: "Chris",
+    name: "Chris Chen",
     role: "Co-Founder & COO",
-    bio: "Works on claim generation, Assistant behavior, and agent evaluation.",
-    avatarUrl: "/team/chris.png",
+    photo: "/team/chris.png",
+    links: {
+      linkedin: "https://www.linkedin.com/in/kewen-chen-754854250/",
+      github: "https://github.com/Chrishhh9874",
+    },
   },
 ];
 
-function getInitials(name: string): string {
-  return name
-    .split(" ")
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
+function LinkedInIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    // biome-ignore lint/a11y/noSvgWithoutTitle: decorative icon; parent link has aria-label
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden {...props}>
+      <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 1 1 0-4.124 2.062 2.062 0 0 1 0 4.124zM7.119 20.452H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
+    </svg>
+  );
+}
+
+function GitHubIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    // biome-ignore lint/a11y/noSvgWithoutTitle: decorative icon; parent link has aria-label
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden {...props}>
+      <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+    </svg>
+  );
+}
+
+function YouTubeIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    // biome-ignore lint/a11y/noSvgWithoutTitle: decorative icon; parent link has aria-label
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden {...props}>
+      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+    </svg>
+  );
+}
+
+function TeamCard({ member }: { member: TeamMember }) {
+  return (
+    <div className="group">
+      <div className="relative aspect-square overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-neutral-200 transition-all duration-300 group-hover:ring-brand-primary-300">
+        <Image
+          src={member.photo}
+          alt={member.name}
+          fill
+          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+          className="object-cover object-center transition-transform duration-500 group-hover:scale-105"
+        />
+      </div>
+
+      <div className="mt-5">
+        <h3 className="text-base font-medium text-neutral-900">{member.name}</h3>
+        <p className="mt-1 text-sm text-neutral-500">{member.role}</p>
+
+        <div className="mt-4 flex items-center gap-3">
+          {member.links.linkedin && (
+            <a
+              href={member.links.linkedin}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`${member.name} on LinkedIn`}
+              className="text-neutral-400 transition-colors duration-200 hover:text-brand-primary-600"
+            >
+              <LinkedInIcon className="size-4" />
+            </a>
+          )}
+          {member.links.github && (
+            <a
+              href={member.links.github}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`${member.name} on GitHub`}
+              className="text-neutral-400 transition-colors duration-200 hover:text-brand-primary-600"
+            >
+              <GitHubIcon className="size-4" />
+            </a>
+          )}
+          {member.links.website && (
+            <a
+              href={member.links.website}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`${member.name}'s personal website`}
+              className="text-neutral-400 transition-colors duration-200 hover:text-brand-primary-600"
+            >
+              <Globe className="size-4" aria-hidden />
+            </a>
+          )}
+          {member.links.youtube && (
+            <a
+              href={member.links.youtube}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`${member.name} on YouTube`}
+              className="text-neutral-400 transition-colors duration-200 hover:text-brand-primary-600"
+            >
+              <YouTubeIcon className="size-4" />
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function TeamMemberGrid() {
   return (
-    <section className="bg-neutral-0 py-24 sm:py-32 lg:py-40">
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-        <h2 className="mb-10 text-center text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+    <section className="bg-neutral-0 pt-12 sm:pt-16 lg:pt-16 pb-16 sm:pb-20 lg:pb-28">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8"
+      >
+        <h2 className="text-balance text-center text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
           Meet the team
         </h2>
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {mockTeamMembers.map((member) => (
-            <Card
-              key={member.name}
-              className="group relative flex flex-col items-center overflow-hidden border border-neutral-200 bg-neutral-0 p-8 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-md"
-            >
-              <div className="relative h-28 w-28 overflow-hidden rounded-full bg-neutral-100 ring-4 ring-neutral-100 transition-all duration-300 group-hover:ring-brand-primary-100">
-                <div className="flex h-full w-full items-center justify-center text-2xl font-semibold text-neutral-400">
-                  {getInitials(member.name)}
-                </div>
-                {member.avatarUrl && (
-                  // biome-ignore lint/performance/noImgElement: static team photos with onError fallback to initials
-                  <img
-                    src={member.avatarUrl}
-                    alt={member.name}
-                    className="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-300 group-hover:scale-105"
-                    onError={(e) => {
-                      e.currentTarget.style.display = "none";
-                    }}
-                  />
-                )}
-              </div>
 
-              <div className="mt-6 flex flex-col items-center text-center">
-                <h3 className="text-lg font-semibold text-neutral-900">{member.name}</h3>
-                <p className="mt-1 text-sm text-neutral-500">{member.role}</p>
-              </div>
-            </Card>
+        <div className="mt-12 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+          {teamMembers.map((member) => (
+            <TeamCard key={member.name} member={member} />
           ))}
         </div>
-      </div>
+      </motion.div>
     </section>
   );
 }

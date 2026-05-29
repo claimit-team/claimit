@@ -196,16 +196,19 @@ async def test_finalize_writes_partial_update_with_extracted_fields(
     assert update_dict["product_name"] == "Widget"
     assert update_dict["product_id"] == "W123"
     assert update_dict["price_paid"] == 24.99
-    assert update_dict["status"] == "monitoring"
+    assert update_dict["status"] == "pending_confirmation"
     # Window comes from the policy_fixture (30 days), not the 15-day default.
     expected = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC) + timedelta(days=30)
     assert update_dict["window_expires"] == expected
 
 
 @pytest.mark.asyncio
-async def test_finalize_publishes_purchase_ingested_for_monitoring(
+async def test_finalize_publishes_purchase_ingested_for_high_confidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Per BUG-83 every ingest routes through pending_confirmation, even at
+    # high confidence — so this test verifies the high-confidence path
+    # still publishes purchase.ingested AND writes the proactive notification.
     purchase = _purchase_doc()
     extracted = _extracted(overall_min=0.99)
     db = _mock_db(purchase=purchase, policy=_policy())
@@ -217,11 +220,12 @@ async def test_finalize_publishes_purchase_ingested_for_monitoring(
     publish.assert_awaited_once()
     _topic, event = publish.await_args.args
     assert isinstance(event, PurchaseIngestedEvent)
-    assert event.status == "monitoring"
+    assert event.status == "pending_confirmation"
     assert event.user_id == str(USER_ID)
     assert event.purchase_id == str(PURCHASE_ID)
-    # No low-confidence notification for high-confidence extracts.
-    db.upsert_notification_event.assert_not_awaited()
+    # pending_confirmation fires the proactive notification regardless of
+    # whether overall_min cleared the 0.95 banner threshold.
+    db.upsert_notification_event.assert_awaited_once()
 
 
 @pytest.mark.asyncio

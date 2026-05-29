@@ -2,6 +2,7 @@
 
 import { ChevronDown, FileText } from "lucide-react";
 import { useState } from "react";
+import { ReceiptPreview } from "@/components/confirm/receipt-preview";
 import { Card, CardContent } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -50,9 +51,20 @@ export interface PurchaseOriginalDetailsModel {
 
 interface OriginalPurchaseDetailsProps {
   purchase: PurchaseOriginalDetailsModel;
+  /** Purchase id — drives the authenticated receipt-blob fetch in the
+   * "View receipt" dialog. */
+  purchaseId: string;
+  /** Raw backend `ingestion_source` — forwarded to `ReceiptPreview`
+   * so a Gmail-sourced (no stored attachment) purchase surfaces the
+   * right "Original not available" copy. */
+  ingestionSource: string | null;
 }
 
-export function OriginalPurchaseDetails({ purchase }: OriginalPurchaseDetailsProps) {
+export function OriginalPurchaseDetails({
+  purchase,
+  purchaseId,
+  ingestionSource,
+}: OriginalPurchaseDetailsProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   const sourceLabel =
@@ -146,21 +158,21 @@ export function OriginalPurchaseDetails({ purchase }: OriginalPurchaseDetailsPro
                     View receipt
                   </p>
                 </DialogTrigger>
-                <DialogContent className="max-w-lg">
+                <DialogContent className="max-w-2xl">
                   <DialogHeader>
                     <DialogTitle>Receipt</DialogTitle>
                   </DialogHeader>
-                  <div className="flex items-center justify-center rounded-lg border border-neutral-200 bg-neutral-50 p-8">
-                    <div className="text-center">
-                      <FileText className="mx-auto size-16 text-neutral-400" aria-hidden />
-                      <p className="mt-4 text-neutral-500 text-sm">
-                        Receipt preview would be displayed here
-                      </p>
-                      <p className="text-neutral-400 text-xs">
-                        {purchase.productName} — {purchase.orderId}
-                      </p>
-                    </div>
-                  </div>
+                  {/* Real authenticated blob fetch (shared with the confirm
+                      flow). Streams `GET /api/v1/purchases/:id/receipt`
+                      through the api-gateway proxy and renders the image /
+                      PDF, or a tasteful "Original not available" fallback
+                      for Gmail-sourced purchases that have no stored
+                      attachment. */}
+                  <ReceiptPreview
+                    purchaseId={purchaseId}
+                    ingestionSource={ingestionSource}
+                    filename={null}
+                  />
                 </DialogContent>
               </Dialog>
 
