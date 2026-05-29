@@ -69,7 +69,7 @@ export function MultiItemSelection({ draft }: { draft: ConfirmDraftContext }) {
                 )}&from=/dashboard`}
                 aria-label={`Review ${line.product_name ?? "item"}`}
                 className={cn(
-                  "flex items-center justify-between gap-4 rounded-lg border p-4 transition-colors",
+                  "flex min-h-20 items-center justify-between gap-4 rounded-lg border p-4 transition-colors",
                   isTracked
                     ? "border-neutral-200 bg-neutral-50"
                     : "border-neutral-200 hover:border-brand-primary-400 hover:bg-brand-primary-50",
