@@ -107,6 +107,7 @@ function deriveReceiptFilename(purchase: PurchaseDetailDoc): string | null {
 export function ConfirmPurchaseContent({
   purchase,
   draft,
+  lineKey,
 }: {
   purchase: PurchaseDetailDoc;
   /**
@@ -116,6 +117,12 @@ export function ConfirmPurchaseContent({
    * "will be attached" note; ActionBar creates the doc on confirm.
    */
   draft?: ConfirmDraftContext;
+  /**
+   * Set when confirming ONE line of a multi-item receipt — switches
+   * ActionBar into "track another" mode (mark tracked + return to the
+   * selection list instead of clearing the draft).
+   */
+  lineKey?: string;
 }) {
   const { fields: lowConfidenceFields, isMostlyFailed } = deriveLowConfidenceFields(
     purchase.extraction_confidence,
@@ -222,6 +229,7 @@ export function ConfirmPurchaseContent({
         initialFormState={initialState}
         formState={formState}
         draft={draft}
+        lineKey={lineKey}
       />
     </div>
   );

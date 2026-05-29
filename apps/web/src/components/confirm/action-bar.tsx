@@ -31,7 +31,12 @@ import {
   type ConfirmFormState,
   getSubmitBlocker,
 } from "@/lib/confirm-form-state";
-import { type ConfirmDraftContext, clearUploadDraft } from "@/lib/confirm-staging";
+import {
+  type ConfirmDraftContext,
+  clearTrackedLineKeys,
+  clearUploadDraft,
+  markLineTracked,
+} from "@/lib/confirm-staging";
 
 interface ActionBarProps {
   purchase: PurchaseDetailDoc;
@@ -46,6 +51,14 @@ interface ActionBarProps {
    * and the server-side Dismiss flow is hidden (there's nothing to dismiss).
    */
   draft?: ConfirmDraftContext;
+  /**
+   * Set when confirming ONE line of a multi-item receipt. Its presence
+   * switches Confirm into "track another" mode: the created purchase
+   * carries this `receipt_line_key`, the line is marked tracked, and the
+   * user returns to the selection list (rather than landing on detail) so
+   * they can confirm more items from the same receipt.
+   */
+  lineKey?: string;
 }
 
 /**
@@ -84,7 +97,13 @@ interface ActionBarProps {
  * Buttons stay disabled while either POST is in-flight so the user
  * can't double-fire confirm + dismiss.
  */
-export function ActionBar({ purchase, initialFormState, formState, draft }: ActionBarProps) {
+export function ActionBar({
+  purchase,
+  initialFormState,
+  formState,
+  draft,
+  lineKey,
+}: ActionBarProps) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [dismissOpen, setDismissOpen] = useState(false);
@@ -119,9 +138,18 @@ export function ActionBar({ purchase, initialFormState, formState, draft }: Acti
     (dismissReason === "not_an_order" || dismissReason === "other") && hasSender;
 
   const handleCancel = () => {
+    // Per-line confirm on a multi-item receipt: back out to the selection
+    // list (keep the draft so the other items remain pickable).
+    if (draft && lineKey) {
+      router.push(`/confirm/${draft.stagingKey}?from=/dashboard`);
+      return;
+    }
     // Upload draft: discard the stashed extraction so a stale key can't be
     // re-opened. Nothing was persisted, so there's no server cleanup.
-    if (draft) clearUploadDraft(draft.stagingKey);
+    if (draft) {
+      clearUploadDraft(draft.stagingKey);
+      clearTrackedLineKeys(draft.stagingKey);
+    }
     router.push("/dashboard");
   };
 
@@ -141,12 +169,24 @@ export function ActionBar({ purchase, initialFormState, formState, draft }: Acti
             storage_url: draft.storage_url,
             content_type: draft.content_type,
             extraction: draft.extraction,
+            // Multi-item line: scope dedup + receipt_hash to this line so
+            // several items off one receipt each become their own purchase.
+            ...(lineKey ? { receipt_line_key: lineKey } : {}),
             ...(patch === undefined ? {} : { corrected_fields: patch }),
           })
         : await confirmPurchase(
             purchase._id,
             patch === undefined ? {} : { corrected_fields: patch },
           );
+      if (draft && lineKey) {
+        // Multi-item: remember this line as tracked and return to the
+        // selection list so the user can confirm more items. The draft
+        // stays in sessionStorage until they finish (or cancel) on the list.
+        markLineTracked(draft.stagingKey, lineKey);
+        toast.success(buildConfirmToast(updated, formState));
+        router.push(`/confirm/${draft.stagingKey}?from=/dashboard`);
+        return;
+      }
       if (draft) clearUploadDraft(draft.stagingKey);
       toast.success(buildConfirmToast(updated, formState));
       router.push(`/purchases/${updated._id}`);

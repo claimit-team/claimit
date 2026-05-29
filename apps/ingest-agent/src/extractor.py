@@ -107,6 +107,8 @@ Multi-item receipts:
 - line_items_detected is the count of distinct purchasable product lines on the receipt. Exclude tax, shipping, fees, coupons, gift-card lines, store-credit lines, and member certificates.
 - If line_items_detected == 1, price_paid is that single item's price.
 - If line_items_detected > 1, pick the HIGHEST-PRICED item as product_name / product_id / variant, set price_paid to that ITEM's price (NOT the grand total or subtotal), and set extraction_confidence.price_paid to at most 0.4. The downstream pipeline will route the purchase to user edit so the user can correct or pick a different line.
+- If line_items_detected > 1, ALSO populate `line_items` with one entry per distinct purchasable line (apply the same exclusions above). Each entry carries that line's own product_name, product_id, product_url, variant, price_paid, and per-field confidence. Do NOT put shared receipt fields (platform, order_id, purchase_date, member_tier) inside line_items — they apply to the whole receipt and stay at the top level. Per-line price confidence reflects how clearly that single line's price reads — it is NOT subject to the 0.4 multi-item cap (that cap only applies to the top-level price_paid, which is ambiguous across lines).
+- If line_items_detected == 1, leave `line_items` empty.
 
 Purchase date:
 - If a purchase / order / transaction date is visibly printed on the receipt or email, extract it and set extraction_confidence.purchase_date >= 0.9.
@@ -162,6 +164,49 @@ class ExtractedFieldConfidence(BaseModel):
     category: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
+class LineItemConfidence(BaseModel):
+    """Per-line confidence for the fields that differ across receipt lines.
+
+    Shared receipt fields (platform, order_id, purchase_date, …) keep
+    their confidence on the parent `ExtractedFieldConfidence`; only the
+    per-line fields are scored here.
+    """
+
+    product_name: float | None = Field(default=None, ge=0.0, le=1.0)
+    product_id: float | None = Field(default=None, ge=0.0, le=1.0)
+    price_paid: float | None = Field(default=None, ge=0.0, le=1.0)
+    variant: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class LineItem(BaseModel):
+    """One purchasable line on a multi-item receipt.
+
+    Carries only the fields that vary line-to-line. Receipt-wide fields
+    (platform, category, order_id, purchase_date, member_tier, …) live on
+    the parent `ExtractedPurchaseFields` and apply to every line. The
+    downstream `/internal/extract` reshape merges those shared fields with
+    each line so the frontend can render a selection card and the
+    api-gateway can build a Purchase from one chosen line.
+    """
+
+    product_name: str = Field(min_length=1)
+    product_id: str | None = None
+    product_url: str | None = None
+    variant: str | None = None
+    price_paid: float = Field(ge=0)
+    confidence: LineItemConfidence
+
+    @field_validator("price_paid", mode="after")
+    @classmethod
+    def _price_paid_must_be_positive(cls, value: float) -> float:
+        # Same `ge=0` + runtime `<= 0` guard as the top-level field — Vertex
+        # AI rejects `exclusiveMinimum` in the JSON Schema, so the strict
+        # positivity check lives here.
+        if value <= 0:
+            raise ValueError("line_items[].price_paid must be greater than zero")
+        return value
+
+
 class ExtractedPurchaseFields(BaseModel):
     """Model-output fields that are directly extracted from source text."""
 
@@ -189,6 +234,13 @@ class ExtractedPurchaseFields(BaseModel):
     # extraction case (which always describes a single product) working
     # without prompt or schema changes downstream.
     line_items_detected: int = Field(default=1, ge=1)
+    # Per-line breakdown of a multi-item receipt. Populated by the model
+    # ONLY when line_items_detected > 1 (single-item receipts and the
+    # email path leave it empty and rely on the top-level fields, which
+    # describe the highest-priced / sole item). Transient extractor-only
+    # output — not a Purchase field; `/internal/extract` reshapes it into
+    # per-line full extractions for the upload selection UI.
+    line_items: list[LineItem] = Field(default_factory=list)
     extraction_confidence: ExtractedFieldConfidence
 
     @field_validator("price_paid", mode="after")
@@ -583,6 +635,71 @@ def _resolve_status(
     if fallback_used or multi_item:
         return "pending_user_edit"
     return "pending_confirmation"
+
+
+def _normalize_order_fallback_id(order_id: str) -> str:
+    """Synthesize a `order-<slug>` product_id from an order_id.
+
+    Mirrors the fallback in `_purchase_payload` / finalize for lines that
+    carry no SKU of their own.
+    """
+    normalized = "".join(char.lower() if char.isalnum() else "-" for char in order_id).strip("-")
+    return f"order-{normalized}"
+
+
+def build_line_item_payloads(extracted: ExtractedPurchaseFields) -> list[dict[str, Any]]:
+    """Resolve each receipt line into a per-line extraction payload.
+
+    Returns one dict per `extracted.line_items` entry carrying the
+    line-specific fields plus a per-line `receipt_line_key`, a resolved
+    `product_id` (order- fallback when the line has no id), a recomputed
+    per-line `extraction_confidence`, and a per-line `status`. Shared
+    receipt fields (platform, category, order_id, purchase_date,
+    member_tier, …) are intentionally NOT included — `/internal/extract`
+    merges them onto every line. Empty list for single-item receipts.
+
+    Per-line price confidence is the line's own (NOT subject to the 0.4
+    multi-item cap, which only blurs the ambiguous top-level price): once
+    the user picks a specific line its price is unambiguous, so the line
+    confirms at its real confidence rather than bouncing to low-confidence.
+    """
+    base = _confidence_payload(extracted.extraction_confidence)
+    payloads: list[dict[str, Any]] = []
+    for idx, line in enumerate(extracted.line_items):
+        confidence = dict(base)
+        line_conf = line.confidence
+        if line_conf.product_name is not None:
+            confidence["product_name"] = line_conf.product_name
+        if line_conf.variant is not None:
+            confidence["variant"] = line_conf.variant
+        if line_conf.price_paid is not None:
+            confidence["price_paid"] = line_conf.price_paid
+            confidence["price"] = line_conf.price_paid
+
+        product_id = line.product_id
+        fallback_used = False
+        if not product_id:
+            product_id = _normalize_order_fallback_id(extracted.order_id)
+            fallback_used = True
+            confidence["product_id"] = FALLBACK_PRODUCT_ID_CONFIDENCE
+        elif line_conf.product_id is not None:
+            confidence["product_id"] = line_conf.product_id
+
+        _merge_confidence_aggregate(confidence)
+        status = _resolve_status(fallback_used, confidence, multi_item=False)
+        payloads.append(
+            {
+                "receipt_line_key": f"line-{idx}",
+                "product_name": line.product_name,
+                "product_id": product_id,
+                "product_url": line.product_url,
+                "variant": line.variant,
+                "price_paid": line.price_paid,
+                "extraction_confidence": confidence,
+                "status": status,
+            }
+        )
+    return payloads
 
 
 def _purchase_payload(

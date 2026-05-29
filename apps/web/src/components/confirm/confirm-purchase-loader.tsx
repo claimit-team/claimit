@@ -1,10 +1,11 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { ConfirmPageHeader } from "@/components/confirm/confirm-page-header";
 import { ConfirmPurchaseContent } from "@/components/confirm/confirm-purchase-content";
+import { MultiItemSelection } from "@/components/confirm/multi-item-selection";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,6 +13,7 @@ import { getPurchaseDetail, type PurchaseDetailDoc, PurchasesApiError } from "@/
 import {
   type ConfirmDraft,
   type ConfirmDraftContext,
+  draftForLine,
   isStagingKey,
   readUploadDraft,
 } from "@/lib/confirm-staging";
@@ -66,7 +68,16 @@ type LoadState =
   | { kind: "loading" }
   | { kind: "analyzing" }
   | { kind: "analyzing_timeout" }
-  | { kind: "ready"; purchase: PurchaseDetailDoc; draft?: ConfirmDraftContext }
+  | { kind: "selecting"; draft: ConfirmDraftContext }
+  | {
+      kind: "ready";
+      purchase: PurchaseDetailDoc;
+      draft?: ConfirmDraftContext;
+      // Set on the multi-item per-line confirm: which receipt line is
+      // being confirmed. Its presence switches ActionBar into
+      // "track-another" mode (mark tracked + return to the list).
+      lineKey?: string;
+    }
   | { kind: "error"; message: string };
 
 /** Upload content-type → Purchase.ingestion_source (display + fallback copy). */
@@ -154,6 +165,11 @@ function ReceiptCardSkeleton() {
 
 export function ConfirmPurchaseLoader({ purchaseId }: { purchaseId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // `?line=<receipt_line_key>` selects one line of a multi-item receipt to
+  // confirm. Absent → render the selection list; present → render the
+  // confirm form pre-filled for that line.
+  const lineParam = searchParams.get("line");
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   // Manual refetch trigger. `router.refresh()` only re-runs server
   // components / resets the route cache — it doesn't remount this
@@ -178,20 +194,49 @@ export function ConfirmPurchaseLoader({ purchaseId }: { purchaseId: string }) {
     // is no doc to fetch and no extraction to poll for.
     if (isStagingKey(purchaseId)) {
       const draft = readUploadDraft(purchaseId);
-      if (draft) {
-        setState({
-          kind: "ready",
-          purchase: synthesizePurchaseFromDraft(draft, purchaseId),
-          draft: { ...draft, stagingKey: purchaseId },
-        });
-      } else {
+      if (!draft) {
         // Draft evicted (refresh after sessionStorage cleared, or a stale
         // link). Nothing was persisted, so the only recovery is re-upload.
         setState({
           kind: "error",
           message: "This upload session has expired. Please upload the receipt again.",
         });
+        return;
       }
+
+      const draftContext: ConfirmDraftContext = { ...draft, stagingKey: purchaseId };
+      const lineItems = draft.extraction?.line_items;
+      const isMultiItem = Array.isArray(lineItems) && lineItems.length > 1;
+
+      if (isMultiItem && !lineParam) {
+        // No line picked yet — show the selection list.
+        setState({ kind: "selecting", draft: draftContext });
+        return;
+      }
+
+      if (isMultiItem && lineParam) {
+        // A specific line is selected — render the confirm form pre-filled
+        // for it. A stale/invalid `?line=` falls back to the list.
+        const lineDraft = draftForLine(draft, lineParam);
+        if (!lineDraft) {
+          setState({ kind: "selecting", draft: draftContext });
+          return;
+        }
+        setState({
+          kind: "ready",
+          purchase: synthesizePurchaseFromDraft(lineDraft, purchaseId),
+          draft: { ...lineDraft, stagingKey: purchaseId },
+          lineKey: lineParam,
+        });
+        return;
+      }
+
+      // Single-item (or manual-fill) upload — unchanged today's path.
+      setState({
+        kind: "ready",
+        purchase: synthesizePurchaseFromDraft(draft, purchaseId),
+        draft: draftContext,
+      });
       return;
     }
 
@@ -261,10 +306,19 @@ export function ConfirmPurchaseLoader({ purchaseId }: { purchaseId: string }) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [purchaseId, retryTick]);
+  }, [purchaseId, retryTick, lineParam]);
 
   if (state.kind === "loading") {
     return <ReceiptCardSkeleton />;
+  }
+
+  if (state.kind === "selecting") {
+    return (
+      <div className="flex flex-col gap-4">
+        <ConfirmPageHeader />
+        <MultiItemSelection draft={state.draft} />
+      </div>
+    );
   }
 
   if (state.kind === "analyzing") {
@@ -339,7 +393,11 @@ export function ConfirmPurchaseLoader({ purchaseId }: { purchaseId: string }) {
   return (
     <div className="flex flex-col gap-4">
       <ConfirmPageHeader />
-      <ConfirmPurchaseContent purchase={state.purchase} draft={state.draft} />
+      <ConfirmPurchaseContent
+        purchase={state.purchase}
+        draft={state.draft}
+        lineKey={state.lineKey}
+      />
     </div>
   );
 }
