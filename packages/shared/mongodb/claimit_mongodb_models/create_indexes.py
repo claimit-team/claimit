@@ -90,6 +90,14 @@ INDEX_DEFINITIONS: dict[str, list[dict[str, Any]]] = {
         {"keys": [("submitted_at", -1)]},
         {"keys": [("email", 1), ("submitted_at", -1)]},
     ],
+    "help_contact_submissions": [
+        {"keys": [("submitted_at", -1)]},
+        {"keys": [("email", 1), ("submitted_at", -1)]},
+    ],
+    "newsletter_subscriptions": [
+        {"keys": [("subscribed_at", -1)]},
+        {"keys": [("email", 1)], "unique": True},
+    ],
 }
 
 
