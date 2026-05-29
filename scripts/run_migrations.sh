@@ -27,11 +27,18 @@ uv run \
 
 echo ""
 echo ">>> Elastic: creating indices"
-uv run \
+if uv run \
   --no-project \
   --python "3.12" \
   --with "elasticsearch[async]>=8.0.0" \
-  python packages/shared/elastic/elastic/create_indices.py
+  python packages/shared/elastic/elastic/create_indices.py; then
+  echo ">>> Elastic indices created"
+else
+  echo ""
+  echo "::warning::Elastic index creation failed; continuing."
+  echo "::warning::Elastic is being dropped in favor of MongoDB Atlas Search in the next change."
+  echo ""
+fi
 
 echo ""
 echo "=== Migrations completed ==="

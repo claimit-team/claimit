@@ -7,7 +7,7 @@ import type { AuthApiError } from "@/lib/api/auth";
 import { cn } from "@/lib/utils";
 
 const STAGE_COPY = [
-  { untilMs: 1500, text: "Connecting to Google..." },
+  { untilMs: 1500, text: "Signing you in..." },
   { untilMs: 3000, text: "Verifying your account..." },
   { untilMs: 5000, text: "Setting up your workspace..." },
   { untilMs: 7000, text: "Loading your preferences..." },
