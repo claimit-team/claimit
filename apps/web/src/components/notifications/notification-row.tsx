@@ -1,6 +1,6 @@
 "use client";
 
-import type { NotificationEvent } from "@claimit/mongodb-types";
+import type { NotificationEvent, NotificationEventType } from "@claimit/mongodb-types";
 import { formatDistanceToNow } from "date-fns";
 
 import { EVENT_ICONS, EVENT_LABELS } from "@/lib/notifications/event-labels";
@@ -10,28 +10,113 @@ import { cn } from "@/lib/utils";
 const iconWrap =
   "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border bg-neutral-0";
 
-/**
- * Builds the row's body line. The backend places event-specific context
- * under `data` (a free-form Record<string, unknown>); we sniff a small
- * set of well-known fields and fall back to the type label when nothing
- * useful is present. Unknown shapes degrade gracefully — they never
- * crash the row.
- */
+function sniffString(data: Record<string, unknown>, key: string): string | null {
+  const v = data[key];
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+function sniffNumber(data: Record<string, unknown>, key: string): number | null {
+  const v = data[key];
+  return typeof v === "number" ? v : null;
+}
+
+function sniffPlatform(data: Record<string, unknown>): string | null {
+  // Returns the raw slug or merchant string. Callers wrap with
+  // `getPlatformLabel()` so brand-specific casing (IHG, Macy's, JetBlue,
+  // …) is applied consistently with the rest of the product.
+  return sniffString(data, "platform") ?? sniffString(data, "merchant");
+}
+
+// Per-event-type humanized body builders. Each returns a sentence shaped
+// from whatever data fields happen to be present, and degrades gracefully
+// when context is missing. Builders return null only when no event-specific
+// template applies — buildBody then falls through to the generic shape so
+// new backend event types still render something useful before frontend
+// catches up.
+const EVENT_BODY_BUILDERS: Partial<
+  Record<NotificationEventType, (data: Record<string, unknown>) => string | null>
+> = {
+  claim_drafted: (d) => {
+    const platform = sniffPlatform(d);
+    const itemTitle = sniffString(d, "item_title");
+    if (platform && itemTitle) {
+      return `Your ${getPlatformLabel(platform)} claim draft for ${itemTitle} is ready for review`;
+    }
+    if (platform) return `Your ${getPlatformLabel(platform)} claim draft is ready for review`;
+    return "Your claim draft is ready for review";
+  },
+  claim_queued_auto: (d) => {
+    const platform = sniffPlatform(d);
+    if (platform) {
+      return `Your ${getPlatformLabel(platform)} claim is queued and will be sent in 5 minutes`;
+    }
+    return "Your claim is queued and will be sent in 5 minutes";
+  },
+  claim_submitted: (d) => {
+    const platform = sniffPlatform(d);
+    if (platform) {
+      return `Your ${getPlatformLabel(platform)} claim has been sent — we'll notify you when they respond`;
+    }
+    return "Your claim has been sent — we'll notify you when they respond";
+  },
+  claim_denied: (d) => {
+    const platform = sniffPlatform(d);
+    const reason = sniffString(d, "reason");
+    if (platform && reason) {
+      return `Your ${getPlatformLabel(platform)} claim was denied: ${reason}`;
+    }
+    if (platform) return `Your ${getPlatformLabel(platform)} claim was denied`;
+    if (reason) return `Your claim was denied: ${reason}`;
+    return "Your claim was denied";
+  },
+  claim_resolved_success: (d) => {
+    const platform = sniffPlatform(d);
+    const amount = sniffNumber(d, "amount_saved");
+    if (platform && amount !== null) {
+      return `Your ${getPlatformLabel(platform)} claim was approved — you saved ${formatUSD(amount)}`;
+    }
+    if (platform) return `Your ${getPlatformLabel(platform)} claim was approved`;
+    if (amount !== null) return `Your claim was approved — you saved ${formatUSD(amount)}`;
+    return "Your claim was approved";
+  },
+  price_dropped: (d) => {
+    const platform = sniffPlatform(d);
+    const itemTitle = sniffString(d, "item_title");
+    const amount = sniffNumber(d, "amount_saved");
+    const subject = itemTitle ?? "Your item";
+    const parts: string[] = [`${subject} dropped in price`];
+    if (platform) parts.push(`on ${getPlatformLabel(platform)}`);
+    if (amount !== null) parts.push(`— save ${formatUSD(amount)}`);
+    return parts.join(" ");
+  },
+  low_confidence_extract: (d) => {
+    const itemTitle = sniffString(d, "item_title");
+    if (itemTitle) return `We had trouble reading your ${itemTitle} receipt — please review`;
+    return "We had trouble reading your receipt — please review";
+  },
+  consecutive_rejections: () => "Several recent claims were denied — let's review your strategy",
+  first_time_dashboard: () => "Welcome to ClaimIt! Let's set up your first purchase to monitor",
+  user_returned_after_long_absence: () => "Welcome back! Here's what you missed",
+};
+
 function buildBody(notification: NotificationEvent): string {
   const data = notification.data ?? {};
+  const builder = EVENT_BODY_BUILDERS[notification.event_type];
+  const custom = builder?.(data);
+  if (custom) return custom;
 
-  const platform = typeof data.platform === "string" ? data.platform : null;
-  const itemTitle = typeof data.item_title === "string" ? data.item_title : null;
-  const merchant = typeof data.merchant === "string" ? data.merchant : null;
-  const amount = typeof data.amount_saved === "number" ? data.amount_saved : null;
-  const reason = typeof data.reason === "string" ? data.reason : null;
-  const message = typeof data.message === "string" ? data.message : null;
+  // Fallback: generic shape for event types we don't have a template for
+  // yet. Keeps the row meaningful when the backend adds a new
+  // NotificationEventType before the frontend catches up.
+  const platform = sniffPlatform(data);
+  const itemTitle = sniffString(data, "item_title");
+  const amount = sniffNumber(data, "amount_saved");
+  const reason = sniffString(data, "reason");
+  const message = sniffString(data, "message");
 
   const parts: string[] = [];
   if (itemTitle) parts.push(itemTitle);
-  if (platform || merchant) {
-    parts.push(`on ${platform ? getPlatformLabel(platform) : merchant}`);
-  }
+  if (platform) parts.push(`on ${getPlatformLabel(platform)}`);
   if (typeof amount === "number") parts.push(`(${formatUSD(amount)})`);
   if (reason) parts.push(`— ${reason}`);
 
