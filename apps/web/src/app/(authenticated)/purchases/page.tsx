@@ -370,6 +370,7 @@ export default function PurchasesPage() {
     setCategory,
     q,
     setQ,
+    counts,
     refetch,
     loadMore,
   } = usePurchases();
@@ -391,13 +392,14 @@ export default function PurchasesPage() {
           <div className="flex flex-wrap gap-2">
             {CATEGORY_CHIPS.map((chip) => {
               const isActive = chip.key === activeChip;
+              const count = counts[chip.key];
               return (
                 <button
                   key={chip.key}
                   type="button"
                   onClick={() => setCategory(chip.key === "all" ? null : chip.key)}
                   className={cn(
-                    "rounded-full border px-3 py-1.5 text-sm transition-colors",
+                    "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors",
                     isActive
                       ? "border-brand-primary-500 bg-brand-primary-500 text-primary-foreground"
                       : "border-neutral-200 bg-neutral-0 text-neutral-700 hover:bg-neutral-50",
@@ -405,6 +407,18 @@ export default function PurchasesPage() {
                   aria-pressed={isActive}
                 >
                   {chip.label}
+                  {count != null && (
+                    <span
+                      className={cn(
+                        "inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1 text-xs font-medium",
+                        isActive
+                          ? "bg-white/20 text-primary-foreground"
+                          : "bg-neutral-100 text-neutral-600",
+                      )}
+                    >
+                      {count}
+                    </span>
+                  )}
                 </button>
               );
             })}

@@ -63,6 +63,8 @@ type UsePurchasesResult = {
   purchases: PurchaseListItem[];
   nextCursor: string | null;
   totalCount: number;
+  /** Per-category chip counts: `{ all, retail, airline, hotel }`. */
+  counts: Record<string, number>;
   isLoading: boolean;
   isLoadingMore: boolean;
   error: PurchasesApiError | null;
@@ -83,6 +85,7 @@ export function usePurchases({
   const [purchases, setPurchases] = useState<PurchaseListItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState<number>(0);
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [error, setError] = useState<PurchasesApiError | null>(null);
@@ -159,6 +162,7 @@ export function usePurchases({
         setPurchases(page.purchases);
         setNextCursor(page.next_cursor);
         setTotalCount(page.total_count);
+        setCounts(page.counts ?? {});
         setError(null);
       })
       .catch((err: unknown) => {
@@ -227,6 +231,7 @@ export function usePurchases({
     purchases,
     nextCursor,
     totalCount,
+    counts,
     isLoading,
     isLoadingMore,
     error,

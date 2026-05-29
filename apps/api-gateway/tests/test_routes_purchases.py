@@ -135,6 +135,9 @@ async def test_list_purchases_returns_page(client: AsyncClient) -> None:
     mock_db = AsyncMock(spec=MongoDBClient)
     mock_db.count = AsyncMock(return_value=2)
     mock_db.find_many = AsyncMock(return_value=[purchase_a, purchase_b])
+    # Per-category chip counts come from a $group aggregate over the
+    # status/q scope (no category filter) — mirrors the /claims chips.
+    mock_db.aggregate = AsyncMock(return_value=[{"_id": "retail", "n": 2}])
     _set_overrides(mock_db)
     try:
         response = await client.get(
@@ -146,12 +149,18 @@ async def test_list_purchases_returns_page(client: AsyncClient) -> None:
         assert payload["total_count"] == 2
         assert payload["next_cursor"] is None
         assert len(payload["purchases"]) == 2
+        # `counts` buckets the per-category aggregate; `all` is the sum.
+        assert payload["counts"] == {"all": 2, "retail": 2, "airline": 0, "hotel": 0}
 
         count_filter = mock_db.count.await_args.args[1]
         assert count_filter == {"user_id": USER_ID}
         find_filter = mock_db.find_many.await_args.args[1]
         assert find_filter == {"user_id": USER_ID}
         assert mock_db.find_many.await_args.kwargs["sort"] == [("_id", 1)]
+        # The count aggregate matches the same scope MINUS any category
+        # filter so every chip count stays correct regardless of selection.
+        count_pipeline = mock_db.aggregate.await_args.args[1]
+        assert count_pipeline[0] == {"$match": {"user_id": USER_ID}}
     finally:
         _clear_overrides()
 

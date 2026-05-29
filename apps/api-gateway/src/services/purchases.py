@@ -149,27 +149,52 @@ async def list_purchases(
       here anyway so unit tests calling the service directly behave
       the same as the HTTP entry point.
     """
-    base_filter: dict[str, Any] = {"user_id": user_id}
+    # `count_match` is everything EXCEPT the category filter — the
+    # per-category chip counts (mirrors the /claims status-group chip
+    # counts) must always reflect every category regardless of which one
+    # is active, but still respect the status scope + search `q` so the
+    # numbers match what the list would show when that chip is selected.
+    count_match: dict[str, Any] = {"user_id": user_id}
     if status:
         # `$in` whether status is a single-element list (backward-compat
         # path for `?status=x`) or multi-element. A length-1 `$in` is
         # semantically equivalent to equality and Mongo's planner uses
         # the same index either way — no perf regression for the common
         # single-value caller.
-        base_filter["status"] = {"$in": [s.value for s in status]}
-    if category is not None:
-        base_filter["category"] = category.value
+        count_match["status"] = {"$in": [s.value for s in status]}
 
     q_clean = q.strip() if q is not None else None
     if q_clean:
         pattern = re.escape(q_clean)
-        base_filter["$or"] = [
+        count_match["$or"] = [
             {"platform": {"$regex": pattern, "$options": "i"}},
             {"product_name": {"$regex": pattern, "$options": "i"}},
             {"order_id": {"$regex": pattern, "$options": "i"}},
         ]
 
-    total_count = await db.count("purchases", base_filter)
+    base_filter: dict[str, Any] = dict(count_match)
+    if category is not None:
+        base_filter["category"] = category.value
+
+    count_pipeline: list[dict[str, Any]] = [
+        {"$match": count_match},
+        {"$group": {"_id": "$category", "n": {"$sum": 1}}},
+    ]
+    total_count, count_docs = await asyncio.gather(
+        db.count("purchases", base_filter),
+        db.aggregate("purchases", count_pipeline),
+    )
+
+    # Map per-category counts → chip buckets. `all` is the sum across
+    # categories (within the status/q scope); unknown/legacy category
+    # values still roll into `all` but no specific chip.
+    counts: dict[str, int] = {"all": 0, "retail": 0, "airline": 0, "hotel": 0}
+    for row in count_docs:
+        n = int(row.get("n") or 0)
+        counts["all"] += n
+        cat = str(row.get("_id") or "")
+        if cat in counts:
+            counts[cat] += n
 
     page_filter = apply_cursor_to_query(base_filter, cursor)
     fetched = await db.find_many(
@@ -191,6 +216,7 @@ async def list_purchases(
         "purchases": [p.model_dump(mode="json", by_alias=True) for p in visible],
         "next_cursor": next_cursor,
         "total_count": total_count,
+        "counts": counts,
     }
 
 
