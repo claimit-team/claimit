@@ -18,6 +18,7 @@ import uuid
 from claimit_mongodb_models import MongoDBClient
 from google.cloud import secretmanager
 
+from .services.careers_resumes import CareersResumesUploader
 from .services.evidence_storage import EvidenceReader
 from .services.pubsub_publisher import PubSubPublisher
 from .services.receipts_storage import ReceiptsUploader
@@ -29,6 +30,7 @@ _state_jwt_key: str | None = None
 _token_cache: AccessTokenCache | None = None
 _pubsub_publisher: PubSubPublisher | None = None
 _receipts_uploader: ReceiptsUploader | None = None
+_careers_resumes_uploader: CareersResumesUploader | None = None
 _evidence_reader: EvidenceReader | None = None
 
 
@@ -78,6 +80,18 @@ async def get_receipts_uploader() -> ReceiptsUploader:
     if _receipts_uploader is None:
         raise RuntimeError("ReceiptsUploader not initialized")
     return _receipts_uploader
+
+
+def init_careers_resumes_uploader() -> None:
+    """Initialize the module-global careers resumes uploader. Called from lifespan()."""
+    global _careers_resumes_uploader
+    _careers_resumes_uploader = CareersResumesUploader()
+
+
+async def get_careers_resumes_uploader() -> CareersResumesUploader:
+    if _careers_resumes_uploader is None:
+        raise RuntimeError("CareersResumesUploader not initialized")
+    return _careers_resumes_uploader
 
 
 def init_evidence_reader() -> None:

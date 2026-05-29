@@ -1,380 +1,183 @@
 "use client";
 
-import { ArrowRight, Upload } from "lucide-react";
+import { ArrowRight, Layout, Server, Workflow } from "lucide-react";
+import { motion } from "motion/react";
 import Link from "next/link";
-import type { FormEvent } from "react";
-import { toast } from "sonner";
+import type { ComponentProps } from "react";
+import { InterestForm } from "@/components/careers/interest-form";
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import { buttonVariants } from "@/components/ui/button";
+import { jobsData } from "@/lib/jobs-data";
 import { cn } from "@/lib/utils";
 
-const mockCareersData = {
-  roles: [
-    {
-      title: "Frontend Engineer",
-      slug: "frontend-engineer",
-      area: "Frontend",
-      description: "Build dashboard workflows, claim review screens, and Assistant UI in Next.js.",
-    },
-    {
-      title: "Backend / Infrastructure Engineer",
-      slug: "backend-infrastructure-engineer",
-      area: "Infrastructure",
-      description: "Work on GCP, Pub/Sub, Cloud Run, MongoDB, and deployment reliability.",
-    },
-    {
-      title: "Agent Logic Engineer",
-      slug: "agent-logic-engineer",
-      area: "Agent Logic",
-      description: "Develop Gemini prompts, tool routing, validators, and evaluation flows.",
-    },
-  ],
-  interestAreas: [
-    "Frontend",
-    "Backend / Infrastructure",
-    "Agent Logic",
-    "Product / Design",
-    "Other",
-  ],
-  workingPrinciples: [
-    {
-      title: "User control first",
-      description:
-        "Users should always understand and approve what the agent is doing on their behalf.",
-    },
-    {
-      title: "Agent decisions should be explainable",
-      description: "Every recommendation or action should have a clear, traceable reasoning path.",
-    },
-    {
-      title: "No invented financial claims",
-      description: "We only surface verified data from receipts and retailer policies.",
-    },
-    {
-      title: "Small, reliable workflows over broad automation",
-      description: "We prefer doing fewer things well rather than many things poorly.",
-    },
-  ],
-  faq: [
-    {
-      question: "Are these active openings?",
-      answer:
-        "No. These roles are placeholders representing future hiring areas. ClaimIt is currently an MVP and is not actively recruiting for these positions.",
-    },
-    {
-      question: "Can I submit interest for future roles?",
-      answer:
-        "Yes. The interest form on this page is a mock form for demonstration purposes. In a production version, your information would be stored for future consideration.",
-    },
-    {
-      question: "Is ClaimIt remote?",
-      answer:
-        "Work format has not been finalized. As an early-stage project, we have not established formal policies around location or remote work.",
-    },
-    {
-      question: "What kind of work does the team focus on?",
-      answer:
-        "The team focuses on agent workflows for price protection monitoring, data infrastructure for receipt and claim processing, and dashboard UX for reviewing and managing claims.",
-    },
-  ],
-};
+const ROLE_ICONS = {
+  "frontend-engineer": Layout,
+  "backend-infrastructure-engineer": Server,
+  "agent-logic-engineer": Workflow,
+} as const;
 
-function handleSubmit(e: FormEvent<HTMLFormElement>) {
-  e.preventDefault();
-  toast.success("Thanks — your interest has been recorded in this mock flow.");
+function RoleIcon({ slug, ...props }: { slug: string } & ComponentProps<typeof Layout>) {
+  const Icon = ROLE_ICONS[slug as keyof typeof ROLE_ICONS] ?? Layout;
+  return <Icon {...props} />;
 }
+
+const faq = [
+  {
+    question: "Are these roles open now?",
+    answer:
+      "These are future roles we're shaping. We're not actively hiring against specific headcount, but we review every submission and reach out when timing aligns.",
+  },
+  {
+    question: "When will you start hiring?",
+    answer:
+      "We expect to open specific roles as we scale beyond the founding team. Submissions today help us understand the pipeline we're building toward.",
+  },
+  {
+    question: "Can I apply if I don't see my exact role?",
+    answer:
+      "Yes — drop your resume and a short note about what you'd like to build. We're interested in people who care about reliable agent systems and clean user experience.",
+  },
+  {
+    question: "Is ClaimIt remote?",
+    answer:
+      "Work format has not been finalized. As an early-stage project, we have not established formal policies around location or remote work.",
+  },
+];
 
 export function CareersListView() {
   return (
     <div className="bg-neutral-0">
-      {/* Hero Section */}
-      <section className="flex min-h-[40vh] flex-col justify-center sm:min-h-[50vh]">
-        <div className="mx-auto w-full max-w-2xl px-6 text-center">
-          <h1 className="text-balance text-4xl font-semibold leading-[1.05] tracking-tight text-neutral-900 sm:text-5xl">
+      <section className="bg-neutral-0 py-12 sm:py-16 lg:py-20">
+        <div className="mx-auto max-w-4xl px-4 text-center sm:px-6 lg:px-8">
+          <h1 className="text-balance text-4xl font-semibold tracking-tight text-neutral-900 sm:text-5xl lg:text-6xl">
             Build practical agents for real-world follow-through.
           </h1>
-          <p className="mt-6 text-pretty text-lg leading-relaxed text-neutral-600 sm:text-xl">
-            ClaimIt is early. We are not hiring broadly yet, but we are interested in people who
-            care about reliable agent workflows, user control, and calm financial product design.
+          <p className="mx-auto mt-4 max-w-2xl text-balance text-base leading-relaxed text-neutral-700 sm:text-lg">
+            Build agents for the work that always slips.
           </p>
-          <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
             <Link
               href="#interest-form"
               className={cn(
-                buttonVariants(),
-                "bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]",
+                buttonVariants({ size: "lg" }),
+                "bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600",
               )}
             >
               Drop your resume
             </Link>
-            <Link
-              href="/team"
-              className={cn(buttonVariants({ variant: "ghost" }), "text-neutral-700")}
-            >
+            <Link href="/team" className={buttonVariants({ variant: "ghost", size: "lg" })}>
               Meet the team
-              <ArrowRight className="ml-2 h-4 w-4" />
             </Link>
           </div>
         </div>
       </section>
 
-      {/* Current Status Section */}
-      <section className="py-24 sm:py-32 lg:py-40">
-        <div className="mx-auto max-w-2xl px-6">
-          <Card className="border-neutral-200">
-            <CardHeader>
-              <div className="flex items-center gap-3">
-                <CardTitle className="text-neutral-900">Where we are now</CardTitle>
-                <Badge variant="secondary" className="bg-neutral-100 text-neutral-700">
-                  Early stage
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-sm text-neutral-700">
-                ClaimIt is currently an MVP built for the Google Cloud Rapid Agent Hackathon.
-              </p>
-              <p className="text-sm text-neutral-700">
-                We are focused on product validation, agent reliability, and demo-quality execution.
-              </p>
-              <p className="text-sm text-neutral-700">
-                Open roles below are placeholders for future hiring areas, not active job offers.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      </section>
-
-      {/* Role Areas Section */}
-      <section className="py-24 sm:py-32 lg:py-40">
-        <div className="mx-auto max-w-4xl px-6">
-          <div className="mb-8">
-            <h2 className="text-2xl font-semibold text-neutral-900">Role areas</h2>
-            <p className="mt-2 text-sm text-neutral-500">
-              Example future roles — not active openings yet.
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="bg-neutral-0 py-16 sm:py-20 lg:py-28"
+      >
+        <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
+          <div className="text-center">
+            <h2 className="text-balance text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+              Where we&apos;ll hire
+            </h2>
+            <p className="mx-auto mt-4 max-w-2xl text-balance text-neutral-700">
+              Future roles. Drop your resume and we&apos;ll be in touch.
             </p>
           </div>
-          <div className="grid gap-6 md:grid-cols-3">
-            {mockCareersData.roles.map((role) => (
-              <Card
-                key={role.slug}
-                className="border-neutral-200 transition-all duration-300 hover:-translate-y-1 hover:shadow-md"
-              >
-                <CardHeader>
-                  <div className="mb-2">
-                    <Badge variant="outline" className="border-neutral-200 text-neutral-600">
-                      {role.area}
-                    </Badge>
+
+          <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {jobsData.map((role) => (
+              <Link key={role.slug} href={`/careers/${role.slug}`} className="group block h-full">
+                <div className="flex h-full flex-col rounded-xl bg-neutral-0 p-6 ring-1 ring-neutral-200 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm hover:ring-neutral-300">
+                  <div className="flex size-10 items-center justify-center rounded-lg bg-neutral-100">
+                    <RoleIcon slug={role.slug} className="size-5 text-neutral-700" aria-hidden />
                   </div>
-                  <CardTitle className="text-lg text-neutral-900">{role.title}</CardTitle>
-                  <CardDescription className="text-neutral-700">{role.description}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Link
-                    href={`/careers/${role.slug}`}
-                    className={cn(
-                      buttonVariants({ variant: "ghost" }),
-                      "h-auto p-0 text-brand-primary-500 hover:bg-transparent hover:text-brand-primary-600",
-                    )}
-                  >
+                  <h3 className="mt-4 min-h-[3rem] text-base font-medium text-neutral-900 transition-colors duration-200 group-hover:text-brand-primary-600">
+                    {role.title}
+                  </h3>
+                  <p className="mt-1 flex-1 text-sm leading-relaxed text-neutral-600">
+                    {role.summary}
+                  </p>
+                  <span className="mt-4 inline-flex items-center text-sm font-medium text-brand-primary-500 transition-colors duration-200 group-hover:text-brand-primary-600">
                     View role
-                    <ArrowRight className="ml-1 h-4 w-4" />
-                  </Link>
-                </CardContent>
-              </Card>
+                    <ArrowRight
+                      className="ml-1 size-4 transition-transform duration-200 group-hover:translate-x-0.5"
+                      aria-hidden
+                    />
+                  </span>
+                </div>
+              </Link>
             ))}
           </div>
         </div>
-      </section>
+      </motion.section>
 
-      {/* How We Work Section */}
-      <section className="py-24 sm:py-32 lg:py-40">
-        <div className="mx-auto max-w-4xl px-6">
-          <h2 className="mb-8 text-2xl font-semibold text-neutral-900">How we work</h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            {mockCareersData.workingPrinciples.map((principle) => (
-              <Card key={principle.title} className="border-neutral-200">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base text-neutral-900">{principle.title}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-neutral-700">{principle.description}</p>
-                </CardContent>
-              </Card>
-            ))}
+      <motion.section
+        id="interest-form"
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="scroll-mt-24 py-16 sm:py-20 lg:py-28"
+      >
+        <div className="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8">
+          <div className="text-center">
+            <h2 className="text-balance text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+              Submit your interest
+            </h2>
+            <p className="mx-auto mt-4 max-w-2xl text-balance text-neutral-700">
+              Drop your resume. We&apos;ll reach out when we open the role.
+            </p>
+          </div>
+          <div className="mt-10">
+            <InterestForm />
           </div>
         </div>
-      </section>
+      </motion.section>
 
-      {/* Resume Interest Form Section */}
-      <section id="interest-form" className="py-24 sm:py-32 lg:py-40">
-        <div className="mx-auto max-w-xl px-6">
-          <Card className="border-neutral-200">
-            <CardHeader>
-              <CardTitle className="text-xl text-neutral-900">Submit your interest</CardTitle>
-              <CardDescription className="text-neutral-700">
-                Leave your details and we may reach out when we begin hiring.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-5">
-                <div className="space-y-2">
-                  <Label htmlFor="name" className="text-neutral-900">
-                    Name
-                  </Label>
-                  <Input
-                    id="name"
-                    placeholder="Your name"
-                    required
-                    className="border-neutral-200"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="email" className="text-neutral-900">
-                    Email
-                  </Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="you@example.com"
-                    required
-                    className="border-neutral-200"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="area" className="text-neutral-900">
-                    Area of interest
-                  </Label>
-                  <Select>
-                    <SelectTrigger className="w-full border-neutral-200">
-                      <SelectValue placeholder="Select an area" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {mockCareersData.interestAreas.map((area) => (
-                        <SelectItem key={area} value={area.toLowerCase()}>
-                          {area}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="profile" className="text-neutral-900">
-                    LinkedIn or GitHub URL
-                  </Label>
-                  <Input
-                    id="profile"
-                    type="url"
-                    placeholder="https://linkedin.com/in/..."
-                    className="border-neutral-200"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="note" className="text-neutral-900">
-                    Short note
-                  </Label>
-                  <Textarea
-                    id="note"
-                    placeholder="Tell us a bit about yourself and what interests you about ClaimIt..."
-                    rows={4}
-                    className="border-neutral-200"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-neutral-900">
-                    Resume <span className="text-neutral-500">(optional)</span>
-                  </Label>
-                  <div className="flex h-24 cursor-pointer items-center justify-center rounded-md border border-dashed border-neutral-300 bg-neutral-100/50 transition-colors hover:border-neutral-400">
-                    <div className="flex flex-col items-center gap-1 text-neutral-500">
-                      <Upload className="h-5 w-5" />
-                      <span className="text-sm">Upload PDF (demo only)</span>
-                    </div>
-                  </div>
-                </div>
-
-                <Button
-                  type="submit"
-                  className="w-full bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600"
-                >
-                  Submit interest
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      </section>
-
-      {/* FAQ Section */}
-      <section className="py-24 sm:py-32 lg:py-40">
-        <div className="mx-auto max-w-2xl px-6">
-          <h2 className="mb-8 text-2xl font-semibold text-neutral-900">
-            Frequently asked questions
-          </h2>
-          <Accordion multiple={false} className="w-full">
-            {mockCareersData.faq.map((item) => (
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="py-16 sm:py-20 lg:py-28"
+      >
+        <div className="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8">
+          <div className="text-center">
+            <h2 className="text-balance text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+              Frequently asked questions
+            </h2>
+            <p className="mx-auto mt-4 max-w-xl text-balance text-neutral-700">
+              About the team, hiring timeline, and submission process.
+            </p>
+          </div>
+          <Accordion multiple={false} className="mt-10 w-full">
+            {faq.map((item) => (
               <AccordionItem
                 key={item.question}
                 value={item.question}
                 className="border-neutral-200"
               >
-                <AccordionTrigger className="text-left text-neutral-900 hover:no-underline">
+                <AccordionTrigger className="text-left text-base font-medium text-neutral-900 hover:no-underline">
                   {item.question}
                 </AccordionTrigger>
-                <AccordionContent className="text-neutral-700">{item.answer}</AccordionContent>
+                <AccordionContent className="text-base leading-relaxed text-neutral-700">
+                  {item.answer}
+                </AccordionContent>
               </AccordionItem>
             ))}
           </Accordion>
         </div>
-      </section>
-
-      {/* Final CTA Section */}
-      <section className="border-t border-neutral-200 bg-neutral-0 py-24 sm:py-32 lg:py-40">
-        <div className="mx-auto max-w-2xl px-6 text-center">
-          <h2 className="text-xl font-semibold text-neutral-900">
-            Want to understand the product first?
-          </h2>
-          <div className="mt-6 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-            <Link
-              href="/how-it-works"
-              className={cn(
-                buttonVariants(),
-                "bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600",
-              )}
-            >
-              See how it works
-            </Link>
-            <Link
-              href="/team"
-              className={cn(buttonVariants({ variant: "ghost" }), "text-neutral-700")}
-            >
-              View team
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </Link>
-          </div>
-        </div>
-      </section>
+      </motion.section>
     </div>
   );
 }

@@ -86,6 +86,10 @@ INDEX_DEFINITIONS: dict[str, list[dict[str, Any]]] = {
         {"keys": [("user_id", 1), ("acknowledged", 1), ("created_at", -1)]},
         {"keys": [("entity_id", 1)], "sparse": True},
     ],
+    "careers_interest_submissions": [
+        {"keys": [("submitted_at", -1)]},
+        {"keys": [("email", 1), ("submitted_at", -1)]},
+    ],
 }
 
 
