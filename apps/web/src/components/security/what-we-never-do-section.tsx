@@ -11,13 +11,13 @@ const neverDoList = [
 
 export function WhatWeNeverDoSection() {
   return (
-    <section className="border-b border-border">
-      <div className="mx-auto max-w-6xl px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
+    <section>
+      <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-28">
         <div className="max-w-3xl">
           <Badge variant="secondary" className="mb-4">
             Commitments
           </Badge>
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+          <h2 className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
             What we never do
           </h2>
           <ul className="mt-8 space-y-4">

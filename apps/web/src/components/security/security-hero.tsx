@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 
 export function SecurityHero() {
   return (
-    <section className="border-b border-border py-12 sm:py-16 lg:py-20">
+    <section className="py-12 sm:py-16 lg:py-20">
       <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
         <div className="max-w-2xl">
           <h1 className="text-balance text-4xl font-semibold leading-[0.95] tracking-tighter text-foreground sm:text-5xl lg:text-6xl">
