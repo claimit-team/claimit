@@ -36,8 +36,23 @@ INDEX_DEFINITIONS: dict[str, list[dict[str, Any]]] = {
         # multiple (user_id, platform, null) rows — but the strict
         # `Purchase` model declares `order_id: str` (non-null,
         # required), so null is a non-issue for prod-written docs.
+        #
+        # `receipt_line_key` is the 4th key so several items off ONE
+        # multi-item receipt — which all share a single real order_id —
+        # can each become their own monitored purchase. Single-item
+        # uploads, Gmail, and manual fill write `receipt_line_key=null`;
+        # two such same-order rows still collide on the null key value,
+        # preserving the pre-existing dedup. The old 3-key triple is
+        # dropped explicitly below (a wider key SHAPE does not trigger
+        # the code 85/86 auto-migration, so it would otherwise survive
+        # and keep blocking line-2).
         {
-            "keys": [("user_id", 1), ("platform", 1), ("order_id", 1)],
+            "keys": [
+                ("user_id", 1),
+                ("platform", 1),
+                ("order_id", 1),
+                ("receipt_line_key", 1),
+            ],
             "unique": True,
             "partialFilterExpression": {"order_id": {"$gt": ""}},
         },
@@ -120,6 +135,18 @@ async def create_indexes(
         for collection_name, specs in INDEX_DEFINITIONS.items():
             collection = db[collection_name]
             created: list[str] = []
+            # One-time migration: the (user_id, platform, order_id) triple
+            # was superseded by the 4-key (…, receipt_line_key) index so
+            # multiple items off one receipt (which share a single order_id)
+            # don't collide. A wider key SHAPE does NOT raise code 85/86, so
+            # `create_index` below silently builds the new index and leaves
+            # the old triple enforcing uniqueness — drop it explicitly here.
+            # Idempotent: `_drop_index_by_keys` returns False (no-op) once
+            # the old index is gone.
+            if collection_name == "purchases":
+                await _drop_index_by_keys(
+                    collection, [("user_id", 1), ("platform", 1), ("order_id", 1)]
+                )
             for spec in specs:
                 keys = spec["keys"]
                 kwargs = {k: v for k, v in spec.items() if k != "keys"}
@@ -150,6 +177,13 @@ async def create_indexes(
                         and (
                             keys == [("receipt_hash", 1)]
                             or keys == [("user_id", 1), ("platform", 1), ("order_id", 1)]
+                            or keys
+                            == [
+                                ("user_id", 1),
+                                ("platform", 1),
+                                ("order_id", 1),
+                                ("receipt_line_key", 1),
+                            ]
                         )
                     )
                     if is_migratable:

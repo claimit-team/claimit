@@ -56,6 +56,61 @@ def _extracted() -> ExtractedPurchaseFields:
     )
 
 
+def _extracted_multi() -> ExtractedPurchaseFields:
+    """A multi-item receipt: top-level fields = highest-priced line, plus a
+    populated `line_items` array (one entry per distinct line)."""
+    return ExtractedPurchaseFields.model_validate(
+        {
+            "platform": "best_buy",
+            "category": "retail",
+            "product_name": "Laptop",  # highest-priced (top-level)
+            "product_id": "L999",
+            "product_url": None,
+            "variant": None,
+            "fare_class": None,
+            "room_type": None,
+            "bed_type": None,
+            "rate_type": None,
+            "price_paid": 999.0,
+            "member_price_at_purchase": None,
+            "non_member_price_at_purchase": None,
+            "purchase_date": "2026-05-04T18:22:31Z",
+            "purchase_date_basis": "order_date",
+            "order_id": "ORDER-7",
+            "member_tier_at_purchase": None,
+            "line_items_detected": 2,
+            "line_items": [
+                {
+                    "product_name": "Laptop",
+                    "product_id": "L999",
+                    "product_url": None,
+                    "variant": "16GB",
+                    "price_paid": 999.0,
+                    "confidence": {"product_name": 0.97, "price_paid": 0.96},
+                },
+                {
+                    "product_name": "Mouse",
+                    "product_id": "M111",
+                    "product_url": None,
+                    "variant": None,
+                    "price_paid": 29.0,
+                    "confidence": {"product_name": 0.95, "price_paid": 0.94},
+                },
+            ],
+            "extraction_confidence": {
+                "platform": 0.99,
+                "price": 0.4,  # top-level capped for multi-item
+                "overall_min": 0.4,
+                "order_id": 0.99,
+                "product_name": 0.97,
+                "price_paid": 0.4,
+                "purchase_date": 0.95,
+                "category": 0.98,
+            },
+        }
+    )
+
+
 def _override_reader(*, blob_error: Exception | None = None) -> AsyncMock:
     reader = AsyncMock(spec=ReceiptsReader)
     reader.bucket_name = "test-bucket"
@@ -109,6 +164,47 @@ def test_extract_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
         assert "extraction_confidence" in extraction
         # Transient extractor-only field must not leak onto the wire.
         assert "line_items_detected" not in extraction
+        # Single-item receipt → no per-line breakdown.
+        assert extraction["line_items"] == []
+    finally:
+        _clear()
+
+
+def test_extract_multi_item_returns_per_line_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
+    _override_reader()
+
+    async def fake_extract(*, data: bytes, mime_type: str) -> ExtractedPurchaseFields:
+        return _extracted_multi()
+
+    monkeypatch.setattr(main_module, "extract_from_blob", fake_extract)
+    try:
+        response = _post()
+        assert response.status_code == 200, response.text
+        extraction = response.json()["extraction"]
+
+        # Top-level stays the highest-priced item (backward compat).
+        assert extraction["product_name"] == "Laptop"
+
+        lines = extraction["line_items"]
+        assert len(lines) == 2
+        assert [line["receipt_line_key"] for line in lines] == ["line-0", "line-1"]
+
+        # Each line carries its own product + price and the shared receipt
+        # fields (order_id / platform / purchase_date) merged in.
+        by_name = {line["product_name"]: line for line in lines}
+        assert set(by_name) == {"Laptop", "Mouse"}
+        mouse = by_name["Mouse"]
+        assert mouse["price_paid"] == 29.0
+        assert mouse["product_id"] == "M111"
+        assert mouse["order_id"] == "ORDER-7"
+        assert mouse["platform"] == "best_buy"
+        assert mouse["purchase_date"] == "2026-05-04T18:22:31Z"
+        assert mouse["currency"] == "USD"
+
+        # Per-line price confidence is the line's own — NOT the 0.4
+        # multi-item cap applied to the ambiguous top-level price.
+        assert mouse["extraction_confidence"]["price_paid"] == 0.94
+        assert mouse["extraction_confidence"]["price"] == 0.94
     finally:
         _clear()
 

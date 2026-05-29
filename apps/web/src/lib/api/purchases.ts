@@ -420,6 +420,26 @@ export type UploadExtraction = {
   status: PurchaseStatus | string | null;
   currency: string | null;
   extraction_confidence: ExtractionConfidenceDoc | null;
+  /**
+   * Which line of a multi-item receipt this extraction represents
+   * ("line-0", …). Present only on a per-line extraction inside
+   * `line_items`; absent/null on the top-level (highest-priced) item.
+   */
+  receipt_line_key?: string | null;
+  /**
+   * Per-line breakdown when the receipt itemizes more than one
+   * purchasable product. Each entry is a FULL extraction (shared receipt
+   * fields merged with that line's fields) plus its `receipt_line_key`,
+   * so the selection UI renders one card per item and the confirm form
+   * can be pre-filled from a chosen line. Empty / absent for single-item
+   * receipts — the FE falls through to the single-item confirm flow.
+   */
+  line_items?: UploadLineItem[] | null;
+};
+
+/** One resolved receipt line — a full extraction with a stable line key. */
+export type UploadLineItem = Omit<UploadExtraction, "line_items"> & {
+  receipt_line_key: string;
 };
 
 /**
@@ -485,6 +505,13 @@ export type CreatePurchaseRequest = {
   content_type: string;
   extraction?: UploadExtraction | null;
   corrected_fields?: Record<string, unknown>;
+  /**
+   * Identifies which line of a multi-item receipt is being tracked
+   * ("line-0", …). Omitted/null for single-item uploads and manual fill.
+   * The server scopes dedup on it and suffixes the internal receipt_hash
+   * so multiple items off one receipt each create their own purchase.
+   */
+  receipt_line_key?: string | null;
 };
 
 export async function createPurchase(body: CreatePurchaseRequest): Promise<PurchaseWriteResponse> {
