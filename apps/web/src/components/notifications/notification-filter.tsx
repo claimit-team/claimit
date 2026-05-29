@@ -13,7 +13,7 @@ import { EVENT_LABELS, FILTERABLE_EVENT_TYPES } from "@/lib/notifications/event-
 import { cn } from "@/lib/utils";
 
 export type NotificationStatusFilter = "all" | "unread";
-const ALL_TYPES_VALUE = "__all__";
+const ALL_TYPES_VALUE = "all";
 
 type Tab = { value: NotificationStatusFilter; label: string };
 
@@ -82,7 +82,9 @@ export function NotificationFilter({
         }
       >
         <SelectTrigger className="h-9 w-full max-w-[16rem] sm:w-56" aria-label="Filter by type">
-          <SelectValue placeholder="All types" />
+          <SelectValue placeholder="All types">
+            {eventType ? EVENT_LABELS[eventType] : "All types"}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={ALL_TYPES_VALUE}>All types</SelectItem>
