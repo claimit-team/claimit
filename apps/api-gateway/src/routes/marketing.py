@@ -57,7 +57,7 @@ async def subscribe_newsletter(
     normalized_email = validate_email_or_raise(body.email, raise_error=_raise_api_error)
 
     client_ip = get_client_ip(request)
-    if not check_ip_rate_limit(client_ip):
+    if not check_ip_rate_limit(client_ip, "newsletter"):
         raise ApiError(
             "rate_limited",
             "Please wait a few minutes before subscribing.",
