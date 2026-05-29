@@ -45,6 +45,7 @@ from .dedup import hash_receipt
 from .extractor import (
     ALLOWED_BLOB_MIME_TYPES,
     ExtractorError,
+    build_line_item_payloads,
     extract_from_blob,
     extract_from_email,
 )
@@ -1111,6 +1112,33 @@ async def internal_extract(
     fields["extraction_confidence"] = confidence  # computed aggregate
     fields["status"] = status_value
     fields["currency"] = "USD"
+
+    # Reshape the raw model `line_items` into per-line FULL extractions:
+    # shared receipt fields merged with each line's own fields, a stable
+    # `receipt_line_key`, and a per-line (uncapped) confidence + status.
+    # The frontend renders one selection card per entry; the api-gateway
+    # builds a Purchase from the chosen line. Empty for single-item
+    # receipts → the FE falls through to today's single-item confirm.
+    line_payloads = build_line_item_payloads(extracted)
+    if line_payloads:
+        shared = {
+            "platform": fields["platform"],
+            "category": fields["category"],
+            "order_id": fields["order_id"],
+            "purchase_date": fields["purchase_date"],
+            "purchase_date_basis": fields["purchase_date_basis"],
+            "member_tier_at_purchase": fields["member_tier_at_purchase"],
+            "fare_class": fields["fare_class"],
+            "room_type": fields["room_type"],
+            "bed_type": fields["bed_type"],
+            "rate_type": fields["rate_type"],
+            "member_price_at_purchase": fields["member_price_at_purchase"],
+            "non_member_price_at_purchase": fields["non_member_price_at_purchase"],
+            "currency": "USD",
+        }
+        fields["line_items"] = [{**shared, **line} for line in line_payloads]
+    else:
+        fields["line_items"] = []
 
     _log.info(
         "internal_extract: extracted ref=%s user_id=%s platform=%s status=%s",

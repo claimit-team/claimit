@@ -269,6 +269,65 @@ def test_extracted_purchase_fields_defaults_line_items_to_one() -> None:
     assert extracted.line_items_detected == 1
 
 
+def test_line_item_price_paid_must_be_positive() -> None:
+    """A line with price_paid <= 0 fails LineItem validation, like the top-level."""
+    payload = _sample_extracted_payload()
+    payload["line_items_detected"] = 2
+    payload["line_items"] = [
+        {
+            "product_name": "Bad",
+            "product_id": None,
+            "price_paid": 0,
+            "confidence": {"price_paid": 0.5},
+        },
+    ]
+    with pytest.raises(ValidationError, match="price_paid"):
+        ExtractedPurchaseFields.model_validate(payload)
+
+
+def test_build_line_item_payloads_empty_for_single_item() -> None:
+    """Single-item extraction (no line_items) → no per-line payloads."""
+    extracted = ExtractedPurchaseFields.model_validate(_sample_extracted_payload())
+    assert extractor.build_line_item_payloads(extracted) == []
+
+
+def test_build_line_item_payloads_resolves_each_line() -> None:
+    payload = _sample_extracted_payload()
+    payload["line_items_detected"] = 2
+    payload["line_items"] = [
+        {
+            "product_name": "Laptop",
+            "product_id": "L999",
+            "variant": "16GB",
+            "price_paid": 999.0,
+            "confidence": {"product_name": 0.97, "price_paid": 0.96},
+        },
+        {
+            # No product_id → order- fallback + FALLBACK confidence.
+            "product_name": "Mouse",
+            "product_id": None,
+            "price_paid": 29.0,
+            "confidence": {"product_name": 0.95, "price_paid": 0.94},
+        },
+    ]
+    extracted = ExtractedPurchaseFields.model_validate(payload)
+
+    payloads = extractor.build_line_item_payloads(extracted)
+    assert [p["receipt_line_key"] for p in payloads] == ["line-0", "line-1"]
+
+    laptop, mouse = payloads
+    assert laptop["product_id"] == "L999"
+    # Per-line price confidence is the line's own (uncapped).
+    assert laptop["extraction_confidence"]["price_paid"] == 0.96
+    assert laptop["extraction_confidence"]["price"] == 0.96
+
+    # order- fallback applied for the SKU-less line.
+    assert mouse["product_id"] == "order-a123"
+    assert mouse["extraction_confidence"]["product_id"] == extractor.FALLBACK_PRODUCT_ID_CONFIDENCE
+    # Fallback line routes to user edit (mirrors the single-item fallback).
+    assert mouse["status"] == "pending_user_edit"
+
+
 def test_resolve_status_multi_item_overrides_high_confidence() -> None:
     """_resolve_status(multi_item=True) must return pending_user_edit
     regardless of confidence, mirroring the fallback_used branch.

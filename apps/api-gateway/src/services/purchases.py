@@ -861,14 +861,20 @@ async def _assert_not_duplicate_purchase(
     platform: Any,
     order_id: str | None,
     receipt_hash: str | None,
+    receipt_line_key: str | None = None,
 ) -> None:
     """Block confirm-create when this receipt duplicates a committed purchase.
 
     Two checks, both scoped to `_COMMITTED_PURCHASE_STATUSES` so a user can
     still re-upload freely before confirming:
-      1. `(user_id, platform, order_id)` for a non-empty order_id — mirrors
-         the unique partial index (`order_id > ""`).
-      2. `receipt_hash` — identical receipt bytes already confirmed.
+      1. `(user_id, platform, order_id, receipt_line_key)` for a non-empty
+         order_id — mirrors the unique partial index. `receipt_line_key`
+         scopes the check to ONE line of a multi-item receipt, so two
+         different items off the same order_id don't false-positive each
+         other; re-confirming the SAME line still matches (desired).
+      2. `receipt_hash` — identical receipt bytes already confirmed. The
+         caller passes the per-line-suffixed hash for multi-item lines, so
+         this is automatically line-scoped too.
     Raises ApiError(duplicate, 409) on the first match.
     """
     platform_value = platform.value if isinstance(platform, Platform) else platform
@@ -879,6 +885,7 @@ async def _assert_not_duplicate_purchase(
                 "user_id": user_id,
                 "platform": platform_value,
                 "order_id": order_id,
+                "receipt_line_key": receipt_line_key,
                 "status": {"$in": _COMMITTED_PURCHASE_STATUSES},
             },
             PurchaseReadTolerant,
@@ -937,6 +944,7 @@ async def create_purchase_from_confirm(
     content_type: str,
     extraction: dict[str, Any] | None,
     corrected_fields: dict[str, Any] | None,
+    receipt_line_key: str | None = None,
 ) -> Purchase:
     """Create the Purchase for a confirmed upload — the first Mongo write.
 
@@ -980,6 +988,14 @@ async def create_purchase_from_confirm(
             status_code=400,
         ) from err
     receipt_hash = f"sha256:{hashlib.sha256(receipt_bytes).hexdigest()}"
+    # Multi-item receipt: every selected line shares the same bytes (and
+    # the same real order_id), so suffix the INTERNAL-only receipt_hash per
+    # line to keep each line's Purchase distinct under the global
+    # receipt_hash unique index. order_id stays the clean merchant number.
+    # Re-confirming the SAME line yields the same suffixed hash → the
+    # unique index backstops a double-track.
+    if receipt_line_key:
+        receipt_hash = f"{receipt_hash}#{receipt_line_key}"
 
     if corrected_fields:
         for key in corrected_fields:
@@ -1007,6 +1023,7 @@ async def create_purchase_from_confirm(
         platform=eff_platform,
         order_id=eff_order_id,
         receipt_hash=receipt_hash,
+        receipt_line_key=receipt_line_key,
     )
 
     now = datetime.now(UTC)
@@ -1036,6 +1053,7 @@ async def create_purchase_from_confirm(
             "ingestion_source": ingestion_source,
             "receipt_storage_url": storage_url,
             "receipt_hash": receipt_hash,
+            "receipt_line_key": receipt_line_key,
             "ingested_at": now,
             "updated_at": now,
             "window_expires": window_expires or now,

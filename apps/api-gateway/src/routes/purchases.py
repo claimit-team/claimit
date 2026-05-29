@@ -54,6 +54,12 @@ class CreatePurchaseRequest(BaseModel):
     content_type: str = Field(min_length=1)
     extraction: dict[str, Any] | None = Field(default=None)
     corrected_fields: dict[str, Any] | None = Field(default=None)
+    # Which line of a multi-item receipt this confirm tracks ("line-0",
+    # "line-1", …). None for single-item uploads and manual fill. Lets the
+    # user create one monitored Purchase per item off a single receipt —
+    # the server scopes dedup on it and suffixes the internal receipt_hash
+    # so the lines don't collide on the shared order_id / receipt bytes.
+    receipt_line_key: str | None = Field(default=None)
 
 
 class UpdatePurchaseRequest(BaseModel):
@@ -187,6 +193,7 @@ async def confirm_create_purchase(
         content_type=body.content_type,
         extraction=body.extraction,
         corrected_fields=body.corrected_fields,
+        receipt_line_key=body.receipt_line_key,
     )
     return {"purchase": serialize_purchase(purchase)}
 

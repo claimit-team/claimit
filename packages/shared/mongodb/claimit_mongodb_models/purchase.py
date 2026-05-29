@@ -65,6 +65,14 @@ class Purchase(BaseDocument):
     ingestion_source: IngestionSource
     receipt_storage_url: str | None
     receipt_hash: str | None
+    # Identifies which line of a multi-item receipt this purchase tracks
+    # (e.g. "line-0", "line-1"). None for single-item uploads, Gmail
+    # ingest, and manual fill. Part of the (user_id, platform, order_id,
+    # receipt_line_key) unique index so several items off one receipt —
+    # which all share a single real order_id — can each become their own
+    # monitored purchase without colliding. order_id itself stays the
+    # clean merchant order number (the claim-agent submits it).
+    receipt_line_key: str | None = None
     format_hash: str | None = None
     sender: str | None = None
     extraction_confidence: ExtractionConfidence
