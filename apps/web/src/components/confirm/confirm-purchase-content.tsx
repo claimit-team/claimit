@@ -46,7 +46,7 @@ const PENDING_CONFIRMATION_THRESHOLD = 0.95;
  * `price` aggregate is collapsed onto `price_paid` (same input on
  * the form) so the banner never lists "Purchase price" twice.
  */
-function deriveLowConfidenceFields(confidence: PurchaseDetailDoc["extraction_confidence"]): {
+export function deriveLowConfidenceFields(confidence: PurchaseDetailDoc["extraction_confidence"]): {
   fields: string[];
   isMostlyFailed: boolean;
 } {

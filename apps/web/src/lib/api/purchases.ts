@@ -519,6 +519,38 @@ export async function createPurchase(body: CreatePurchaseRequest): Promise<Purch
 }
 
 /**
+ * POST /api/v1/purchases/:id/reupload-receipt — replace the receipt on
+ * an EXISTING monitored purchase and apply the reviewed fields (BUG-85).
+ *
+ * Same body shape as `createPurchase` — the receipt was already stored
+ * (+ extracted) by `uploadPurchase`; this swaps it onto the existing
+ * purchase, merges `extraction` with the user's `corrected_fields`,
+ * recomputes the window, clears stale monitor errors, and keeps the
+ * purchase monitoring. Only valid while monitoring (409 otherwise).
+ */
+export type ReuploadReceiptRequest = {
+  storage_url: string;
+  content_type: string;
+  extraction?: UploadExtraction | null;
+  corrected_fields?: Record<string, unknown>;
+};
+
+export async function reuploadReceipt(
+  purchaseId: string,
+  body: ReuploadReceiptRequest,
+): Promise<PurchaseWriteResponse> {
+  return _request<PurchaseWriteResponse>(
+    `/api/v1/purchases/${encodeURIComponent(purchaseId)}/reupload-receipt`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    "Re-upload receipt failed",
+  );
+}
+
+/**
  * POST /api/v1/purchases/:id/confirm — apply user corrections and
  * flip the purchase to `monitoring`.
  *
@@ -605,6 +637,21 @@ export async function updatePurchase(
       body: JSON.stringify(body),
     },
     "Update purchase failed",
+  );
+}
+
+/**
+ * POST /api/v1/purchases/:id/stop-monitoring — stop tracking a
+ * monitored purchase (BUG-85). Transitions it to `dismissed`, which the
+ * UI renders as a neutral "Stopped" badge. Dedicated endpoint (NOT
+ * /dismiss): only valid while the purchase is actively monitoring; the
+ * backend 409s from any other status.
+ */
+export async function stopMonitoring(purchaseId: string): Promise<PurchaseWriteResponse> {
+  return _request<PurchaseWriteResponse>(
+    `/api/v1/purchases/${encodeURIComponent(purchaseId)}/stop-monitoring`,
+    { method: "POST" },
+    "Stop monitoring failed",
   );
 }
 
