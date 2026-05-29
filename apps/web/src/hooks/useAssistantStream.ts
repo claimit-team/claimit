@@ -224,7 +224,7 @@ export function useAssistantStream(): UseAssistantStreamResult {
           onToolResult: (toolName, summary) => {
             setMessages((prev) => addToolResultToAssistant(prev, assistantId, toolName, summary));
           },
-          onDone: (errorMsg) => {
+          onDone: (errorMsg, traceId) => {
             if (errorMsg) {
               // Server done-frame error (assistant-agent threw). Log the raw string
               // for debugging but never show it to the user — curate it.
@@ -237,6 +237,11 @@ export function useAssistantStream(): UseAssistantStreamResult {
             } else {
               setMessages((prev) =>
                 finalizeAssistantTurn(prev, assistantId, emptyFallbackForTools(turnToolNames)),
+              );
+            }
+            if (traceId) {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, trace_id: traceId } : m)),
               );
             }
           },
@@ -279,7 +284,7 @@ interface FrameHandlers {
   onTextChunk: (chunk: string) => void;
   onToolCall: (call: { tool: string; input: Record<string, unknown> }) => void;
   onToolResult: (tool: string, output_summary: string) => void;
-  onDone: (errorMsg?: string) => void;
+  onDone: (errorMsg?: string, traceId?: string) => void;
   onUnknown: (eventType: string, data: string) => void;
   onHeartbeat?: () => void;
   onStall?: () => void;
@@ -413,15 +418,19 @@ function dispatchFrame(raw: string, handlers: FrameHandlers): boolean {
     }
     case "done": {
       let errorMsg: string | undefined;
+      let traceId: string | undefined;
       try {
-        const parsed = JSON.parse(data) as { error?: string };
+        const parsed = JSON.parse(data) as { error?: string; trace_id?: string };
         if (typeof parsed.error === "string" && parsed.error.length > 0) {
           errorMsg = parsed.error;
+        }
+        if (typeof parsed.trace_id === "string" && parsed.trace_id.length > 0) {
+          traceId = parsed.trace_id;
         }
       } catch {
         // ignore — treat as happy completion
       }
-      handlers.onDone(errorMsg);
+      handlers.onDone(errorMsg, traceId);
       return true;
     }
     case "heartbeat": {

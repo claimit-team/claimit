@@ -56,6 +56,8 @@ export interface UIMessage {
   streaming?: boolean;
   /** Set when the stream errored out — UI renders a retry affordance. */
   error?: string;
+  /** Phoenix trace ID — present on assistant messages after stream completes. */
+  trace_id?: string;
 }
 
 export interface UIToolCall {
