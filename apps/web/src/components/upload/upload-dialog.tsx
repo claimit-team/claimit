@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { PurchasesApiError, uploadPurchase } from "@/lib/api/purchases";
+import { stashUploadDraft } from "@/lib/confirm-staging";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store";
 
@@ -132,8 +133,12 @@ export function UploadDialog() {
     if (!file || uploading) return;
     setUploading(true);
     try {
-      const { purchase } = await uploadPurchase(file);
+      const draft = await uploadPurchase(file);
       toast.success("Receipt uploaded.");
+      // Write-after-confirm: nothing is persisted yet. Stash the
+      // extracted fields client-side and route to /confirm/<stagingKey>;
+      // the Purchase is created only when the user confirms there.
+      const stagingKey = stashUploadDraft(draft);
       // Close before navigating so the dialog doesn't briefly flash
       // back over the confirm page during route transition.
       setOpen(false);
@@ -142,7 +147,7 @@ export function UploadDialog() {
       // be opened from any page but the "I uploaded then changed my
       // mind" return surface is the dashboard hero). Cancel inside
       // the confirm page is unchanged — also lands on /dashboard.
-      router.push(`/confirm/${purchase._id}?from=/dashboard`);
+      router.push(`/confirm/${stagingKey}?from=/dashboard`);
     } catch (err) {
       let message = "We couldn't upload that receipt. Try again.";
       if (err instanceof PurchasesApiError) {
@@ -167,9 +172,10 @@ export function UploadDialog() {
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        // An in-flight upload should not be cancellable mid-request —
-        // the user could otherwise leave behind a sentinel
-        // pending_confirmation purchase with no FE follow-up.
+        // An in-flight upload (GCS write + synchronous extraction) should
+        // not be cancellable mid-request — closing the dialog would drop
+        // the response the confirm page needs. Nothing is persisted to
+        // MongoDB until the user confirms, so there's no sentinel to strand.
         if (uploading && !next) return;
         setOpen(next);
       }}

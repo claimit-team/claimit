@@ -157,6 +157,17 @@ resource "google_pubsub_topic_iam_member" "ingest_agent_publisher_on_purchase_in
   member  = "serviceAccount:${module.ingest_agent.service_account_email}"
 }
 
+# api-gateway → purchase.ingested. Under write-after-confirm, the api-gateway
+# creates the Purchase when the user confirms an upload and publishes
+# purchase.ingested so the monitor-agent starts tracking (this moved off the
+# ingest-agent's async finalize path for the upload flow).
+resource "google_pubsub_topic_iam_member" "api_gateway_publisher_on_purchase_ingested" {
+  project = var.project_id
+  topic   = google_pubsub_topic.main["purchase.ingested"].name
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${module.api_gateway.service_account_email}"
+}
+
 # monitor-agent → price.dropped (cron price polling). Unblocks the full
 # ingest→monitor→claim pipeline when a drop triggers claim drafting.
 resource "google_pubsub_topic_iam_member" "monitor_agent_publisher_on_price_dropped" {

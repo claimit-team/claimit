@@ -20,6 +20,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   confirmPurchase,
+  createPurchase,
   type DismissReason,
   dismissPurchase,
   type PurchaseDetailDoc,
@@ -30,6 +31,7 @@ import {
   type ConfirmFormState,
   getSubmitBlocker,
 } from "@/lib/confirm-form-state";
+import { type ConfirmDraftContext, clearUploadDraft } from "@/lib/confirm-staging";
 
 interface ActionBarProps {
   purchase: PurchaseDetailDoc;
@@ -37,6 +39,13 @@ interface ActionBarProps {
   initialFormState: ConfirmFormState;
   /** Live form state. */
   formState: ConfirmFormState;
+  /**
+   * Present for the write-after-confirm UPLOAD flow: nothing is persisted
+   * yet, so Confirm creates the Purchase via POST /confirm-create (rather
+   * than confirming an existing doc), Cancel discards the stashed draft,
+   * and the server-side Dismiss flow is hidden (there's nothing to dismiss).
+   */
+  draft?: ConfirmDraftContext;
 }
 
 /**
@@ -75,7 +84,7 @@ interface ActionBarProps {
  * Buttons stay disabled while either POST is in-flight so the user
  * can't double-fire confirm + dismiss.
  */
-export function ActionBar({ purchase, initialFormState, formState }: ActionBarProps) {
+export function ActionBar({ purchase, initialFormState, formState, draft }: ActionBarProps) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [dismissOpen, setDismissOpen] = useState(false);
@@ -109,7 +118,12 @@ export function ActionBar({ purchase, initialFormState, formState }: ActionBarPr
   const showSkipSender =
     (dismissReason === "not_an_order" || dismissReason === "other") && hasSender;
 
-  const handleCancel = () => router.push("/dashboard");
+  const handleCancel = () => {
+    // Upload draft: discard the stashed extraction so a stale key can't be
+    // re-opened. Nothing was persisted, so there's no server cleanup.
+    if (draft) clearUploadDraft(draft.stagingKey);
+    router.push("/dashboard");
+  };
 
   const handleConfirm = async () => {
     if (submitting) return;
@@ -120,10 +134,21 @@ export function ActionBar({ purchase, initialFormState, formState }: ActionBarPr
     setSubmitting(true);
     const patch = buildCorrectedFields(initialFormState, formState);
     try {
-      const { purchase: updated } = await confirmPurchase(
-        purchase._id,
-        patch === undefined ? {} : { corrected_fields: patch },
-      );
+      // Write-after-confirm upload: create the Purchase now (first Mongo
+      // write). Otherwise (Gmail deep-link), confirm the existing doc.
+      const { purchase: updated } = draft
+        ? await createPurchase({
+            storage_url: draft.storage_url,
+            content_type: draft.content_type,
+            receipt_hash: draft.receipt_hash,
+            extraction: draft.extraction,
+            ...(patch === undefined ? {} : { corrected_fields: patch }),
+          })
+        : await confirmPurchase(
+            purchase._id,
+            patch === undefined ? {} : { corrected_fields: patch },
+          );
+      if (draft) clearUploadDraft(draft.stagingKey);
       toast.success(buildConfirmToast(updated, formState));
       router.push(`/purchases/${updated._id}`);
     } catch (err) {
@@ -186,106 +211,111 @@ export function ActionBar({ purchase, initialFormState, formState }: ActionBarPr
             Cancel
           </button>
 
-          <Dialog
-            open={dismissOpen}
-            onOpenChange={(next) => {
-              // Reset selections on close so re-opening shows the
-              // default (Not an order, with "skip future emails from this
-              // sender" pre-checked — see `defaultRememberForReason`).
-              if (!next) {
-                setDismissReason("not_an_order");
-                setRememberSender(defaultRememberForReason("not_an_order"));
-              }
-              setDismissOpen(next);
-            }}
-          >
-            <DialogTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full sm:w-auto"
-                  disabled={submitting}
-                />
-              }
+          {/* Upload drafts have no persisted doc to dismiss — Cancel
+              discards them. Only the Gmail/existing-doc path shows Ignore. */}
+          {!draft ? (
+            <Dialog
+              open={dismissOpen}
+              onOpenChange={(next) => {
+                // Reset selections on close so re-opening shows the
+                // default (Not an order, with "skip future emails from this
+                // sender" pre-checked — see `defaultRememberForReason`).
+                if (!next) {
+                  setDismissReason("not_an_order");
+                  setRememberSender(defaultRememberForReason("not_an_order"));
+                }
+                setDismissOpen(next);
+              }}
             >
-              Ignore this
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Ignore this receipt?</DialogTitle>
-                <DialogDescription>
-                  Tell us why — it helps us send fewer of these in the future.
-                </DialogDescription>
-              </DialogHeader>
+              <DialogTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                    disabled={submitting}
+                  />
+                }
+              >
+                Ignore this
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Ignore this receipt?</DialogTitle>
+                  <DialogDescription>
+                    Tell us why — it helps us send fewer of these in the future.
+                  </DialogDescription>
+                </DialogHeader>
 
-              <div className="flex flex-col gap-4 py-2">
-                <RadioGroup
-                  value={dismissReason}
-                  onValueChange={(v) => {
-                    const next = (v ?? "not_an_order") as DismissReason;
-                    setDismissReason(next);
-                    // Apply the reason-aware default so the checkbox state
-                    // matches what the user would expect for each reason
-                    // every time they flip the selection — they can still
-                    // override before submitting.
-                    setRememberSender(defaultRememberForReason(next));
-                  }}
-                  disabled={submitting}
-                >
-                  <DismissReasonRow
-                    value="not_an_order"
-                    label="Not an order"
-                    description="This receipt isn't an order we should monitor (e.g. shipping update, account alert, marketing)."
-                  />
-                  <DismissReasonRow
-                    value="duplicate"
-                    label="Duplicate"
-                    description="We already track this purchase — no need to start a second monitor."
-                  />
-                  <DismissReasonRow
-                    value="other"
-                    label="Other"
-                    description="None of the above. We'll still skip monitoring."
-                  />
-                </RadioGroup>
-
-                {showSkipSender ? (
-                  <label className="flex items-start gap-2 rounded-md border border-neutral-200 bg-neutral-50 p-3">
-                    <input
-                      type="checkbox"
-                      checked={rememberSender}
-                      onChange={(e) => setRememberSender(e.target.checked)}
-                      disabled={submitting}
-                      className="mt-0.5 size-4 cursor-pointer rounded border-neutral-300 text-brand-primary-500 focus:ring-brand-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
+                <div className="flex flex-col gap-4 py-2">
+                  <RadioGroup
+                    value={dismissReason}
+                    onValueChange={(v) => {
+                      const next = (v ?? "not_an_order") as DismissReason;
+                      setDismissReason(next);
+                      // Apply the reason-aware default so the checkbox state
+                      // matches what the user would expect for each reason
+                      // every time they flip the selection — they can still
+                      // override before submitting.
+                      setRememberSender(defaultRememberForReason(next));
+                    }}
+                    disabled={submitting}
+                  >
+                    <DismissReasonRow
+                      value="not_an_order"
+                      label="Not an order"
+                      description="This receipt isn't an order we should monitor (e.g. shipping update, account alert, marketing)."
                     />
-                    <span className="text-sm text-neutral-700">
-                      Skip future emails from <span className="font-medium">{purchase.sender}</span>
-                      <span className="block text-xs text-neutral-500">
-                        We won't auto-monitor anything else from this sender.
-                      </span>
-                    </span>
-                  </label>
-                ) : null}
-              </div>
+                    <DismissReasonRow
+                      value="duplicate"
+                      label="Duplicate"
+                      description="We already track this purchase — no need to start a second monitor."
+                    />
+                    <DismissReasonRow
+                      value="other"
+                      label="Other"
+                      description="None of the above. We'll still skip monitoring."
+                    />
+                  </RadioGroup>
 
-              <DialogFooter>
-                <DialogClose
-                  render={<Button type="button" variant="outline" disabled={submitting} />}
-                >
-                  Go back
-                </DialogClose>
-                <Button
-                  type="button"
-                  className="bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600"
-                  disabled={submitting}
-                  onClick={handleDismiss}
-                >
-                  {submitting ? "Ignoring…" : "Yes, ignore"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+                  {showSkipSender ? (
+                    <label className="flex items-start gap-2 rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                      <input
+                        type="checkbox"
+                        checked={rememberSender}
+                        onChange={(e) => setRememberSender(e.target.checked)}
+                        disabled={submitting}
+                        className="mt-0.5 size-4 cursor-pointer rounded border-neutral-300 text-brand-primary-500 focus:ring-brand-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+                      <span className="text-sm text-neutral-700">
+                        Skip future emails from{" "}
+                        <span className="font-medium">{purchase.sender}</span>
+                        <span className="block text-xs text-neutral-500">
+                          We won't auto-monitor anything else from this sender.
+                        </span>
+                      </span>
+                    </label>
+                  ) : null}
+                </div>
+
+                <DialogFooter>
+                  <DialogClose
+                    render={<Button type="button" variant="outline" disabled={submitting} />}
+                  >
+                    Go back
+                  </DialogClose>
+                  <Button
+                    type="button"
+                    className="bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600"
+                    disabled={submitting}
+                    onClick={handleDismiss}
+                  >
+                    {submitting ? "Ignoring…" : "Yes, ignore"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          ) : null}
 
           <Button
             type="button"
