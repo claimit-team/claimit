@@ -4,13 +4,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 export function EncryptionSection() {
   return (
-    <section className="border-b border-border">
-      <div className="mx-auto max-w-6xl px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
+    <section>
+      <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-28">
         <div className="mb-12">
           <Badge variant="secondary" className="mb-4">
             Encryption
           </Badge>
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+          <h2 className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
             Encryption and transport
           </h2>
         </div>

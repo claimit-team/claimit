@@ -1,7 +1,7 @@
 "use client";
 
 import type { ClaimOutcome } from "@claimit/mongodb-types";
-import { Search } from "lucide-react";
+import { Search, SearchX } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -23,6 +23,7 @@ import {
 import { useClaims } from "@/hooks/useClaims";
 import type { ClaimListItem, StatusGroup } from "@/lib/api/claims";
 import { claimTypeLabel, formatRelativeFromNow, formatWindowRemaining } from "@/lib/claims-status";
+import { getPlatformLabel } from "@/lib/platform-labels";
 import { cn } from "@/lib/utils";
 
 // --- chip group config ---------------------------------------------------
@@ -74,13 +75,6 @@ function formatMoney(amount: number | null, currency: string | null): string {
   } catch {
     return `${currency} ${amount}`;
   }
-}
-
-// `claim.platform` may be null on legacy data — render the same em-dash
-// rather than calling `.replace` on a nullish value.
-function platformLabel(platform: string | null): string {
-  if (platform === null || platform === "") return "—";
-  return platform.replace(/_/g, " ");
 }
 
 function formatDateShort(iso: string | null): string {
@@ -164,7 +158,20 @@ function LoadingSkeleton() {
   );
 }
 
-function EmptyState({ chip }: { chip: ChipKey }) {
+function EmptyState({ chip, hasSearch }: { chip: ChipKey; hasSearch: boolean }) {
+  if (hasSearch) {
+    return (
+      <Card className="mx-auto max-w-md">
+        <CardContent className="py-10 text-center">
+          <SearchX className="mx-auto mb-3 h-10 w-10 text-neutral-300" aria-hidden />
+          <h3 className="text-base font-medium text-neutral-900">No results found</h3>
+          <p className="mt-2 text-sm text-neutral-600">
+            Try adjusting your search term or clearing filters.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
   const copy = EMPTY_COPY[chip];
   return (
     <Card className="mx-auto max-w-md">
@@ -218,9 +225,7 @@ function ClaimRow({ claim }: { claim: ClaimListItem }) {
             <span className="truncate font-medium text-neutral-900">
               {claim.product_name ?? "Unlinked claim"}
             </span>
-            <span className="text-xs text-neutral-500 capitalize">
-              {platformLabel(claim.platform)}
-            </span>
+            <span className="text-xs text-neutral-500">{getPlatformLabel(claim.platform)}</span>
           </div>
         </div>
       </TableCell>
@@ -278,8 +283,8 @@ function ClaimCard({ claim }: { claim: ClaimListItem }) {
             <span className="truncate font-medium text-neutral-900">
               {claim.product_name ?? "Unlinked claim"}
             </span>
-            <span className="text-xs text-neutral-500 capitalize">
-              {platformLabel(claim.platform)} · {claimTypeLabel(claim.claim_type)}
+            <span className="text-xs text-neutral-500">
+              {getPlatformLabel(claim.platform)} · {claimTypeLabel(claim.claim_type)}
             </span>
           </div>
         </div>
@@ -311,6 +316,8 @@ export default function ClaimsPage() {
     setStatusGroup,
     q,
     setQ,
+    debouncedQ,
+    counts,
     refetch,
     loadMore,
   } = useClaims();
@@ -337,13 +344,14 @@ export default function ClaimsPage() {
           <div className="flex flex-wrap gap-2">
             {CHIPS.map((chip) => {
               const isActive = chip.key === activeChip;
+              const count = counts[chip.key];
               return (
                 <button
                   key={chip.key}
                   type="button"
                   onClick={() => setStatusGroup(chip.key === "all" ? null : chip.key)}
                   className={cn(
-                    "rounded-full border px-3 py-1.5 text-sm transition-colors",
+                    "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors",
                     isActive
                       ? "border-brand-primary-500 bg-brand-primary-500 text-primary-foreground"
                       : "border-neutral-200 bg-neutral-0 text-neutral-700 hover:bg-neutral-50",
@@ -351,6 +359,18 @@ export default function ClaimsPage() {
                   aria-pressed={isActive}
                 >
                   {chip.label}
+                  {count != null && (
+                    <span
+                      className={cn(
+                        "inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1 text-xs font-medium",
+                        isActive
+                          ? "bg-white/20 text-primary-foreground"
+                          : "bg-neutral-100 text-neutral-600",
+                      )}
+                    >
+                      {count}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -376,7 +396,7 @@ export default function ClaimsPage() {
       ) : isLoading ? (
         <LoadingSkeleton />
       ) : claims.length === 0 ? (
-        <EmptyState chip={emptyChipKey} />
+        <EmptyState chip={emptyChipKey} hasSearch={!!debouncedQ} />
       ) : (
         <>
           <div className="hidden rounded-xl border border-neutral-200 bg-neutral-0 shadow-sm md:block">

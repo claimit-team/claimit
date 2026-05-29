@@ -101,7 +101,11 @@ async def test_list_claims_empty(client: AsyncClient) -> None:
             response = await client.get("/api/v1/claims", headers={"Authorization": "Bearer t"})
         assert response.status_code == 200
         payload = response.json()
-        assert payload == {"claims": [], "next_cursor": None}
+        assert payload == {
+            "claims": [],
+            "next_cursor": None,
+            "counts": {"all": 0, "pending": 0, "in_progress": 0, "resolved": 0},
+        }
     finally:
         _clear_overrides()
 
@@ -123,7 +127,8 @@ async def test_list_claims_with_filters_passes_them_to_aggregation(
             )
         assert response.status_code == 200
         # Inspect the aggregation $match the service built.
-        pipeline = db.aggregate.await_args.args[1]
+        # First call is the main pipeline, second is the count pipeline.
+        pipeline = db.aggregate.await_args_list[0].args[1]
         match = _stage(pipeline, "$match")
         assert match is not None
         assert match["$match"]["user_id"] == UUID(_USER_ID)
@@ -184,7 +189,8 @@ async def test_list_claims_enriches_product_name_category_window(client: AsyncCl
         assert "draft_content" not in row
         assert "draft_versions" not in row
         # Pipeline shape: $match → $lookup(purchases) → $unwind → $sort → $limit → $project
-        pipeline = db.aggregate.await_args.args[1]
+        # First call is the main pipeline, second is the count pipeline.
+        pipeline = db.aggregate.await_args_list[0].args[1]
         lookup = _stage(pipeline, "$lookup")
         assert lookup is not None
         assert lookup["$lookup"]["from"] == "purchases"
@@ -239,7 +245,8 @@ async def test_list_claims_status_group_maps_to_outcome_in(
                 headers={"Authorization": "Bearer t"},
             )
         assert response.status_code == 200
-        pipeline = db.aggregate.await_args.args[1]
+        # First call is the main pipeline, second is the count pipeline.
+        pipeline = db.aggregate.await_args_list[0].args[1]
         match = _stage(pipeline, "$match")["$match"]  # type: ignore[index]
         assert "outcome" in match
         assert match["outcome"] == {"$in": expected}
@@ -263,7 +270,8 @@ async def test_list_claims_outcome_wins_over_status_group(client: AsyncClient) -
                 headers={"Authorization": "Bearer t"},
             )
         assert response.status_code == 200
-        pipeline = db.aggregate.await_args.args[1]
+        # First call is the main pipeline, second is the count pipeline.
+        pipeline = db.aggregate.await_args_list[0].args[1]
         match = _stage(pipeline, "$match")["$match"]  # type: ignore[index]
         # outcome wins → exact string, no $in
         assert match["outcome"] == "approved"
@@ -374,7 +382,8 @@ async def test_list_claims_pagination_with_status_group(client: AsyncClient) -> 
                 headers={"Authorization": "Bearer t"},
             )
         assert response.status_code == 200
-        pipeline = db.aggregate.await_args.args[1]
+        # First call is the main pipeline, second is the count pipeline.
+        pipeline = db.aggregate.await_args_list[0].args[1]
         match = _stage(pipeline, "$match")["$match"]  # type: ignore[index]
         assert match["outcome"] == {
             "$in": [

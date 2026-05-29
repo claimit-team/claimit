@@ -140,7 +140,6 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
     }
   }, [isClaimDetail, setClaimEmbeddedAssistantExpanded]);
 
-  const floatingAssistantVariant = isClaimDetail ? ("pill" as const) : ("default" as const);
   const displayName = user?.name ?? user?.email ?? "User";
   const email = user?.email ?? "";
   const initials = getInitials(user?.name);
@@ -208,30 +207,26 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
 
           {/* Header right */}
           <div className="flex items-center gap-3">
-            {!isAssistant ? (
-              <>
-                <SseReconnectChip />
-                <ThemeToggle />
+            <SseReconnectChip />
+            <ThemeToggle />
 
-                <Link
-                  href="/notifications"
-                  aria-label={
-                    unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"
-                  }
-                  className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "relative")}
+            <Link
+              href="/notifications"
+              aria-label={
+                unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"
+              }
+              className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "relative")}
+            >
+              <Bell className="w-5 h-5 text-neutral-600" aria-hidden="true" />
+              {unreadCount > 0 ? (
+                <span
+                  aria-hidden
+                  className="absolute -top-0.5 -right-0.5 inline-flex min-w-[1.125rem] h-[1.125rem] items-center justify-center rounded-full bg-brand-primary-600 px-1 text-[10px] font-semibold leading-none text-neutral-0 tabular-nums"
                 >
-                  <Bell className="w-5 h-5 text-neutral-600" aria-hidden="true" />
-                  {unreadCount > 0 ? (
-                    <span
-                      aria-hidden
-                      className="absolute -top-0.5 -right-0.5 inline-flex min-w-[1.125rem] h-[1.125rem] items-center justify-center rounded-full bg-brand-primary-600 px-1 text-[10px] font-semibold leading-none text-neutral-0 tabular-nums"
-                    >
-                      {unreadCount > 99 ? "99+" : unreadCount}
-                    </span>
-                  ) : null}
-                </Link>
-              </>
-            ) : null}
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              ) : null}
+            </Link>
 
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -302,9 +297,9 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
       {/* Floating assistant — wrapped so `data-print-hide` removes it
           from 5.16 print output (FloatingAssistant uses `position:fixed`
           internally; hiding the wrapper removes it from layout entirely). */}
-      {!isAssistant ? (
+      {!isAssistant && !isClaimDetail ? (
         <div data-print-hide>
-          <FloatingAssistant variant={floatingAssistantVariant} />
+          <FloatingAssistant variant="default" />
         </div>
       ) : null}
 

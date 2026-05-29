@@ -64,7 +64,7 @@ export function SessionActionsCard({ onSignOut }: SessionActionsCardProps) {
               type="button"
               variant="destructive"
               onClick={handleSignOut}
-              className="bg-semantic-danger hover:bg-semantic-danger/90"
+              className="bg-semantic-danger text-neutral-0 hover:bg-semantic-danger/90"
             >
               Sign out
             </Button>

@@ -12,6 +12,7 @@ import {
   Laptop,
   Loader2,
   Mail,
+  Maximize2,
   MessageSquare,
 } from "lucide-react";
 import { type ElementType, useEffect, useState } from "react";
@@ -34,6 +35,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -45,6 +47,7 @@ import type {
   ClaimPolicy,
   DraftVersion,
 } from "@/lib/claim-detail-types";
+import { EDITABLE_STATUSES } from "@/lib/claims-status";
 import { toSafeExternalHref } from "@/lib/safe-url";
 import { cn } from "@/lib/utils";
 
@@ -103,11 +106,13 @@ function PaneHeader({
   return (
     <button
       type="button"
-      className="flex w-full cursor-default items-center gap-2 border-neutral-200 border-b bg-neutral-0 px-4 py-3 text-left"
+      title="Double-click to maximize"
+      className="group flex w-full cursor-pointer items-center gap-2 border-neutral-200 border-b bg-neutral-0 px-4 py-3 text-left transition-colors hover:bg-neutral-50"
       onDoubleClick={onDoubleClick}
     >
       <Icon className="h-4 w-4 text-neutral-500" />
       <h3 className="font-medium text-neutral-900 text-sm">{title}</h3>
+      <Maximize2 className="ml-auto h-3.5 w-3.5 text-neutral-400 opacity-0 transition-opacity group-hover:opacity-100" />
     </button>
   );
 }
@@ -255,16 +260,14 @@ function EmailDraft({
   content,
   policy,
   orderId,
+  subject: savedSubject,
 }: {
   content: string;
   policy: ClaimPolicy;
   orderId: string;
+  subject?: string | null;
 }) {
-  // type_a_email.py L138, L146: draft_content is body-only — Claim has
-  // no `subject` field. Derive a display-only subject from the order
-  // id so the To/Subject rows stay informative. Edit buffer
-  // intentionally excludes this string (WI-3).
-  const subject = deriveEmailSubject(orderId);
+  const subject = savedSubject ?? deriveEmailSubject(orderId);
   const toAddress = policy.claim_email;
 
   return (
@@ -612,7 +615,6 @@ export function DraftPane({
   setSelectedVersion,
   editBuffer,
   setEditBuffer,
-  dirty,
   isRegenerating = false,
   regeneratingTimedOut = false,
   onDoubleClickHeader,
@@ -620,6 +622,19 @@ export function DraftPane({
   const baseline = claim.draft_versions[selectedVersion - 1]?.content ?? "";
 
   const [isSaving, setIsSaving] = useState(false);
+  const [editSubject, setEditSubject] = useState<string>(() => {
+    if (claim.claim_type !== "email") return "";
+    return claim.subject ?? deriveEmailSubject(claim.purchase.order_id);
+  });
+  useEffect(() => {
+    if (claim.claim_type === "email") {
+      setEditSubject(claim.subject ?? deriveEmailSubject(claim.purchase.order_id));
+    }
+  }, [claim.subject, claim.claim_type, claim.purchase.order_id]);
+  const dirty =
+    editBuffer !== baseline ||
+    (claim.claim_type === "email" &&
+      editSubject !== (claim.subject ?? deriveEmailSubject(claim.purchase.order_id)));
 
   // Pending-navigation state for the unsaved-changes guard. Each entry
   // captures the navigation the user wanted but is blocked on
@@ -637,6 +652,7 @@ export function DraftPane({
   // #168). The empty-draft Alert in `renderPreview` already covers the
   // user-facing message; the header navigation stays calm.
   const onLatestVersion = totalVersions === 0 || selectedVersion === totalVersions;
+  const isEditable = EDITABLE_STATUSES.has(claim.status);
   // When the user browses an older version, force preview-only — editing
   // an older version is not a supported rollback flow in 5.7.
   useEffect(() => {
@@ -677,7 +693,12 @@ export function DraftPane({
     switch (claim.claim_type) {
       case "email":
         return (
-          <EmailDraft content={editBuffer} policy={policy} orderId={claim.purchase.order_id} />
+          <EmailDraft
+            content={editBuffer}
+            policy={policy}
+            orderId={claim.purchase.order_id}
+            subject={claim.subject}
+          />
         );
       case "chat_script":
         return <ChatScriptDraft content={editBuffer} />;
@@ -732,11 +753,17 @@ export function DraftPane({
     if (pendingTab !== null) setDraftMode(pendingTab);
     if (pendingVersion !== null) setSelectedVersion(pendingVersion);
     setEditBuffer(nextBaseline);
+    if (claim.claim_type === "email") {
+      setEditSubject(claim.subject ?? deriveEmailSubject(claim.purchase.order_id));
+    }
     clearPending();
   };
 
   const handleDiscard = () => {
     setEditBuffer(baseline);
+    if (claim.claim_type === "email") {
+      setEditSubject(claim.subject ?? deriveEmailSubject(claim.purchase.order_id));
+    }
     setDraftMode("preview");
   };
 
@@ -757,7 +784,10 @@ export function DraftPane({
     try {
       const nowIso = new Date().toISOString();
       const nextVersion = claim.draft_versions.length + 1;
-      await editClaimDraft(claim.claim_id, { draft_content: editBuffer });
+      await editClaimDraft(claim.claim_id, {
+        draft_content: editBuffer,
+        ...(claim.claim_type === "email" && { subject: editSubject }),
+      });
       // Edit write succeeded — apply the optimistic patch + flip back
       // to preview regardless of whether the follow-up refetch lands.
       // A refetch-only failure does NOT mean the save failed; reporting
@@ -866,11 +896,11 @@ export function DraftPane({
             <TabsTrigger value="preview" className="data-active:bg-neutral-100">
               Preview
             </TabsTrigger>
-            {onLatestVersion ? (
+            {isEditable && onLatestVersion ? (
               <TabsTrigger value="edit" className="data-active:bg-neutral-100">
                 Edit
               </TabsTrigger>
-            ) : (
+            ) : isEditable ? (
               <Tooltip>
                 <TooltipTrigger
                   type="button"
@@ -883,7 +913,7 @@ export function DraftPane({
                 </TooltipTrigger>
                 <TooltipContent>Switch to the latest version to edit.</TooltipContent>
               </Tooltip>
-            )}
+            ) : null}
           </TabsList>
         </div>
 
@@ -902,9 +932,31 @@ export function DraftPane({
             <ScrollArea className="h-full">{renderPreview()}</ScrollArea>
           </TabsContent>
 
-          <TabsContent value="edit" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden">
+          <TabsContent
+            value="edit"
+            className="m-0 flex h-full min-h-0 flex-1 flex-col overflow-hidden"
+          >
             <ScrollArea className="min-h-0 flex-1">
               <div className="p-4">
+                {claim.claim_type === "email" && (
+                  <div className="mb-3 flex items-center gap-2">
+                    <label
+                      htmlFor="edit-email-subject"
+                      className="w-16 shrink-0 text-sm font-medium text-neutral-500"
+                    >
+                      Subject
+                    </label>
+                    <Input
+                      id="edit-email-subject"
+                      value={editSubject}
+                      onChange={(e) => setEditSubject(e.target.value)}
+                      className="flex-1 text-sm"
+                      placeholder="Email subject"
+                      disabled={isSaving}
+                      aria-label="Edit email subject"
+                    />
+                  </div>
+                )}
                 {editHint ? <p className="mb-2 text-neutral-500 text-xs">{editHint}</p> : null}
                 <Textarea
                   value={editBuffer}

@@ -43,6 +43,8 @@ type UseClaimsResult = {
   setStatusGroup: (group: StatusGroup | null) => void;
   q: string;
   setQ: (value: string) => void;
+  debouncedQ: string;
+  counts: Record<string, number>;
   refetch: () => void;
   loadMore: () => Promise<void>;
 };
@@ -57,6 +59,7 @@ export function useClaims({ pageSize = DEFAULT_PAGE_SIZE }: UseClaimsArgs = {}):
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [error, setError] = useState<ClaimsApiError | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
+  const [counts, setCounts] = useState<Record<string, number>>({});
 
   const [statusGroup, setStatusGroupState] = useState<StatusGroup | null>(null);
   // Two `q` values: `q` is the controlled input (instant, no fetch) and
@@ -163,6 +166,7 @@ export function useClaims({ pageSize = DEFAULT_PAGE_SIZE }: UseClaimsArgs = {}):
         lastQueryKeyRef.current = queryKey;
         setClaims(page.claims);
         setNextCursor(page.next_cursor);
+        setCounts(page.counts ?? {});
         setError(null);
       })
       .catch((err: unknown) => {
@@ -241,6 +245,8 @@ export function useClaims({ pageSize = DEFAULT_PAGE_SIZE }: UseClaimsArgs = {}):
     setStatusGroup,
     q,
     setQ,
+    debouncedQ,
+    counts,
     refetch,
     loadMore,
   };

@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 
 export function CareersTeaser() {
   return (
-    <section className="bg-neutral-50 py-24 sm:py-32 lg:py-40">
+    <section className="bg-neutral-0 py-24 sm:py-32 lg:py-40">
       <div className="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8">
         <Card className="border-neutral-200 bg-neutral-0">
           <CardContent className="pt-6 text-center">

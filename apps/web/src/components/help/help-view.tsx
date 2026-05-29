@@ -40,9 +40,9 @@ export function HelpCenterView() {
   };
 
   return (
-    <div className="bg-background">
+    <div className="bg-neutral-0">
       {/* Hero Section */}
-      <section className="flex min-h-[40vh] flex-col justify-center border-b border-border bg-muted/30 sm:min-h-[50vh]">
+      <section className="flex min-h-[40vh] flex-col justify-center border-b border-neutral-200 bg-neutral-0 sm:min-h-[50vh]">
         <div className="mx-auto w-full max-w-3xl px-4 text-center sm:px-6 lg:px-8">
           <h1 className="text-balance text-4xl font-bold leading-[1.05] tracking-tight text-foreground sm:text-5xl">
             How can we help?
@@ -154,7 +154,7 @@ export function HelpCenterView() {
       </section>
 
       {/* Contact Support CTA */}
-      <section className="border-t border-border bg-muted/30 py-24 sm:py-32 lg:py-40">
+      <section className="border-t border-neutral-200 bg-neutral-0 py-24 sm:py-32 lg:py-40">
         <div className="mx-auto max-w-2xl px-4 text-center sm:px-6 lg:px-8">
           <Card className="bg-card">
             <CardContent className="py-10">

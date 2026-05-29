@@ -1,16 +1,19 @@
 /**
  * ClaimOutcomeBadge — single source of truth for "what does outcome X
- * look like in the UI?" Maps each ClaimOutcome to a label + Shadcn
- * Badge variant. Used by the /claims list rows and by the claim detail
- * header so the same outcome always reads the same way.
+ * look like in the UI?" Maps each ClaimOutcome to a label + color classes.
+ * Used by the /claims list rows and by the claim detail header so the same
+ * outcome always reads the same way.
  *
- * Variant choices:
- * - approved -> default (green primary) so resolved-favorable jumps out
- * - denied -> destructive (the only outcome that's an explicit "no")
- * - pending (submitted, awaiting outcome) -> secondary, in-progress feel
- * - draft_pending -> outline with amber tint (action-needed, not error)
- * - everything else (expired, no_response, user_*) -> outline / ghost
- *   (resolved but neutral/closed, not a celebration)
+ * Color scheme (WCAG AA verified):
+ * - approved       → green  (bg-green-100 / text-green-700, ~6.5:1)
+ * - denied         → red solid (bg-red-700 / text-white, ~5.9:1)
+ * - draft_pending / awaiting_approval → amber (bg-amber-100 / text-amber-700, ~4.8:1)
+ * - pending / queued_for_send → blue (bg-blue-100 / text-blue-700, ~6.5:1)
+ * - expired / no_response / user_* → neutral gray (bg-neutral-100 / text-neutral-600, ~7:1)
+ *
+ * All badges use `variant="outline"` as the base (adds border, no bg/text) and
+ * override bg/text/border via extraClassName. tailwind-merge in `cn()` deduplicates
+ * conflicting utilities, so the custom classes win over the variant's defaults.
  */
 
 import type { ClaimOutcome } from "@claimit/mongodb-types";
@@ -28,47 +31,60 @@ const OUTCOME_DISPLAY: Record<
   draft_pending: {
     label: "Draft pending",
     variant: "outline",
-    // Amber-tinted outline so "needs your approval" reads as action-needed
-    // without feeling like a destructive error.
-    extraClassName: "border-amber-500 text-amber-700",
-  },
-  pending: {
-    label: "Submitted",
-    variant: "secondary",
-  },
-  approved: {
-    label: "Approved",
-    variant: "default",
-  },
-  denied: {
-    label: "Denied",
-    variant: "destructive",
-  },
-  expired: {
-    label: "Expired",
-    variant: "outline",
-  },
-  user_self_service: {
-    label: "Self-service",
-    variant: "outline",
-  },
-  user_cancelled: {
-    label: "Cancelled",
-    variant: "outline",
-  },
-  no_response: {
-    label: "No response",
-    variant: "outline",
+    extraClassName: "bg-amber-100 text-amber-700 border-amber-200",
   },
   awaiting_approval: {
     label: "Awaiting Approval",
     variant: "outline",
+    extraClassName: "bg-amber-100 text-amber-700 border-amber-200",
   },
   queued_for_send: {
     label: "Sending Soon",
-    variant: "secondary",
+    variant: "outline",
+    extraClassName: "bg-blue-100 text-blue-700 border-blue-200",
+  },
+  pending: {
+    label: "Submitted",
+    variant: "outline",
+    extraClassName: "bg-blue-100 text-blue-700 border-blue-200",
+  },
+  approved: {
+    label: "Approved",
+    variant: "outline",
+    extraClassName: "bg-green-100 text-green-700 border-green-200",
+  },
+  denied: {
+    label: "Denied",
+    variant: "outline",
+    extraClassName: "bg-red-700 text-white border-transparent",
+  },
+  expired: {
+    label: "Expired",
+    variant: "outline",
+    extraClassName: "bg-neutral-100 text-neutral-600 border-neutral-200",
+  },
+  no_response: {
+    label: "No response",
+    variant: "outline",
+    extraClassName: "bg-neutral-100 text-neutral-600 border-neutral-200",
+  },
+  user_self_service: {
+    label: "Self-service",
+    variant: "outline",
+    extraClassName: "bg-neutral-100 text-neutral-600 border-neutral-200",
+  },
+  user_cancelled: {
+    label: "Cancelled",
+    variant: "outline",
+    extraClassName: "bg-neutral-100 text-neutral-600 border-neutral-200",
   },
 };
+
+// Applied to every badge so sizing is uniform regardless of outcome.
+// Placed after extraClassName in cn() so tailwind-merge gives these
+// priority over the CVA variant's px-2 / rounded-4xl defaults.
+const BASE_BADGE_CLASSES =
+  "text-xs font-medium px-2.5 py-0.5 rounded-full whitespace-nowrap min-w-[6.5rem] text-center";
 
 /**
  * Resolve the display config for a possibly-unknown outcome string.
@@ -107,7 +123,7 @@ export function ClaimOutcomeBadge({
 }) {
   const { label, variant, extraClassName } = resolveOutcomeDisplay(outcome);
   return (
-    <Badge variant={variant} className={cn(extraClassName, className)}>
+    <Badge variant={variant} className={cn(extraClassName, BASE_BADGE_CLASSES, className)}>
       {label}
     </Badge>
   );

@@ -13,6 +13,7 @@
  * file (or factor both onto a shared JSON spec in a future ticket).
  */
 
+import { getPlatformLabel } from "@/lib/platform-labels";
 import type { ProactiveOutput } from "@/types/assistant";
 
 type PayloadDict = Record<string, unknown>;
@@ -61,7 +62,7 @@ function safeNumber(value: unknown, fallback: number): number {
 // ---------------------------------------------------------------------------
 
 function priceDropped(data: PayloadDict): ProactiveOutput {
-  const platform = safeGet(data, "platform");
+  const platform = getPlatformLabel(safeGet(data, "platform"));
   const amount = formatCurrency(data.refund_amount);
   const hours = safeGet(data, "window_remaining_hours", "?");
   return {
@@ -79,7 +80,7 @@ function priceDropped(data: PayloadDict): ProactiveOutput {
 }
 
 function claimDrafted(data: PayloadDict): ProactiveOutput {
-  const platform = safeGet(data, "platform");
+  const platform = getPlatformLabel(safeGet(data, "platform"));
   const amount = formatCurrency(data.refund_amount);
   const claimType = safeGet(data, "claim_type", "claim");
   return {
@@ -107,7 +108,7 @@ function claimQueuedAuto(data: PayloadDict): ProactiveOutput {
 }
 
 function claimSubmitted(data: PayloadDict): ProactiveOutput {
-  const platform = safeGet(data, "platform");
+  const platform = getPlatformLabel(safeGet(data, "platform"));
   return {
     opening_message: `Your ${platform} claim has been submitted. I'll let you know when there's a response.`,
     key_facts: [`Platform: ${platform}`, "Status: submitted"],
@@ -116,7 +117,7 @@ function claimSubmitted(data: PayloadDict): ProactiveOutput {
 }
 
 function claimDenied(data: PayloadDict): ProactiveOutput {
-  const platform = safeGet(data, "platform");
+  const platform = getPlatformLabel(safeGet(data, "platform"));
   const reason = safeGet(data, "denial_reason_extracted", "not specified");
   return {
     opening_message: `${platform} denied your claim. Reason: ${reason}. Want to try a different approach?`,
@@ -130,7 +131,7 @@ function claimDenied(data: PayloadDict): ProactiveOutput {
 }
 
 function claimResolvedSuccess(data: PayloadDict): ProactiveOutput {
-  const platform = safeGet(data, "platform");
+  const platform = getPlatformLabel(safeGet(data, "platform"));
   const amount = formatCurrency(data.refund_amount);
   const totalRaw = data.monthly_total_savings;
   const facts = [`Platform: ${platform}`, `Refund: ${amount}`];

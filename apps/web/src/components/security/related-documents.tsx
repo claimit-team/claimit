@@ -1,4 +1,7 @@
+"use client";
+
 import { FileText, HelpCircle, Mail, Scale } from "lucide-react";
+import { motion } from "motion/react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 
@@ -32,21 +35,27 @@ const documents = [
 export function RelatedDocuments() {
   return (
     <section>
-      <div className="mx-auto max-w-6xl px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.2 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-28"
+      >
         <div className="mb-12">
           <Badge variant="secondary" className="mb-4">
             Resources
           </Badge>
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+          <h2 className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
             Related documents
           </h2>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {documents.map((doc) => (
             <Link
               key={doc.href}
               href={doc.href}
-              className="group flex flex-col rounded-lg border border-border bg-card p-6 transition-colors hover:bg-accent/50"
+              className="group flex h-full flex-col rounded-lg border border-border bg-card p-6 transition-colors hover:bg-accent/50"
             >
               <div className="flex size-10 items-center justify-center rounded-lg bg-secondary">
                 <doc.icon className="size-5 text-foreground" />
@@ -58,7 +67,7 @@ export function RelatedDocuments() {
             </Link>
           ))}
         </div>
-      </div>
+      </motion.div>
     </section>
   );
 }
