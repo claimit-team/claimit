@@ -4,8 +4,7 @@ import { PublicHeader } from "@/components/layout/public-header";
 
 export const metadata: Metadata = {
   title: "Sign in — ClaimIt",
-  description:
-    "Continue to ClaimIt for purchase monitoring and claim workflows. MVP mock sign-in only.",
+  description: "Sign in to ClaimIt with Google, GitHub, or an email link.",
 };
 
 /**
