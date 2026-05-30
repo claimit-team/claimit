@@ -182,14 +182,24 @@ export function ApproveConfirmDialog({
   // mid-write and re-trigger the action on reopen (mirrors the
   // cancel-dialog fix; CodeRabbit MAJOR finding, PR #168).
   const handleOpenChange = (nextOpen: boolean, eventDetails?: { cancel: () => void }) => {
+    console.log("[APPROVE DIALOG] handleOpenChange:", {
+      nextOpen,
+      refValue: isSubmittingRef.current,
+      stateValue: isSubmitting,
+      hasEventDetails: !!eventDetails,
+      hasCancelFn: !!eventDetails?.cancel,
+    });
     if (isSubmittingRef.current && !nextOpen) {
+      console.log("[APPROVE DIALOG] BLOCKING — calling cancel()");
       eventDetails?.cancel();
       return;
     }
+    console.log("[APPROVE DIALOG] ALLOWING — calling onOpenChange");
     onOpenChange(nextOpen);
   };
 
   const handleConfirm = async () => {
+    console.log("[APPROVE DIALOG] handleConfirm start, ref:", isSubmittingRef.current);
     if (isSubmittingRef.current) return;
     // Pre-approve validation for dirty self-service drafts: when the
     // reviewer clicks "Approve and send" with unsaved edits, the body
@@ -205,8 +215,10 @@ export function ApproveConfirmDialog({
       toast.error("Invalid walkthrough format — fix the JSON before approving");
       return;
     }
+    console.log("[APPROVE DIALOG] setting ref=true");
     isSubmittingRef.current = true;
     setIsSubmitting(true);
+    console.log("[APPROVE DIALOG] ref is now:", isSubmittingRef.current);
     try {
       const body = dirty ? { edited_draft_content: editedDraftContent } : {};
       await approveClaim(claim.claim_id, body);
@@ -238,6 +250,7 @@ export function ApproveConfirmDialog({
       const message = err instanceof Error ? err.message : "Could not approve claim";
       toast.error(message);
     } finally {
+      console.log("[APPROVE DIALOG] finally — clearing ref");
       isSubmittingRef.current = false;
       setIsSubmitting(false);
     }
