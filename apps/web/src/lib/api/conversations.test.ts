@@ -148,4 +148,28 @@ describe("conversations api client", () => {
     expect(caught).toBeInstanceOf(ConversationsApiError);
     expect((caught as InstanceType<typeof ConversationsApiError>).code).toBe("unauthorized");
   });
+
+  // BUG-62 follow-up (CodeRabbit): retry must only fire on safe methods —
+  // a POST/PATCH/DELETE retry could create duplicate resources server-side
+  // when the original request timed out mid-flight.
+  it("does NOT retry POST createConversation on transient error", async () => {
+    const timeoutErr = new DOMException("aborted", "AbortError");
+    const fetchMock = vi.fn().mockRejectedValue(timeoutErr);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { createConversation, ConversationsApiError } = await import("./conversations");
+
+    let caught: unknown;
+    try {
+      await createConversation({ mode: "general" });
+    } catch (err) {
+      caught = err;
+    }
+
+    // Critical: exactly one fetch attempt — no retry — so the backend cannot
+    // end up with two conversations for one user click on a cold start.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(caught).toBeInstanceOf(ConversationsApiError);
+    expect((caught as InstanceType<typeof ConversationsApiError>).code).toBe("request_timeout");
+  });
 });

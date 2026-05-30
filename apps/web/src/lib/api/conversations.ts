@@ -106,14 +106,23 @@ async function _request<T>(path: string, init: RequestInit, _failureMessage: str
   const token = await currentUser.getIdToken();
   const url = `${API_BASE_URL}${path}`;
 
+  // Only retry safe (idempotent) methods. Retrying a POST that timed out
+  // mid-flight risks creating a duplicate resource server-side — e.g. a
+  // cold-start retry of POST /conversations would land two conversations
+  // for one user click. Mutations (POST/PATCH/DELETE) run once and surface
+  // the transient error to the caller.
+  const method = (init.method ?? "GET").toUpperCase();
+  const retriable = method === "GET" || method === "HEAD";
+  const maxAttempts = retriable ? _MAX_ATTEMPTS : 1;
+
   let response: Response | null = null;
   let lastError: unknown = null;
 
-  for (let attempt = 1; attempt <= _MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const candidate = await _attemptOnce(url, init, token);
-      // 5xx is transport-level transient — retry. 4xx is not.
-      if (candidate.status >= 500 && candidate.status < 600 && attempt < _MAX_ATTEMPTS) {
+      // 5xx is transport-level transient — retry on safe methods only.
+      if (retriable && candidate.status >= 500 && candidate.status < 600 && attempt < maxAttempts) {
         await _sleep(_RETRY_BACKOFF_MS);
         continue;
       }
@@ -122,7 +131,7 @@ async function _request<T>(path: string, init: RequestInit, _failureMessage: str
       break;
     } catch (err) {
       lastError = err;
-      if (!_isTransientError(err) || attempt >= _MAX_ATTEMPTS) {
+      if (!retriable || !_isTransientError(err) || attempt >= maxAttempts) {
         break;
       }
       await _sleep(_RETRY_BACKOFF_MS);
