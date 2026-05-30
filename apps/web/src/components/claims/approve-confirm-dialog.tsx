@@ -181,8 +181,11 @@ export function ApproveConfirmDialog({
   // is in flight so a user can't accidentally tear down the dialog
   // mid-write and re-trigger the action on reopen (mirrors the
   // cancel-dialog fix; CodeRabbit MAJOR finding, PR #168).
-  const handleOpenChange = (nextOpen: boolean) => {
-    if (isSubmittingRef.current && !nextOpen) return;
+  const handleOpenChange = (nextOpen: boolean, eventDetails?: { cancel: () => void }) => {
+    if (isSubmittingRef.current && !nextOpen) {
+      eventDetails?.cancel();
+      return;
+    }
     onOpenChange(nextOpen);
   };
 
