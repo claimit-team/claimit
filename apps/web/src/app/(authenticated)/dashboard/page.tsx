@@ -12,6 +12,7 @@ import {
   UploadCloud,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { OutcomeRecorder } from "@/components/claims/outcome-recorder";
@@ -34,6 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { TableCell, TableRow } from "@/components/ui/table";
 import { useAwaitingOutcomeClaims } from "@/hooks/useAwaitingOutcomeClaims";
 import { useDashboardSummary } from "@/hooks/useDashboardSummary";
 import { useMonitoredPurchases } from "@/hooks/useMonitoredPurchases";
@@ -342,20 +344,26 @@ function AwaitingOutcomeCard({
 }) {
   return (
     <Card className="border-neutral-200">
-      <CardContent className="p-4">
-        <Badge
-          variant="secondary"
-          className="mb-2 bg-semantic-warning-bg text-semantic-warning border-0"
+      <CardContent className="space-y-4 p-4">
+        <Link
+          href={`/claims/${item.claimId}`}
+          className="-m-2 block rounded-md p-2 transition-colors hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary-500"
+          aria-label={`Open claim: ${item.platform} · ${item.title}`}
         >
-          Needs your update
-        </Badge>
-        <div className="font-medium text-neutral-900 truncate">
-          {item.platform} · {item.title}
-        </div>
-        <div className="mt-2 mb-3 flex items-center gap-1 text-sm text-neutral-600">
-          <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-          {item.submittedLabel}
-        </div>
+          <Badge
+            variant="secondary"
+            className="mb-2 bg-semantic-warning-bg text-semantic-warning border-0"
+          >
+            Needs your update
+          </Badge>
+          <div className="truncate font-medium text-neutral-900">
+            {item.platform} · {item.title}
+          </div>
+          <div className="mt-2 flex items-center gap-1 text-sm text-neutral-600">
+            <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+            {item.submittedLabel}
+          </div>
+        </Link>
         <OutcomeRecorder
           claimId={item.claimId}
           defaultAmount={item.claimAmount}
@@ -632,6 +640,62 @@ function getCategoryIcon(category: "retail" | "airline" | "hotel") {
   }
 }
 
+function MonitoredPurchaseRow({ purchase }: { purchase: PurchaseListItem }) {
+  const router = useRouter();
+  const href = `/purchases/${purchase._id}`;
+  const cat = purchase.category;
+  const Icon =
+    cat === "retail" || cat === "airline" || cat === "hotel" ? getCategoryIcon(cat) : ShoppingBag;
+  const statusBadge = getListStatusBadge(purchase.status);
+  const degraded = isMonitoringDegraded(purchase.status);
+
+  return (
+    <TableRow
+      role="link"
+      tabIndex={0}
+      onClick={() => router.push(href)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          router.push(href);
+        }
+      }}
+      className="cursor-pointer transition-colors hover:bg-neutral-50 focus-visible:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-primary-500"
+    >
+      <TableCell className="px-4 py-3 text-sm font-medium text-neutral-900">
+        {getPlatformLabel(purchase.platform)}
+      </TableCell>
+      <TableCell className="px-4 py-3 text-sm text-neutral-700">
+        {purchase.product_name ?? "—"}
+      </TableCell>
+      <TableCell className="px-4 py-3">
+        <Badge variant="outline" className="text-xs capitalize">
+          <Icon className="mr-1 size-3" aria-hidden="true" />
+          {snakeToTitleLabel(purchase.category)}
+        </Badge>
+      </TableCell>
+      <TableCell className="px-4 py-3">
+        <span className="inline-flex items-center gap-1.5">
+          <Badge variant="outline" className={cn("text-xs capitalize", statusBadge.className)}>
+            {statusBadge.label}
+          </Badge>
+          {degraded ? (
+            <span
+              role="img"
+              aria-label="Monitoring partially degraded"
+              title="Monitoring is partially degraded — last price check returned no data."
+              className="inline-block size-2 rounded-full bg-semantic-warning"
+            />
+          ) : null}
+        </span>
+      </TableCell>
+      <TableCell className="px-4 py-3 text-sm text-neutral-600">
+        {formatWindowRemaining(purchase.window_expires)}
+      </TableCell>
+    </TableRow>
+  );
+}
+
 // Skeleton row keys — fixed 5-row layout matches the dashboard section's
 // default visible slice (see useMonitoredPurchases DEFAULT_LIMIT). Stable
 // hand-rolled keys satisfy React's key constraint without an index.
@@ -714,61 +778,9 @@ function MonitoredPurchasesSection({
                     </td>
                   </tr>
                 ) : (
-                  purchases.map((purchase) => {
-                    // Read-tolerant category narrowing: the backend
-                    // surfaces the raw enum string, so cast to the
-                    // function's known input set when matched and
-                    // fall back to ShoppingBag (the safe generic
-                    // retail icon) for rogue / null values.
-                    const cat = purchase.category;
-                    const Icon =
-                      cat === "retail" || cat === "airline" || cat === "hotel"
-                        ? getCategoryIcon(cat)
-                        : ShoppingBag;
-                    const statusBadge = getListStatusBadge(purchase.status);
-                    const degraded = isMonitoringDegraded(purchase.status);
-                    return (
-                      <tr key={purchase._id} className="hover:bg-neutral-50 transition-colors">
-                        <td className="px-4 py-3 text-sm font-medium text-neutral-900">
-                          <Link href={`/purchases/${purchase._id}`} className="hover:underline">
-                            {getPlatformLabel(purchase.platform)}
-                          </Link>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-neutral-700">
-                          <Link href={`/purchases/${purchase._id}`} className="hover:underline">
-                            {purchase.product_name ?? "—"}
-                          </Link>
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge variant="outline" className="text-xs capitalize">
-                            <Icon className="w-3 h-3 mr-1" aria-hidden="true" />
-                            {snakeToTitleLabel(purchase.category)}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="inline-flex items-center gap-1.5">
-                            <Badge
-                              variant="outline"
-                              className={cn("text-xs capitalize", statusBadge.className)}
-                            >
-                              {statusBadge.label}
-                            </Badge>
-                            {degraded ? (
-                              <span
-                                role="img"
-                                aria-label="Monitoring partially degraded"
-                                title="Monitoring is partially degraded — last price check returned no data."
-                                className="inline-block h-2 w-2 rounded-full bg-semantic-warning"
-                              />
-                            ) : null}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-neutral-600">
-                          {formatWindowRemaining(purchase.window_expires)}
-                        </td>
-                      </tr>
-                    );
-                  })
+                  purchases.map((purchase) => (
+                    <MonitoredPurchaseRow key={purchase._id} purchase={purchase} />
+                  ))
                 )}
               </tbody>
             </table>

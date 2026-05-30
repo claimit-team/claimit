@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { subscribeNewsletter } from "@/lib/api/newsletter";
+import { useAuthStore } from "@/store";
 
 // Brand marks (lucide-react v1.14 has no LinkedIn/GitHub/YouTube icons).
 // Single-color glyphs use currentColor so theme color classes apply.
@@ -163,6 +164,31 @@ function NewsletterColumn() {
 }
 
 export function PublicFooter() {
+  const user = useAuthStore((s) => s.user);
+  const isLoading = useAuthStore((s) => s.isLoading);
+  const slim = Boolean(user?.onboarded && !isLoading);
+
+  if (slim) {
+    return (
+      <footer className="border-t border-neutral-200 bg-neutral-0">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-6 text-sm text-neutral-500 sm:flex-row sm:px-6 lg:px-8">
+          <p>© {new Date().getFullYear()} ClaimIt. All rights reserved.</p>
+          <nav className="flex items-center gap-5">
+            <Link href="/privacy" className="transition-colors hover:text-neutral-700">
+              Privacy
+            </Link>
+            <Link href="/terms" className="transition-colors hover:text-neutral-700">
+              Terms
+            </Link>
+            <Link href="/help/contact" className="transition-colors hover:text-neutral-700">
+              Contact
+            </Link>
+          </nav>
+        </div>
+      </footer>
+    );
+  }
+
   return (
     <footer className="border-t border-neutral-200 bg-neutral-0">
       <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
