@@ -136,6 +136,7 @@ locals {
     PHOENIX_API_KEY           = "phoenix-api-key"
     GMAIL_OAUTH_CLIENT_ID     = "gmail-oauth-client-id"
     GMAIL_OAUTH_CLIENT_SECRET = "gmail-oauth-client-secret"
+    SENDGRID_API_KEY          = "sendgrid-api-key"
   }
   # assistant: conversational orchestrator — Anthropic + Agent Builder for
   # sub-agent calls; Elastic for telemetry; Phoenix for LLM tracing.
@@ -167,6 +168,7 @@ locals {
     CLAIMIT_MONITOR_AGENT_ID   = "claimit-monitor-agent-id"
     CLAIMIT_CLAIM_AGENT_ID     = "claimit-claim-agent-id"
     CLAIMIT_ASSISTANT_AGENT_ID = "claimit-assistant-agent-id"
+    SENDGRID_API_KEY           = "sendgrid-api-key"
   }
 }
 
@@ -267,6 +269,7 @@ module "claim_agent" {
     # override — including prod. Keep the explicit assignment here as
     # the single source of truth for which environments audit-BCC.
     CLAIMIT_BCC_EMAIL = "claimitbeta@gmail.com"
+    FRONTEND_BASE_URL = var.web_frontend_url
   }
   # Keep one warm instance so the genai/Vertex connection warmed at startup
   # (warm_up_*_model) survives idle — otherwise scale-to-zero re-colds it and the
