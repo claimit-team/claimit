@@ -1,0 +1,100 @@
+name: Smoke Test
+
+on:
+  schedule:
+    # Every hour, at minute 0 (UTC).
+    - cron: "0 * * * *"
+  # Allow manual trigger for testing / on-demand verification.
+  workflow_dispatch:
+
+concurrency:
+  group: smoke-test
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+  # Needed by actions/github-script listWorkflowRuns dedupe query below;
+  # without it the API returns 403 and the dedupe fails open (still alerts).
+  actions: read
+
+env:
+  GCP_REGION: us-east1
+
+jobs:
+  smoke-test:
+    name: Health-check Cloud Run + Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Run smoke test
+        id: smoke
+        run: bash scripts/smoke-test.sh
+        env:
+          GCP_REGION: ${{ vars.GCP_REGION || env.GCP_REGION }}
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: actions/github-script@v7
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          FAILED: ${{ steps.smoke.outputs.failed }}
+        with:
+          script: |
+            // Dedupe: only alert on a status FLIP (previous run was not
+            // failure). If the prior completed run was already failure,
+            // assume the channel has been pinged once already — staying
+            // failed shouldn't re-page. Fail-open: any error in the
+            // lookup falls through and alerts anyway (better noisy than
+            // silently dropping a real outage).
+            try {
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'smoke-test.yml',
+                status: 'completed',
+                per_page: 10,
+              });
+              const prev = runs.data.workflow_runs.find(r => r.id !== context.runId);
+              if (prev && prev.conclusion === 'failure') {
+                core.info(`Previous run #${prev.run_number} already failed — skip duplicate alert`);
+                return;
+              }
+            } catch (err) {
+              core.warning(`Dedupe lookup failed (${err.message}) — proceeding with alert`);
+            }
+
+            const token = process.env.SLACK_BOT_TOKEN;
+            const channel = process.env.SLACK_CHANNEL_ID;
+            const failed = process.env.FAILED || "(see run logs — script may have crashed before writing output)";
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            const text = `🚨 *Smoke test failed* — <!channel> please investigate\n` +
+                         `Failed services: \`${failed}\`\n` +
+                         `<${runUrl}|view run logs>`;
+
+            const resp = await fetch("https://slack.com/api/chat.postMessage", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`,
+              },
+              body: JSON.stringify({ channel, text }),
+            });
+            const result = await resp.json();
+            if (!result.ok) {
+              core.setFailed(`Slack API error: ${result.error}`);
+            }
