@@ -127,7 +127,7 @@ function MessageBubble({ message }: { message: UIMessage }) {
         ) : null}
         {isAssistant && message.trace_id && !message.streaming ? (
           <a
-            href={`https://app.phoenix.arize.com/s/claimitbeta/projects/claimit/traces/${message.trace_id}`}
+            href={`https://app.phoenix.arize.com/s/claimitbeta/projects/UHJvamVjdDoz/traces/${message.trace_id}`}
             target="_blank"
             rel="noopener noreferrer"
             className="mt-1.5 inline-flex items-center gap-1 text-neutral-400 text-xs transition-colors hover:text-brand-primary-500"

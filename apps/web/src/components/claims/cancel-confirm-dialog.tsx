@@ -16,7 +16,7 @@
  */
 
 import { Loader2, XCircle } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -60,6 +60,7 @@ export function CancelConfirmDialog({
   const [reason, setReason] = useState<ReasonOption>("not_worth_it");
   const [otherText, setOtherText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false);
   const otherTextareaId = useId();
 
   // Reset form whenever the dialog closes so the next opening starts
@@ -80,8 +81,11 @@ export function CancelConfirmDialog({
   // Block Escape / backdrop / close-button dismissal while the cancel
   // is in flight so a user can't accidentally tear down the dialog
   // mid-write and re-trigger the action on reopen.
-  const handleOpenChange = (nextOpen: boolean) => {
-    if (isSubmitting && !nextOpen) return;
+  const handleOpenChange = (nextOpen: boolean, eventDetails?: { cancel: () => void }) => {
+    if (isSubmittingRef.current && !nextOpen) {
+      eventDetails?.cancel();
+      return;
+    }
     onOpenChange(nextOpen);
   };
 
@@ -101,6 +105,7 @@ export function CancelConfirmDialog({
           ? REASON_LABELS.other
           : trimmedOther
         : REASON_LABELS[reason];
+    isSubmittingRef.current = true;
     setIsSubmitting(true);
     try {
       await cancelClaim(claim.claim_id, { reason: reasonText });
@@ -133,13 +138,22 @@ export function CancelConfirmDialog({
       const message = err instanceof Error ? err.message : "Could not cancel claim";
       toast.error(message);
     } finally {
+      isSubmittingRef.current = false;
       setIsSubmitting(false);
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent>
+    <Dialog open={open} onOpenChange={handleOpenChange} disablePointerDismissal={isSubmitting}>
+      <DialogContent
+        showCloseButton={!isSubmitting}
+        onKeyDown={(e: React.KeyboardEvent) => {
+          if (isSubmittingRef.current && e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Cancel claim</DialogTitle>
           <DialogDescription>
@@ -182,7 +196,7 @@ export function CancelConfirmDialog({
           <Button
             variant="outline"
             type="button"
-            onClick={() => onOpenChange(false)}
+            onClick={() => handleOpenChange(false)}
             disabled={isSubmitting}
           >
             Keep claim
