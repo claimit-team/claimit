@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAssistantStream } from "@/hooks/useAssistantStream";
 import { useConversations } from "@/hooks/useConversations";
 import { cn } from "@/lib/utils";
+import { useClaimAssistantPromptStore } from "@/store/claim-assistant-prompt";
 import { useClaimDetailRefetchStore } from "@/store/claim-detail-refetch";
 import { useClaimRedraftProgressStore } from "@/store/claim-redraft-progress";
 import type { UIMessage, UIToolCall, WireConversationMessage } from "@/types/assistant";
@@ -178,6 +179,8 @@ export function AssistantPane({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const hydratedForRef = useRef<string | null>(null);
 
+  const pendingPrompt = useClaimAssistantPromptStore((s) => s.pendingByClaimId[claimId]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: claimId is the intentional trigger
   useEffect(() => {
     setCreateError(null);
@@ -245,6 +248,15 @@ export function AssistantPane({
       await triggerClaimRefetch(claimId);
     }
   };
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runSend is intentionally omitted — effect must re-fire on pendingPrompt nonce/activeId/streaming only
+  useEffect(() => {
+    if (!pendingPrompt) return;
+    if (!activeId || streaming) return;
+    const consumed = useClaimAssistantPromptStore.getState().consumePrompt(claimId);
+    if (!consumed) return;
+    void runSend(consumed.text);
+  }, [pendingPrompt, activeId, streaming, claimId]);
 
   const handleSend = async () => {
     const text = inputValue.trim();
