@@ -1,7 +1,9 @@
-"""Auth-related endpoints: GET /auth/me, PATCH /auth/me."""
+"""Auth-related endpoints: GET /auth/me, PATCH /auth/me, avatar upload/delete."""
 
 from __future__ import annotations
 
+import asyncio
+from datetime import UTC, datetime
 from typing import Annotated
 
 from claimit_mongodb_models import (
@@ -11,15 +13,22 @@ from claimit_mongodb_models import (
     MongoDBClient,
     User,
 )
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel, Field
 
-from ..deps import get_db
+from ..deps import get_avatars_uploader, get_db
 from ..middleware.auth import get_current_user
 from ..middleware.errors import ApiError
 from ..serializers import serialize_user
+from ..services.avatars_storage import (
+    ALLOWED_AVATAR_TYPES,
+    MAX_AVATAR_BYTES,
+    AvatarsUploader,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+_READ_CHUNK_BYTES = 8192
 
 
 class PatchUserMeRequest(BaseModel):
@@ -93,3 +102,71 @@ async def patch_me(
         user.onboarded = body.onboarded
 
     return {"user": serialize_user(user)}
+
+
+@router.post("/me/avatar")
+async def upload_my_avatar(
+    user: Annotated[User, Depends(get_current_user)],
+    uploader: Annotated[AvatarsUploader, Depends(get_avatars_uploader)],
+    db: Annotated[MongoDBClient, Depends(get_db)],
+    file: Annotated[UploadFile, File(description="Avatar image (JPEG/PNG/WEBP, ≤2 MB).")],
+) -> dict[str, object]:
+    content_type = (file.content_type or "").lower()
+    if content_type not in ALLOWED_AVATAR_TYPES:
+        raise ApiError(
+            "unsupported_media_type",
+            "Avatar must be JPEG, PNG, or WEBP.",
+            status_code=415,
+        )
+
+    content = await _read_limited_avatar_upload(file)
+
+    if user.custom_avatar_url:
+        await asyncio.to_thread(uploader.delete_by_url, user.custom_avatar_url)
+
+    new_url = await asyncio.to_thread(uploader.upload, str(user.id), content, content_type)
+
+    now = datetime.now(UTC)
+    updates = {"custom_avatar_url": new_url, "updated_at": now}
+    matched = await db.partial_update("users", user.id, updates, model=User)
+    if not matched:
+        raise ApiError("user_not_found", "User document was removed", status_code=404)
+
+    user.custom_avatar_url = new_url
+    user.updated_at = now
+    return {"user": serialize_user(user)}
+
+
+@router.delete("/me/avatar")
+async def delete_my_avatar(
+    user: Annotated[User, Depends(get_current_user)],
+    uploader: Annotated[AvatarsUploader, Depends(get_avatars_uploader)],
+    db: Annotated[MongoDBClient, Depends(get_db)],
+) -> dict[str, object]:
+    if user.custom_avatar_url:
+        await asyncio.to_thread(uploader.delete_by_url, user.custom_avatar_url)
+        now = datetime.now(UTC)
+        updates = {"custom_avatar_url": None, "updated_at": now}
+        matched = await db.partial_update("users", user.id, updates, model=User)
+        if not matched:
+            raise ApiError("user_not_found", "User document was removed", status_code=404)
+        user.custom_avatar_url = None
+        user.updated_at = now
+
+    return {"user": serialize_user(user)}
+
+
+async def _read_limited_avatar_upload(file: UploadFile) -> bytes:
+    """Stream-read with 2 MB size cap; 413 if exceeded."""
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(_READ_CHUNK_BYTES):
+        total += len(chunk)
+        if total > MAX_AVATAR_BYTES:
+            raise ApiError(
+                "file_too_large",
+                "Avatar must be at most 2 MB.",
+                status_code=413,
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)

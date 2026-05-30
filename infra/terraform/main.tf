@@ -367,6 +367,7 @@ module "api_gateway" {
     # storage.tf grants the read access this env enables.
     EVIDENCE_BUCKET        = google_storage_bucket.evidence.name
     CAREERS_RESUMES_BUCKET = google_storage_bucket.careers_resumes.name
+    AVATARS_BUCKET         = google_storage_bucket.avatars.name
     # Ticket 4.15: the gmail-inbound topic api-gateway tells Gmail to
     # publish to during `users.watch`. The .id form yields the fully-
     # qualified `projects/<project>/topics/gmail-inbound` path Gmail

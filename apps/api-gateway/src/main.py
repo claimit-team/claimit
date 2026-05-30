@@ -58,6 +58,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     deps.init_pubsub_publisher()
     deps.init_receipts_uploader()
     deps.init_careers_resumes_uploader()
+    deps.init_avatars_uploader()
     deps.init_evidence_reader()
     yield
     if deps._db is not None:

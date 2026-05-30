@@ -1,16 +1,24 @@
 "use client";
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Camera, Trash2 } from "lucide-react";
+import { useRef, useState } from "react";
+import { toast } from "sonner";
+
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UserAvatar } from "@/components/user/user-avatar";
+import { deleteAvatar, uploadAvatar } from "@/lib/api/auth";
+import { useAuthStore } from "@/store";
+
+const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const MAX_BYTES = 2 * 1024 * 1024;
 
 type AccountProfileCardProps = {
   name: string;
   email: string;
-  initials: string;
   isLoading?: boolean;
   isSaving?: boolean;
   onNameChange: (name: string) => void;
@@ -20,12 +28,60 @@ type AccountProfileCardProps = {
 export function AccountProfileCard({
   name,
   email,
-  initials,
   isLoading,
   isSaving,
   onNameChange,
   onSave,
 }: AccountProfileCardProps) {
+  const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
+
+  const [uploading, setUploading] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const hasCustomAvatar = Boolean(user?.custom_avatar_url);
+  const hasProviderFallback = Boolean(user?.provider_avatar_url);
+
+  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      toast.error("Avatar must be JPEG, PNG, or WEBP.");
+      return;
+    }
+    if (file.size > MAX_BYTES) {
+      toast.error("Avatar must be at most 2 MB.");
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const { user: updated } = await uploadAvatar(file);
+      setUser(updated);
+      toast.success("Avatar updated.");
+    } catch {
+      toast.error("Couldn't upload that photo. Try again.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleRemove() {
+    setRemoving(true);
+    try {
+      const { user: updated } = await deleteAvatar();
+      setUser(updated);
+      toast.success(hasProviderFallback ? "Reverted to your sign-in photo." : "Avatar removed.");
+    } catch {
+      toast.error("Couldn't remove that photo. Try again.");
+    } finally {
+      setRemoving(false);
+    }
+  }
+
   if (isLoading) {
     return (
       <Card className="border-neutral-200 bg-neutral-0">
@@ -60,12 +116,41 @@ export function AccountProfileCard({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="flex items-center gap-4">
-          <Avatar className="size-16">
-            <AvatarFallback className="bg-brand-primary-50 text-lg font-medium text-brand-primary-700">
-              {initials}
-            </AvatarFallback>
-          </Avatar>
+        <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
+          <UserAvatar user={user} size="xl" />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading || removing}
+            >
+              <Camera className="mr-2 size-4" aria-hidden />
+              {uploading ? "Uploading…" : hasCustomAvatar ? "Change photo" : "Upload photo"}
+            </Button>
+            {hasCustomAvatar ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void handleRemove()}
+                disabled={uploading || removing}
+                className="text-neutral-700"
+              >
+                <Trash2 className="mr-2 size-4" aria-hidden />
+                {removing ? "Removing…" : "Remove"}
+              </Button>
+            ) : null}
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            onChange={(e) => void handleFileChange(e)}
+            className="hidden"
+            aria-hidden
+          />
         </div>
 
         <div className="space-y-2">

@@ -18,6 +18,7 @@ import uuid
 from claimit_mongodb_models import MongoDBClient
 from google.cloud import secretmanager
 
+from .services.avatars_storage import AvatarsUploader
 from .services.careers_resumes import CareersResumesUploader
 from .services.evidence_storage import EvidenceReader
 from .services.pubsub_publisher import PubSubPublisher
@@ -31,6 +32,7 @@ _token_cache: AccessTokenCache | None = None
 _pubsub_publisher: PubSubPublisher | None = None
 _receipts_uploader: ReceiptsUploader | None = None
 _careers_resumes_uploader: CareersResumesUploader | None = None
+_avatars_uploader: AvatarsUploader | None = None
 _evidence_reader: EvidenceReader | None = None
 
 
@@ -92,6 +94,18 @@ async def get_careers_resumes_uploader() -> CareersResumesUploader:
     if _careers_resumes_uploader is None:
         raise RuntimeError("CareersResumesUploader not initialized")
     return _careers_resumes_uploader
+
+
+def init_avatars_uploader() -> None:
+    """Initialize the module-global avatars uploader. Called from lifespan()."""
+    global _avatars_uploader
+    _avatars_uploader = AvatarsUploader()
+
+
+async def get_avatars_uploader() -> AvatarsUploader:
+    if _avatars_uploader is None:
+        raise RuntimeError("AvatarsUploader not initialized")
+    return _avatars_uploader
 
 
 def init_evidence_reader() -> None:

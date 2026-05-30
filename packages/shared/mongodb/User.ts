@@ -62,6 +62,8 @@ export interface User {
   updated_at: ISODateString | null;
   email: string;
   name: string;
+  provider_avatar_url: string | null;
+  custom_avatar_url: string | null;
   default_location: DefaultLocation;
   loyalty_memberships: LoyaltyMembership[];
   gmail_integration: GmailIntegration;

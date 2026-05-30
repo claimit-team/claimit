@@ -1,4 +1,4 @@
-"""Tests for GET /api/v1/auth/me and PATCH /api/v1/auth/me."""
+"""Tests for GET /api/v1/auth/me, PATCH /api/v1/auth/me, and avatar routes."""
 
 from __future__ import annotations
 
@@ -8,12 +8,46 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from claimit_mongodb_models import MongoDBClient, User
 from httpx import AsyncClient
-from src.deps import get_db
+from src.deps import get_avatars_uploader, get_db
 from src.main import app
 
 from ._fixtures import USER_FIXTURE
 
 _FIREBASE_CLAIMS = {"uid": "test-uid", "email": "test@example.com"}
+_FAKE_BUCKET = "test-avatars-bucket"
+_JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"jpeg-bytes"
+_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"png-bytes"
+_WEBP_BYTES = b"RIFF" + b"\x00" * 4 + b"WEBP"
+
+
+class FakeAvatarsUploader:
+    bucket_name = _FAKE_BUCKET
+
+    def __init__(self) -> None:
+        self.upload_calls: list[tuple[str, bytes, str]] = []
+        self.delete_calls: list[str] = []
+
+    def upload(self, user_id: str, content: bytes, content_type: str) -> str:
+        ext = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}[content_type]
+        self.upload_calls.append((user_id, content, content_type))
+        return f"https://storage.googleapis.com/{_FAKE_BUCKET}/{user_id}/new.{ext}"
+
+    def delete_by_url(self, url: str) -> None:
+        self.delete_calls.append(url)
+
+
+def _fake_uploader_override(fake: FakeAvatarsUploader):
+    async def _override() -> FakeAvatarsUploader:
+        return fake
+
+    return _override
+
+
+def _avatar_db(user: User | None = None) -> AsyncMock:
+    db = AsyncMock(spec=MongoDBClient)
+    db.find_one = AsyncMock(return_value=user or User.model_validate(USER_FIXTURE))
+    db.partial_update = AsyncMock(return_value=True)
+    return db
 
 
 @pytest.mark.asyncio
@@ -349,5 +383,344 @@ async def test_patch_me_returns_404_when_user_missing(client: AsyncClient) -> No
             )
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "user_not_found"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/me/avatar + DELETE /auth/me/avatar
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("filename", "content", "content_type", "expected_ext"),
+    [
+        ("avatar.jpg", _JPEG_BYTES, "image/jpeg", "jpg"),
+        ("avatar.png", _PNG_BYTES, "image/png", "png"),
+        ("avatar.webp", _WEBP_BYTES, "image/webp", "webp"),
+    ],
+)
+async def test_upload_avatar_valid_types(
+    client: AsyncClient,
+    filename: str,
+    content: bytes,
+    content_type: str,
+    expected_ext: str,
+) -> None:
+    fake = FakeAvatarsUploader()
+    db = _avatar_db()
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_avatars_uploader] = _fake_uploader_override(fake)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                "/api/v1/auth/me/avatar",
+                headers={"Authorization": "Bearer valid-token"},
+                files={"file": (filename, content, content_type)},
+            )
+        assert response.status_code == 200, response.text
+        user = response.json()["user"]
+        assert user["custom_avatar_url"] == (
+            f"https://storage.googleapis.com/{_FAKE_BUCKET}/"
+            f"{USER_FIXTURE['_id']}/new.{expected_ext}"
+        )
+        assert len(fake.upload_calls) == 1
+        db.partial_update.assert_awaited_once()
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_avatars_uploader, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("filename", "content", "content_type"),
+    [
+        ("avatar.gif", b"GIF89a", "image/gif"),
+        ("doc.pdf", b"%PDF-1.4", "application/pdf"),
+    ],
+)
+async def test_upload_avatar_rejects_unsupported_type(
+    client: AsyncClient,
+    filename: str,
+    content: bytes,
+    content_type: str,
+) -> None:
+    fake = FakeAvatarsUploader()
+    db = _avatar_db()
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_avatars_uploader] = _fake_uploader_override(fake)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                "/api/v1/auth/me/avatar",
+                headers={"Authorization": "Bearer valid-token"},
+                files={"file": (filename, content, content_type)},
+            )
+        assert response.status_code == 415
+        assert "JPEG, PNG, or WEBP" in response.json()["error"]["message"]
+        assert fake.upload_calls == []
+        db.partial_update.assert_not_awaited()
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_avatars_uploader, None)
+
+
+@pytest.mark.asyncio
+async def test_upload_avatar_rejects_file_larger_than_2mb(client: AsyncClient) -> None:
+    fake = FakeAvatarsUploader()
+    db = _avatar_db()
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_avatars_uploader] = _fake_uploader_override(fake)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                "/api/v1/auth/me/avatar",
+                headers={"Authorization": "Bearer valid-token"},
+                files={"file": ("big.jpg", b"x" * (2 * 1024 * 1024 + 1), "image/jpeg")},
+            )
+        assert response.status_code == 413
+        assert "at most 2 MB" in response.json()["error"]["message"]
+        assert fake.upload_calls == []
+        db.partial_update.assert_not_awaited()
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_avatars_uploader, None)
+
+
+@pytest.mark.asyncio
+async def test_upload_avatar_replaces_existing_custom_url(client: AsyncClient) -> None:
+    old_url = f"https://storage.googleapis.com/{_FAKE_BUCKET}/{USER_FIXTURE['_id']}/old.jpg"
+    fixture = copy.deepcopy(USER_FIXTURE)
+    fixture["custom_avatar_url"] = old_url  # type: ignore[index]
+    fake = FakeAvatarsUploader()
+    db = _avatar_db(User.model_validate(fixture))
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_avatars_uploader] = _fake_uploader_override(fake)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.post(
+                "/api/v1/auth/me/avatar",
+                headers={"Authorization": "Bearer valid-token"},
+                files={"file": ("avatar.jpg", _JPEG_BYTES, "image/jpeg")},
+            )
+        assert response.status_code == 200
+        assert fake.delete_calls == [old_url]
+        assert response.json()["user"]["custom_avatar_url"].endswith("/new.jpg")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_avatars_uploader, None)
+
+
+@pytest.mark.asyncio
+async def test_delete_avatar_clears_custom_url(client: AsyncClient) -> None:
+    old_url = f"https://storage.googleapis.com/{_FAKE_BUCKET}/{USER_FIXTURE['_id']}/old.jpg"
+    fixture = copy.deepcopy(USER_FIXTURE)
+    fixture["custom_avatar_url"] = old_url  # type: ignore[index]
+    fake = FakeAvatarsUploader()
+    db = _avatar_db(User.model_validate(fixture))
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_avatars_uploader] = _fake_uploader_override(fake)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.delete(
+                "/api/v1/auth/me/avatar",
+                headers={"Authorization": "Bearer valid-token"},
+            )
+        assert response.status_code == 200
+        assert response.json()["user"]["custom_avatar_url"] is None
+        assert fake.delete_calls == [old_url]
+        db.partial_update.assert_awaited_once()
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_avatars_uploader, None)
+
+
+@pytest.mark.asyncio
+async def test_delete_avatar_noop_when_no_custom_url(client: AsyncClient) -> None:
+    fake = FakeAvatarsUploader()
+    db = _avatar_db()
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_avatars_uploader] = _fake_uploader_override(fake)
+    try:
+        with patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS):
+            response = await client.delete(
+                "/api/v1/auth/me/avatar",
+                headers={"Authorization": "Bearer valid-token"},
+            )
+        assert response.status_code == 200
+        assert fake.delete_calls == []
+        db.partial_update.assert_not_awaited()
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_avatars_uploader, None)
+
+
+@pytest.mark.asyncio
+async def test_upload_avatar_requires_bearer(client: AsyncClient) -> None:
+    db = AsyncMock(spec=MongoDBClient)
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        response = await client.post(
+            "/api/v1/auth/me/avatar",
+            files={"file": ("avatar.jpg", _JPEG_BYTES, "image/jpeg")},
+        )
+        assert response.status_code == 401
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
+async def test_delete_avatar_requires_bearer(client: AsyncClient) -> None:
+    db = AsyncMock(spec=MongoDBClient)
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        response = await client.delete("/api/v1/auth/me/avatar")
+        assert response.status_code == 401
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+# ---------------------------------------------------------------------------
+# Middleware: provider_avatar_url sync from Firebase picture claim
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_new_user_created_with_provider_avatar_url(client: AsyncClient) -> None:
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.find_one = AsyncMock(return_value=None)
+    mock_db.upsert = AsyncMock(return_value=str(USER_FIXTURE["_id"]))
+
+    async def _override_db() -> MongoDBClient:
+        return mock_db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        with patch(
+            "firebase_admin.auth.verify_id_token",
+            return_value={
+                "uid": "test-uid",
+                "email": "test@example.com",
+                "picture": "https://lh3.googleusercontent.com/a/new-user",
+            },
+        ):
+            response = await client.get(
+                "/api/v1/auth/me",
+                headers={"Authorization": "Bearer valid-token"},
+            )
+        assert response.status_code == 200
+        mock_db.upsert.assert_awaited_once()
+        upserted_user = mock_db.upsert.await_args.args[2]
+        assert upserted_user.provider_avatar_url == "https://lh3.googleusercontent.com/a/new-user"
+        assert upserted_user.custom_avatar_url is None
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
+async def test_existing_user_provider_avatar_updates_when_picture_changes(
+    client: AsyncClient,
+) -> None:
+    fixture = copy.deepcopy(USER_FIXTURE)
+    fixture["provider_avatar_url"] = "https://lh3.googleusercontent.com/a/old"  # type: ignore[index]
+    user = User.model_validate(fixture)
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.find_one = AsyncMock(return_value=user)
+    mock_db.partial_update = AsyncMock(return_value=True)
+
+    async def _override_db() -> MongoDBClient:
+        return mock_db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        with patch(
+            "firebase_admin.auth.verify_id_token",
+            return_value={
+                "uid": "test-uid",
+                "email": "test@example.com",
+                "picture": "https://lh3.googleusercontent.com/a/new",
+            },
+        ):
+            response = await client.get(
+                "/api/v1/auth/me",
+                headers={"Authorization": "Bearer valid-token"},
+            )
+        assert response.status_code == 200
+        mock_db.partial_update.assert_awaited_once()
+        updates = mock_db.partial_update.call_args.args[2]
+        assert updates["provider_avatar_url"] == "https://lh3.googleusercontent.com/a/new"
+        assert response.json()["user"]["provider_avatar_url"] == (
+            "https://lh3.googleusercontent.com/a/new"
+        )
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
+async def test_existing_user_provider_avatar_skips_write_when_picture_unchanged(
+    client: AsyncClient,
+) -> None:
+    picture = "https://lh3.googleusercontent.com/a/same"
+    fixture = copy.deepcopy(USER_FIXTURE)
+    fixture["provider_avatar_url"] = picture  # type: ignore[index]
+    user = User.model_validate(fixture)
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.find_one = AsyncMock(return_value=user)
+    mock_db.partial_update = AsyncMock(return_value=True)
+    mock_db.upsert = AsyncMock()
+
+    async def _override_db() -> MongoDBClient:
+        return mock_db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        with patch(
+            "firebase_admin.auth.verify_id_token",
+            return_value={
+                "uid": "test-uid",
+                "email": "test@example.com",
+                "picture": picture,
+            },
+        ):
+            response = await client.get(
+                "/api/v1/auth/me",
+                headers={"Authorization": "Bearer valid-token"},
+            )
+        assert response.status_code == 200
+        mock_db.partial_update.assert_not_awaited()
+        mock_db.upsert.assert_not_awaited()
     finally:
         app.dependency_overrides.pop(get_db, None)
