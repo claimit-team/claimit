@@ -393,7 +393,7 @@ function FloatingPanel({ onActionClick }: { onActionClick: (a: string) => void }
       id="assistant-pane"
       role="dialog"
       aria-label="ClaimIt Assistant"
-      className="absolute bottom-16 right-0 w-[22rem] sm:w-[26rem] bg-neutral-0 border border-neutral-200 rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[36rem]"
+      className="absolute bottom-16 right-0 w-[calc(100vw-3rem)] max-w-[26rem] sm:w-[26rem] bg-neutral-0 border border-neutral-200 rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[36rem]"
     >
       <div className="p-4 bg-brand-primary-500 text-neutral-0">
         <h3 className="font-semibold">ClaimIt Assistant</h3>

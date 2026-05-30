@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu, ShieldCheck, X } from "lucide-react";
+import { ArrowRight, Menu, ShieldCheck, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
@@ -8,6 +8,7 @@ import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/store";
 
 const navLinks = [
   { href: "/how-it-works", label: "How it works" },
@@ -24,6 +25,9 @@ function navLinkActive(pathname: string, href: string): boolean {
 export function PublicHeader() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const user = useAuthStore((s) => s.user);
+  const isLoading = useAuthStore((s) => s.isLoading);
+  const showAuthCTA = Boolean(user?.onboarded && !isLoading);
 
   return (
     <header className="sticky top-0 z-50 border-b border-neutral-200 bg-neutral-0/95 backdrop-blur-sm">
@@ -58,21 +62,36 @@ export function PublicHeader() {
 
         <div className="hidden items-center gap-3 md:flex">
           <ThemeToggle />
-          <Link
-            href="/login"
-            className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-neutral-700")}
-          >
-            Log in
-          </Link>
-          <Link
-            href="/login"
-            className={cn(
-              buttonVariants({ size: "sm" }),
-              "bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600",
-            )}
-          >
-            Try free
-          </Link>
+          {showAuthCTA ? (
+            <Link
+              href="/dashboard"
+              className={cn(
+                buttonVariants({ size: "sm" }),
+                "gap-1.5 bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600",
+              )}
+            >
+              Go to dashboard
+              <ArrowRight className="size-4" aria-hidden />
+            </Link>
+          ) : (
+            <>
+              <Link
+                href="/login"
+                className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-neutral-700")}
+              >
+                Log in
+              </Link>
+              <Link
+                href="/login"
+                className={cn(
+                  buttonVariants({ size: "sm" }),
+                  "bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600",
+                )}
+              >
+                Try free
+              </Link>
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-1 md:hidden">
@@ -111,23 +130,39 @@ export function PublicHeader() {
               </Link>
             ))}
             <Separator className="my-3 bg-neutral-200" />
-            <Link
-              href="/login"
-              className="py-2 text-sm text-neutral-700 hover:text-neutral-900"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              Log in
-            </Link>
-            <Link
-              href="/login"
-              className={cn(
-                buttonVariants({ size: "default" }),
-                "mt-2 w-full bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600 text-center justify-center inline-flex items-center py-2",
-              )}
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              Try free
-            </Link>
+            {showAuthCTA ? (
+              <Link
+                href="/dashboard"
+                className={cn(
+                  buttonVariants({ size: "default" }),
+                  "mt-2 w-full justify-center gap-1.5 bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600",
+                )}
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Go to dashboard
+                <ArrowRight className="size-4" aria-hidden />
+              </Link>
+            ) : (
+              <>
+                <Link
+                  href="/login"
+                  className="py-2 text-sm text-neutral-700 hover:text-neutral-900"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Log in
+                </Link>
+                <Link
+                  href="/login"
+                  className={cn(
+                    buttonVariants({ size: "default" }),
+                    "mt-2 w-full bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600 text-center justify-center inline-flex items-center py-2",
+                  )}
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Try free
+                </Link>
+              </>
+            )}
           </nav>
         </div>
       )}
