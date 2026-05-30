@@ -30,7 +30,7 @@ from opentelemetry.trace import Span, Tracer
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ENDPOINT = "https://app.phoenix.arize.com/v1/traces"
+DEFAULT_ENDPOINT = "https://app.phoenix.arize.com/s/claimitbeta/v1/traces"
 
 _initialized = False
 

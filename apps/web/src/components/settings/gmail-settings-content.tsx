@@ -312,10 +312,9 @@ export function GmailSettingsContent() {
             </p>
             <Button
               type="button"
-              variant="destructive"
+              variant="destructiveSolid"
               onClick={() => setShowDisconnectDialog(true)}
               disabled={isDisconnecting}
-              className="bg-semantic-danger text-neutral-0 hover:bg-semantic-danger/90"
             >
               Disconnect Gmail
             </Button>
@@ -348,10 +347,9 @@ export function GmailSettingsContent() {
             </Button>
             <Button
               type="button"
-              variant="destructive"
+              variant="destructiveSolid"
               onClick={() => void handleDisconnect()}
               disabled={isDisconnecting}
-              className="bg-semantic-danger text-neutral-0 hover:bg-semantic-danger/90"
             >
               {isDisconnecting ? "Disconnecting…" : "Disconnect Gmail"}
             </Button>

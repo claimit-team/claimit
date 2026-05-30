@@ -192,3 +192,114 @@ export async function patchUserMe(req: PatchUserMeRequest): Promise<User> {
   const body = (await response.json()) as { user: User };
   return body.user;
 }
+
+export type UserResponse = {
+  user: User;
+};
+
+async function authMultipartRequest(path: string, file: File): Promise<User> {
+  if (!API_BASE_URL) {
+    throw new AuthApiError("missing_api_base_url", "NEXT_PUBLIC_API_BASE_URL is not configured.");
+  }
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new AuthApiError("unauthenticated", "User must be signed in.");
+  }
+
+  const token = await currentUser.getIdToken();
+  const form = new FormData();
+  form.append("file", file, file.name);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), AUTH_ME_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new AuthApiError(
+        "request_timeout",
+        "Timed out uploading your photo. Please try again.",
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!response.ok) {
+    let code = "request_failed";
+    try {
+      const body = (await response.json()) as { error?: { code?: string; message?: string } };
+      code = body.error?.code ?? code;
+    } catch {
+      // Non-JSON body; keep defaults.
+    }
+    const message = friendlyMessage(response.status, code);
+    throw new AuthApiError(code, message);
+  }
+
+  const body = (await response.json()) as UserResponse;
+  return body.user;
+}
+
+async function authDeleteRequest(path: string): Promise<User> {
+  if (!API_BASE_URL) {
+    throw new AuthApiError("missing_api_base_url", "NEXT_PUBLIC_API_BASE_URL is not configured.");
+  }
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new AuthApiError("unauthenticated", "User must be signed in.");
+  }
+
+  const token = await currentUser.getIdToken();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), AUTH_ME_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new AuthApiError("request_timeout", "Timed out removing your photo. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!response.ok) {
+    let code = "request_failed";
+    try {
+      const body = (await response.json()) as { error?: { code?: string; message?: string } };
+      code = body.error?.code ?? code;
+    } catch {
+      // Non-JSON body; keep defaults.
+    }
+    const message = friendlyMessage(response.status, code);
+    throw new AuthApiError(code, message);
+  }
+
+  const body = (await response.json()) as UserResponse;
+  return body.user;
+}
+
+export async function uploadAvatar(file: File): Promise<UserResponse> {
+  const user = await authMultipartRequest("/api/v1/auth/me/avatar", file);
+  return { user };
+}
+
+export async function deleteAvatar(): Promise<UserResponse> {
+  const user = await authDeleteRequest("/api/v1/auth/me/avatar");
+  return { user };
+}

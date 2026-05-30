@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  FileEdit,
   Hotel,
   Mail,
   Plane,
@@ -12,9 +13,9 @@ import {
   UploadCloud,
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
-import { OutcomeRecorder } from "@/components/claims/outcome-recorder";
 import { AutoSendBanner } from "@/components/dashboard/auto-send-banner";
 import { HeroActiveUser } from "@/components/dashboard/hero/active-user";
 import { HeroNewUser } from "@/components/dashboard/hero/new-user";
@@ -22,7 +23,7 @@ import { HeroReclaimExperienced } from "@/components/dashboard/hero/reclaim-expe
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,7 +34,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { PlatformLogo } from "@/components/ui/platform-logo";
 import { Skeleton } from "@/components/ui/skeleton";
+import { TableCell, TableRow } from "@/components/ui/table";
 import { useAwaitingOutcomeClaims } from "@/hooks/useAwaitingOutcomeClaims";
 import { useDashboardSummary } from "@/hooks/useDashboardSummary";
 import { useMonitoredPurchases } from "@/hooks/useMonitoredPurchases";
@@ -208,8 +211,83 @@ function DevStateSwitcher({
 }
 
 // ============================================================================
-// NEEDS ATTENTION
+// SECTION HEADER
 // ============================================================================
+
+function SectionHeader({
+  title,
+  subtitle,
+  action,
+}: {
+  title: string;
+  subtitle?: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="mb-4 flex items-end justify-between gap-4">
+      <div className="min-w-0">
+        <h2 className="text-lg font-semibold tracking-tight text-neutral-900">{title}</h2>
+        {subtitle ? (
+          <p className="mt-1 text-sm leading-relaxed text-neutral-600">{subtitle}</p>
+        ) : null}
+      </div>
+      {action ? <div className="shrink-0">{action}</div> : null}
+    </div>
+  );
+}
+
+// ============================================================================
+// NEEDS ATTENTION — item types (builders below)
+// ============================================================================
+
+type ConfirmExtractionItem = {
+  type: "confirm_extraction";
+  purchaseId: string;
+  platform: string;
+  title: string;
+  lowConfidenceFields: string[];
+  category: string | null;
+};
+
+type ReviewDraftItem = {
+  type: "review_draft";
+  claimId: string;
+  platform: string;
+  title: string;
+  claimType: string;
+  windowRemaining: string;
+  category: string | null;
+};
+
+type AwaitingOutcomeItem = {
+  type: "awaiting_outcome";
+  claimId: string;
+  platform: string;
+  title: string;
+  claimAmount: number;
+  submittedLabel: string;
+  category: string | null;
+};
+
+type NeedsAttentionItem = ReviewDraftItem | ConfirmExtractionItem | AwaitingOutcomeItem;
+
+function getCategoryIcon(category: "retail" | "airline" | "hotel") {
+  switch (category) {
+    case "retail":
+      return ShoppingBag;
+    case "airline":
+      return Plane;
+    case "hotel":
+      return Hotel;
+  }
+}
+
+function getCategoryFallbackIcon(category: string | null | undefined) {
+  if (category === "retail" || category === "airline" || category === "hotel") {
+    return getCategoryIcon(category);
+  }
+  return ShoppingBag;
+}
 
 function ReviewDraftCard({
   claimId,
@@ -217,56 +295,48 @@ function ReviewDraftCard({
   title,
   claimType,
   windowRemaining,
-}: {
-  claimId: string;
-  platform: string;
-  title: string;
-  claimType: string;
-  windowRemaining: string;
-}) {
-  // Mirror the ConfirmExtractionCard pattern: whole-card is the hit
-  // target (a tap on the platform name / claim-type badge lands at
-  // /claims/:id same as if the trailing "Review draft" CTA were
-  // clicked). Pre-fix the card body had no handler so only the small
-  // trailing Link navigated, leaving the rest of the visibly-clickable
-  // card dead. The trailing CTA stays a styled <span> with
-  // pointer-events-none because nested interactive elements (<Link>
-  // inside <Link>) are invalid HTML and confuse screen readers.
+  category,
+}: ReviewDraftItem) {
+  if (!claimId) return null;
+
   return (
     <Link
       href={`/claims/${claimId}`}
-      aria-label={`Review draft: ${platform} · ${title}`}
-      className="block rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className="block h-full rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary-500 focus-visible:ring-offset-2"
+      aria-label={`Review draft for ${title}`}
     >
-      <Card className="border-neutral-200 transition-colors hover:bg-neutral-50">
-        <CardContent className="p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <Badge
-                variant="secondary"
-                className="mb-2 bg-brand-primary-50 text-brand-primary-700 border-0"
-              >
-                Review needed
-              </Badge>
-              <div className="font-medium text-neutral-900 truncate">
-                {platform} · {title}
-              </div>
-              <div className="flex items-center gap-3 mt-2 text-sm text-neutral-600 flex-wrap">
-                <Badge variant="outline" className="text-xs">
-                  {snakeToTitleLabel(claimType)}
-                </Badge>
-                <span className="flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5" aria-hidden="true" />
-                  {windowRemaining}
-                </span>
-              </div>
+      <Card className="h-full border-neutral-200 transition-[border-color,box-shadow] duration-200 hover:border-neutral-300 hover:shadow-sm">
+        <CardContent className="flex h-full flex-col p-6">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-neutral-50 ring-1 ring-neutral-200/70">
+              <PlatformLogo
+                platform={platform}
+                fallbackIcon={getCategoryFallbackIcon(category)}
+                size={30}
+              />
             </div>
             <span
-              aria-hidden="true"
-              className={cn(buttonVariants({ size: "sm" }), "pointer-events-none")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
+                "bg-brand-primary-100 text-brand-primary-700",
+              )}
             >
-              Review draft
+              <FileEdit className="size-3.5" aria-hidden />
+              Review needed
             </span>
+          </div>
+          <div className="mt-5">
+            <p className="line-clamp-2 text-[15px] font-semibold leading-snug tracking-tight text-neutral-900">
+              {title}
+            </p>
+            <p className="mt-1.5 text-sm text-neutral-600">
+              {platform} · {snakeToTitleLabel(claimType)}
+            </p>
+            <p className="mt-2 text-xs text-neutral-500">Window {windowRemaining}</p>
+          </div>
+          <div className="mt-auto flex items-center justify-end gap-1 pt-5 text-sm font-medium text-brand-primary-600">
+            Review draft
+            <ChevronRight className="size-4" aria-hidden />
           </div>
         </CardContent>
       </Card>
@@ -279,53 +349,48 @@ function ConfirmExtractionCard({
   platform,
   title,
   lowConfidenceFields,
-}: {
-  purchaseId: string;
-  platform: string;
-  title: string;
-  lowConfidenceFields: string[];
-}) {
-  // Wrap the WHOLE card in <Link> (whole-card hit target) so a user
-  // who taps the platform name / low-confidence summary lands on
-  // /confirm/:id same as if they clicked the trailing call-to-action.
-  // Pre-fix, only the small button was clickable — the visual
-  // affordance of the entire card was misleading because nothing else
-  // navigated. The trailing CTA is demoted to a styled <span> instead
-  // of a nested <Link>/<button> because nested interactive elements
-  // are invalid HTML and screen readers can't disambiguate the two
-  // targets. The visual treatment is preserved via buttonVariants().
+  category,
+}: ConfirmExtractionItem) {
+  if (!purchaseId) return null;
+
   return (
     <Link
       href={`/confirm/${purchaseId}?from=/dashboard`}
-      aria-label={`Confirm purchase: ${platform} · ${title}`}
-      className="block rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className="block h-full rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary-500 focus-visible:ring-offset-2"
+      aria-label={`Confirm details for ${title}`}
     >
-      <Card className="border-neutral-200 transition-colors hover:bg-neutral-50">
-        <CardContent className="p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <Badge
-                variant="secondary"
-                className="mb-2 bg-semantic-warning-bg text-semantic-warning border-0"
-              >
-                Confirm details
-              </Badge>
-              <div className="font-medium text-neutral-900 truncate">
-                {platform} · {title}
-              </div>
-              <div className="text-sm text-neutral-600 mt-1">
-                Low confidence: {lowConfidenceFields.join(", ")}
-              </div>
+      <Card className="h-full border-neutral-200 transition-[border-color,box-shadow] duration-200 hover:border-neutral-300 hover:shadow-sm">
+        <CardContent className="flex h-full flex-col p-6">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-neutral-50 ring-1 ring-neutral-200/70">
+              <PlatformLogo
+                platform={platform}
+                fallbackIcon={getCategoryFallbackIcon(category)}
+                size={30}
+              />
             </div>
             <span
-              aria-hidden="true"
               className={cn(
-                buttonVariants({ size: "sm", variant: "outline" }),
-                "pointer-events-none",
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
+                "bg-amber-100 text-amber-700",
               )}
             >
-              Confirm purchase
+              <CheckCircle2 className="size-3.5" aria-hidden />
+              Confirm details
             </span>
+          </div>
+          <div className="mt-5">
+            <p className="line-clamp-2 text-[15px] font-semibold leading-snug tracking-tight text-neutral-900">
+              {title}
+            </p>
+            <p className="mt-1.5 text-sm text-neutral-600">{platform}</p>
+            <p className="mt-2 text-xs text-neutral-500">
+              Low confidence: {lowConfidenceFields.join(", ")}
+            </p>
+          </div>
+          <div className="mt-auto flex items-center justify-end gap-1 pt-5 text-sm font-medium text-brand-primary-600">
+            Confirm details
+            <ChevronRight className="size-4" aria-hidden />
           </div>
         </CardContent>
       </Card>
@@ -334,38 +399,54 @@ function ConfirmExtractionCard({
 }
 
 function AwaitingOutcomeCard({
-  item,
-  onRecorded,
-}: {
-  item: AwaitingOutcomeItem;
-  onRecorded: () => void | Promise<void>;
-}) {
+  claimId,
+  platform,
+  title,
+  submittedLabel,
+  category,
+}: AwaitingOutcomeItem) {
+  if (!claimId) return null;
+
   return (
-    <Card className="border-neutral-200">
-      <CardContent className="p-4">
-        <Badge
-          variant="secondary"
-          className="mb-2 bg-semantic-warning-bg text-semantic-warning border-0"
-        >
-          Needs your update
-        </Badge>
-        <div className="font-medium text-neutral-900 truncate">
-          {item.platform} · {item.title}
-        </div>
-        <div className="mt-2 mb-3 flex items-center gap-1 text-sm text-neutral-600">
-          <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-          {item.submittedLabel}
-        </div>
-        <OutcomeRecorder
-          claimId={item.claimId}
-          defaultAmount={item.claimAmount}
-          promptLabel="Heard back?"
-          onRecorded={async () => {
-            await onRecorded();
-          }}
-        />
-      </CardContent>
-    </Card>
+    <Link
+      href={`/claims/${claimId}`}
+      className="block h-full rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary-500 focus-visible:ring-offset-2"
+      aria-label={`Record outcome for ${title}`}
+    >
+      <Card className="h-full border-neutral-200 transition-[border-color,box-shadow] duration-200 hover:border-neutral-300 hover:shadow-sm">
+        <CardContent className="flex h-full flex-col p-6">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-neutral-50 ring-1 ring-neutral-200/70">
+              <PlatformLogo
+                platform={platform}
+                fallbackIcon={getCategoryFallbackIcon(category)}
+                size={30}
+              />
+            </div>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
+                "bg-orange-100 text-orange-700",
+              )}
+            >
+              <Clock className="size-3.5" aria-hidden />
+              Needs your update
+            </span>
+          </div>
+          <div className="mt-5">
+            <p className="line-clamp-2 text-[15px] font-semibold leading-snug tracking-tight text-neutral-900">
+              {title}
+            </p>
+            <p className="mt-1.5 text-sm text-neutral-600">{platform}</p>
+            <p className="mt-2 text-xs text-neutral-500">Submitted {submittedLabel}</p>
+          </div>
+          <div className="mt-auto flex items-center justify-end gap-1 pt-5 text-sm font-medium text-brand-primary-600">
+            Record outcome
+            <ChevronRight className="size-4" aria-hidden />
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
   );
 }
 
@@ -376,38 +457,6 @@ function AwaitingOutcomeCard({
  */
 const CONFIDENCE_THRESHOLD = 0.95;
 const AWAITING_OUTCOME_MIN_DAYS = 3;
-
-type ConfirmExtractionItem = {
-  type: "confirm_extraction";
-  purchaseId: string;
-  platform: string;
-  title: string;
-  lowConfidenceFields: string[];
-};
-
-/**
- * `review_draft` cards come from `outcome=draft_pending` claims via
- * `useReviewDraft`.
- */
-type ReviewDraftItem = {
-  type: "review_draft";
-  claimId: string;
-  platform: string;
-  title: string;
-  claimType: string;
-  windowRemaining: string;
-};
-
-type AwaitingOutcomeItem = {
-  type: "awaiting_outcome";
-  claimId: string;
-  platform: string;
-  title: string;
-  claimAmount: number;
-  submittedLabel: string;
-};
-
-type NeedsAttentionItem = ReviewDraftItem | ConfirmExtractionItem | AwaitingOutcomeItem;
 
 /**
  * Map an `outcome=draft_pending` claim row to the dashboard's
@@ -430,6 +479,7 @@ function buildReviewDraftItems(claims: ClaimListItem[]): ReviewDraftItem[] {
       title: c.product_name ?? "Untitled claim",
       claimType: typeof c.claim_type === "string" ? c.claim_type : "email",
       windowRemaining: formatWindowRemaining(c.window_expires),
+      category: typeof c.category === "string" ? c.category : null,
     }));
 }
 
@@ -450,6 +500,7 @@ function buildAwaitingOutcomeItems(claims: ClaimListItem[]): AwaitingOutcomeItem
       title: c.product_name ?? "Untitled claim",
       claimAmount: c.claim_amount ?? 0,
       submittedLabel: formatRelativeFromNow(c.submitted_at),
+      category: typeof c.category === "string" ? c.category : null,
     }));
 }
 
@@ -513,6 +564,7 @@ function buildConfirmExtractionItems(purchases: PurchaseListItem[]): ConfirmExtr
       platform: getPlatformLabel(p.platform),
       title: p.product_name ?? "Untitled purchase",
       lowConfidenceFields: lowFields.length > 0 ? lowFields : ["Review extracted details"],
+      category: typeof p.category === "string" ? p.category : null,
     });
   }
   return out;
@@ -548,21 +600,10 @@ function buildRecentActivityText(item: RecentResolvedClaim): string {
     : `${platform} claim ${outcome}`;
 }
 
-function NeedsAttentionSection({
-  items,
-  onOutcomeRecorded,
-}: {
-  items: NeedsAttentionItem[];
-  onOutcomeRecorded?: () => void | Promise<void>;
-}) {
+function NeedsAttentionSection({ items }: { items: NeedsAttentionItem[] }) {
   return (
     <section>
-      <div className="mb-4">
-        <h2 className="text-lg font-semibold text-neutral-900">Needs your attention</h2>
-        <p className="text-sm text-neutral-600">
-          These items require a decision or update from you.
-        </p>
-      </div>
+      <SectionHeader title="Needs your attention" />
 
       {items.length === 0 ? (
         <Card className="border-neutral-200">
@@ -575,39 +616,16 @@ function NeedsAttentionSection({
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 auto-rows-fr gap-6 lg:grid-cols-2">
           {items.map((item) => {
+            if (item.type === "awaiting_outcome") {
+              return <AwaitingOutcomeCard key={item.claimId} {...item} />;
+            }
             if (item.type === "review_draft") {
-              return (
-                <ReviewDraftCard
-                  key={item.claimId}
-                  claimId={item.claimId}
-                  platform={item.platform}
-                  title={item.title}
-                  claimType={item.claimType}
-                  windowRemaining={item.windowRemaining}
-                />
-              );
+              return <ReviewDraftCard key={item.claimId} {...item} />;
             }
             if (item.type === "confirm_extraction") {
-              return (
-                <ConfirmExtractionCard
-                  key={item.purchaseId}
-                  purchaseId={item.purchaseId}
-                  platform={item.platform}
-                  title={item.title}
-                  lowConfidenceFields={item.lowConfidenceFields}
-                />
-              );
-            }
-            if (item.type === "awaiting_outcome") {
-              return (
-                <AwaitingOutcomeCard
-                  key={item.claimId}
-                  item={item}
-                  onRecorded={onOutcomeRecorded ?? (async () => {})}
-                />
-              );
+              return <ConfirmExtractionCard key={item.purchaseId} {...item} />;
             }
             return null;
           })}
@@ -621,15 +639,60 @@ function NeedsAttentionSection({
 // MONITORED PURCHASES
 // ============================================================================
 
-function getCategoryIcon(category: "retail" | "airline" | "hotel") {
-  switch (category) {
-    case "retail":
-      return ShoppingBag;
-    case "airline":
-      return Plane;
-    case "hotel":
-      return Hotel;
-  }
+function MonitoredPurchaseRow({ purchase }: { purchase: PurchaseListItem }) {
+  const router = useRouter();
+  const href = `/purchases/${purchase._id}`;
+  const cat = purchase.category;
+  const Icon =
+    cat === "retail" || cat === "airline" || cat === "hotel" ? getCategoryIcon(cat) : ShoppingBag;
+  const statusBadge = getListStatusBadge(purchase.status);
+  const degraded = isMonitoringDegraded(purchase.status);
+
+  return (
+    <TableRow
+      role="link"
+      tabIndex={0}
+      onClick={() => router.push(href)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          router.push(href);
+        }
+      }}
+      className="cursor-pointer transition-colors hover:bg-neutral-50 focus-visible:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-primary-500"
+    >
+      <TableCell className="px-4 py-3 text-sm font-medium text-neutral-900">
+        {getPlatformLabel(purchase.platform)}
+      </TableCell>
+      <TableCell className="px-4 py-3 text-sm text-neutral-700">
+        {purchase.product_name ?? "—"}
+      </TableCell>
+      <TableCell className="px-4 py-3">
+        <Badge variant="outline" className="text-xs capitalize">
+          <Icon className="mr-1 size-3" aria-hidden="true" />
+          {snakeToTitleLabel(purchase.category)}
+        </Badge>
+      </TableCell>
+      <TableCell className="px-4 py-3">
+        <span className="inline-flex items-center gap-1.5">
+          <Badge variant="outline" className={cn("text-xs capitalize", statusBadge.className)}>
+            {statusBadge.label}
+          </Badge>
+          {degraded ? (
+            <span
+              role="img"
+              aria-label="Monitoring partially degraded"
+              title="Monitoring is partially degraded — last price check returned no data."
+              className="inline-block size-2 rounded-full bg-semantic-warning"
+            />
+          ) : null}
+        </span>
+      </TableCell>
+      <TableCell className="px-4 py-3 text-sm text-neutral-600">
+        {formatWindowRemaining(purchase.window_expires)}
+      </TableCell>
+    </TableRow>
+  );
 }
 
 // Skeleton row keys — fixed 5-row layout matches the dashboard section's
@@ -648,19 +711,21 @@ function MonitoredPurchasesSection({
 }) {
   return (
     <section>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-neutral-900">Monitored purchases</h2>
-        <Link
-          href="/purchases"
-          className={cn(
-            buttonVariants({ variant: "ghost", size: "sm" }),
-            "inline-flex items-center",
-          )}
-        >
-          View all purchases
-          <ChevronRight className="w-4 h-4 ml-1" aria-hidden="true" />
-        </Link>
-      </div>
+      <SectionHeader
+        title="Monitored purchases"
+        action={
+          <Link
+            href="/purchases"
+            className={cn(
+              buttonVariants({ variant: "ghost", size: "sm" }),
+              "inline-flex items-center",
+            )}
+          >
+            View all purchases
+            <ChevronRight className="w-4 h-4 ml-1" aria-hidden="true" />
+          </Link>
+        }
+      />
 
       <Card className="border-neutral-200">
         <CardContent className="p-0">
@@ -714,61 +779,9 @@ function MonitoredPurchasesSection({
                     </td>
                   </tr>
                 ) : (
-                  purchases.map((purchase) => {
-                    // Read-tolerant category narrowing: the backend
-                    // surfaces the raw enum string, so cast to the
-                    // function's known input set when matched and
-                    // fall back to ShoppingBag (the safe generic
-                    // retail icon) for rogue / null values.
-                    const cat = purchase.category;
-                    const Icon =
-                      cat === "retail" || cat === "airline" || cat === "hotel"
-                        ? getCategoryIcon(cat)
-                        : ShoppingBag;
-                    const statusBadge = getListStatusBadge(purchase.status);
-                    const degraded = isMonitoringDegraded(purchase.status);
-                    return (
-                      <tr key={purchase._id} className="hover:bg-neutral-50 transition-colors">
-                        <td className="px-4 py-3 text-sm font-medium text-neutral-900">
-                          <Link href={`/purchases/${purchase._id}`} className="hover:underline">
-                            {getPlatformLabel(purchase.platform)}
-                          </Link>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-neutral-700">
-                          <Link href={`/purchases/${purchase._id}`} className="hover:underline">
-                            {purchase.product_name ?? "—"}
-                          </Link>
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge variant="outline" className="text-xs capitalize">
-                            <Icon className="w-3 h-3 mr-1" aria-hidden="true" />
-                            {snakeToTitleLabel(purchase.category)}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="inline-flex items-center gap-1.5">
-                            <Badge
-                              variant="outline"
-                              className={cn("text-xs capitalize", statusBadge.className)}
-                            >
-                              {statusBadge.label}
-                            </Badge>
-                            {degraded ? (
-                              <span
-                                role="img"
-                                aria-label="Monitoring partially degraded"
-                                title="Monitoring is partially degraded — last price check returned no data."
-                                className="inline-block h-2 w-2 rounded-full bg-semantic-warning"
-                              />
-                            ) : null}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-neutral-600">
-                          {formatWindowRemaining(purchase.window_expires)}
-                        </td>
-                      </tr>
-                    );
-                  })
+                  purchases.map((purchase) => (
+                    <MonitoredPurchaseRow key={purchase._id} purchase={purchase} />
+                  ))
                 )}
               </tbody>
             </table>
@@ -792,19 +805,16 @@ function QuickUploadSection({ gmailConnected }: { gmailConnected: boolean }) {
 
   return (
     <section>
+      <SectionHeader title="Quick upload" />
       <Card className="border-neutral-200">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base font-semibold text-neutral-900">Quick upload</CardTitle>
-          <CardDescription>Add a receipt without leaving the dashboard.</CardDescription>
-        </CardHeader>
-        <CardContent className="pt-0">
+        <CardContent className="p-4">
           <button
             type="button"
             onClick={() => openUploadDialog(true)}
-            className="w-full border-2 border-dashed border-neutral-300 hover:border-neutral-400 rounded-lg p-6 text-center transition-colors cursor-pointer"
+            className="flex w-full cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-neutral-300 px-6 py-7 text-center transition-colors hover:border-neutral-400 hover:bg-neutral-50"
           >
-            <UploadCloud className="w-8 h-8 mx-auto text-neutral-400 mb-2" aria-hidden="true" />
-            <span className="inline-flex items-center justify-center px-3 py-1.5 rounded-md border border-neutral-300 bg-neutral-0 text-sm font-medium text-neutral-700 mb-2">
+            <UploadCloud className="mb-2 h-7 w-7 text-neutral-400" aria-hidden="true" />
+            <span className="mb-2 inline-flex items-center justify-center rounded-md border border-neutral-300 bg-neutral-0 px-3 py-1.5 text-sm font-medium text-neutral-700">
               Browse files
             </span>
             <p className="text-xs text-neutral-500">PDF, PNG, or JPG up to 10 MB</p>
@@ -813,7 +823,7 @@ function QuickUploadSection({ gmailConnected }: { gmailConnected: boolean }) {
           {!gmailConnected && (
             <Link
               href="/settings/gmail"
-              className="text-xs text-brand-primary-500 hover:text-brand-primary-600 mt-2 inline-block"
+              className="mt-3 inline-block text-xs text-brand-primary-600 hover:text-brand-primary-700"
             >
               Or connect Gmail →
             </Link>
@@ -831,22 +841,20 @@ function QuickUploadSection({ gmailConnected }: { gmailConnected: boolean }) {
 function RecentActivitySection({ items }: { items: RecentResolvedClaim[] }) {
   return (
     <section>
+      <SectionHeader title="Recently resolved" />
       <Card className="border-neutral-200">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base font-semibold text-neutral-900">
-            Recently resolved
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0">
+        <CardContent className="p-4">
           {items.length === 0 ? (
-            <p className="text-sm text-neutral-500">No recent activity yet</p>
+            <p className="py-6 text-center text-sm text-neutral-500">
+              Your resolved claims will appear here.
+            </p>
           ) : (
             <ul className="space-y-3">
               {items.map((item) => (
                 <li key={item.claim_id} className="flex items-start gap-3 text-sm">
-                  <div className="w-2 h-2 rounded-full bg-neutral-300 mt-1.5 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-neutral-700">{buildRecentActivityText(item)}</span>
+                  <div className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-neutral-300" />
+                  <div className="min-w-0 flex-1 text-neutral-700">
+                    {buildRecentActivityText(item)}
                   </div>
                 </li>
               ))}
@@ -903,7 +911,7 @@ export default function DashboardPage() {
   } = useMonitoredPurchases();
   const { purchases: pendingPurchases } = usePendingConfirmation();
   const { claims: reviewDraftClaims } = useReviewDraft();
-  const { claims: awaitingClaims, refetch: refetchAwaiting } = useAwaitingOutcomeClaims();
+  const { claims: awaitingClaims } = useAwaitingOutcomeClaims();
   // Ticket 5.15 / WI-9: hydrate the auto-send banner store with the
   // current queued_for_send slice. Live updates after this come via
   // the SSE fanout in useProactiveAssistant (no polling).
@@ -939,7 +947,7 @@ export default function DashboardPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 lg:px-8 py-6 lg:py-8">
-      <div className="space-y-8">
+      <div className="space-y-10">
         <PageHeader
           gmailConnected={gmailConnected}
           onUploadClick={handleUploadClick}
@@ -989,14 +997,7 @@ export default function DashboardPage() {
 
         {userState !== "new" && <AutoSendBanner />}
 
-        {userState !== "new" && (
-          <NeedsAttentionSection
-            items={needsAttention}
-            onOutcomeRecorded={async () => {
-              await Promise.all([refetchAwaiting(), refetchSummary()]);
-            }}
-          />
-        )}
+        {userState !== "new" && <NeedsAttentionSection items={needsAttention} />}
 
         {userState !== "new" && (
           <MonitoredPurchasesSection
@@ -1010,7 +1011,7 @@ export default function DashboardPage() {
             because HeroNewUser already renders an upload CTA at the top —
             otherwise new users see two upload regions on the same page. */}
         {userState !== "new" && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <QuickUploadSection gmailConnected={gmailConnected} />
             <RecentActivitySection items={summary?.recent_resolved ?? []} />
           </div>

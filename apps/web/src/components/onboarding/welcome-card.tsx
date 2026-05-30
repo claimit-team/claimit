@@ -1,14 +1,13 @@
 "use client";
 
+import { ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { FlowPreview } from "@/components/onboarding/flow-preview";
-import { buttonVariants } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { signOutUser } from "@/lib/auth-actions";
-import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store";
 
 export function WelcomeCard() {
@@ -30,45 +29,41 @@ export function WelcomeCard() {
   };
 
   return (
-    <Card className="w-full border-neutral-200 bg-neutral-0 shadow-sm">
-      <CardContent className="flex flex-col gap-6">
-        <div className="space-y-3 text-center">
-          <h1 className="font-heading text-xl font-semibold text-neutral-900">
-            Welcome to ClaimIt
-          </h1>
-          <p className="text-sm leading-relaxed text-neutral-700">
-            ClaimIt helps you monitor purchases after checkout and prepare refund claim materials
-            when a supported platform&apos;s price protection policy applies. You stay in control of
-            what gets reviewed, sent, or marked resolved. The goal is a clearer reclaim workflow
-            without chasing policies by hand.
-          </p>
+    <div className="space-y-6">
+      <div className="flex flex-col items-center text-center">
+        <div className="flex size-12 items-center justify-center rounded-xl bg-neutral-100">
+          <ShieldCheck className="size-6 text-neutral-700" aria-hidden />
         </div>
+        <h1 className="mt-5 text-2xl font-semibold tracking-tight text-balance text-neutral-900 sm:text-3xl">
+          Welcome to ClaimIt
+        </h1>
+        <p className="mt-3 text-base leading-relaxed text-neutral-600">
+          We watch the prices on what you buy and file the refund claims for you when prices drop.
+        </p>
+      </div>
 
-        <FlowPreview />
+      <FlowPreview />
 
-        <div className="flex flex-col gap-3">
-          <Link
-            href="/onboarding/gmail"
-            className={cn(
-              buttonVariants({ size: "lg" }),
-              "w-full bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600",
-            )}
+      <div className="space-y-3">
+        <Button
+          render={<Link href="/onboarding/gmail" />}
+          size="lg"
+          className="w-full bg-neutral-900 text-neutral-0 hover:bg-neutral-800"
+        >
+          Get started
+        </Button>
+
+        <p className="text-center">
+          <button
+            type="button"
+            onClick={() => void handleUseDifferentAccount()}
+            disabled={isSwitchingAccount}
+            className="text-sm text-neutral-500 transition-colors hover:text-neutral-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Get started
-          </Link>
-
-          <p className="text-center text-xs text-neutral-500">
-            <button
-              type="button"
-              onClick={() => void handleUseDifferentAccount()}
-              disabled={isSwitchingAccount}
-              className="text-brand-primary-600 underline-offset-4 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isSwitchingAccount ? "Signing out…" : "Use a different account"}
-            </button>
-          </p>
-        </div>
-      </CardContent>
-    </Card>
+            {isSwitchingAccount ? "Signing out…" : "Use a different account"}
+          </button>
+        </p>
+      </div>
+    </div>
   );
 }

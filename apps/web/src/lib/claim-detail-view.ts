@@ -47,12 +47,10 @@ import { getPlatformLabel } from "@/lib/platform-labels";
  * Map a backend `claim.outcome` value to the UI workflow status the
  * header / shell branch on.
  *
- * The backend `ClaimOutcome` enum has 8 values; the UI workflow has 7.
- * Two intermediate UI states (`queued_for_send`, `ready_to_execute`)
- * have no backend counterpart — they only exist as transient
- * post-approval UI in the original mock and are NEVER emitted by this
- * mapper. Once real approve wiring lands, the API will surface state
- * for those buckets and this mapper can be extended.
+ * The backend `ClaimOutcome` enum has 8 values; the UI workflow has 6.
+ * `queued_for_send` has no direct backend counterpart — it is set
+ * client-side via the auto-send queue surface and NEVER emitted by
+ * this mapper directly.
  *
  * Mapping rules:
  *  - `draft_pending`        -> `awaiting_approval`

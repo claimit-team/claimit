@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
 
 from claimit_observability import init_phoenix
 from fastapi import Depends, FastAPI
+from opentelemetry import context as otel_context
+from opentelemetry import trace as otel_trace
+from opentelemetry.trace import StatusCode, set_span_in_context
 from pydantic import BaseModel, Field
 from starlette.requests import Request
 from starlette.responses import StreamingResponse
@@ -44,6 +49,10 @@ class ModeBStreamRequest(BaseModel):
     messages: list[WireHistoryMessage] = Field(default_factory=list)
 
 
+logger = logging.getLogger(__name__)
+_tracer = otel_trace.get_tracer("claimit.assistant-agent.mode-b")
+
+
 def _format_sse_frame(event: str, data: str) -> str:
     lines = data.splitlines() or [""]
     data_block = "".join(f"data: {line}\n" for line in lines)
@@ -51,8 +60,19 @@ def _format_sse_frame(event: str, data: str) -> str:
 
 
 async def _stream_mode_b(body: ModeBStreamRequest) -> AsyncIterator[str]:
-    history = [HistoryMessage(role=m.role, content=m.content) for m in body.messages]
+    # Create a wrapping span so all child spans (httpx→Gemini, pymongo)
+    # share the same trace_id. Set it as the current span so the OTel
+    # context propagates to auto-instrumented callees.
+    span = _tracer.start_span(
+        "mode_b.stream",
+        attributes={"claim.id": body.claim_id, "user.id": body.user_id},
+    )
+    span_ctx = span.get_span_context()
+    mode_b_trace_id = format(span_ctx.trace_id, "032x") if span_ctx.trace_id != 0 else None
+    token: object | None = None
     try:
+        token = otel_context.attach(set_span_in_context(span))
+        history = [HistoryMessage(role=m.role, content=m.content) for m in body.messages]
         async for frame in handle_message(
             body.user_id,
             body.claim_id,
@@ -63,12 +83,26 @@ async def _stream_mode_b(body: ModeBStreamRequest) -> AsyncIterator[str]:
             data = frame.get("data", "")
             if not isinstance(data, str):
                 data = json.dumps(data)
+            if event == "done" and mode_b_trace_id:
+                try:
+                    payload = json.loads(data) if data else {}
+                    payload["trace_id"] = mode_b_trace_id
+                    data = json.dumps(payload)
+                except (json.JSONDecodeError, TypeError):
+                    pass
             yield _format_sse_frame(str(event), data)
     except Exception:
-        yield _format_sse_frame(
-            "done",
-            json.dumps({"error": "Mode B stream failed unexpectedly."}),
-        )
+        logger.exception("Mode B stream failed for claim %s", body.claim_id)
+        span.set_status(StatusCode.ERROR)
+        span.record_exception(sys.exc_info()[1])
+        error_payload: dict = {"error": "Mode B stream failed unexpectedly."}
+        if mode_b_trace_id:
+            error_payload["trace_id"] = mode_b_trace_id
+        yield _format_sse_frame("done", json.dumps(error_payload))
+    finally:
+        span.end()
+        if token is not None:
+            otel_context.detach(token)
 
 
 @app.get("/health")

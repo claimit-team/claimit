@@ -3,7 +3,6 @@
 export type ClaimDetailWorkflowStatus =
   | "awaiting_approval"
   | "queued_for_send"
-  | "ready_to_execute"
   | "submitted"
   | "approved"
   | "denied"

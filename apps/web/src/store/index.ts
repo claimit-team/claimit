@@ -1,4 +1,5 @@
 export { useAuthStore } from "./auth";
+export { useClaimAssistantPromptStore } from "./claim-assistant-prompt";
 export { useClaimDetailRefetchStore } from "./claim-detail-refetch";
 export {
   normalizeClaimId,

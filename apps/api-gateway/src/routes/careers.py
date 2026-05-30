@@ -7,9 +7,8 @@ MIME/size validation, per-IP rate limiting, and per-email daily dedup.
 from __future__ import annotations
 
 import logging
-import re
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Annotated
 
 from claimit_mongodb_models import MongoDBClient
@@ -24,17 +23,19 @@ from ..services.careers_resumes import (
     CareersResumesUploader,
     sanitize_filename,
 )
+from ..utils.form_security import (
+    check_email_dedup,
+    check_ip_rate_limit,
+    get_client_ip,
+    is_honeypot_triggered,
+    validate_email_or_raise,
+)
 
 router = APIRouter(prefix="/careers", tags=["careers"])
 _log = logging.getLogger(__name__)
 
-_RATE_LIMIT_WINDOW_SECONDS = 300
 _MAX_EMAIL_SUBMISSIONS_PER_DAY = 3
 _READ_CHUNK_BYTES = 64 * 1024
-_EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
-
-# In-memory per-IP rate limit (single Cloud Run instance; document limitation).
-_ip_submission_log: dict[str, list[datetime]] = {}
 
 
 class InterestSubmissionResponse(BaseModel):
@@ -42,29 +43,8 @@ class InterestSubmissionResponse(BaseModel):
     submitted_at: datetime
 
 
-def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client and request.client.host:
-        return request.client.host
-    return "unknown"
-
-
-def _check_ip_rate_limit(client_ip: str, now: datetime) -> None:
-    cutoff = now - timedelta(seconds=_RATE_LIMIT_WINDOW_SECONDS)
-    recent = [t for t in _ip_submission_log.get(client_ip, []) if t > cutoff]
-    _ip_submission_log[client_ip] = recent
-    if recent:
-        raise ApiError(
-            "rate_limited",
-            "Please wait a few minutes before submitting again.",
-            status_code=429,
-        )
-
-
-def _record_ip_submission(client_ip: str, now: datetime) -> None:
-    _ip_submission_log.setdefault(client_ip, []).append(now)
+def _raise_api_error(code: str, message: str, status_code: int) -> None:
+    raise ApiError(code, message, status_code=status_code)
 
 
 async def _read_limited_resume(file: UploadFile) -> bytes:
@@ -80,13 +60,6 @@ async def _read_limited_resume(file: UploadFile) -> bytes:
             )
         chunks.append(chunk)
     return b"".join(chunks)
-
-
-def _validate_email(value: str) -> str:
-    normalized = value.strip().lower()
-    if not _EMAIL_PATTERN.match(normalized):
-        raise ApiError("validation_error", "Please enter a valid email address.", status_code=400)
-    return normalized
 
 
 @router.post("/interest", response_model=InterestSubmissionResponse)
@@ -107,12 +80,17 @@ async def submit_interest(
     """Accept a careers interest submission with resume upload."""
     now = datetime.now(UTC)
 
-    if website and website.strip():
-        _log.info("Careers interest honeypot triggered from ip=%s", _client_ip(request))
+    if is_honeypot_triggered(website):
+        _log.info("Careers interest honeypot triggered from ip=%s", get_client_ip(request))
         return InterestSubmissionResponse(id="rejected", submitted_at=now)
 
-    client_ip = _client_ip(request)
-    _check_ip_rate_limit(client_ip, now)
+    client_ip = get_client_ip(request)
+    if not check_ip_rate_limit(client_ip, "careers"):
+        raise ApiError(
+            "rate_limited",
+            "Please wait a few minutes before submitting again.",
+            status_code=429,
+        )
 
     content_type = resume.content_type or "application/octet-stream"
     if content_type not in ALLOWED_RESUME_CONTENT_TYPES:
@@ -126,13 +104,14 @@ async def submit_interest(
     if not contents:
         raise ApiError("validation_error", "Resume file is required.", status_code=400)
 
-    normalized_email = _validate_email(email)
-    day_ago = now - timedelta(days=1)
-    recent_count = await db.count(
+    normalized_email = validate_email_or_raise(email, raise_error=_raise_api_error)
+
+    if not await check_email_dedup(
+        db,
         "careers_interest_submissions",
-        {"email": normalized_email, "submitted_at": {"$gte": day_ago}},
-    )
-    if recent_count >= _MAX_EMAIL_SUBMISSIONS_PER_DAY:
+        normalized_email,
+        max_per_day=_MAX_EMAIL_SUBMISSIONS_PER_DAY,
+    ):
         raise ApiError(
             "rate_limited",
             "You've reached the daily submission limit. Please contact us directly.",
@@ -177,7 +156,5 @@ async def submit_interest(
             "This submission was already received.",
             status_code=409,
         )
-
-    _record_ip_submission(client_ip, now)
 
     return InterestSubmissionResponse(id=submission_id, submitted_at=now)

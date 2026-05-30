@@ -82,6 +82,8 @@ class Subscription(BaseModel):
 class User(BaseDocument):
     email: str
     name: str
+    provider_avatar_url: str | None = None
+    custom_avatar_url: str | None = None
     default_location: DefaultLocation
     loyalty_memberships: list[LoyaltyMembership]
     gmail_integration: GmailIntegration

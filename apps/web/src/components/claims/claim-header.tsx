@@ -14,21 +14,34 @@
  *   - awaiting_approval → Edit draft / Cancel claim / Approve and send
  *   - submitted         → (none — see PostApproveBanner)
  *   - approved          → Reclaimed $X (view receipt deferred)
- *   - denied            → denial reason + Try a different angle (deferred)
+ *   - denied            → denial reason + Try a different angle
  *   - cancelled         → muted cancel reason subtext
  *   - expired           → none
  */
 
-import { AlertCircle, ArrowLeft, Check, Clock, Edit, Printer, Send, XCircle } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  Check,
+  Clock,
+  Edit,
+  Loader2,
+  Printer,
+  Send,
+  XCircle,
+} from "lucide-react";
 import Link from "next/link";
 import { type KeyboardEvent, type MouseEvent, type ReactNode, useEffect, useState } from "react";
 
+import { getApproveAction } from "@/components/claims/approve-confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatClaimCurrency, formatClaimRemainingTime } from "@/lib/claim-detail";
 import type { ClaimDetail, ClaimDetailWorkflowStatus } from "@/lib/claim-detail-types";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/store";
+import { useClaimRedraftProgressStore } from "@/store/claim-redraft-progress";
 
 interface ClaimHeaderProps {
   claim: ClaimDetail;
@@ -45,15 +58,11 @@ interface ClaimHeaderProps {
    * Shell toggles `body.printing-in-store-guide` + calls `window.print()`.
    */
   onClickPrint: () => void;
+  /** Header → shell: queue an Assistant redraft for a denied claim. */
+  onClickTryDifferentAngle?: () => void;
 }
 
-// Tooltip copy for the two actions still missing backends today.
-// (Approve / Cancel / Edit are wired in 5.7 and no longer need a
-// "coming soon" tooltip.) These two flip when the matching backends
-// land: View receipt → reclaimed-amount receipt URL on Claim; Try a
-// different angle → redraft endpoint (not yet specced).
-const TRY_AGAIN_TODO =
-  "Coming soon — claim redrafting flow needs a backend endpoint before wiring.";
+// Tooltip copy for View receipt — still missing backend (BUG-125).
 const VIEW_RECEIPT_TODO =
   "Coming soon — the reclaimed-amount receipt link isn't surfaced from the API yet.";
 
@@ -66,10 +75,6 @@ function StatusBadge({ status }: { status: ClaimDetailWorkflowStatus }) {
     queued_for_send: {
       label: "Queued",
       className: "bg-semantic-warning/10 text-semantic-warning border-semantic-warning/20",
-    },
-    ready_to_execute: {
-      label: "Ready",
-      className: "bg-brand-primary-50 text-brand-primary-500 border-brand-primary-500/20",
     },
     submitted: {
       label: "Submitted",
@@ -134,15 +139,20 @@ export function ClaimHeader({
   onClickCancel,
   onClickApprove,
   onClickPrint,
+  onClickTryDifferentAngle,
 }: ClaimHeaderProps) {
   // Hook called unconditionally (rules-of-hooks). The interval is
   // always on; `countdown` is only read on the queued_for_send branch.
   const now = useCurrentSecond();
   const countdown = claim.auto_send_at ? formatCountdown(claim.auto_send_at, now) : "0:00";
+  const gmailConnected = useAuthStore((s) => s.user?.gmail_integration?.connected ?? false);
+  const isRegenerating = useClaimRedraftProgressStore((s) => s.isRegenerating(claim.claim_id));
 
   const renderActions = () => {
     switch (claim.status) {
-      case "awaiting_approval":
+      case "awaiting_approval": {
+        const approveAction = getApproveAction(claim.claim_type, gmailConnected);
+        const ApproveIcon = approveAction.icon;
         return (
           <>
             <Button
@@ -166,11 +176,12 @@ export function ClaimHeader({
               Cancel claim
             </Button>
             <Button size="sm" type="button" onClick={onClickApprove} className="w-full sm:w-auto">
-              <Send className="mr-2 h-4 w-4" />
-              Approve and send
+              <ApproveIcon className="mr-2 h-4 w-4" />
+              {approveAction.headerLabel}
             </Button>
           </>
         );
+      }
 
       case "queued_for_send":
         // 5.15 / WI-8: the auto-send queue surface on the claim page
@@ -230,11 +241,21 @@ export function ClaimHeader({
               <AlertCircle className="h-5 w-5" />
               <span className="text-sm">{claim.denial_reason ?? "Claim was denied"}</span>
             </div>
-            <DisabledTooltipButton
-              label="Try a different angle"
-              tooltip={TRY_AGAIN_TODO}
-              variant="ghost"
-            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClickTryDifferentAngle}
+              disabled={isRegenerating || !onClickTryDifferentAngle}
+            >
+              {isRegenerating ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Regenerating…
+                </>
+              ) : (
+                "Try a different angle"
+              )}
+            </Button>
           </div>
         );
 

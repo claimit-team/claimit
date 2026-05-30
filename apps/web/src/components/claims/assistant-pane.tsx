@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAssistantStream } from "@/hooks/useAssistantStream";
 import { useConversations } from "@/hooks/useConversations";
 import { cn } from "@/lib/utils";
+import { useClaimAssistantPromptStore } from "@/store/claim-assistant-prompt";
 import { useClaimDetailRefetchStore } from "@/store/claim-detail-refetch";
 import { useClaimRedraftProgressStore } from "@/store/claim-redraft-progress";
 import type { UIMessage, UIToolCall, WireConversationMessage } from "@/types/assistant";
@@ -96,7 +97,7 @@ function MessageBubble({ message }: { message: UIMessage }) {
       <div
         className={cn(
           "max-w-[85%] rounded-lg px-4 py-2.5 md:max-w-[70%]",
-          isAssistant ? "bg-neutral-100 text-neutral-900" : "bg-brand-primary-500 text-white",
+          isAssistant ? "bg-neutral-100 text-neutral-900" : "bg-brand-primary-500 text-neutral-0",
         )}
       >
         {isAssistant ? (
@@ -127,7 +128,7 @@ function MessageBubble({ message }: { message: UIMessage }) {
         ) : null}
         {isAssistant && message.trace_id && !message.streaming ? (
           <a
-            href={`https://app.phoenix.arize.com/s/claimitbeta/projects/claimit/traces/${message.trace_id}`}
+            href={`https://app.phoenix.arize.com/s/claimitbeta/projects/UHJvamVjdDoz/spans/${message.trace_id}`}
             target="_blank"
             rel="noopener noreferrer"
             className="mt-1.5 inline-flex items-center gap-1 text-neutral-400 text-xs transition-colors hover:text-brand-primary-500"
@@ -139,7 +140,7 @@ function MessageBubble({ message }: { message: UIMessage }) {
       </div>
       {!isAssistant ? (
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-primary-500">
-          <User className="h-4 w-4 text-white" />
+          <User className="h-4 w-4 text-neutral-0" />
         </div>
       ) : null}
     </div>
@@ -177,6 +178,8 @@ export function AssistantPane({
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const hydratedForRef = useRef<string | null>(null);
+
+  const pendingPrompt = useClaimAssistantPromptStore((s) => s.pendingByClaimId[claimId]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: claimId is the intentional trigger
   useEffect(() => {
@@ -245,6 +248,15 @@ export function AssistantPane({
       await triggerClaimRefetch(claimId);
     }
   };
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runSend is intentionally omitted — effect must re-fire on pendingPrompt nonce/activeId/streaming only
+  useEffect(() => {
+    if (!pendingPrompt) return;
+    if (!activeId || streaming) return;
+    const consumed = useClaimAssistantPromptStore.getState().consumePrompt(claimId);
+    if (!consumed) return;
+    void runSend(consumed.text);
+  }, [pendingPrompt, activeId, streaming, claimId]);
 
   const handleSend = async () => {
     const text = inputValue.trim();

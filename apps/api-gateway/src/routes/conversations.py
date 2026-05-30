@@ -14,6 +14,7 @@ from claimit_mongodb_models.conversation import Conversation, ToolCall
 from claimit_mongodb_models.enums import ConversationMode, ConversationStatus, MessageRole
 from claimit_mongodb_models.user import User
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from opentelemetry import trace as otel_trace
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -30,6 +31,7 @@ from ..services.conversation_service import (
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 logger = logging.getLogger(__name__)
+_tracer = otel_trace.get_tracer("claimit.api-gateway.conversations")
 
 
 class CreateConversationRequest(BaseModel):
@@ -169,14 +171,38 @@ async def send_message(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[MongoDBClient, Depends(get_db)],
 ) -> EventSourceResponse:
+    # Create a manual span to obtain a valid trace_id. We can't rely on
+    # an active request span (FastAPIInstrumentor is not wired), and
+    # _current_trace_id() inside a generator always returns None because
+    # async generators don't inherit the caller's OTel context.
+    # When PHOENIX_API_KEY is unset, init_phoenix() skips registering a
+    # TracerProvider, so get_tracer() returns a no-op tracer (trace_id=0).
+    _span = _tracer.start_span("conversations.send_message")
+    _ctx = _span.get_span_context()
+    route_trace_id = format(_ctx.trace_id, "032x") if _ctx.trace_id != 0 else None
+    _span.end()
+
     async def event_generator():
+        def _augment_done(ev: dict) -> dict:
+            if not route_trace_id:
+                return ev
+            try:
+                payload = json.loads(ev.get("data", "{}"))
+                if "trace_id" not in payload:
+                    payload["trace_id"] = route_trace_id
+                return {"event": "done", "data": json.dumps(payload)}
+            except json.JSONDecodeError:
+                return ev
+
         try:
             conv = await get_conversation_for_user(db, conversation_id, user.id)
         except ValueError:
-            yield {"event": "done", "data": json.dumps({"error": "Conversation not found"})}
+            yield _augment_done(
+                {"event": "done", "data": json.dumps({"error": "Conversation not found"})}
+            )
             return
         except PermissionError:
-            yield {"event": "done", "data": json.dumps({"error": "Access denied"})}
+            yield _augment_done({"event": "done", "data": json.dumps({"error": "Access denied"})})
             return
 
         conv = await append_message(db, conv, MessageRole.USER, body.content)
@@ -191,6 +217,8 @@ async def send_message(
         while True:
             try:
                 event = await asyncio.wait_for(agent_stream.__anext__(), timeout=15.0)
+                if event.get("event") == "done":
+                    event = _augment_done(event)
                 yield event
                 _accumulate_stream_event(
                     event,
@@ -213,7 +241,7 @@ async def send_message(
                 continue
             except Exception as e:
                 logger.exception("Stream error in send_message")
-                yield {"event": "done", "data": json.dumps({"error": str(e)})}
+                yield _augment_done({"event": "done", "data": json.dumps({"error": str(e)})})
                 break
 
         if done_error:

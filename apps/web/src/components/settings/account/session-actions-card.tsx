@@ -32,12 +32,7 @@ export function SessionActionsCard({ onSignOut }: SessionActionsCardProps) {
           <CardTitle className="text-neutral-900">Session</CardTitle>
         </CardHeader>
         <CardContent>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setShowDialog(true)}
-            className="border-semantic-danger text-semantic-danger hover:bg-semantic-danger/10"
-          >
+          <Button type="button" variant="outline" onClick={() => setShowDialog(true)}>
             Sign out
           </Button>
         </CardContent>
@@ -60,12 +55,7 @@ export function SessionActionsCard({ onSignOut }: SessionActionsCardProps) {
             >
               Cancel
             </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={handleSignOut}
-              className="bg-semantic-danger text-neutral-0 hover:bg-semantic-danger/90"
-            >
+            <Button type="button" variant="default" onClick={handleSignOut}>
               Sign out
             </Button>
           </DialogFooter>
