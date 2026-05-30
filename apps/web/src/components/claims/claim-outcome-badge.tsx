@@ -6,7 +6,7 @@
  *
  * Color scheme (WCAG AA verified):
  * - approved       → green  (bg-green-100 / text-green-700, ~6.5:1)
- * - denied         → red solid (bg-red-700 / text-white, ~5.9:1)
+ * - denied         → red solid (bg-semantic-danger / text-white)
  * - draft_pending / awaiting_approval → amber (bg-amber-100 / text-amber-700, ~4.8:1)
  * - pending / queued_for_send → blue (bg-blue-100 / text-blue-700, ~6.5:1)
  * - expired / no_response / user_* → neutral gray (bg-neutral-100 / text-neutral-600, ~7:1)
@@ -57,7 +57,7 @@ const OUTCOME_DISPLAY: Record<
   denied: {
     label: "Denied",
     variant: "outline",
-    extraClassName: "bg-red-700 text-white border-transparent",
+    extraClassName: "bg-semantic-danger text-white border-transparent",
   },
   expired: {
     label: "Expired",

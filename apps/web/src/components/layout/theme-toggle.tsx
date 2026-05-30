@@ -43,7 +43,7 @@ export function ThemeToggle() {
         type="button"
         onClick={handleClick}
         aria-label="Toggle theme"
-        className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 dark:hover:bg-neutral-200/40"
+        className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       >
         {mounted ? (
           effective === "dark" ? (
