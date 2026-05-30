@@ -23,12 +23,14 @@ import { AlertCircle, ArrowLeft, Check, Clock, Edit, Printer, Send, XCircle } fr
 import Link from "next/link";
 import { type KeyboardEvent, type MouseEvent, type ReactNode, useEffect, useState } from "react";
 
+import { getApproveAction } from "@/components/claims/approve-confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatClaimCurrency, formatClaimRemainingTime } from "@/lib/claim-detail";
 import type { ClaimDetail, ClaimDetailWorkflowStatus } from "@/lib/claim-detail-types";
 import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/store";
 
 interface ClaimHeaderProps {
   claim: ClaimDetail;
@@ -139,10 +141,13 @@ export function ClaimHeader({
   // always on; `countdown` is only read on the queued_for_send branch.
   const now = useCurrentSecond();
   const countdown = claim.auto_send_at ? formatCountdown(claim.auto_send_at, now) : "0:00";
+  const gmailConnected = useAuthStore((s) => s.user?.gmail_integration?.connected ?? false);
 
   const renderActions = () => {
     switch (claim.status) {
-      case "awaiting_approval":
+      case "awaiting_approval": {
+        const approveAction = getApproveAction(claim.claim_type, gmailConnected);
+        const ApproveIcon = approveAction.icon;
         return (
           <>
             <Button
@@ -166,11 +171,12 @@ export function ClaimHeader({
               Cancel claim
             </Button>
             <Button size="sm" type="button" onClick={onClickApprove} className="w-full sm:w-auto">
-              <Send className="mr-2 h-4 w-4" />
-              Approve and send
+              <ApproveIcon className="mr-2 h-4 w-4" />
+              {approveAction.headerLabel}
             </Button>
           </>
         );
+      }
 
       case "queued_for_send":
         // 5.15 / WI-8: the auto-send queue surface on the claim page

@@ -32,7 +32,7 @@
  * post-approve via `PostApproveBanner`.
  */
 
-import { Loader2, Send } from "lucide-react";
+import { Check, Loader2, Send } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -47,8 +47,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { approveClaim, type ClaimDetailDoc } from "@/lib/api/claims";
-import { formatClaimCurrency } from "@/lib/claim-detail";
 import type { ClaimDetail, ClaimDetailDraftType } from "@/lib/claim-detail-types";
+import { useAuthStore } from "@/store";
 
 interface ApproveConfirmDialogProps {
   open: boolean;
@@ -62,40 +62,81 @@ interface ApproveConfirmDialogProps {
   refetch: () => Promise<void>;
 }
 
-function summaryCopy(claim: ClaimDetail): { title: string; description: string } {
-  const platform = claim.platform;
-  const policy = claim.policy;
-  const claimType = claim.claim_type satisfies ClaimDetailDraftType;
+interface ApproveAction {
+  headerLabel: string;
+  dialogTitle: string;
+  confirmLabel: string;
+  loadingLabel: string;
+  icon: typeof Send;
+}
+
+export function getApproveAction(claimType: string, gmailConnected: boolean): ApproveAction {
   switch (claimType) {
     case "email":
-      return {
-        title: "Approve and send",
-        description:
-          policy?.claim_email && policy.claim_email !== ""
-            ? `Sending to ${policy.claim_email} for ${formatClaimCurrency(
-                claim.refund_amount,
-                claim.currency,
-              )}.`
-            : `Sending the price match request for ${formatClaimCurrency(
-                claim.refund_amount,
-                claim.currency,
-              )}.`,
-      };
+      return gmailConnected
+        ? {
+            headerLabel: "Approve and send",
+            dialogTitle: "Send claim email",
+            confirmLabel: "Send email",
+            loadingLabel: "Sending…",
+            icon: Send,
+          }
+        : {
+            headerLabel: "Approve",
+            dialogTitle: "Approve email draft",
+            confirmLabel: "Approve",
+            loadingLabel: "Approving…",
+            icon: Check,
+          };
     case "chat_script":
       return {
-        title: "Approve and send",
-        description: `You'll paste this script in ${platform} chat. Approving locks it in so the agent can copy step-by-step messages.`,
+        headerLabel: "Approve",
+        dialogTitle: "Approve chat script",
+        confirmLabel: "Approve",
+        loadingLabel: "Approving…",
+        icon: Check,
       };
     case "in_store_guide":
       return {
-        title: "Approve and send",
-        description: `You'll bring this guide to ${platform}. Approving locks it in so you can show it at the store.`,
+        headerLabel: "Approve",
+        dialogTitle: "Approve store guide",
+        confirmLabel: "Approve",
+        loadingLabel: "Approving…",
+        icon: Check,
       };
     case "self_service_walkthrough":
       return {
-        title: "Approve and send",
-        description: `You'll complete this at ${platform}. Approving locks the walkthrough in so you can step through it.`,
+        headerLabel: "Approve",
+        dialogTitle: "Approve walkthrough",
+        confirmLabel: "Approve",
+        loadingLabel: "Approving…",
+        icon: Check,
       };
+    default:
+      return {
+        headerLabel: "Approve",
+        dialogTitle: "Approve claim",
+        confirmLabel: "Approve",
+        loadingLabel: "Approving…",
+        icon: Check,
+      };
+  }
+}
+
+function summaryCopy(claim: ClaimDetail, gmailConnected: boolean): string {
+  const platform = claim.platform;
+  const claimType = claim.claim_type satisfies ClaimDetailDraftType;
+  switch (claimType) {
+    case "email":
+      return gmailConnected
+        ? `This will send your price match request to ${platform} from your Gmail. You'll be notified when they respond.`
+        : `Approving locks this email draft. Connect Gmail in Settings to send automatically, or copy the draft and send it yourself.`;
+    case "chat_script":
+      return `This locks your ${platform} chat script. You can copy it step by step and start the chat whenever you're ready.`;
+    case "in_store_guide":
+      return `This locks your ${platform} in-store guide. Download or print it when you're ready to visit.`;
+    case "self_service_walkthrough":
+      return `This locks your ${platform} walkthrough. Follow the steps at your own pace — the Assistant is here if you need help.`;
   }
 }
 
@@ -109,7 +150,10 @@ export function ApproveConfirmDialog({
   refetch,
 }: ApproveConfirmDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { title, description } = summaryCopy(claim);
+  const gmailConnected = useAuthStore((s) => s.user?.gmail_integration?.connected ?? false);
+  const action = getApproveAction(claim.claim_type, gmailConnected);
+  const description = summaryCopy(claim, gmailConnected);
+  const ActionIcon = action.icon;
 
   // Block Escape / backdrop / close-button dismissal while the approve
   // is in flight so a user can't accidentally tear down the dialog
@@ -174,9 +218,9 @@ export function ApproveConfirmDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent>
+      <DialogContent showCloseButton={!isSubmitting}>
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+          <DialogTitle>{action.dialogTitle}</DialogTitle>
           {/* `break-words` on the description so any policy-derived dynamic
               string the copy embeds (e.g. a long policy.claim_email like
               `customer-care.price-match@somelongdomain.example.com`) wraps
@@ -194,7 +238,7 @@ export function ApproveConfirmDialog({
           <Button
             variant="outline"
             type="button"
-            onClick={() => onOpenChange(false)}
+            onClick={() => handleOpenChange(false)}
             disabled={isSubmitting}
           >
             Cancel
@@ -203,12 +247,12 @@ export function ApproveConfirmDialog({
             {isSubmitting ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Sending…
+                {action.loadingLabel}
               </>
             ) : (
               <>
-                <Send className="mr-2 h-4 w-4" />
-                Approve and send
+                <ActionIcon className="mr-2 h-4 w-4" />
+                {action.confirmLabel}
               </>
             )}
           </Button>

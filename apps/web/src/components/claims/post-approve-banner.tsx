@@ -20,12 +20,15 @@ import { parseSelfServiceWalkthrough } from "@/components/claims/draft-parsers";
 import { Button } from "@/components/ui/button";
 import type { ClaimDetail } from "@/lib/claim-detail-types";
 import { toSafeExternalHref } from "@/lib/safe-url";
+import { useAuthStore } from "@/store";
 
 interface PostApproveBannerProps {
   claim: ClaimDetail;
 }
 
 export function PostApproveBanner({ claim }: PostApproveBannerProps) {
+  const gmailConnected = useAuthStore((s) => s.user?.gmail_integration?.connected ?? false);
+
   if (claim.status !== "submitted") return null;
 
   const policy = claim.policy;
@@ -39,7 +42,9 @@ export function PostApproveBanner({ claim }: PostApproveBannerProps) {
           <Mail className="h-4 w-4" />
           <span>
             <strong className="font-medium">Submitted</strong>
-            {" — sending from your Gmail."}
+            {gmailConnected
+              ? " — sending from your Gmail."
+              : " — copy the email draft above and send it manually."}
           </span>
         </BannerShell>
       );
