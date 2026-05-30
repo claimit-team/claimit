@@ -144,8 +144,16 @@ export function CancelConfirmDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent showCloseButton={!isSubmitting}>
+    <Dialog open={open} onOpenChange={handleOpenChange} disablePointerDismissal={isSubmitting}>
+      <DialogContent
+        showCloseButton={!isSubmitting}
+        onKeyDown={(e: React.KeyboardEvent) => {
+          if (isSubmittingRef.current && e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Cancel claim</DialogTitle>
           <DialogDescription>

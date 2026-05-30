@@ -257,8 +257,16 @@ export function ApproveConfirmDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent showCloseButton={!isSubmitting}>
+    <Dialog open={open} onOpenChange={handleOpenChange} disablePointerDismissal={isSubmitting}>
+      <DialogContent
+        showCloseButton={!isSubmitting}
+        onKeyDown={(e: React.KeyboardEvent) => {
+          if (isSubmittingRef.current && e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{action.dialogTitle}</DialogTitle>
           {/* `break-words` on the description so any policy-derived dynamic
