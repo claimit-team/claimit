@@ -137,10 +137,7 @@ def _build_claim_drafted(
         text += f"\nReview claim: {deep_link}\n"
     text += _footer_text()
 
-    body_inner = (
-        f'<p>{html_lib.escape(greet)},</p>'
-        f'<p>{html_lib.escape(body_sentence)}</p>'
-    )
+    body_inner = f"<p>{html_lib.escape(greet)},</p><p>{html_lib.escape(body_sentence)}</p>"
     html_body = _wrap_html(
         body_inner,
         cta_html=_cta_button_html("Review claim", deep_link),
@@ -167,8 +164,7 @@ def _build_claim_queued_auto(
     else:
         subject = "Claim queued — sending in 5 minutes"
         body_sentence = (
-            "Your claim is queued and will be sent in 5 minutes. "
-            "Review or cancel it before then."
+            "Your claim is queued and will be sent in 5 minutes. Review or cancel it before then."
         )
 
     greet = _greeting(user_name)
@@ -177,10 +173,7 @@ def _build_claim_queued_auto(
         text += f"\nView claim: {deep_link}\n"
     text += _footer_text()
 
-    body_inner = (
-        f'<p>{html_lib.escape(greet)},</p>'
-        f'<p>{html_lib.escape(body_sentence)}</p>'
-    )
+    body_inner = f"<p>{html_lib.escape(greet)},</p><p>{html_lib.escape(body_sentence)}</p>"
     html_body = _wrap_html(
         body_inner,
         cta_html=_cta_button_html("View claim", deep_link),
@@ -201,8 +194,7 @@ def _build_claim_submitted(
     if platform_label and platform_label != "—":
         subject = f"Claim submitted — your {platform_label} claim has been sent"
         body_sentence = (
-            f"Your {platform_label} claim has been sent. "
-            "We'll notify you when they respond."
+            f"Your {platform_label} claim has been sent. We'll notify you when they respond."
         )
     else:
         subject = "Claim submitted — your claim has been sent"
@@ -214,10 +206,7 @@ def _build_claim_submitted(
         text += f"\nView claim: {deep_link}\n"
     text += _footer_text()
 
-    body_inner = (
-        f'<p>{html_lib.escape(greet)},</p>'
-        f'<p>{html_lib.escape(body_sentence)}</p>'
-    )
+    body_inner = f"<p>{html_lib.escape(greet)},</p><p>{html_lib.escape(body_sentence)}</p>"
     html_body = _wrap_html(
         body_inner,
         cta_html=_cta_button_html("View claim", deep_link),
