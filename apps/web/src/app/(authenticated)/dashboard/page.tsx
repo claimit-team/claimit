@@ -46,7 +46,7 @@ import { useReviewDraft } from "@/hooks/useReviewDraft";
 import type { ClaimListItem } from "@/lib/api/claims";
 import type { RecentResolvedClaim } from "@/lib/api/dashboard";
 import type { PurchaseListItem, PurchasesApiError } from "@/lib/api/purchases";
-import { formatClaimCurrency } from "@/lib/claim-detail";
+import { formatClaimCurrency } from "@/lib/claim-format";
 import {
   formatRelativeFromNow,
   formatWindowRemaining,

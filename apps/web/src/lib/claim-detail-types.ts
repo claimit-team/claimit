@@ -37,9 +37,7 @@ export interface DraftVersion {
    * Widened to `string | null | undefined` (read-tolerant: a legacy
    * doc may carry a value the current enum no longer recognises;
    * null/undefined when the wire field is missing). Renderers fall
-   * back to a Title-Case label on unknown values. The `undefined`
-   * branch keeps legacy mock fixtures in `claim-detail.ts`
-   * type-checking without forcing a synthetic value on every row.
+   * back to a Title-Case label on unknown values.
    */
   generated_by?: string | null;
 }
@@ -60,12 +58,10 @@ export interface ClaimEvidence {
   /**
    * The original product URL (`purchase.product_url`) — used as the
    * "Source" link in the evidence card so the user can verify the
-   * snapshot against the live page. Optional in the interface so legacy
-   * fixtures in `claim-detail.ts` (a dead-code mock module slated for
-   * cleanup) keep type-checking without forcing a synthetic URL on
-   * every row; the view-model builder always populates a string
-   * (empty when `purchase` is null) so renderers can treat empty +
-   * undefined identically as "platform label only, no link".
+   * snapshot against the live page. The view-model builder always
+   * populates a string (empty when `purchase` is null) so renderers
+   * can treat empty + undefined identically as "platform label only,
+   * no link".
    */
   source_url?: string;
   policy_clause: string;
@@ -95,15 +91,13 @@ export interface ClaimPolicy {
    * string when no row matches the claim's platform/category combo —
    * evidence-pane renders the "Read full policy" link conditionally
    * (passes through `toSafeExternalHref` so a malformed/relative URL
-   * also hides the link). Optional in the interface to keep legacy
-   * mock fixtures type-checking.
+   * also hides the link).
    */
   policy_url?: string;
   /**
    * ISO timestamp of when the policy text was last verified
    * (ticket 5.8 / WI-4). Empty string when null on the wire — the
-   * evidence-pane hides the "Policy verified …" caption. Optional so
-   * legacy mocks keep type-checking.
+   * evidence-pane hides the "Policy verified …" caption.
    */
   last_verified?: string;
 }
@@ -126,10 +120,7 @@ export interface ClaimDetail {
    * read (To: address for email, claim URL for chat/in_store/self_service
    * call-to-action buttons, claim phone for in_store "call ahead",
    * window_days as a reference). The view-model builder always
-   * populates this; optional in the interface so legacy fixtures in
-   * `claim-detail.ts` (a dead-code mock module slated for cleanup)
-   * keep type-checking without forcing a synthetic policy on every
-   * row.
+   * populates this.
    */
   policy?: ClaimPolicy;
   outcome?: OutcomeStatus;

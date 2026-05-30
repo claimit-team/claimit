@@ -14,11 +14,7 @@
  *    `ClaimDetailResponse` into the render-friendly `ClaimDetail`
  *    shape that `ClaimDetailShell` + its panes consume.
  *
- * Mirrors `lib/purchase-detail-view.ts` (PR1) — non-mock module, lives
- * outside `lib/claim-detail.ts` so real code never reaches into a
- * mock-data file. The mock-data module retains only formatters used by
- * `claim-header`, `evidence-pane`, and `claims-status` (orthogonal,
- * not blocked by this rewrite).
+ * Mirrors `lib/purchase-detail-view.ts` (PR1) in shape and read-tolerance.
  *
  * Read-tolerance (PR #142): every enum-typed wire field is widened to
  * `Enum | string | null` and every required scalar to `T | null`. The

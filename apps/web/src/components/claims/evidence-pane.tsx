@@ -20,8 +20,8 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ClaimsApiError, fetchEvidenceBlob } from "@/lib/api/claims";
-import { formatClaimCurrency } from "@/lib/claim-detail";
 import type { ClaimDetail } from "@/lib/claim-detail-types";
+import { formatClaimCurrency } from "@/lib/claim-format";
 import { toSafeExternalHref } from "@/lib/safe-url";
 
 interface EvidencePaneProps {
