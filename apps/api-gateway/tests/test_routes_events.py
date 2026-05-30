@@ -261,7 +261,9 @@ async def test_stream_passes_authenticated_user_id_to_generator(
     db = _mock_db()
     captured: dict[str, object] = {}
 
-    def _capture(_db: MongoDBClient, user_id: object) -> AsyncIterator[dict[str, str]]:
+    def _capture(
+        _db: MongoDBClient, user_id: object, **_kwargs: object
+    ) -> AsyncIterator[dict[str, str]]:
         captured["user_id"] = user_id
         return _finite_generator([])
 
@@ -278,5 +280,104 @@ async def test_stream_passes_authenticated_user_id_to_generator(
                 assert resp.status_code == 200
 
         assert captured["user_id"] == User.model_validate(USER_FIXTURE).id
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
+async def test_stream_forwards_last_event_id_query_param(stream_client: AsyncClient) -> None:
+    """?last_event_id= (manual reconnect path) reaches the generator so the
+    stream resumes past the last delivered event (BUG-123 S2)."""
+    db = _mock_db()
+    captured: dict[str, object] = {}
+
+    def _capture(
+        _db: MongoDBClient, _user_id: object, *, last_event_id: object = None
+    ) -> AsyncIterator[dict[str, str]]:
+        captured["last_event_id"] = last_event_id
+        return _finite_generator([])
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        with (
+            patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS),
+            patch("src.routes.events.event_stream_generator", _capture),
+        ):
+            url = "/api/v1/events/stream?token=valid&last_event_id=2026-05-18T10:00:00%2B00:00|abc"
+            async with stream_client.stream("GET", url) as resp:
+                assert resp.status_code == 200
+
+        assert captured["last_event_id"] == "2026-05-18T10:00:00+00:00|abc"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
+async def test_stream_uses_last_event_id_header_when_no_query(stream_client: AsyncClient) -> None:
+    """The standard Last-Event-ID header (native EventSource auto-reconnect)
+    is honored when no query param is present."""
+    db = _mock_db()
+    captured: dict[str, object] = {}
+
+    def _capture(
+        _db: MongoDBClient, _user_id: object, *, last_event_id: object = None
+    ) -> AsyncIterator[dict[str, str]]:
+        captured["last_event_id"] = last_event_id
+        return _finite_generator([])
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        with (
+            patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS),
+            patch("src.routes.events.event_stream_generator", _capture),
+        ):
+            async with stream_client.stream(
+                "GET",
+                "/api/v1/events/stream?token=valid",
+                headers={"Last-Event-ID": "header-cursor"},
+            ) as resp:
+                assert resp.status_code == 200
+
+        assert captured["last_event_id"] == "header-cursor"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
+async def test_stream_query_last_event_id_wins_over_header(stream_client: AsyncClient) -> None:
+    """When both are present the query param (manual reconnect) takes
+    precedence over the header."""
+    db = _mock_db()
+    captured: dict[str, object] = {}
+
+    def _capture(
+        _db: MongoDBClient, _user_id: object, *, last_event_id: object = None
+    ) -> AsyncIterator[dict[str, str]]:
+        captured["last_event_id"] = last_event_id
+        return _finite_generator([])
+
+    async def _override_db() -> MongoDBClient:
+        return db
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        with (
+            patch("firebase_admin.auth.verify_id_token", return_value=_FIREBASE_CLAIMS),
+            patch("src.routes.events.event_stream_generator", _capture),
+        ):
+            async with stream_client.stream(
+                "GET",
+                "/api/v1/events/stream?token=valid&last_event_id=query-cursor",
+                headers={"Last-Event-ID": "header-cursor"},
+            ) as resp:
+                assert resp.status_code == 200
+
+        assert captured["last_event_id"] == "query-cursor"
     finally:
         app.dependency_overrides.pop(get_db, None)
