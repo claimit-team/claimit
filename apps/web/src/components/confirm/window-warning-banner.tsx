@@ -11,9 +11,10 @@ import { safePlatformLabel } from "@/lib/purchase-detail-view";
  * Reads the live form state (`platform`, `purchaseDate`, `memberTier`)
  * + the policy fetched by `usePlatformPolicy` and renders an amber
  * banner when the chosen purchase date is already past the platform's
- * price-protection window. Purely informational — the Confirm CTA
- * remains submittable so the user can still start monitoring on a
- * known-ineligible purchase if they choose (matches the ticket).
+ * price-protection window. When this banner shows, the Confirm CTA is
+ * disabled (ActionBar) and the backend rejects the submit with 409
+ * `window_expired` — a past-window purchase can no longer be monitored,
+ * so the user is steered to Dismiss instead.
  *
  * Renders nothing when the inputs aren't yet ready to compute (no
  * platform, no date, policy still loading) so the banner doesn't
@@ -54,7 +55,7 @@ export function WindowWarningBanner({
           This purchase is outside {label}&apos;s {windowDays}-day price protection window
         </p>
         <p className="mt-0.5 text-sm text-neutral-500">
-          Confirming will start monitoring but no claim can be filed.
+          It can no longer be monitored — no claim could be filed. Dismiss it instead.
         </p>
       </div>
     </div>

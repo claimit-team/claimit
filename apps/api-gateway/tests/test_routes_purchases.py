@@ -1071,7 +1071,10 @@ async def test_confirm_purchase_invalid_corrected_value_returns_400(client: Asyn
 @pytest.mark.asyncio
 async def test_confirm_purchase_recomputes_window_from_policy(client: AsyncClient) -> None:
     """Upload-created sentinel (window=now) confirms with a policy → window in future."""
-    purchase_date = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
+    # Anchor to a recent date so the recomputed window (+30d) lands safely in
+    # the future regardless of wall-clock — the confirm path now 409s when the
+    # recomputed window is already past.
+    purchase_date = datetime.now(UTC) - timedelta(days=1)
     # Sentinel doc: window_expires == purchase_date == now (upload default).
     pending = _purchase_fixture().model_copy(
         update={
@@ -1115,8 +1118,9 @@ async def test_confirm_purchase_window_honors_corrected_purchase_date(
     client: AsyncClient,
 ) -> None:
     """User-corrected purchase_date drives the recomputed window."""
-    original_date = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
-    corrected_date = datetime(2026, 5, 10, 12, 0, 0, tzinfo=UTC)
+    # Recent dates so the recomputed window (+30d) stays in the future.
+    original_date = datetime.now(UTC) - timedelta(days=20)
+    corrected_date = datetime.now(UTC) - timedelta(days=1)
     pending = _purchase_fixture().model_copy(
         update={
             "platform": "best_buy",
@@ -1153,7 +1157,8 @@ async def test_confirm_purchase_window_uses_member_window_when_tier_set(
     client: AsyncClient,
 ) -> None:
     """Member tier on purchase + policy.window_days_member → use the member-specific window."""
-    purchase_date = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
+    # Recent date so the recomputed member window (+60d) stays in the future.
+    purchase_date = datetime.now(UTC) - timedelta(days=1)
     pending = _purchase_fixture().model_copy(
         update={
             "platform": "best_buy",
@@ -1186,11 +1191,16 @@ async def test_confirm_purchase_window_uses_member_window_when_tier_set(
 
 
 @pytest.mark.asyncio
-async def test_confirm_purchase_window_zero_days_yields_purchase_date(
+async def test_confirm_purchase_window_zero_days_is_rejected_as_expired(
     client: AsyncClient,
 ) -> None:
-    """Amazon-style window_days=0 → window_expires == purchase_date (immediately past-window)."""
-    purchase_date = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
+    """Amazon-style window_days=0 → window_expires == purchase_date, already past.
+
+    A zero-day window means the purchase is past its price-protection window the
+    instant it's confirmed, so monitoring it is refused with 409 window_expired
+    and nothing is written (the user is steered to Dismiss instead).
+    """
+    purchase_date = datetime.now(UTC) - timedelta(minutes=1)
     pending = _purchase_fixture().model_copy(
         update={
             "platform": "amazon",
@@ -1198,11 +1208,10 @@ async def test_confirm_purchase_window_zero_days_yields_purchase_date(
             "window_expires": purchase_date,
         }
     )
-    monitoring = _purchase_fixture(status="monitoring")
     from claimit_mongodb_models import Policy
 
     mock_db = AsyncMock(spec=MongoDBClient)
-    mock_db.get_purchase = AsyncMock(side_effect=[pending, monitoring])
+    mock_db.get_purchase = AsyncMock(return_value=pending)
     mock_db.partial_update = AsyncMock(return_value=True)
     mock_db.get_policy = AsyncMock(
         return_value=Policy.model_validate(_policy_fixture(platform="amazon", window_days=0))
@@ -1213,10 +1222,10 @@ async def test_confirm_purchase_window_zero_days_yields_purchase_date(
             f"/api/v1/purchases/{PURCHASE_ID}/confirm",
             headers={"Authorization": "Bearer valid-token"},
         )
-        assert response.status_code == 200
-        updates = mock_db.partial_update.await_args.args[2]
-        # window_expires must equal purchase_date — NOT a fabricated 15d fallback.
-        assert updates["window_expires"] == purchase_date
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "window_expired"
+        # Nothing persisted — the status never flips to monitoring.
+        mock_db.partial_update.assert_not_awaited()
     finally:
         _clear_overrides()
 
@@ -2045,6 +2054,40 @@ async def test_confirm_create_duplicate_returns_409(client: AsyncClient) -> None
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "duplicate"
         mock_db.upsert.assert_not_awaited()
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_create_past_window_rejected_without_write_or_publish(
+    client: AsyncClient,
+) -> None:
+    """A receipt whose window is already past must NOT be created/monitored.
+
+    The recomputed window (purchase_date + 30d) lands in the past, so confirm-
+    create 409s with window_expired before the upsert and before the
+    purchase.ingested publish — neither the DB write nor the monitor kickoff fires.
+    """
+    mock_db = _confirm_create_db(policy_window_days=30)
+    publisher = _publisher_mock()
+    _set_overrides(mock_db, _confirm_create_uploader(), publisher)
+    # purchase_date 31 days ago → window (+30d) ended yesterday.
+    past_date = (datetime.now(UTC) - timedelta(days=31)).isoformat()
+    try:
+        response = await client.post(
+            "/api/v1/purchases/confirm-create",
+            headers={"Authorization": "Bearer valid-token"},
+            json={
+                "storage_url": _RECEIPT_URL,
+                "content_type": "application/pdf",
+                "extraction": _extraction_fixture(purchase_date=past_date),
+                "corrected_fields": None,
+            },
+        )
+        assert response.status_code == 409, response.text
+        assert response.json()["error"]["code"] == "window_expired"
+        mock_db.upsert.assert_not_awaited()
+        publisher.publish.assert_not_awaited()
     finally:
         _clear_overrides()
 

@@ -473,6 +473,16 @@ async def confirm_purchase(
         member_tier_at_purchase=effective_member_tier,
         log_ref=purchase_id,
     )
+    # Refuse to start monitoring a purchase whose refund window has already
+    # closed — there is no recoverable claim, so monitoring would only ever
+    # surface "Window expired". The user is routed to Dismiss instead.
+    if window_expires is not None and window_expires <= datetime.now(UTC):
+        raise ApiError(
+            "window_expired",
+            "This purchase is past its price-protection window and can no longer be "
+            "monitored. Dismiss it instead.",
+            status_code=409,
+        )
     if window_expires is not None:
         updates["window_expires"] = window_expires
 
@@ -1138,6 +1148,20 @@ async def create_purchase_from_confirm(
         fallback_default=True,
     )
 
+    # Refuse to create a monitored purchase whose refund window has already
+    # closed (BUG: no claim is recoverable, so it would only ever read "Window
+    # expired"). Guard before the upsert + `purchase.ingested` publish so
+    # neither the write nor the monitoring kickoff fires. `fallback_default`
+    # guarantees a non-None window here, but keep the None-safety for parity
+    # with the confirm path.
+    if (window_expires or now) <= now:
+        raise ApiError(
+            "window_expired",
+            "This purchase is past its price-protection window and can no longer be "
+            "monitored. Dismiss it instead.",
+            status_code=409,
+        )
+
     if extraction and extraction.get("extraction_confidence"):
         confidence = extraction["extraction_confidence"]
     else:
@@ -1347,6 +1371,16 @@ async def reupload_receipt(
         member_tier_at_purchase=eff_member_tier,
         log_ref=purchase_id,
     )
+    # A corrected purchase_date on re-upload can push the window into the
+    # past; refuse to keep monitoring a now-expired purchase (same contract
+    # as confirm / confirm-create). Nothing is written.
+    if window_expires is not None and window_expires <= datetime.now(UTC):
+        raise ApiError(
+            "window_expired",
+            "This purchase is past its price-protection window and can no longer be "
+            "monitored. Dismiss it instead.",
+            status_code=409,
+        )
 
     # Receipt swap + cleared monitor-failure trail (so the UI drops any stale
     # "blocked" badge immediately, same as the BUG-19 product_url remediation).

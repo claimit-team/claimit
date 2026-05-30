@@ -430,6 +430,12 @@ class TestRunCron(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["fetched"], 0)
         self.assertEqual(adapter.calls, 0)
         self.assertIsNone(_last_checked_update(db, purchase.id))
+        # The stored status is flipped monitoring -> expired so the UI stops
+        # reporting "monitoring" for a closed window; last_checked_at is NOT
+        # bumped (the row was never fetched).
+        status_updates = [u for pid, u in db.updates if pid == purchase.id and "status" in u]
+        self.assertEqual(status_updates, [{"status": "expired"}])
+        self.assertEqual(summary["errors"], 0)
 
     async def test_cadence_drift_persists_new_value(self) -> None:
         now = datetime.now(UTC)

@@ -11,6 +11,7 @@ import { usePlatformPolicy } from "@/hooks/use-platform-policy";
 import type { PurchaseDetailDoc } from "@/lib/api/purchases";
 import { buildInitialFormState, type ConfirmFormState } from "@/lib/confirm-form-state";
 import { type ConfirmDraftContext, getStagedReceiptFile } from "@/lib/confirm-staging";
+import { isOutsideWindow } from "@/lib/policy-window";
 
 /**
  * Real-purchase confirm shell (ticket 5.14 B3).
@@ -171,6 +172,20 @@ export function ConfirmPurchaseContent({
   // with edits to platform / purchase_date / member_tier on the form.
   const { policy, loading: policyLoading } = usePlatformPolicy(formState.platform);
 
+  // Mirror the WindowWarningBanner's gating: only meaningful once we have a
+  // platform + date + a resolved policy. While loading / incomplete, treat as
+  // in-window so Confirm isn't wrongly disabled mid-load. When true, ActionBar
+  // disables Confirm — monitoring a past-window purchase is rejected server-side.
+  const outsideWindow =
+    !policyLoading &&
+    formState.platform !== "" &&
+    formState.purchaseDate !== null &&
+    isOutsideWindow({
+      purchaseDate: formState.purchaseDate,
+      policy,
+      memberTier: formState.memberTier.trim() || null,
+    }).outside;
+
   return (
     <div className="flex min-h-[calc(100dvh-4rem)] flex-col">
       <div className="flex-1 px-4 py-6 lg:px-8 lg:py-8">
@@ -253,6 +268,7 @@ export function ConfirmPurchaseContent({
         formState={formState}
         draft={draft}
         lineKey={lineKey}
+        outsideWindow={outsideWindow}
       />
     </div>
   );
