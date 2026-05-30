@@ -69,10 +69,6 @@ function StatusBadge({ status }: { status: ClaimDetailWorkflowStatus }) {
       label: "Queued",
       className: "bg-semantic-warning/10 text-semantic-warning border-semantic-warning/20",
     },
-    ready_to_execute: {
-      label: "Ready",
-      className: "bg-brand-primary-50 text-brand-primary-500 border-brand-primary-500/20",
-    },
     submitted: {
       label: "Submitted",
       className: "bg-neutral-100 text-neutral-700 border-neutral-200",
