@@ -392,7 +392,11 @@ export function ConfirmPurchaseLoader({ purchaseId }: { purchaseId: string }) {
   // hardcoded to `/dashboard` per the locked decision.
   return (
     <div className="flex flex-col gap-4">
-      <ConfirmPageHeader />
+      {/* Per-line confirm of a multi-item receipt: Back returns to the
+          item selection list it came from (drop the `?line=`), not the
+          dashboard. Single-item / Gmail confirms have no lineKey, so Back
+          falls through to the `?from=` behavior unchanged. */}
+      <ConfirmPageHeader backHref={state.lineKey ? `/confirm/${purchaseId}` : undefined} />
       <ConfirmPurchaseContent
         purchase={state.purchase}
         draft={state.draft}

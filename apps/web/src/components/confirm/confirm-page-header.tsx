@@ -89,17 +89,27 @@ export function resolveBackHref(raw: string | null | undefined): string {
  * - Open-redirect defence lives in `resolveBackHref`, which is the
  *   only path the `?from=` value reaches `router.push` through.
  */
-export function ConfirmPageHeader() {
+export function ConfirmPageHeader({ backHref }: { backHref?: string } = {}) {
   const router = useRouter();
 
   const handleBack = useCallback(() => {
+    // `backHref` is a trusted, app-computed interior path (e.g. the
+    // multi-item list a per-line confirm came from). It bypasses the
+    // `?from=` allow-list precisely because it is NOT user-controlled —
+    // the loader derives it from route state, not a query param — so the
+    // open-redirect boundary in `resolveBackHref` stays intact for the
+    // query-driven path below.
+    if (backHref) {
+      router.push(backHref);
+      return;
+    }
     if (typeof window === "undefined") {
       router.push("/dashboard");
       return;
     }
     const from = new URLSearchParams(window.location.search).get("from");
     router.push(resolveBackHref(from));
-  }, [router]);
+  }, [router, backHref]);
 
   return (
     <div className="flex items-center gap-2">
