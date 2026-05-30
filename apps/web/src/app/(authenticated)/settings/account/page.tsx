@@ -15,19 +15,6 @@ import { AuthApiError, patchUserMe } from "@/lib/api/auth";
 import { signOutUser } from "@/lib/auth-actions";
 import { useAuthStore } from "@/store";
 
-function deriveInitials(name: string): string {
-  // First letter of the first two whitespace-separated words. Covers the
-  // common "First Last" case and degrades cleanly for one-word display
-  // names (just the first letter). Empty string falls back to "?".
-  const trimmed = name.trim();
-  if (!trimmed) return "?";
-  const parts = trimmed.split(/\s+/).slice(0, 2);
-  return parts
-    .map((p) => p[0]?.toUpperCase() ?? "")
-    .join("")
-    .slice(0, 2);
-}
-
 export default function AccountSettingsPage() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
@@ -97,7 +84,6 @@ export default function AccountSettingsPage() {
       <AccountProfileCard
         name={name}
         email={user?.email ?? ""}
-        initials={user ? deriveInitials(user.name) : "?"}
         isLoading={isLoading}
         isSaving={isSaving}
         onNameChange={setName}

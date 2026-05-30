@@ -9,7 +9,6 @@ import { FloatingAssistant } from "@/components/layout/floating-assistant";
 import { SidebarContent } from "@/components/layout/sidebar";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { mockPlan } from "@/components/settings/settings-mock";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -23,6 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { UploadDialog } from "@/components/upload/upload-dialog";
+import { UserAvatar } from "@/components/user/user-avatar";
 import { useProactiveAssistant } from "@/hooks/useProactiveAssistant";
 import { useUnreadCount } from "@/hooks/useUnreadCount";
 import { signOutUser } from "@/lib/auth-actions";
@@ -43,18 +43,6 @@ const PLAN_LABEL: Record<typeof mockPlan, string> = {
   pro: "Pro plan",
   family: "Family plan",
 };
-
-function getInitials(name: string | null | undefined) {
-  const initials = name
-    ?.trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("");
-
-  return initials || "?";
-}
 
 function ThemeChips() {
   const { theme, setTheme } = useTheme();
@@ -123,7 +111,6 @@ export function AuthenticatedShell({ children }: { children: ReactNode }) {
 
   const displayName = user?.name ?? user?.email ?? "User";
   const email = user?.email ?? "";
-  const initials = getInitials(user?.name);
 
   const handleSignOut = async () => {
     await signOutUser();
@@ -195,11 +182,7 @@ export function AuthenticatedShell({ children }: { children: ReactNode }) {
               <DropdownMenuTrigger
                 className={cn(buttonVariants({ variant: "ghost" }), "flex items-center gap-2 px-2")}
               >
-                <Avatar className="w-8 h-8">
-                  <AvatarFallback className="bg-brand-primary-100 text-brand-primary-700 text-sm">
-                    {initials}
-                  </AvatarFallback>
-                </Avatar>
+                <UserAvatar user={user} size="default" />
                 <span className="hidden sm:inline text-sm font-medium text-neutral-700">
                   {displayName}
                 </span>

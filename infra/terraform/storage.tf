@@ -167,3 +167,47 @@ resource "google_storage_bucket_iam_member" "api_gateway_careers_reader" {
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${module.api_gateway.service_account_email}"
 }
+
+# User profile avatars (BUG-118). Public read via allUsers/objectViewer so
+# browsers can load avatar URLs directly; uploads are uuid-named under
+# {user_id}/ to keep object names unguessable.
+resource "google_storage_bucket" "avatars" {
+  name     = "${var.project_id}-avatars"
+  location = var.region
+
+  uniform_bucket_level_access = true
+  public_access_prevention    = "inherited"
+
+  cors {
+    origin          = ["*"]
+    method          = ["GET", "HEAD"]
+    response_header = ["Content-Type"]
+    max_age_seconds = 3600
+  }
+
+  lifecycle_rule {
+    condition {
+      age = 365
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  labels = {
+    purpose = "avatars"
+    managed = "terraform"
+  }
+}
+
+resource "google_storage_bucket_iam_member" "avatars_public_read" {
+  bucket = google_storage_bucket.avatars.name
+  role   = "roles/storage.objectViewer"
+  member = "allUsers"
+}
+
+resource "google_storage_bucket_iam_member" "avatars_gateway_writer" {
+  bucket = google_storage_bucket.avatars.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${module.api_gateway.service_account_email}"
+}
