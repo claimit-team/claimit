@@ -10,6 +10,7 @@ import { WindowWarningBanner } from "@/components/confirm/window-warning-banner"
 import { usePlatformPolicy } from "@/hooks/use-platform-policy";
 import type { PurchaseDetailDoc } from "@/lib/api/purchases";
 import { buildInitialFormState, type ConfirmFormState } from "@/lib/confirm-form-state";
+import type { ConfirmDraftContext } from "@/lib/confirm-staging";
 
 /**
  * Real-purchase confirm shell (ticket 5.14 B3).
@@ -45,7 +46,7 @@ const PENDING_CONFIRMATION_THRESHOLD = 0.95;
  * `price` aggregate is collapsed onto `price_paid` (same input on
  * the form) so the banner never lists "Purchase price" twice.
  */
-function deriveLowConfidenceFields(confidence: PurchaseDetailDoc["extraction_confidence"]): {
+export function deriveLowConfidenceFields(confidence: PurchaseDetailDoc["extraction_confidence"]): {
   fields: string[];
   isMostlyFailed: boolean;
 } {
@@ -103,7 +104,26 @@ function deriveReceiptFilename(purchase: PurchaseDetailDoc): string | null {
   return null;
 }
 
-export function ConfirmPurchaseContent({ purchase }: { purchase: PurchaseDetailDoc }) {
+export function ConfirmPurchaseContent({
+  purchase,
+  draft,
+  lineKey,
+}: {
+  purchase: PurchaseDetailDoc;
+  /**
+   * Present for the write-after-confirm upload flow — the purchase has
+   * not been persisted yet. The receipt blob can't be proxied via
+   * `/purchases/:id/receipt` until confirm, so the column shows a
+   * "will be attached" note; ActionBar creates the doc on confirm.
+   */
+  draft?: ConfirmDraftContext;
+  /**
+   * Set when confirming ONE line of a multi-item receipt — switches
+   * ActionBar into "track another" mode (mark tracked + return to the
+   * selection list instead of clearing the draft).
+   */
+  lineKey?: string;
+}) {
   const { fields: lowConfidenceFields, isMostlyFailed } = deriveLowConfidenceFields(
     purchase.extraction_confidence,
   );
@@ -118,7 +138,10 @@ export function ConfirmPurchaseContent({ purchase }: { purchase: PurchaseDetailD
   // isn't, we render the compact "Original receipt not available"
   // fallback directly so the user still sees source context next to
   // the form they're being asked to confirm.
-  const hasReceipt = purchase.receipt_storage_url !== null;
+  // For an upload draft the blob exists in GCS but no purchase doc backs
+  // the `/purchases/:id/receipt` proxy yet, so we never mount ReceiptPreview
+  // pre-confirm — the draft fallback note covers it.
+  const hasReceipt = !draft && purchase.receipt_storage_url !== null;
 
   // Form state lives here (ticket 5.14 B4). The form is purely
   // controlled and ActionBar reads the same state object to compute
@@ -163,6 +186,12 @@ export function ConfirmPurchaseContent({ purchase }: { purchase: PurchaseDetailD
                   <MissingReceiptFallback
                     ingestionSource={purchase.ingestion_source}
                     variant="compact"
+                    {...(draft
+                      ? {
+                          title: "Receipt ready to attach",
+                          body: "Your uploaded receipt is saved and will be attached to this purchase when you confirm.",
+                        }
+                      : {})}
                   />
                 </div>
               )}
@@ -195,7 +224,13 @@ export function ConfirmPurchaseContent({ purchase }: { purchase: PurchaseDetailD
         </div>
       </div>
 
-      <ActionBar purchase={purchase} initialFormState={initialState} formState={formState} />
+      <ActionBar
+        purchase={purchase}
+        initialFormState={initialState}
+        formState={formState}
+        draft={draft}
+        lineKey={lineKey}
+      />
     </div>
   );
 }

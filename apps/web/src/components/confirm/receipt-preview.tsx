@@ -258,14 +258,21 @@ export function ReceiptPreview({ purchaseId, filename, ingestionSource }: Receip
 export function MissingReceiptFallback({
   ingestionSource,
   variant = "panel",
+  title = "Original receipt not available",
+  body: bodyOverride,
 }: {
   ingestionSource: string | null;
   variant?: "panel" | "compact";
+  /** Override the heading — e.g. the pre-confirm upload draft case. */
+  title?: string;
+  /** Override the body copy — defaults to the ingestion-source-aware text. */
+  body?: string;
 }) {
   const body =
-    ingestionSource === "gmail"
+    bodyOverride ??
+    (ingestionSource === "gmail"
       ? "This purchase came in through Gmail. We don't store the original email attachment, but we did capture every detail you see on the right."
-      : "We don't have a stored receipt for this purchase. Everything we extracted is on the right.";
+      : "We don't have a stored receipt for this purchase. Everything we extracted is on the right.");
   const sizeClass =
     variant === "panel"
       ? "h-[400px] lg:h-[500px]"
@@ -281,9 +288,7 @@ export function MissingReceiptFallback({
         className={variant === "compact" ? "size-8 text-neutral-300" : "size-12 text-neutral-300"}
         aria-hidden
       />
-      <p className="max-w-xs text-sm font-medium text-neutral-700">
-        Original receipt not available
-      </p>
+      <p className="max-w-xs text-sm font-medium text-neutral-700">{title}</p>
       <p className="max-w-xs text-sm text-neutral-500">{body}</p>
     </div>
   );

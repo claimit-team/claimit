@@ -25,13 +25,11 @@ export function PurchaseDetailContent({
    */
   onPurchaseUpdated: () => void;
 }) {
-  // Header monitoring status is no longer locally mutable — the real
-  // detail page reads it from the server response. "Stop monitoring"
-  // and "Re-upload receipt" header actions are disabled with a TODO
-  // (decision 3 in the review): there's no backend endpoint that
-  // implements either today (POST /dismiss has a different semantic +
-  // a fixed reason enum; receipt re-upload belongs in the 5.13 upload
-  // flow), and we deliberately don't fake mutation success.
+  // Header monitoring status is read from the server response, not
+  // locally mutated. The header's "Stop monitoring" and "Re-upload
+  // receipt" actions (BUG-85) call real endpoints and refetch via
+  // `onPurchaseUpdated` on success, so the status reflects server truth
+  // rather than an optimistic flip.
   const monitoringStatus = initial.monitoringStatus;
 
   const headerModel: PurchasePageHeaderModel = useMemo(
@@ -63,6 +61,10 @@ export function PurchaseDetailContent({
       memberTier: initial.memberTier ?? undefined,
       memberPriceAtPurchase: initial.memberPriceAtPurchase,
       nonMemberPriceAtPurchase: initial.nonMemberPriceAtPurchase,
+      fareClass: initial.fareClass,
+      roomType: initial.roomType,
+      bedType: initial.bedType,
+      rateType: initial.rateType,
       sourceEmail: initial.sourceEmail ?? undefined,
     }),
     [initial],
@@ -71,7 +73,11 @@ export function PurchaseDetailContent({
   return (
     <div className="mx-auto max-w-[960px] px-4 py-6 lg:px-6">
       <div className="space-y-6">
-        <PurchasePageHeader purchase={headerModel} />
+        <PurchasePageHeader
+          purchase={headerModel}
+          purchaseId={initial.purchaseId}
+          onPurchaseUpdated={onPurchaseUpdated}
+        />
 
         <PriceHistoryChart
           purchaseId={initial.purchaseId}
@@ -99,7 +105,11 @@ export function PurchaseDetailContent({
 
         <RelatedClaimsCard claims={initial.relatedClaims} />
 
-        <OriginalPurchaseDetails purchase={originalModel} />
+        <OriginalPurchaseDetails
+          purchase={originalModel}
+          purchaseId={initial.purchaseId}
+          ingestionSource={initial.ingestionSourceRaw}
+        />
       </div>
     </div>
   );

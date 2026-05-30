@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
-import { PrivacyPolicyView } from "@/components/privacy/privacy-policy-view";
+
+import { LegalDocumentView } from "@/components/legal/legal-document-view";
+import { PRIVACY_CONTENT } from "@/lib/legal/privacy-content";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy — ClaimIt",
-  description:
-    "How ClaimIt handles purchase-related data, account information, Gmail access, claim materials, and user-reported outcomes.",
+  title: "Privacy Policy | ClaimIt",
+  description: PRIVACY_CONTENT.description,
 };
 
 export default function PrivacyPage() {
-  return <PrivacyPolicyView />;
+  return <LegalDocumentView {...PRIVACY_CONTENT} />;
 }

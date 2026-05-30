@@ -95,7 +95,7 @@ def test_extract_returns_purchase_shaped_dict_for_fixtures(
     assert result["extraction_confidence"]["price_paid"] is not None
 
 
-def test_extract_high_confidence_starts_monitoring(
+def test_extract_high_confidence_sets_pending_confirmation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     payload = _sample_extracted_payload()
@@ -117,7 +117,7 @@ def test_extract_high_confidence_starts_monitoring(
 
     result = asyncio.run(extract(_sample_email()))
 
-    assert result["status"] == "monitoring"
+    assert result["status"] == "pending_confirmation"
     assert result["extraction_confidence"]["overall_min"] == pytest.approx(0.99)
     assert (
         compute_overall_min(result["extraction_confidence"])["critical_field_below_threshold"]
@@ -187,8 +187,9 @@ def test_extract_handles_missing_optional_fields(monkeypatch: pytest.MonkeyPatch
     assert result["variant"] is None
     assert result["member_tier_at_purchase"] is None
     assert result["member_price_at_purchase"] is None
-    # Sample payload has every critical confidence >= 0.95, so it should auto-start monitoring.
-    assert result["status"] == "monitoring"
+    # Per BUG-83 every ingested purchase routes through the review screen,
+    # so even high-confidence extractions land in `pending_confirmation`.
+    assert result["status"] == "pending_confirmation"
 
 
 def test_extract_uses_product_id_fallback_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -269,6 +270,65 @@ def test_extracted_purchase_fields_defaults_line_items_to_one() -> None:
     assert extracted.line_items_detected == 1
 
 
+def test_line_item_price_paid_must_be_positive() -> None:
+    """A line with price_paid <= 0 fails LineItem validation, like the top-level."""
+    payload = _sample_extracted_payload()
+    payload["line_items_detected"] = 2
+    payload["line_items"] = [
+        {
+            "product_name": "Bad",
+            "product_id": None,
+            "price_paid": 0,
+            "confidence": {"price_paid": 0.5},
+        },
+    ]
+    with pytest.raises(ValidationError, match="price_paid"):
+        ExtractedPurchaseFields.model_validate(payload)
+
+
+def test_build_line_item_payloads_empty_for_single_item() -> None:
+    """Single-item extraction (no line_items) → no per-line payloads."""
+    extracted = ExtractedPurchaseFields.model_validate(_sample_extracted_payload())
+    assert extractor.build_line_item_payloads(extracted) == []
+
+
+def test_build_line_item_payloads_resolves_each_line() -> None:
+    payload = _sample_extracted_payload()
+    payload["line_items_detected"] = 2
+    payload["line_items"] = [
+        {
+            "product_name": "Laptop",
+            "product_id": "L999",
+            "variant": "16GB",
+            "price_paid": 999.0,
+            "confidence": {"product_name": 0.97, "price_paid": 0.96},
+        },
+        {
+            # No product_id → order- fallback + FALLBACK confidence.
+            "product_name": "Mouse",
+            "product_id": None,
+            "price_paid": 29.0,
+            "confidence": {"product_name": 0.95, "price_paid": 0.94},
+        },
+    ]
+    extracted = ExtractedPurchaseFields.model_validate(payload)
+
+    payloads = extractor.build_line_item_payloads(extracted)
+    assert [p["receipt_line_key"] for p in payloads] == ["line-0", "line-1"]
+
+    laptop, mouse = payloads
+    assert laptop["product_id"] == "L999"
+    # Per-line price confidence is the line's own (uncapped).
+    assert laptop["extraction_confidence"]["price_paid"] == 0.96
+    assert laptop["extraction_confidence"]["price"] == 0.96
+
+    # order- fallback applied for the SKU-less line.
+    assert mouse["product_id"] == "order-a123"
+    assert mouse["extraction_confidence"]["product_id"] == extractor.FALLBACK_PRODUCT_ID_CONFIDENCE
+    # Fallback line routes to user edit (mirrors the single-item fallback).
+    assert mouse["status"] == "pending_user_edit"
+
+
 def test_resolve_status_multi_item_overrides_high_confidence() -> None:
     """_resolve_status(multi_item=True) must return pending_user_edit
     regardless of confidence, mirroring the fallback_used branch.
@@ -282,7 +342,8 @@ def test_resolve_status_multi_item_overrides_high_confidence() -> None:
         "purchase_date": 1.0,
     }
     assert extractor._resolve_status(False, high_conf, multi_item=True) == "pending_user_edit"
-    # Single-item path still derives status from confidence.
+    # Single-item, non-fallback path always lands at pending_confirmation
+    # (BUG-83: every ingest routes through the review screen).
     assert extractor._resolve_status(False, high_conf, multi_item=False) == "pending_confirmation"
 
 

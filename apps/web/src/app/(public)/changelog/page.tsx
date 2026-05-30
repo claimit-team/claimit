@@ -1,26 +1,11 @@
 import type { Metadata } from "next";
-import { ChangelogHero } from "@/components/changelog/changelog-hero";
-import { ChangelogTimeline } from "@/components/changelog/changelog-timeline";
-import { CurrentStatusCard } from "@/components/changelog/current-status-card";
-import { FinalCTA } from "@/components/changelog/final-cta";
-import { ProductPrinciplesCallout } from "@/components/changelog/product-principles-callout";
-import { RelatedLinks } from "@/components/changelog/related-links";
+import { ChangelogView } from "@/components/changelog/changelog-view";
 
 export const metadata: Metadata = {
-  title: "Changelog — ClaimIt",
-  description:
-    "Product updates, interface changes, and implementation notes as ClaimIt moves from MVP to working demo.",
+  title: "What's new | ClaimIt",
+  description: "Recent updates to the ClaimIt platform.",
 };
 
 export default function ChangelogPage() {
-  return (
-    <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
-      <ChangelogHero />
-      <CurrentStatusCard />
-      <ChangelogTimeline />
-      <ProductPrinciplesCallout />
-      <RelatedLinks />
-      <FinalCTA />
-    </div>
-  );
+  return <ChangelogView />;
 }

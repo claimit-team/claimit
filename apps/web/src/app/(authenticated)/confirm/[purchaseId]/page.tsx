@@ -15,6 +15,8 @@
  * here for the in-scope 5.14 work.
  */
 
+import { Suspense } from "react";
+
 import { ConfirmPurchaseLoader } from "@/components/confirm/confirm-purchase-loader";
 
 type ConfirmPageProps = {
@@ -23,5 +25,13 @@ type ConfirmPageProps = {
 
 export default async function ConfirmPurchasePage({ params }: ConfirmPageProps) {
   const { purchaseId } = await params;
-  return <ConfirmPurchaseLoader purchaseId={purchaseId} />;
+  // Suspense boundary: the loader reads `?line=` via `useSearchParams()`
+  // (it needs to react to query-only navigation between the multi-item
+  // selection list and a per-line confirm). Wrapping here satisfies the
+  // App Router requirement and prevents the static-prerender bailout.
+  return (
+    <Suspense fallback={null}>
+      <ConfirmPurchaseLoader purchaseId={purchaseId} />
+    </Suspense>
+  );
 }

@@ -1,6 +1,8 @@
 "use client";
 
-import { MessageCircle, Search } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { MessageCircle, Search, Workflow } from "lucide-react";
+import { motion } from "motion/react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
@@ -10,10 +12,39 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { faqData, faqTopics } from "@/lib/faq-data";
 import { cn } from "@/lib/utils";
+
+const howItWorksTile = {
+  title: "How ClaimIt works",
+  description: "See the agent workflow end to end",
+  href: "/how-it-works",
+  icon: Workflow,
+} as const;
+
+function TopicCardInner({
+  title,
+  description,
+  icon: Icon,
+}: {
+  title: string;
+  description: string;
+  icon: LucideIcon;
+}) {
+  return (
+    <Card className="flex h-full cursor-pointer flex-col rounded-xl bg-neutral-0 p-6 ring-1 ring-neutral-200 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm hover:ring-neutral-300">
+      <div className="flex size-10 items-center justify-center rounded-lg bg-neutral-100">
+        <Icon className="size-5 text-neutral-700" aria-hidden />
+      </div>
+      <h3 className="mt-4 text-base font-medium text-neutral-900 transition-colors duration-200 group-hover:text-brand-primary-600">
+        {title}
+      </h3>
+      <p className="mt-2 min-h-[2.5rem] text-sm leading-relaxed text-neutral-600">{description}</p>
+    </Card>
+  );
+}
 
 export function HelpCenterView() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -41,105 +72,126 @@ export function HelpCenterView() {
 
   return (
     <div className="bg-neutral-0">
-      {/* Hero Section */}
-      <section className="flex min-h-[40vh] flex-col justify-center border-b border-neutral-200 bg-neutral-0 sm:min-h-[50vh]">
-        <div className="mx-auto w-full max-w-3xl px-4 text-center sm:px-6 lg:px-8">
-          <h1 className="text-balance text-4xl font-bold leading-[1.05] tracking-tight text-foreground sm:text-5xl">
-            How can we help?
-          </h1>
-          <p className="mt-4 text-pretty text-lg leading-relaxed text-muted-foreground sm:text-xl">
-            Find answers about connecting Gmail, monitoring purchases, reviewing claims, and
-            reporting outcomes.
-          </p>
+      <section className="py-12 sm:py-16 lg:py-20">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-3xl text-center">
+            <h1 className="text-balance text-4xl font-semibold tracking-tight text-neutral-900 sm:text-5xl lg:text-6xl">
+              How can we help?
+            </h1>
+            <p className="mx-auto mt-4 max-w-xl text-balance text-base leading-relaxed text-neutral-700 sm:text-lg">
+              Find answers about connecting Gmail, monitoring purchases, reviewing claims, and
+              reporting outcomes.
+            </p>
 
-          {/* Search Input */}
-          <div className="relative mx-auto mt-8 max-w-xl">
-            <Search className="absolute left-3 top-1/2 size-5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              placeholder="Search help articles…"
-              className="h-12 pl-10 text-base"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              aria-label="Search help articles"
-            />
+            <div className="relative mx-auto mt-8 max-w-xl">
+              <Search
+                className="absolute left-3 top-1/2 size-5 -translate-y-1/2 text-neutral-500"
+                aria-hidden
+              />
+              <Input
+                type="search"
+                placeholder="Search help articles…"
+                className="h-12 border-neutral-200 pl-10 text-base ring-1 ring-neutral-200 focus-visible:ring-brand-primary-500"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                aria-label="Search help articles"
+              />
+            </div>
+
+            <div className="mt-6">
+              <Link
+                href="/help/contact"
+                className={cn(
+                  buttonVariants(),
+                  "inline-flex items-center bg-brand-primary-500 text-neutral-0 transition-all duration-200 hover:bg-brand-primary-600 hover:scale-[1.02] active:scale-[0.98]",
+                )}
+              >
+                <MessageCircle className="mr-2 size-4" />
+                Contact support
+              </Link>
+            </div>
           </div>
 
-          <div className="mt-6">
-            <Link
-              href="/help/contact"
-              className={cn(
-                buttonVariants(),
-                "inline-flex items-center transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]",
-              )}
+          {!searchQuery && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, amount: 0.2 }}
+              transition={{ duration: 0.6, ease: "easeOut" }}
+              className="mt-12 sm:mt-16"
             >
-              <MessageCircle className="mr-2 size-4" />
-              Contact support
-            </Link>
-          </div>
+              <h2 className="sr-only">Browse topics</h2>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {faqTopics.map((topic) => {
+                  const Icon = topic.icon;
+                  return (
+                    <button
+                      key={topic.id}
+                      type="button"
+                      onClick={() => scrollToSection(topic.id)}
+                      className="group w-full text-left"
+                    >
+                      <TopicCardInner
+                        title={topic.title}
+                        description={topic.description}
+                        icon={Icon}
+                      />
+                    </button>
+                  );
+                })}
+                <Link href={howItWorksTile.href} className="group block h-full text-left">
+                  <TopicCardInner
+                    title={howItWorksTile.title}
+                    description={howItWorksTile.description}
+                    icon={howItWorksTile.icon}
+                  />
+                </Link>
+              </div>
+            </motion.div>
+          )}
         </div>
       </section>
 
-      {/* Quick Topic Cards */}
-      {!searchQuery && (
-        <section className="py-24 sm:py-32 lg:py-40">
-          <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-            <h2 className="sr-only">Quick topics</h2>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {faqTopics.map((topic) => {
-                const Icon = topic.icon;
-                return (
-                  <button
-                    key={topic.id}
-                    type="button"
-                    onClick={() => scrollToSection(topic.id)}
-                    className="group text-left"
-                  >
-                    <Card className="h-full transition-all duration-300 hover:-translate-y-1 hover:shadow-md">
-                      <CardContent className="flex items-start gap-4 pt-6">
-                        <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                          <Icon className="size-5 text-primary" />
-                        </div>
-                        <div>
-                          <h3 className="font-semibold text-foreground group-hover:text-primary">
-                            {topic.title}
-                          </h3>
-                          <p className="mt-1 text-sm text-muted-foreground">{topic.description}</p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </button>
-                );
-              })}
-            </div>
+      <section className="py-16 sm:py-20 lg:py-28">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.2 }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+          className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8"
+        >
+          <div className="text-center">
+            <h2 className="text-balance text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+              Frequently asked questions
+            </h2>
+            <p className="mx-auto mt-4 max-w-2xl text-balance text-neutral-700">
+              Browse by topic or search above for specific answers.
+            </p>
           </div>
-        </section>
-      )}
 
-      {/* FAQ Sections */}
-      <section className="py-24 sm:py-32 lg:py-40">
-        <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
           {filteredFaqData.length === 0 ? (
             <div className="py-12 text-center">
-              <p className="text-muted-foreground">
-                No results found for &quot;{searchQuery}&quot;
-              </p>
+              <p className="text-neutral-700">No results found for &quot;{searchQuery}&quot;</p>
               <Button variant="link" className="mt-2" onClick={() => setSearchQuery("")}>
                 Clear search
               </Button>
             </div>
           ) : (
-            <div className="space-y-12">
+            <div className="mt-12 space-y-12">
               {filteredFaqData.map((category) => (
-                <div key={category.id} id={category.id} className="scroll-mt-24">
-                  <h2 className="mb-4 text-xl font-semibold text-foreground">{category.title}</h2>
+                <div key={category.id} className="scroll-mt-24">
+                  <h3 id={category.id} className="mb-4 text-lg font-semibold text-neutral-900">
+                    {category.title}
+                  </h3>
                   <Accordion multiple={false} className="w-full">
                     {category.questions.map((item) => {
                       const slug = `${category.id}-${item.question}`;
                       return (
                         <AccordionItem key={slug} value={slug}>
-                          <AccordionTrigger className="text-left">{item.question}</AccordionTrigger>
-                          <AccordionContent className="text-muted-foreground leading-relaxed">
+                          <AccordionTrigger className="text-left text-base font-medium text-neutral-900">
+                            {item.question}
+                          </AccordionTrigger>
+                          <AccordionContent className="text-base leading-relaxed text-neutral-700">
                             {item.answer}
                           </AccordionContent>
                         </AccordionItem>
@@ -150,26 +202,35 @@ export function HelpCenterView() {
               ))}
             </div>
           )}
-        </div>
+        </motion.div>
       </section>
 
-      {/* Contact Support CTA */}
-      <section className="border-t border-neutral-200 bg-neutral-0 py-24 sm:py-32 lg:py-40">
-        <div className="mx-auto max-w-2xl px-4 text-center sm:px-6 lg:px-8">
-          <Card className="bg-card">
-            <CardContent className="py-10">
-              <h2 className="text-2xl font-semibold text-foreground">Still need help?</h2>
-              <p className="mt-3 text-muted-foreground">Send a note and we will follow up.</p>
-              <Link
-                href="/help/contact"
-                className={cn(buttonVariants({ size: "lg" }), "mt-6 inline-flex items-center")}
-              >
-                <MessageCircle className="mr-2 size-4" />
-                Contact support
-              </Link>
-            </CardContent>
-          </Card>
-        </div>
+      <section className="py-16 sm:py-20 lg:py-28">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.2 }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+          className="mx-auto max-w-2xl px-4 text-center sm:px-6 lg:px-8"
+        >
+          <h2 className="text-balance text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+            Still need help?
+          </h2>
+          <p className="mx-auto mt-4 max-w-xl text-balance text-neutral-700">
+            Send us a note and we&apos;ll get back to you.
+          </p>
+          <div className="mt-8">
+            <Link
+              href="/help/contact"
+              className={cn(
+                buttonVariants({ size: "lg" }),
+                "inline-flex bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600",
+              )}
+            >
+              Contact support
+            </Link>
+          </div>
+        </motion.div>
       </section>
     </div>
   );

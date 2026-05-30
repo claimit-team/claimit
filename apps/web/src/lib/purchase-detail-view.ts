@@ -128,8 +128,30 @@ export interface PurchaseDetailViewModel {
   memberTier: string | null;
   memberPriceAtPurchase: number | null;
   nonMemberPriceAtPurchase: number | null;
+  /**
+   * Category-specific fields (BUG-107). Flat nullable columns on the
+   * Purchase doc: `fareClass` is populated for airline purchases,
+   * `roomType` / `bedType` / `rateType` for hotel purchases; all `null`
+   * for retail (and for the inapplicable category). The detail view
+   * surfaces them only when the purchase category matches AND the value
+   * is non-null, mirroring the member-tier conditional rows.
+   */
+  fareClass: string | null;
+  roomType: string | null;
+  bedType: string | null;
+  rateType: string | null;
   sourceEmail: string | null;
   purchaseSource: PurchaseDetailOriginalSource;
+  /**
+   * Raw backend `ingestion_source` (e.g. "gmail", "upload_pdf",
+   * "upload_image") — carried verbatim alongside the lossy
+   * `purchaseSource` label because `ReceiptPreview` keys its
+   * "Original not available" fallback copy off the literal "gmail",
+   * which `purchaseSource` collapses to "email". Same convention as
+   * `platformRaw` / `categoryRaw`. `null` when the wire doc has no
+   * ingestion source.
+   */
+  ingestionSourceRaw: string | null;
   /**
    * BUG-19: monitor-failure trail surfaced from the wire `purchase` doc.
    * The price-history card renders a real explanation + remediation
@@ -406,8 +428,13 @@ export function buildPurchaseDetailViewModel(
     memberTier: purchase.member_tier_at_purchase,
     memberPriceAtPurchase: purchase.member_price_at_purchase,
     nonMemberPriceAtPurchase: purchase.non_member_price_at_purchase,
+    fareClass: purchase.fare_class ?? null,
+    roomType: purchase.room_type ?? null,
+    bedType: purchase.bed_type ?? null,
+    rateType: purchase.rate_type ?? null,
     sourceEmail: purchase.sender,
     purchaseSource: inferOriginalSource(purchase.ingestion_source),
+    ingestionSourceRaw: purchase.ingestion_source ?? null,
     productUrl: purchase.product_url ?? null,
     // `?? null` guards against a backend that doesn't yet expose the
     // BUG-19 fields (older deployments, or the read-tolerant variant

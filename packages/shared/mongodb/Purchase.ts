@@ -59,6 +59,12 @@ export interface Purchase {
   ingestion_source: IngestionSource;
   receipt_storage_url: string | null;
   receipt_hash: string | null;
+  // Which line of a multi-item receipt this purchase tracks ("line-0",
+  // "line-1", …). Null for single-item uploads, Gmail, and manual fill.
+  // Part of the (user_id, platform, order_id, receipt_line_key) unique
+  // index so multiple items off one receipt each become their own
+  // monitored purchase without colliding on the shared order_id.
+  receipt_line_key?: string | null;
   format_hash?: string | null;
   sender?: string | null;
   extraction_confidence: ExtractionConfidence;

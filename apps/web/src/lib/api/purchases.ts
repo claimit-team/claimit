@@ -330,6 +330,14 @@ export type ListPurchasesResponse = {
   purchases: PurchaseListItem[];
   next_cursor: string | null;
   /**
+   * Per-category chip counts (mirrors the /claims status-group chip
+   * counts): `{ all, retail, airline, hotel }`. Always reflects every
+   * category within the active status/search scope regardless of which
+   * category filter is applied, so the filter chips can show a stable
+   * count beside each label.
+   */
+  counts: Record<string, number>;
+  /**
    * Server-computed total over the FILTERED set (status + category + q
    * are honored). Not rendered today (v0 §4 forbids money totals) —
    * kept on the type for parity with the wire shape so a future
@@ -385,21 +393,85 @@ export type PurchaseWriteResponse = {
 };
 
 /**
+ * Fields the ingest extractor returns for an uploaded receipt. Maps 1:1
+ * onto the editable `PurchaseDetailDoc` fields plus the server-computed
+ * `status` / `extraction_confidence`. `null` for the whole object means
+ * the extractor could not read the receipt — the FE opens the confirm
+ * form in manual-fill mode.
+ */
+export type UploadExtraction = {
+  platform: Platform | string | null;
+  category: Category | string | null;
+  product_name: string | null;
+  product_id: string | null;
+  product_url: string | null;
+  variant: string | null;
+  fare_class: string | null;
+  room_type: string | null;
+  bed_type: string | null;
+  rate_type: string | null;
+  price_paid: number | null;
+  member_price_at_purchase: number | null;
+  non_member_price_at_purchase: number | null;
+  purchase_date: string | null;
+  purchase_date_basis: PurchaseDateBasis | string | null;
+  order_id: string | null;
+  member_tier_at_purchase: string | null;
+  status: PurchaseStatus | string | null;
+  currency: string | null;
+  extraction_confidence: ExtractionConfidenceDoc | null;
+  /**
+   * Which line of a multi-item receipt this extraction represents
+   * ("line-0", …). Present only on a per-line extraction inside
+   * `line_items`; absent/null on the top-level (highest-priced) item.
+   */
+  receipt_line_key?: string | null;
+  /**
+   * Per-line breakdown when the receipt itemizes more than one
+   * purchasable product. Each entry is a FULL extraction (shared receipt
+   * fields merged with that line's fields) plus its `receipt_line_key`,
+   * so the selection UI renders one card per item and the confirm form
+   * can be pre-filled from a chosen line. Empty / absent for single-item
+   * receipts — the FE falls through to the single-item confirm flow.
+   */
+  line_items?: UploadLineItem[] | null;
+};
+
+/** One resolved receipt line — a full extraction with a stable line key. */
+export type UploadLineItem = Omit<UploadExtraction, "line_items"> & {
+  receipt_line_key: string;
+};
+
+/**
+ * Response of POST /api/v1/purchases/upload under the write-after-confirm
+ * flow. NOTHING is persisted on upload — the bytes go to GCS, the
+ * ingest-agent extracts the fields synchronously, and they're returned
+ * here. The FE carries this client-side to the confirm form and calls
+ * `createPurchase` (POST /confirm-create) only when the user confirms.
+ */
+export type UploadReceiptResponse = {
+  storage_url: string;
+  content_type: string;
+  receipt_hash: string | null;
+  extraction: UploadExtraction | null;
+};
+
+/**
  * POST /api/v1/purchases/upload — multipart receipt upload.
  *
  * The api-gateway validates content-type (PDF / PNG / JPEG only) and
- * file size (≤ MAX_UPLOAD_BYTES = 10 MB), writes a sentinel
- * `pending_confirmation` Purchase row, uploads the bytes to GCS, and
- * publishes `purchase.uploaded` so the ingest-agent extracts the
- * fields asynchronously. Returns the freshly-created purchase doc;
- * the FE then routes the user to `/confirm/:id` where the analyzing
- * poll waits for extraction to finalize (B3).
+ * file size (≤ MAX_UPLOAD_BYTES = 10 MB), uploads the bytes to GCS, and
+ * extracts the fields synchronously via the ingest-agent. It writes
+ * NOTHING to MongoDB — the Purchase is created only when the user
+ * confirms (`createPurchase`). The FE stashes this response and routes
+ * to `/confirm/:stagingKey`, where the form renders immediately from the
+ * carried `extraction` (no analyzing poll).
  *
- * Upload timeout is widened to 60s — a slow upstream + a 10 MB PDF
- * comfortably exceeds the 10s JSON-default in `PURCHASES_TIMEOUT_MS`.
- * Error envelope uses the same `code` discriminator as JSON 4xx
- * responses: `file_too_large` (413), `unsupported_media_type` (415),
- * everything else surfaces with `failureMessage` + the HTTP status.
+ * Upload timeout is widened to 60s — a slow upstream + a 10 MB PDF plus
+ * the synchronous Gemini extraction comfortably exceeds the 10s
+ * JSON-default in `PURCHASES_TIMEOUT_MS`. Error envelope uses the same
+ * `code` discriminator: `file_too_large` (413),
+ * `unsupported_media_type` (415).
  *
  * The `Content-Type` header is intentionally NOT set here — the
  * browser must build the `multipart/form-data; boundary=…` value
@@ -407,14 +479,82 @@ export type PurchaseWriteResponse = {
  */
 const UPLOAD_TIMEOUT_MS = 60_000;
 
-export async function uploadPurchase(file: File): Promise<PurchaseWriteResponse> {
+export async function uploadPurchase(file: File): Promise<UploadReceiptResponse> {
   const form = new FormData();
   form.append("file", file, file.name);
-  return _request<PurchaseWriteResponse>(
+  return _request<UploadReceiptResponse>(
     "/api/v1/purchases/upload",
     { method: "POST", body: form },
     "Receipt upload failed",
     { timeoutMs: UPLOAD_TIMEOUT_MS },
+  );
+}
+
+/**
+ * POST /api/v1/purchases/confirm-create — create the Purchase for a
+ * confirmed upload (the first MongoDB write under write-after-confirm).
+ *
+ * Carries the upload-time `storage_url` / `content_type` / `receipt_hash`
+ * plus the `extraction` returned by /upload and any user `corrected_fields`.
+ * The server dedups against already-committed purchases (409 `duplicate`
+ * on a true re-add), creates the doc in `monitoring`, and kicks off
+ * monitoring. `extraction` is null on manual fill.
+ */
+export type CreatePurchaseRequest = {
+  storage_url: string;
+  content_type: string;
+  extraction?: UploadExtraction | null;
+  corrected_fields?: Record<string, unknown>;
+  /**
+   * Identifies which line of a multi-item receipt is being tracked
+   * ("line-0", …). Omitted/null for single-item uploads and manual fill.
+   * The server scopes dedup on it and suffixes the internal receipt_hash
+   * so multiple items off one receipt each create their own purchase.
+   */
+  receipt_line_key?: string | null;
+};
+
+export async function createPurchase(body: CreatePurchaseRequest): Promise<PurchaseWriteResponse> {
+  return _request<PurchaseWriteResponse>(
+    "/api/v1/purchases/confirm-create",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    "Create purchase failed",
+  );
+}
+
+/**
+ * POST /api/v1/purchases/:id/reupload-receipt — replace the receipt on
+ * an EXISTING monitored purchase and apply the reviewed fields (BUG-85).
+ *
+ * Same body shape as `createPurchase` — the receipt was already stored
+ * (+ extracted) by `uploadPurchase`; this swaps it onto the existing
+ * purchase, merges `extraction` with the user's `corrected_fields`,
+ * recomputes the window, clears stale monitor errors, and keeps the
+ * purchase monitoring. Only valid while monitoring (409 otherwise).
+ */
+export type ReuploadReceiptRequest = {
+  storage_url: string;
+  content_type: string;
+  extraction?: UploadExtraction | null;
+  corrected_fields?: Record<string, unknown>;
+};
+
+export async function reuploadReceipt(
+  purchaseId: string,
+  body: ReuploadReceiptRequest,
+): Promise<PurchaseWriteResponse> {
+  return _request<PurchaseWriteResponse>(
+    `/api/v1/purchases/${encodeURIComponent(purchaseId)}/reupload-receipt`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    "Re-upload receipt failed",
   );
 }
 
@@ -505,6 +645,21 @@ export async function updatePurchase(
       body: JSON.stringify(body),
     },
     "Update purchase failed",
+  );
+}
+
+/**
+ * POST /api/v1/purchases/:id/stop-monitoring — stop tracking a
+ * monitored purchase (BUG-85). Transitions it to `dismissed`, which the
+ * UI renders as a neutral "Stopped" badge. Dedicated endpoint (NOT
+ * /dismiss): only valid while the purchase is actively monitoring; the
+ * backend 409s from any other status.
+ */
+export async function stopMonitoring(purchaseId: string): Promise<PurchaseWriteResponse> {
+  return _request<PurchaseWriteResponse>(
+    `/api/v1/purchases/${encodeURIComponent(purchaseId)}/stop-monitoring`,
+    { method: "POST" },
+    "Stop monitoring failed",
   );
 }
 

@@ -8,6 +8,7 @@ describe("friendlyMessage", () => {
     expect(friendlyMessage(500, "unauthenticated")).toMatch(/session expired/i);
     expect(friendlyMessage(200, "not_found")).toMatch(/couldn't find/i);
     expect(friendlyMessage(0, "request_timeout")).toMatch(/took too long/i);
+    expect(friendlyMessage(409, "duplicate")).toMatch(/already added this receipt/i);
   });
   it("maps by status when code is generic", () => {
     expect(friendlyMessage(401)).toMatch(/session expired/i);

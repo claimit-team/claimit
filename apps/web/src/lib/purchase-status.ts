@@ -179,44 +179,44 @@ export function getMonitoringStatusBadge(
  * Palette is consistent with the detail header's existing
  * `BADGE_BY_MONITORING_STATUS` so the same visual vocabulary applies
  * across surfaces:
- *  - monitoring / claimed     -> brand-primary (in-progress, calm)
- *  - monitoring_degraded      -> brand-primary palette (caller can
- *                                  surface a degraded dot beside the
- *                                  label; the badge itself stays the
- *                                  same shade so a degraded row
- *                                  doesn't visually scream)
- *  - pending_*                -> neutral (transient pre-monitor)
- *  - refunded                 -> semantic-success
- *  - expired                  -> semantic-danger
- *  - dismissed                -> neutral (off-state)
+ *  - monitoring / monitoring_degraded / claimed -> blue (in-progress)
+ *  - pending_*                -> amber (needs attention / transient)
+ *  - refunded                 -> green (positive resolution)
+ *  - expired / dismissed      -> neutral (off-state, closed)
  *  - unknown / null           -> neutral with "Unknown" label
+ *
+ * Palette + sizing are shared with the /claims `ClaimOutcomeBadge`
+ * (solid bg-{color}-100 / text-{color}-700 + `BADGE_BASE_CLASSES`) so
+ * the two list pages read as one design system (BUG-103). The caller
+ * (`StatusCell`) layers `BADGE_BASE_CLASSES` on for the min-width /
+ * centered sizing; the degraded amber dot stays a separate signal.
  */
 export function getListStatusBadge(
   status: PurchaseStatus | string | null | undefined,
 ): PurchaseStatusBadge {
-  const brandPrimary = "bg-brand-primary-500/10 text-brand-primary-500 border-brand-primary-500/20";
-  const neutral = "bg-neutral-100 text-neutral-500 border-neutral-200";
-  const success = "bg-semantic-success/10 text-semantic-success border-semantic-success/20";
-  const danger = "bg-semantic-danger/10 text-semantic-danger border-semantic-danger/20";
+  const blue = "bg-blue-100 text-blue-700 border-blue-200";
+  const amber = "bg-amber-100 text-amber-700 border-amber-200";
+  const green = "bg-green-100 text-green-700 border-green-200";
+  const neutral = "bg-neutral-100 text-neutral-600 border-neutral-200";
 
   switch (status) {
     case "monitoring":
-      return { label: "Monitoring", className: brandPrimary };
+      return { label: "Monitoring", className: blue };
     case "monitoring_degraded":
-      // Same brand palette as `monitoring` so a degraded row stays
+      // Same blue palette as `monitoring` so a degraded row stays
       // calm; the v0 prompt expects the optional amber dot beside the
       // label as the degraded signal, not a recolored badge.
-      return { label: "Monitoring", className: brandPrimary };
+      return { label: "Monitoring", className: blue };
     case "pending_confirmation":
-      return { label: "Pending confirmation", className: neutral };
+      return { label: "Pending confirmation", className: amber };
     case "pending_user_edit":
-      return { label: "Pending edit", className: neutral };
+      return { label: "Pending edit", className: amber };
     case "claimed":
-      return { label: "Claim active", className: brandPrimary };
+      return { label: "Claim active", className: blue };
     case "refunded":
-      return { label: "Refund received", className: success };
+      return { label: "Refund received", className: green };
     case "expired":
-      return { label: "Window expired", className: danger };
+      return { label: "Window expired", className: neutral };
     case "dismissed":
       return { label: "Stopped", className: neutral };
     default:

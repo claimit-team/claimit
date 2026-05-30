@@ -8,6 +8,7 @@ shapes; all DB and storage work lives here.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
 import uuid
@@ -19,26 +20,25 @@ from claimit_mongodb_models import (
     SKIPLIST_MAX_ENTRIES,
     Category,
     ClaimType,
-    ExtractionConfidence,
     IngestionSkiplistEntry,
     IngestionSource,
     MongoDBClient,
     Platform,
     PriceHistoryReadTolerant,
     Purchase,
-    PurchaseDateBasis,
     PurchaseReadTolerant,
     PurchaseStatus,
     User,
     compute_window_days,
     normalize_sender,
 )
-from claimit_pubsub import TOPIC_PURCHASE_UPLOADED, PurchaseUploadedEvent
+from claimit_pubsub import TOPIC_PURCHASE_INGESTED, PurchaseIngestedEvent
 from pydantic import TypeAdapter, ValidationError
+from pymongo.errors import DuplicateKeyError
 
 from ..middleware.errors import ApiError
 from ..middleware.pagination import apply_cursor_to_query, encode_cursor
-from ..services import claims_service
+from ..services import claims_service, ingest_client
 from ..services.pubsub_publisher import PubSubPublisher
 from ..services.receipts_storage import ReceiptObjectMissingError, ReceiptsUploader
 
@@ -84,6 +84,17 @@ _REVIEWABLE_STATUSES: frozenset[str] = frozenset(
     }
 )
 
+# The two live monitoring states. "Stop monitoring" and "re-upload
+# receipt" both act on an actively-monitored purchase — not on a
+# pending_* one (those use /confirm or /dismiss) and not on a terminal
+# claimed/expired/refunded/dismissed one.
+_MONITORING_STATUSES: frozenset[str] = frozenset(
+    {
+        PurchaseStatus.MONITORING.value,
+        PurchaseStatus.MONITORING_DEGRADED.value,
+    }
+)
+
 _ALLOWED_UPLOAD_CONTENT_TYPES: dict[str, IngestionSource] = {
     "application/pdf": IngestionSource.UPLOAD_PDF,
     "image/png": IngestionSource.UPLOAD_IMAGE,
@@ -93,32 +104,23 @@ _ALLOWED_UPLOAD_CONTENT_TYPES: dict[str, IngestionSource] = {
 # 10 MB per Attachment 2 §3.3 + acceptance criteria.
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
-# Pending-confirmation upload defaults. The ingest agent overwrites every
-# one of these once it picks up the upload (via change stream or future
-# Pub/Sub). Frontend must not display these literal values — it should
-# render the upload as "Processing…" while status == pending_confirmation.
-_UPLOAD_PURCHASE_DEFAULTS: dict[str, Any] = {
-    "platform": Platform.AMAZON,
-    "category": Category.RETAIL,
-    "product_name": "",
-    "product_id": "",
-    "product_url": None,
-    "variant": None,
-    "fare_class": None,
-    "room_type": None,
-    "bed_type": None,
-    "rate_type": None,
-    # price_paid has gt=0; use 0.01 sentinel until extraction fills it in.
-    "price_paid": 0.01,
-    "member_price_at_purchase": None,
-    "non_member_price_at_purchase": None,
-    "currency": "USD",
-    "purchase_date_basis": PurchaseDateBasis.ORDER_DATE,
-    "order_id": "",
-    "member_tier_at_purchase": None,
-    "claim_type": ClaimType.SELF_SERVICE,
-    "monitoring_cadence_minutes": 360,
-}
+# Default monitoring cadence for a purchase created from a confirmed upload
+# when the user did not pick one (server-owned; not extracted).
+_DEFAULT_MONITORING_CADENCE_MINUTES = 360
+
+# Purchase fields declared `X | None` WITHOUT a model default, so Pydantic
+# still requires the key to be present. The extractor always supplies these;
+# the manual-fill path (extraction=None) must default them to None so the
+# Purchase validates from corrected_fields alone.
+_NULLABLE_PURCHASE_FIELDS: tuple[str, ...] = (
+    "product_url",
+    "variant",
+    "fare_class",
+    "room_type",
+    "bed_type",
+    "rate_type",
+    "member_tier_at_purchase",
+)
 
 
 def parse_purchase_id(purchase_id: str) -> UUID:
@@ -158,27 +160,52 @@ async def list_purchases(
       here anyway so unit tests calling the service directly behave
       the same as the HTTP entry point.
     """
-    base_filter: dict[str, Any] = {"user_id": user_id}
+    # `count_match` is everything EXCEPT the category filter — the
+    # per-category chip counts (mirrors the /claims status-group chip
+    # counts) must always reflect every category regardless of which one
+    # is active, but still respect the status scope + search `q` so the
+    # numbers match what the list would show when that chip is selected.
+    count_match: dict[str, Any] = {"user_id": user_id}
     if status:
         # `$in` whether status is a single-element list (backward-compat
         # path for `?status=x`) or multi-element. A length-1 `$in` is
         # semantically equivalent to equality and Mongo's planner uses
         # the same index either way — no perf regression for the common
         # single-value caller.
-        base_filter["status"] = {"$in": [s.value for s in status]}
-    if category is not None:
-        base_filter["category"] = category.value
+        count_match["status"] = {"$in": [s.value for s in status]}
 
     q_clean = q.strip() if q is not None else None
     if q_clean:
         pattern = re.escape(q_clean)
-        base_filter["$or"] = [
+        count_match["$or"] = [
             {"platform": {"$regex": pattern, "$options": "i"}},
             {"product_name": {"$regex": pattern, "$options": "i"}},
             {"order_id": {"$regex": pattern, "$options": "i"}},
         ]
 
-    total_count = await db.count("purchases", base_filter)
+    base_filter: dict[str, Any] = dict(count_match)
+    if category is not None:
+        base_filter["category"] = category.value
+
+    count_pipeline: list[dict[str, Any]] = [
+        {"$match": count_match},
+        {"$group": {"_id": "$category", "n": {"$sum": 1}}},
+    ]
+    total_count, count_docs = await asyncio.gather(
+        db.count("purchases", base_filter),
+        db.aggregate("purchases", count_pipeline),
+    )
+
+    # Map per-category counts → chip buckets. `all` is the sum across
+    # categories (within the status/q scope); unknown/legacy category
+    # values still roll into `all` but no specific chip.
+    counts: dict[str, int] = {"all": 0, "retail": 0, "airline": 0, "hotel": 0}
+    for row in count_docs:
+        n = int(row.get("n") or 0)
+        counts["all"] += n
+        cat = str(row.get("_id") or "")
+        if cat in counts:
+            counts[cat] += n
 
     page_filter = apply_cursor_to_query(base_filter, cursor)
     fetched = await db.find_many(
@@ -200,6 +227,7 @@ async def list_purchases(
         "purchases": [p.model_dump(mode="json", by_alias=True) for p in visible],
         "next_cursor": next_cursor,
         "total_count": total_count,
+        "counts": counts,
     }
 
 
@@ -332,6 +360,59 @@ async def update_purchase_product_url(
     return updated
 
 
+async def stop_monitoring(
+    db: MongoDBClient,
+    user: User,
+    purchase_id: UUID,
+) -> PurchaseReadTolerant:
+    """Stop tracking a monitored purchase (BUG-85).
+
+    Transitions a `monitoring` / `monitoring_degraded` purchase to
+    `dismissed` — the only terminal "off" state the schema carries, and
+    the one the frontend already renders as a neutral "Stopped" badge.
+    The monitor cron scans `status:"monitoring"` only, so leaving that
+    state is what actually halts the price sweep.
+
+    Deliberately a DEDICATED endpoint rather than POST /dismiss: dismiss
+    carries a "this was misidentified" reason enum + optional skiplist
+    write, neither of which applies to "I'm done watching this".
+
+    Raises:
+        ApiError(not_found, 404) if the purchase is missing or not owned.
+        ApiError(invalid_status, 409) if the purchase is not currently
+            monitoring (pending_* / terminal states cannot be stopped).
+    """
+    purchase = await get_purchase_for_user(db, user.id, purchase_id)
+
+    if purchase.status not in _MONITORING_STATUSES:
+        raise ApiError(
+            "invalid_status",
+            f"Purchase cannot be stopped from status '{purchase.status}'",
+            status_code=409,
+        )
+
+    matched = await db.partial_update(
+        "purchases",
+        purchase_id,
+        {"status": PurchaseStatus.DISMISSED},
+        model=Purchase,
+    )
+    if not matched:
+        raise ApiError("not_found", "Purchase not found", status_code=404)
+
+    updated = await db.get_purchase(purchase_id)
+    if updated is None:
+        raise ApiError("not_found", "Purchase not found", status_code=404)
+
+    _log.info(
+        "Purchase monitoring stopped purchase_id=%s user_id=%s prev_status=%s",
+        purchase_id,
+        user.id,
+        purchase.status,
+    )
+    return updated
+
+
 async def confirm_purchase(
     db: MongoDBClient,
     user: User,
@@ -374,80 +455,26 @@ async def confirm_purchase(
         updates.update(corrected_fields)
 
     # Recompute `window_expires` server-side from the platform's Policy
-    # (ticket 5.14). Upload-created sentinels start with `window_expires=now`;
-    # the email-path extractor also sets it from the matching Policy now.
-    # Confirm is the authoritative seam — the user-corrected `purchase_date`
-    # / `platform` / `member_tier_at_purchase` flow into the computation so
-    # whatever the user just locked in drives the monitoring window.
-    #
-    # `window_expires` is NOT in _ALLOWED_CORRECTABLE_FIELDS: the server
-    # owns this number; a client trying to set it directly still 400s
-    # at the allow-list check above.
-    # All three `effective_*` resolvers use `dict.get(key, default)`
-    # uniformly. With `or`, a falsy-but-present correction (e.g. `""`
-    # or explicit `null`) would silently fall back to the OLD value
-    # on the existing doc and feed that into the window computation;
-    # `partial_update` below would then reject the write, but the
-    # window number was already based on a value the user is trying
-    # to overwrite. `.get(default)` lets the falsy value short-circuit
-    # the `if effective_platform and effective_purchase_date:` guard,
-    # so the policy lookup and TypeAdapter validation don't run on
-    # a stale value and the 400 is produced from the partial_update
-    # path (whose Pydantic-supplied `loc` includes the correct field
-    # name).
+    # (ticket 5.14). Confirm is the authoritative seam — the user-corrected
+    # `purchase_date` / `platform` / `member_tier_at_purchase` flow into the
+    # computation so whatever the user just locked in drives the monitoring
+    # window. `window_expires` is NOT in _ALLOWED_CORRECTABLE_FIELDS: the
+    # server owns this number; a client trying to set it directly still 400s
+    # at the allow-list check above. `.get(default)` (not `or`) so a
+    # falsy-but-present correction short-circuits the resolver's guard and
+    # the 400 surfaces from the partial_update path with the right field loc.
     effective_platform = updates.get("platform", purchase.platform)
     effective_purchase_date = updates.get("purchase_date", purchase.purchase_date)
     effective_member_tier = updates.get("member_tier_at_purchase", purchase.member_tier_at_purchase)
-    if effective_platform and effective_purchase_date:
-        policy = await db.get_policy(effective_platform)
-        if policy is None:
-            # Latent data gap (e.g. extractor mapped to a platform not yet
-            # in the Policy collection). Log and leave the existing
-            # window_expires untouched — better than fabricating a 15-day
-            # window that could mislead the monitor cron about when the
-            # claim window closes.
-            _log.warning(
-                "Confirm window not recomputed: no Policy for platform=%s purchase_id=%s",
-                effective_platform,
-                purchase_id,
-            )
-        else:
-            days = compute_window_days(policy, member_tier_at_purchase=effective_member_tier)
-            # `purchase_date` may arrive as an ISO string when the user
-            # supplied it via corrected_fields; normalize before
-            # timedelta. A malformed string from the client (e.g.
-            # `"not-a-date"`) used to surface as a 400 via Pydantic's
-            # ValidationError inside `partial_update` below — now that
-            # we touch the value first to compute `window_expires`, an
-            # unhandled `datetime.fromisoformat` `ValueError` would
-            # leak as a 500. Preserve the 400 contract by mapping
-            # parse errors to the same `invalid_field` ApiError the
-            # downstream partial_update would have raised.
-            # Use Pydantic's `TypeAdapter(datetime)` so the error shape
-            # for a malformed `purchase_date` is identical to other
-            # corrected-field validation errors (which flow through
-            # `partial_update(..., model=Purchase)` → ValidationError
-            # → `_validation_error_details`). Without this, a hand-rolled
-            # `datetime.fromisoformat` would either leak a 500 (caller
-            # never wrapped ValueError) or produce a bare 400 without
-            # the `details.fields` payload the frontend's per-field
-            # error rendering consumes. `loc_prefix=("purchase_date",)`
-            # is required because `TypeAdapter(datetime)` validates a
-            # single bare value and returns `loc=()` — the field name
-            # has to be re-attached so PR-B's form can highlight the
-            # right input. The downstream `partial_update` path does
-            # not need this because the Purchase model itself supplies
-            # the field name in `loc` for the same kind of error.
-            try:
-                pd = TypeAdapter(datetime).validate_python(effective_purchase_date)
-            except ValidationError as err:
-                raise ApiError(
-                    "invalid_field",
-                    "One or more corrected fields failed validation",
-                    status_code=400,
-                    details=_validation_error_details(err, loc_prefix=("purchase_date",)),
-                ) from err
-            updates["window_expires"] = pd + timedelta(days=days)
+    window_expires = await _resolve_window_expires(
+        db,
+        platform=effective_platform,
+        purchase_date=effective_purchase_date,
+        member_tier_at_purchase=effective_member_tier,
+        log_ref=purchase_id,
+    )
+    if window_expires is not None:
+        updates["window_expires"] = window_expires
 
     try:
         matched = await db.partial_update("purchases", purchase_id, updates, model=Purchase)
@@ -674,49 +701,50 @@ async def fetch_receipt_for_user(
 
 async def upload_receipt(
     *,
-    db: MongoDBClient,
     uploader: ReceiptsUploader,
-    publisher: PubSubPublisher,
     user: User,
     file_bytes: bytes,
     content_type: str,
     filename: str | None,
-) -> Purchase:
-    """Persist an uploaded receipt and create a pending_confirmation Purchase.
+) -> dict[str, Any]:
+    """Store an uploaded receipt in GCS and extract its fields — NO Mongo write.
 
-    The new Purchase carries sentinel field values (price_paid=0.01,
-    empty strings for ids/names, etc.) because nothing has been
-    extracted yet — the ingest agent will overwrite these once the
-    purchase.uploaded Pub/Sub event lands on its push handler. Status
-    is `pending_confirmation` so consumers know not to trust the field
-    values yet.
+    Write-after-confirm flow: the receipt blob goes to GCS, the
+    ingest-agent extracts the fields synchronously, and the extracted
+    fields are handed back to the browser. Nothing is persisted to the
+    `purchases` collection and no Pub/Sub event is published — the
+    Purchase is created only when the user confirms (see
+    `create_purchase_from_confirm`). This means re-uploading the same
+    receipt before confirming can never collide with a unique index or
+    leave a "stuck analyzing" sentinel.
 
-    Three side effects, ordered for clean rollback (ticket 5.14):
-      1. GCS write — if this fails, nothing else has happened; raise.
-      2. Mongo upsert — if this fails, the GCS blob is orphaned but
-         no doc exists; the orphan costs storage cents at worst and
-         the cleanup script can sweep. Raise.
-      3. Pub/Sub publish — if this fails, the user thinks the upload
-         worked (we'd otherwise return 200 with a doc that will never
-         get extracted). Delete the purchase doc, log the orphan blob
-         for ops, and surface 503 so the client retries the whole
-         flow. This matches the claim-approval pattern in
-         services/claims_service.publish_claim_approval.
+    Returns a dict the route hands to the FE:
+        {
+          "storage_url":  gs:// URI of the stored blob,
+          "content_type": echoed mime,
+          "receipt_hash": "sha256:<digest>" of the raw bytes (carried back
+                          at confirm time so the dedup index can protect
+                          identical re-confirms),
+          "extraction":   the extracted fields + computed status +
+                          extraction_confidence, or None when the
+                          extractor could not read the receipt (the FE
+                          then opens the manual-fill form).
+        }
 
     Raises:
         ApiError(unsupported_media_type, 415) for non-PDF/PNG/JPEG.
         ApiError(file_too_large, 413) for files > 10 MB.
-        ApiError(publish_failed, 503) when the broker rejects the
-            purchase.uploaded message after the doc was written.
     """
-    ingestion_source = validate_upload_content_type(content_type)
+    validate_upload_content_type(content_type)
     validate_upload_size(len(file_bytes))
 
-    purchase_id = uuid.uuid4()
+    # `staging_id` only names the GCS path — there is no purchase yet. The
+    # path keeps the user_id prefix so confirm can assert ownership.
+    staging_id = uuid.uuid4()
     now = datetime.now(UTC)
     blob_path = _build_receipt_blob_path(
         user_id=user.id,
-        purchase_id=purchase_id,
+        purchase_id=staging_id,
         filename=filename,
         content_type=content_type,
         uploaded_at=now,
@@ -727,78 +755,42 @@ async def upload_receipt(
         content_type=content_type,
         blob_path=blob_path,
     )
+    receipt_hash = f"sha256:{hashlib.sha256(file_bytes).hexdigest()}"
 
-    purchase = Purchase(
-        id=purchase_id,
-        user_id=user.id,
-        status=PurchaseStatus.PENDING_CONFIRMATION,
-        ingestion_source=ingestion_source,
-        receipt_storage_url=storage_url,
-        receipt_hash=None,
-        purchase_date=now,
-        # window_expires is filled by ingest extraction; default to now so
-        # the field is non-null. Status pending_confirmation prevents the
-        # monitor-agent from treating window as authoritative.
-        window_expires=now,
-        ingested_at=now,
-        updated_at=now,
-        extraction_confidence=ExtractionConfidence(
-            platform=0.0,
-            price=0.0,
-            overall_min=0.0,
-        ),
-        **_UPLOAD_PURCHASE_DEFAULTS,
-    )
-    await db.upsert("purchases", purchase_id, purchase)
-
-    event = PurchaseUploadedEvent(
-        user_id=str(user.id),
-        purchase_id=str(purchase_id),
-        receipt_storage_url=storage_url,
-        content_type=content_type,
-    )
     try:
-        await publisher.publish(TOPIC_PURCHASE_UPLOADED, event.model_dump(mode="json"))
-    except Exception:
-        _log.exception(
-            "Failed to publish purchase.uploaded for purchase_id=%s; rolling back doc",
-            purchase_id,
+        extraction: dict[str, Any] | None = await ingest_client.extract_receipt(
+            user_id=str(user.id),
+            storage_url=storage_url,
+            content_type=content_type,
         )
-        try:
-            await db.delete("purchases", purchase_id)
-        except Exception:
-            # Rollback itself failed — the doc is stranded as a sentinel
-            # pending_confirmation that no ingest event will fire for.
-            # Surface in logs so on-call can clean up; user still gets
-            # 503 below so retry is the right next action.
-            _log.exception(
-                "Rollback failed after publish failure for purchase %s; manual fix required",
-                purchase_id,
-            )
-        else:
-            # Doc deleted; the GCS object is now orphaned. Cheap to
-            # leave (10 MB cap, storage costs cents), and a future
-            # bucket-lifecycle sweep based on missing-doc lookup can
-            # clean it up. Log so the orphan is discoverable.
-            _log.warning(
-                "Orphaned receipt blob after publish-rollback purchase_id=%s blob=%s",
-                purchase_id,
-                storage_url,
-            )
-        raise ApiError(
-            "publish_failed",
-            "Upload failed; please retry.",
-            status_code=503,
-        ) from None
+    except ingest_client.IngestExtractError as err:
+        # Extractor rejected / failed — surface a manual-fill form rather
+        # than a hard error. The blob stays in GCS and is attached on
+        # confirm. Old async pipeline did the same via _rescue_extraction.
+        _log.warning(
+            "Upload extraction unavailable; FE opens manual-fill form "
+            "user_id=%s storage_url=%s code=%s",
+            user.id,
+            storage_url,
+            err.code,
+        )
+        extraction = None
 
     _log.info(
-        "Receipt uploaded purchase_id=%s user_id=%s content_type=%s bytes=%d",
-        purchase_id,
+        "Receipt uploaded (unpersisted) staging_id=%s user_id=%s content_type=%s "
+        "bytes=%d extracted=%s",
+        staging_id,
         user.id,
         content_type,
         len(file_bytes),
+        extraction is not None,
     )
-    return purchase
+    return {
+        "storage_url": storage_url,
+        "content_type": content_type,
+        "receipt_hash": receipt_hash,
+        "extraction": extraction,
+    }
 
 
 def validate_upload_content_type(content_type: str) -> IngestionSource:
@@ -877,3 +869,533 @@ def _build_receipt_blob_path(
         }.get(content_type, "bin")
         cleaned = f"receipt.{ext}"
     return f"receipts/{user_id}/{purchase_id}/{ts}-{cleaned}"
+
+
+async def _resolve_window_expires(
+    db: MongoDBClient,
+    *,
+    platform: Any,
+    purchase_date: Any,
+    member_tier_at_purchase: str | None,
+    log_ref: object,
+    fallback_default: bool = False,
+) -> datetime | None:
+    """Compute `window_expires` from the platform's Policy.
+
+    Shared by `confirm_purchase` (update path) and
+    `create_purchase_from_confirm` (create path). Returns the computed
+    timestamp, or None when it cannot be computed and the caller should
+    leave the existing value untouched:
+      - `platform` / `purchase_date` falsy → None.
+      - no matching Policy and `fallback_default=False` → None (confirm
+        path leaves the existing window rather than fabricating one).
+
+    When `fallback_default=True` (create path), a missing Policy still
+    yields a window via `compute_window_days(None, …)`'s 15-day default —
+    a freshly-created purchase must have a non-null `window_expires`.
+
+    Raises ApiError(invalid_field, 400) when `purchase_date` is a
+    malformed value (mirrors the downstream Purchase validation error
+    shape so the FE highlights the right field).
+    """
+    if not (platform and purchase_date):
+        return None
+    platform_value = platform.value if isinstance(platform, Platform) else platform
+    policy = await db.get_policy(platform_value)
+    if policy is None and not fallback_default:
+        _log.warning(
+            "Window not recomputed: no Policy for platform=%s ref=%s",
+            platform_value,
+            log_ref,
+        )
+        return None
+    days = compute_window_days(policy, member_tier_at_purchase=member_tier_at_purchase)
+    try:
+        pd = TypeAdapter(datetime).validate_python(purchase_date)
+    except ValidationError as err:
+        raise ApiError(
+            "invalid_field",
+            "One or more corrected fields failed validation",
+            status_code=400,
+            details=_validation_error_details(err, loc_prefix=("purchase_date",)),
+        ) from err
+    return pd + timedelta(days=days)
+
+
+# Statuses that mean a purchase is already committed (the user confirmed it
+# and it is being tracked). Re-uploading a receipt for one of these is a
+# true duplicate and is blocked. Pre-confirmation states
+# (pending_confirmation / pending_user_edit) and `dismissed` are NOT here:
+# the user is allowed to re-upload freely until they confirm.
+_COMMITTED_PURCHASE_STATUSES: list[str] = [
+    PurchaseStatus.MONITORING.value,
+    PurchaseStatus.MONITORING_DEGRADED.value,
+    PurchaseStatus.CLAIMED.value,
+    PurchaseStatus.EXPIRED.value,
+    PurchaseStatus.REFUNDED.value,
+]
+
+
+def _duplicate_receipt_error() -> ApiError:
+    return ApiError(
+        "duplicate",
+        "You've already added this receipt.",
+        status_code=409,
+    )
+
+
+async def _assert_not_duplicate_purchase(
+    db: MongoDBClient,
+    *,
+    user_id: UUID,
+    platform: Any,
+    order_id: str | None,
+    receipt_hash: str | None,
+    receipt_line_key: str | None = None,
+    exclude_purchase_id: UUID | None = None,
+) -> None:
+    """Block confirm-create when this receipt duplicates a committed purchase.
+
+    Two checks, both scoped to `_COMMITTED_PURCHASE_STATUSES` so a user can
+    still re-upload freely before confirming:
+      1. `(user_id, platform, order_id, receipt_line_key)` for a non-empty
+         order_id — mirrors the unique partial index. `receipt_line_key`
+         scopes the check to ONE line of a multi-item receipt, so two
+         different items off the same order_id don't false-positive each
+         other; re-confirming the SAME line still matches (desired).
+      2. `receipt_hash` — identical receipt bytes already confirmed. The
+         caller passes the per-line-suffixed hash for multi-item lines, so
+         this is automatically line-scoped too.
+    Raises ApiError(duplicate, 409) on the first match.
+
+    `exclude_purchase_id` excludes a single document from BOTH checks. The
+    re-upload path (BUG-85) passes the purchase being re-uploaded so its
+    OWN committed row doesn't false-match — re-uploading the identical
+    receipt, or keeping the same order_id, must not 409 against itself.
+    """
+    exclude_clause: dict[str, Any] = (
+        {"_id": {"$ne": exclude_purchase_id}} if exclude_purchase_id is not None else {}
+    )
+    platform_value = platform.value if isinstance(platform, Platform) else platform
+    if platform_value and order_id:
+        existing = await db.find_one(
+            "purchases",
+            {
+                "user_id": user_id,
+                "platform": platform_value,
+                "order_id": order_id,
+                "receipt_line_key": receipt_line_key,
+                "status": {"$in": _COMMITTED_PURCHASE_STATUSES},
+                **exclude_clause,
+            },
+            PurchaseReadTolerant,
+        )
+        if existing is not None:
+            raise _duplicate_receipt_error()
+
+    if receipt_hash:
+        existing = await db.find_one(
+            "purchases",
+            {
+                "receipt_hash": receipt_hash,
+                "status": {"$in": _COMMITTED_PURCHASE_STATUSES},
+                **exclude_clause,
+            },
+            PurchaseReadTolerant,
+        )
+        if existing is not None:
+            raise _duplicate_receipt_error()
+
+
+def _validate_receipt_storage_url(
+    storage_url: str,
+    *,
+    user_id: UUID,
+    bucket_name: str,
+) -> None:
+    """Reject a client-supplied receipt URL that isn't this user's own blob.
+
+    Defense-in-depth: the URL is carried client-side between upload and
+    confirm, so never trust it blindly. Enforce that it is a gs:// URI in
+    the configured receipts bucket and under the caller's `receipts/{uid}/`
+    prefix — otherwise a client could attach another user's (or another
+    bucket's) object to their new purchase and read it back via the
+    receipt proxy. The read path also checks bucket + ownership, so this
+    is the second layer.
+    """
+    try:
+        bucket, blob_path = _parse_gs_uri(storage_url)
+    except ValueError as err:
+        raise ApiError("invalid_field", "Invalid receipt reference", status_code=400) from err
+    if bucket != bucket_name or not blob_path.startswith(f"receipts/{user_id}/"):
+        raise ApiError(
+            "invalid_field",
+            "Receipt reference does not belong to this user",
+            status_code=400,
+        )
+
+
+async def create_purchase_from_confirm(
+    *,
+    db: MongoDBClient,
+    uploader: ReceiptsUploader,
+    publisher: PubSubPublisher,
+    user: User,
+    storage_url: str,
+    content_type: str,
+    extraction: dict[str, Any] | None,
+    corrected_fields: dict[str, Any] | None,
+    receipt_line_key: str | None = None,
+) -> Purchase:
+    """Create the Purchase for a confirmed upload — the first Mongo write.
+
+    Write-after-confirm: nothing was persisted at upload time. The user has
+    now reviewed the extracted fields (carried from the upload response) and
+    confirmed, so we build the full Purchase here, transition it straight to
+    `monitoring`, dedup against already-committed purchases, persist, and
+    publish `purchase.ingested` so the monitor-agent starts tracking.
+
+    `extraction` is the dict the ingest extractor returned (None when the
+    extractor failed and the user filled the form by hand). `corrected_fields`
+    are the user's edits — validated against `_ALLOWED_CORRECTABLE_FIELDS`,
+    same as `confirm_purchase`.
+
+    `receipt_hash` is recomputed server-side from the GCS object (NOT trusted
+    from the client), so a forged/omitted hash can't bypass same-receipt
+    dedup or poison the global unique index.
+
+    Raises:
+        ApiError(unsupported_media_type, 415) for a bad content_type.
+        ApiError(invalid_field, 400) for a disallowed corrected key, a
+            receipt URL that isn't the user's own, or fields that fail
+            Purchase validation (missing/invalid after merge).
+        ApiError(receipt_missing, 400) when the uploaded blob is gone.
+        ApiError(duplicate, 409) when the receipt duplicates a committed
+            purchase (pre-check) or hits the unique index (backstop).
+    """
+    ingestion_source = validate_upload_content_type(content_type)
+    _validate_receipt_storage_url(storage_url, user_id=user.id, bucket_name=uploader.bucket_name)
+
+    # Recompute the receipt hash from the stored object — never trust the
+    # client-carried value (it could be forged to bypass dedup or poison the
+    # global receipt_hash unique index against another user's receipt).
+    _bucket, blob_path = _parse_gs_uri(storage_url)
+    try:
+        receipt_bytes, _blob_ct = await uploader.download(blob_path=blob_path)
+    except ReceiptObjectMissingError as err:
+        raise ApiError(
+            "receipt_missing",
+            "Uploaded receipt is no longer available; please re-upload.",
+            status_code=400,
+        ) from err
+    receipt_hash = f"sha256:{hashlib.sha256(receipt_bytes).hexdigest()}"
+    # Multi-item receipt: every selected line shares the same bytes (and
+    # the same real order_id), so suffix the INTERNAL-only receipt_hash per
+    # line to keep each line's Purchase distinct under the global
+    # receipt_hash unique index. order_id stays the clean merchant number.
+    # Re-confirming the SAME line yields the same suffixed hash → the
+    # unique index backstops a double-track.
+    if receipt_line_key:
+        receipt_hash = f"{receipt_hash}#{receipt_line_key}"
+
+    if corrected_fields:
+        for key in corrected_fields:
+            if key not in _ALLOWED_CORRECTABLE_FIELDS:
+                raise ApiError(
+                    "invalid_field",
+                    f"Field '{key}' is not user-correctable",
+                    status_code=400,
+                )
+
+    # Merge extracted fields with the user's corrections. corrected_fields
+    # wins (it's the user's final say). `status` is server-owned and stripped.
+    merged: dict[str, Any] = dict(extraction) if extraction else {}
+    merged.update(corrected_fields or {})
+    merged.pop("status", None)
+
+    eff_platform = merged.get("platform")
+    eff_order_id = merged.get("order_id") or ""
+    eff_member_tier = merged.get("member_tier_at_purchase")
+    eff_purchase_date = merged.get("purchase_date")
+
+    await _assert_not_duplicate_purchase(
+        db,
+        user_id=user.id,
+        platform=eff_platform,
+        order_id=eff_order_id,
+        receipt_hash=receipt_hash,
+        receipt_line_key=receipt_line_key,
+    )
+
+    now = datetime.now(UTC)
+    purchase_id = uuid.uuid4()
+    window_expires = await _resolve_window_expires(
+        db,
+        platform=eff_platform,
+        purchase_date=eff_purchase_date,
+        member_tier_at_purchase=eff_member_tier,
+        log_ref=purchase_id,
+        fallback_default=True,
+    )
+
+    if extraction and extraction.get("extraction_confidence"):
+        confidence = extraction["extraction_confidence"]
+    else:
+        # Manual fill (extractor failed): the user typed every field, so
+        # treat it as fully confident.
+        confidence = {"platform": 1.0, "price": 1.0, "overall_min": 1.0}
+
+    # Server-owned fields override anything carried from the client.
+    merged.update(
+        {
+            "_id": purchase_id,
+            "user_id": user.id,
+            "status": PurchaseStatus.MONITORING,
+            "ingestion_source": ingestion_source,
+            "receipt_storage_url": storage_url,
+            "receipt_hash": receipt_hash,
+            "receipt_line_key": receipt_line_key,
+            "ingested_at": now,
+            "updated_at": now,
+            "window_expires": window_expires or now,
+            "currency": "USD",
+            "claim_type": ClaimType.SELF_SERVICE,
+            "extraction_confidence": confidence,
+        }
+    )
+    merged.setdefault("monitoring_cadence_minutes", _DEFAULT_MONITORING_CADENCE_MINUTES)
+    merged.setdefault("product_id", "")
+    merged.setdefault("order_id", "")
+    # Nullable Purchase fields that have no model-level default (declared
+    # `str | None` without `= None`, so Pydantic requires the key to be
+    # present). The extractor supplies these; on manual fill they're absent.
+    for nullable_field in _NULLABLE_PURCHASE_FIELDS:
+        merged.setdefault(nullable_field, None)
+
+    try:
+        purchase = Purchase.model_validate(merged)
+    except ValidationError as err:
+        raise ApiError(
+            "invalid_field",
+            "One or more fields failed validation",
+            status_code=400,
+            details=_validation_error_details(err),
+        ) from err
+
+    try:
+        await db.upsert("purchases", purchase_id, purchase)
+    except DuplicateKeyError as err:
+        # Backstop for the unique partial indexes (order_id triple /
+        # receipt_hash) — e.g. racing with an in-flight Gmail sentinel the
+        # committed-status pre-check intentionally doesn't cover.
+        _log.info(
+            "Confirm-create dedup collision user_id=%s platform=%s order_id=%s",
+            user.id,
+            eff_platform,
+            eff_order_id,
+        )
+        raise _duplicate_receipt_error() from err
+
+    # Kick off monitoring. Best-effort: the purchase is already the
+    # source-of-truth committed record, so a broker hiccup must NOT roll it
+    # back. Log loudly — a missed event delays monitoring until the next
+    # reconciliation, it doesn't lose the purchase.
+    event = PurchaseIngestedEvent(
+        user_id=str(user.id),
+        purchase_id=str(purchase_id),
+        platform=str(purchase.platform.value),
+        category=purchase.category.value,
+        status=purchase.status.value,
+        ingestion_source=purchase.ingestion_source.value,
+        overall_confidence=purchase.extraction_confidence.overall_min,
+    )
+    try:
+        await publisher.publish(TOPIC_PURCHASE_INGESTED, event.model_dump(mode="json"))
+    except Exception:
+        _log.exception(
+            "Failed to publish purchase.ingested after confirm-create purchase_id=%s; "
+            "monitoring may be delayed",
+            purchase_id,
+        )
+
+    _log.info(
+        "Purchase created from confirmed upload purchase_id=%s user_id=%s "
+        "platform=%s manual_fill=%s",
+        purchase_id,
+        user.id,
+        eff_platform,
+        extraction is None,
+    )
+    return purchase
+
+
+async def reupload_receipt(
+    *,
+    db: MongoDBClient,
+    uploader: ReceiptsUploader,
+    user: User,
+    purchase_id: UUID,
+    storage_url: str,
+    content_type: str,
+    extraction: dict[str, Any] | None,
+    corrected_fields: dict[str, Any] | None,
+) -> PurchaseReadTolerant:
+    """Replace the receipt on a monitored purchase and apply its fields (BUG-85).
+
+    The user uploaded a corrected receipt (via POST /upload — same flow as
+    onboarding, no Mongo write), reviewed the freshly-extracted fields, and
+    confirmed. We update the EXISTING purchase in place: swap
+    `receipt_storage_url` / `receipt_hash`, apply the reviewed fields, clear
+    any stale monitor-failure trail, recompute the refund window, and keep
+    the purchase monitoring. No re-ingest event is published — the purchase
+    is already tracked.
+
+    Field application mirrors `create_purchase_from_confirm`: the new
+    `extraction` provides the baseline and `corrected_fields` (the user's
+    edits in the review form) win on top. Only `_ALLOWED_CORRECTABLE_FIELDS`
+    are written — system-owned keys carried in the extraction (status,
+    currency, etc.) are dropped. The review form is the clobber-safeguard:
+    whatever the user confirmed is the new truth, so accepting a corrected
+    extraction verbatim genuinely replaces the wrong original values.
+
+    `receipt_hash` is recomputed server-side from the stored object (never
+    trusted from the client). The dedup pre-check excludes THIS purchase so
+    re-uploading the identical receipt (or keeping the same order_id) does
+    not 409 against the purchase's own committed row.
+
+    Raises:
+        ApiError(not_found, 404) if the purchase is missing or not owned.
+        ApiError(invalid_status, 409) if the purchase is not monitoring.
+        ApiError(unsupported_media_type, 415) for a bad content_type.
+        ApiError(invalid_field, 400) for a disallowed corrected key, a
+            receipt URL that isn't the user's own, or fields that fail
+            Purchase validation.
+        ApiError(receipt_missing, 400) when the uploaded blob is gone.
+        ApiError(duplicate, 409) when the new receipt duplicates a
+            DIFFERENT committed purchase.
+    """
+    purchase = await get_purchase_for_user(db, user.id, purchase_id)
+
+    if purchase.status not in _MONITORING_STATUSES:
+        raise ApiError(
+            "invalid_status",
+            f"Receipt can only be re-uploaded while monitoring (status '{purchase.status}')",
+            status_code=409,
+        )
+
+    ingestion_source = validate_upload_content_type(content_type)
+    _validate_receipt_storage_url(storage_url, user_id=user.id, bucket_name=uploader.bucket_name)
+
+    # Recompute the receipt hash from the stored object — never trust the
+    # client-carried value (forgeable to bypass dedup or poison the global
+    # receipt_hash unique index against another user's receipt).
+    _bucket, blob_path = _parse_gs_uri(storage_url)
+    try:
+        receipt_bytes, _blob_ct = await uploader.download(blob_path=blob_path)
+    except ReceiptObjectMissingError as err:
+        raise ApiError(
+            "receipt_missing",
+            "Uploaded receipt is no longer available; please re-upload.",
+            status_code=400,
+        ) from err
+    receipt_hash = f"sha256:{hashlib.sha256(receipt_bytes).hexdigest()}"
+
+    if corrected_fields:
+        for key in corrected_fields:
+            if key not in _ALLOWED_CORRECTABLE_FIELDS:
+                raise ApiError(
+                    "invalid_field",
+                    f"Field '{key}' is not user-correctable",
+                    status_code=400,
+                )
+
+    # Merge new extraction with the user's corrections (corrections win),
+    # then keep only user-correctable keys — system-owned fields carried in
+    # the extraction (status, currency, extraction_confidence, ...) are not
+    # written through this path.
+    merged: dict[str, Any] = dict(extraction) if extraction else {}
+    merged.update(corrected_fields or {})
+    updates: dict[str, Any] = {
+        key: value for key, value in merged.items() if key in _ALLOWED_CORRECTABLE_FIELDS
+    }
+
+    # Effective values for dedup + window come from the merge, falling back
+    # to the existing doc when a field wasn't touched.
+    eff_platform = updates.get("platform", purchase.platform)
+    eff_order_id = updates.get("order_id", purchase.order_id) or ""
+    eff_member_tier = updates.get("member_tier_at_purchase", purchase.member_tier_at_purchase)
+    eff_purchase_date = updates.get("purchase_date", purchase.purchase_date)
+
+    # Exclude THIS purchase so its own committed row never false-matches.
+    await _assert_not_duplicate_purchase(
+        db,
+        user_id=user.id,
+        platform=eff_platform,
+        order_id=eff_order_id,
+        receipt_hash=receipt_hash,
+        exclude_purchase_id=purchase_id,
+    )
+
+    # Recompute the window from the (possibly corrected) date/platform/tier.
+    # fallback_default stays False: if the platform has no Policy we leave the
+    # existing window untouched rather than fabricating one for an already-
+    # monitored purchase.
+    window_expires = await _resolve_window_expires(
+        db,
+        platform=eff_platform,
+        purchase_date=eff_purchase_date,
+        member_tier_at_purchase=eff_member_tier,
+        log_ref=purchase_id,
+    )
+
+    # Receipt swap + cleared monitor-failure trail (so the UI drops any stale
+    # "blocked" badge immediately, same as the BUG-19 product_url remediation).
+    updates.update(
+        {
+            "receipt_storage_url": storage_url,
+            "receipt_hash": receipt_hash,
+            "ingestion_source": ingestion_source,
+            "last_monitor_error": None,
+            "last_monitor_error_at": None,
+            "last_monitor_error_code": None,
+        }
+    )
+    if extraction and extraction.get("extraction_confidence"):
+        updates["extraction_confidence"] = extraction["extraction_confidence"]
+    else:
+        # Manual fill (extractor failed): the user typed/confirmed every
+        # field, so treat it as fully confident.
+        updates["extraction_confidence"] = {"platform": 1.0, "price": 1.0, "overall_min": 1.0}
+    if window_expires is not None:
+        updates["window_expires"] = window_expires
+
+    try:
+        matched = await db.partial_update("purchases", purchase_id, updates, model=Purchase)
+    except ValidationError as err:
+        raise ApiError(
+            "invalid_field",
+            "One or more fields failed validation",
+            status_code=400,
+            details=_validation_error_details(err),
+        ) from err
+    except ValueError as err:
+        raise ApiError("invalid_field", str(err), status_code=400) from err
+    except DuplicateKeyError as err:
+        # Backstop for the global receipt_hash / order_id unique indexes —
+        # the new receipt collides with a DIFFERENT committed purchase that
+        # the pre-check didn't cover (e.g. a racing write).
+        raise _duplicate_receipt_error() from err
+    if not matched:
+        raise ApiError("not_found", "Purchase not found", status_code=404)
+
+    updated = await db.get_purchase(purchase_id)
+    if updated is None:
+        raise ApiError("not_found", "Purchase not found", status_code=404)
+
+    _log.info(
+        "Receipt re-uploaded purchase_id=%s user_id=%s manual_fill=%s",
+        purchase_id,
+        user.id,
+        extraction is None,
+    )
+    return updated

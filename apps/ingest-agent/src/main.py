@@ -23,7 +23,8 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from uuid import UUID
+from typing import Any
+from uuid import UUID, uuid4
 
 from claimit_gmail import WatchRegistrationError, exchange_refresh_for_access
 from claimit_mongodb_models import (
@@ -34,21 +35,23 @@ from claimit_mongodb_models import (
     compute_format_hash,
 )
 from claimit_observability import init_phoenix
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from google.cloud import secretmanager
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from .auth import verify_pubsub_oidc
+from .auth import verify_gateway_oidc, verify_pubsub_oidc
 from .classifier import classify
 from .dedup import hash_receipt
 from .extractor import (
     ALLOWED_BLOB_MIME_TYPES,
     ExtractorError,
+    build_line_item_payloads,
     extract_from_blob,
     extract_from_email,
 )
 from .finalize import (
     FinalizeError,
+    _compute_status_and_confidence,
     finalize_purchase_extraction,
     finalize_purchase_extraction_failure,
 )
@@ -981,3 +984,167 @@ async def handle_purchase_uploaded(
         body.message.message_id,
     )
     return {"status": "ack"}
+
+
+class _ExtractRequest(BaseModel):
+    """Body for the synchronous `/internal/extract` call from api-gateway.
+
+    `storage_url` is the gs:// URI api-gateway wrote the receipt blob to
+    (it uploads to GCS first, then asks us to read + extract). `user_id`
+    and `content_type` are carried for logging / mime-selection only —
+    this endpoint never writes anything.
+    """
+
+    user_id: str
+    storage_url: str
+    content_type: str | None = None
+
+
+@app.post(
+    "/internal/extract",
+    status_code=200,
+    dependencies=[Depends(verify_gateway_oidc)],
+)
+async def internal_extract(
+    body: _ExtractRequest,
+    receipts_reader: ReceiptsReader = Depends(get_receipts_reader),
+) -> dict[str, Any]:
+    """Synchronously extract purchase fields from an uploaded receipt blob.
+
+    The write-after-confirm upload flow (ticket: receipts only persist on
+    confirm): api-gateway uploads the blob to GCS, calls this endpoint,
+    and returns the extracted fields straight to the browser. NOTHING is
+    written to Mongo and no Pub/Sub event is published here — this is a
+    pure extractor adapter. The api-gateway creates the Purchase only when
+    the user confirms.
+
+    Returns `{"extraction": {...}}` with the fields + resolved product_id
+    + computed status + extraction_confidence the api-gateway needs to
+    build the Purchase. Error surface (HTTP status, not a 200 ack — the
+    caller is a synchronous client, not Pub/Sub):
+      - 422 `extractor_rejected_input` — unsupported mime / empty blob /
+        Gemini output that fails the schema. Retrying won't help.
+      - 502 `extractor_failed` — Gemini timeout / malformed-but-retryable.
+      - 502 `receipt_blob_missing` / 400 `malformed_receipt_url` /
+        403 `bucket_mismatch` — GCS read problems.
+    """
+    # Per-request correlation id for log lines (there is no purchase yet).
+    ref = uuid4()
+
+    try:
+        bucket, blob_path = parse_gs_uri(body.storage_url)
+    except ValueError as err:
+        _log.error(
+            "internal_extract: malformed receipt URI ref=%s url=%r err=%s",
+            ref,
+            body.storage_url,
+            err,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "malformed_receipt_url"},
+        ) from err
+
+    if bucket != receipts_reader.bucket_name:
+        # Defence-in-depth: never read from any bucket other than the
+        # configured RECEIPTS_BUCKET, even if the SA happens to have access.
+        _log.error(
+            "internal_extract: bucket mismatch ref=%s uri_bucket=%s expected=%s",
+            ref,
+            bucket,
+            receipts_reader.bucket_name,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "bucket_mismatch"},
+        )
+
+    try:
+        blob_data, blob_content_type = await receipts_reader.download(blob_path=blob_path)
+    except ReceiptObjectMissingError as err:
+        _log.error("internal_extract: receipt blob missing ref=%s blob_path=%s", ref, blob_path)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"code": "receipt_blob_missing"},
+        ) from err
+
+    mime_type = _select_mime_type(
+        blob_content_type=blob_content_type,
+        event_content_type=body.content_type,
+        data=blob_data,
+        purchase_id=ref,
+    )
+
+    try:
+        extracted = await extract_from_blob(data=blob_data, mime_type=mime_type)
+    except ValueError as err:
+        # Unsupported mime / empty blob — unrecoverable on retry.
+        _log.error("internal_extract: extractor rejected input ref=%s err=%s", ref, err)
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "extractor_rejected_input"},
+        ) from err
+    except ExtractorError as err:
+        # Timeout / malformed model output — the FE opens the manual-fill
+        # form on this (api-gateway maps 502 → extraction=null).
+        _log.error("internal_extract: extractor failed ref=%s err=%s", ref, err)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"code": "extractor_failed"},
+        ) from err
+    except ValidationError as err:
+        _log.error("internal_extract: extraction failed schema validation ref=%s err=%s", ref, err)
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "extractor_rejected_input"},
+        ) from err
+
+    # Reuse the ingest state machine so upload + Gmail paths derive
+    # status / product_id / confidence identically.
+    status_value, confidence, product_id, _fallback_used = _compute_status_and_confidence(extracted)
+
+    fields = extracted.model_dump(mode="json")
+    # `line_items_detected` is a transient extractor-only signal already
+    # consumed by `_compute_status_and_confidence`; it is not a Purchase
+    # field, so drop it from the wire payload.
+    fields.pop("line_items_detected", None)
+    fields["product_id"] = product_id  # resolved (order- fallback applied)
+    fields["extraction_confidence"] = confidence  # computed aggregate
+    fields["status"] = status_value
+    fields["currency"] = "USD"
+
+    # Reshape the raw model `line_items` into per-line FULL extractions:
+    # shared receipt fields merged with each line's own fields, a stable
+    # `receipt_line_key`, and a per-line (uncapped) confidence + status.
+    # The frontend renders one selection card per entry; the api-gateway
+    # builds a Purchase from the chosen line. Empty for single-item
+    # receipts → the FE falls through to today's single-item confirm.
+    line_payloads = build_line_item_payloads(extracted)
+    if line_payloads:
+        shared = {
+            "platform": fields["platform"],
+            "category": fields["category"],
+            "order_id": fields["order_id"],
+            "purchase_date": fields["purchase_date"],
+            "purchase_date_basis": fields["purchase_date_basis"],
+            "member_tier_at_purchase": fields["member_tier_at_purchase"],
+            "fare_class": fields["fare_class"],
+            "room_type": fields["room_type"],
+            "bed_type": fields["bed_type"],
+            "rate_type": fields["rate_type"],
+            "member_price_at_purchase": fields["member_price_at_purchase"],
+            "non_member_price_at_purchase": fields["non_member_price_at_purchase"],
+            "currency": "USD",
+        }
+        fields["line_items"] = [{**shared, **line} for line in line_payloads]
+    else:
+        fields["line_items"] = []
+
+    _log.info(
+        "internal_extract: extracted ref=%s user_id=%s platform=%s status=%s",
+        ref,
+        body.user_id,
+        fields.get("platform"),
+        status_value,
+    )
+    return {"extraction": fields}
