@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 /**
  * Stripped onboarding shell: no marketing header/footer, no dashboard sidebar.
- * Centered column — max-width 480px; horizontal padding matches ~24px mobile margin.
+ * Centered column — max-width 560px.
  *
  * `OnboardingGate` is a client component that handles auth + completion
  * redirects (no user → /login, already onboarded → /dashboard); keeping it
@@ -18,11 +18,9 @@ export const metadata: Metadata = {
 export default function OnboardingLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <OnboardingGate>
-      <div className="min-h-dvh bg-neutral-50">
-        <main className="flex min-h-dvh flex-col items-center px-6 py-8 md:py-12">
-          <div className="w-full max-w-[480px]">{children}</div>
-        </main>
-      </div>
+      <main className="flex min-h-dvh flex-col items-center justify-center bg-neutral-50 px-4 py-12 sm:px-6 sm:py-16">
+        <div className="w-full max-w-[560px] space-y-6">{children}</div>
+      </main>
     </OnboardingGate>
   );
 }
