@@ -1,11 +1,11 @@
+"use client";
+
+import { useParams } from "next/navigation";
 import { AssistantContent } from "@/components/assistant/assistant-content";
 
-type AssistantPageProps = {
-  params: Promise<{ conversationId?: string[] }>;
-};
-
-export default async function AssistantCatchAllPage({ params }: AssistantPageProps) {
-  const { conversationId: segments } = await params;
+export default function AssistantCatchAllPage() {
+  const params = useParams<{ conversationId?: string[] }>();
+  const segments = params?.conversationId;
   const firstSegment = segments?.[0]?.trim();
 
   const conversationId =
