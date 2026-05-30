@@ -29,6 +29,8 @@ import { auth } from "@/lib/firebase";
 import { generateProactiveOutput, PROACTIVE_EVENT_TYPES } from "@/lib/proactive-templates";
 import { computeBackoffMs } from "@/lib/sse/backoff";
 import { useSseConnectionStore } from "@/lib/sse/connection-status";
+import { createCrossTabDedup } from "@/lib/sse/cross-tab-dedup";
+import { buildStreamUrl } from "@/lib/sse/last-event-id";
 import { useAuthStore, useUIStore } from "@/store";
 import { useAutoSendBannerStore } from "@/store/auto-send-banner";
 import { useClaimDetailRefetchStore } from "@/store/claim-detail-refetch";
@@ -71,6 +73,9 @@ export function useProactiveAssistant(): void {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const failureCountRef = useRef(0);
+  // Last SSE `id:` seen, echoed back on reconnect so the server resumes
+  // past it instead of reseeding to now() (BUG-123 S2). Reset per stream.
+  const lastEventIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (isAuthLoading) return;
@@ -80,6 +85,9 @@ export function useProactiveAssistant(): void {
     }
 
     let cancelled = false;
+    // One coordinator per mounted stream so a given proactive card surfaces
+    // in exactly one browser tab (BUG-123 S4).
+    const crossTab = createCrossTabDedup();
 
     async function connect(): Promise<void> {
       const currentUser = auth.currentUser;
@@ -95,16 +103,24 @@ export function useProactiveAssistant(): void {
       }
       if (cancelled) return;
 
-      const url = `${API_BASE_URL}/api/v1/events/stream?token=${encodeURIComponent(token)}`;
+      const url = buildStreamUrl(API_BASE_URL, token, lastEventIdRef.current);
       const source = new EventSource(url);
       sourceRef.current = source;
 
       source.addEventListener("notification", (evt: MessageEvent) => {
         try {
           const frame = JSON.parse(evt.data) as NotificationFrame;
-          handleClaimDraftedFanout(frame);
+          // Advance the resume watermark even for frames we end up dropping,
+          // so a reconnect never rewinds past an already-delivered event.
+          if (evt.lastEventId) {
+            lastEventIdRef.current = evt.lastEventId;
+          }
+          handleClaimDraftedFanout(frame); // every tab refreshes its own open claim
           if (frame._id && !rememberNotificationId(frame._id)) {
-            return;
+            return; // in-tab dedup (replays / double mounts)
+          }
+          if (frame._id && !crossTab.claim(frame._id)) {
+            return; // another tab owns the user-visible surface
           }
           handleNotificationFrame(frame, setProactiveEvent);
           handleAutoSendBannerFanout(frame, addBannerRow, markBannerSent);
@@ -147,15 +163,49 @@ export function useProactiveAssistant(): void {
       }, delay);
     }
 
+    // The browser's offline/online events fire instantly on a DevTools
+    // network toggle, whereas the EventSource `error` event can lag. Mark
+    // disconnected immediately so the "Reconnecting…" chip is observable
+    // (BUG-123 S1), and reconnect promptly (resetting backoff) on recovery.
+    function handleOffline(): void {
+      if (cancelled) return;
+      setSseDisconnected();
+    }
+    function handleOnline(): void {
+      if (cancelled) return;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+      sourceRef.current?.close();
+      sourceRef.current = null;
+      failureCountRef.current = 0;
+      void connect();
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("offline", handleOffline);
+      window.addEventListener("online", handleOnline);
+    }
+
     void connect();
 
     return () => {
       cancelled = true;
+      if (typeof window !== "undefined") {
+        window.removeEventListener("offline", handleOffline);
+        window.removeEventListener("online", handleOnline);
+      }
+      crossTab.dispose();
       sourceRef.current?.close();
       sourceRef.current = null;
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
       failureCountRef.current = 0;
+      lastEventIdRef.current = null;
       resetSseConnection();
     };
   }, [

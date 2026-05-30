@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from claimit_mongodb_models import MongoDBClient, User
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, Query
 from sse_starlette.sse import EventSourceResponse
 
 from ..deps import get_db
@@ -29,11 +29,20 @@ router = APIRouter(prefix="/events", tags=["events"])
 async def stream_events(
     user: Annotated[User, Depends(get_current_user_from_query_token)],
     db: Annotated[MongoDBClient, Depends(get_db)],
+    last_event_id_query: Annotated[str | None, Query(alias="last_event_id")] = None,
+    last_event_id_header: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
 ) -> EventSourceResponse:
     """Long-lived SSE stream of notification events for the authenticated user.
 
     Auth: ?token=<firebase_id_token> (EventSource cannot set headers).
-    Frames: event=notification with NotificationEvent JSON, or event=error
-    on transient DB failure.
+    Frames: event=notification with NotificationEvent JSON (and a composite
+    `id:`), or event=error on transient DB failure.
+
+    Resume: the client passes the last delivered event id back as the
+    `?last_event_id=` query param (manual reconnect, since query-param auth
+    rebuilds the EventSource) or the standard `Last-Event-ID` header
+    (native EventSource auto-reconnect). The query param wins when both are
+    present; the generator falls back to now() when neither is usable.
     """
-    return EventSourceResponse(event_stream_generator(db, user.id))
+    last_event_id = last_event_id_query or last_event_id_header
+    return EventSourceResponse(event_stream_generator(db, user.id, last_event_id=last_event_id))

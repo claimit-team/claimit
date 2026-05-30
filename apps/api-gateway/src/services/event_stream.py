@@ -58,24 +58,69 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL_SECONDS = 1.0
 MAX_DOCS_PER_TICK = 50
 
+# Separator for the composite SSE `id:` field. created_at ISO strings and
+# UUIDs never contain a pipe, so a single `|` round-trips unambiguously.
+_EVENT_ID_SEP = "|"
+
+
+def format_event_id(created_at: str, event_id: UUID) -> str:
+    """Compose the SSE `id:` value from the (created_at, _id) watermark.
+
+    The client echoes this back as `last_event_id` (or the Last-Event-ID
+    header) on reconnect so the next stream resumes exactly past the last
+    delivered event instead of from now().
+    """
+    return f"{created_at}{_EVENT_ID_SEP}{event_id}"
+
+
+def parse_event_id(raw: str) -> tuple[str, UUID] | None:
+    """Inverse of format_event_id. Returns (created_at_iso, _id) or None.
+
+    None means the value is unusable (no separator or a non-UUID id) — the
+    caller falls back to now() rather than replaying the user's full
+    history or crashing the stream.
+    """
+    created_at, sep, id_part = raw.rpartition(_EVENT_ID_SEP)
+    if not sep or not created_at:
+        return None
+    try:
+        return created_at, UUID(id_part)
+    except ValueError:
+        return None
+
 
 async def event_stream_generator(
     db: MongoDBClient,
     user_id: UUID,
+    last_event_id: str | None = None,
 ) -> AsyncIterator[dict[str, str]]:
     """Yield SSE-formatted event dicts for `user_id` indefinitely.
 
-    Each dict has `event` (str) and `data` (JSON-encoded str). The route
-    layer hands these to sse_starlette.EventSourceResponse, which emits
-    them as `event:` / `data:` lines on the wire.
+    Each dict has `event` (str), `data` (JSON-encoded str), and `id` (the
+    composite created_at|_id watermark). The route layer hands these to
+    sse_starlette.EventSourceResponse, which emits them as `id:` /
+    `event:` / `data:` lines on the wire.
+
+    Resume (`last_event_id`):
+    - On a fresh connection (no last_event_id) the watermark starts at
+      now(), so the client only receives events created after it connects
+      — we never replay the full backlog.
+    - On a reconnect the client passes the last delivered event id back.
+      We seed the watermark from it so events written during the
+      disconnect gap (token-refresh reconnect, network blip) are delivered
+      rather than skipped. A malformed value degrades to the now() path.
 
     Loop: poll notification_events newer than the (created_at, _id)
     watermark, emit each new doc (oldest first), sleep, repeat.
     Disconnects propagate via asyncio.CancelledError raised by
     sse_starlette when the client closes the underlying response.
     """
-    last_seen_iso: str = datetime.now(UTC).isoformat()
-    last_seen_id: UUID | None = None
+    resumed = parse_event_id(last_event_id) if last_event_id else None
+    if resumed is not None:
+        last_seen_iso, last_seen_id = resumed
+    else:
+        last_seen_iso = datetime.now(UTC).isoformat()
+        last_seen_id = None
 
     while True:
         try:
@@ -96,6 +141,7 @@ async def event_stream_generator(
                 yield {
                     "event": "notification",
                     "data": json.dumps(payload),
+                    "id": format_event_id(event.created_at, event.id),
                 }
                 last_seen_iso = event.created_at
                 last_seen_id = event.id
