@@ -81,4 +81,71 @@ describe("conversations api client", () => {
       }),
     );
   });
+
+  // BUG-62 — one automatic retry on transient failure (cold-start coverage).
+  // AbortError mirrors the timeout path; the matched 5xx counterpart is
+  // implicit (same branch in `_request`).
+
+  it("retries once on AbortError timeout and surfaces the second-try result", async () => {
+    const timeoutErr = new DOMException("aborted", "AbortError");
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(timeoutErr)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ conversations: [], count: 0 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { listConversations } = await import("./conversations");
+
+    const result = await listConversations();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.conversations).toEqual([]);
+  });
+
+  it("after retry on AbortError second attempt also fails: throws request_timeout", async () => {
+    const timeoutErr = new DOMException("aborted", "AbortError");
+    const fetchMock = vi.fn().mockRejectedValue(timeoutErr);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { listConversations, ConversationsApiError } = await import("./conversations");
+
+    let caught: unknown;
+    try {
+      await listConversations();
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(caught).toBeInstanceOf(ConversationsApiError);
+    expect((caught as InstanceType<typeof ConversationsApiError>).code).toBe("request_timeout");
+  });
+
+  it("does NOT retry on 401 — fails fast", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "unauthorized", message: "no" } }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { listConversations, ConversationsApiError } = await import("./conversations");
+
+    let caught: unknown;
+    try {
+      await listConversations();
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(caught).toBeInstanceOf(ConversationsApiError);
+    expect((caught as InstanceType<typeof ConversationsApiError>).code).toBe("unauthorized");
+  });
 });
