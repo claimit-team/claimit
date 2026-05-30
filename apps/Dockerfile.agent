@@ -46,6 +46,7 @@ COPY packages/shared/elastic /build/packages/shared/elastic
 COPY packages/shared/search /build/packages/shared/search
 COPY packages/shared/maps /build/packages/shared/maps
 COPY packages/shared/gmail /build/packages/shared/gmail
+COPY packages/shared/notifier /build/packages/shared/notifier
 
 # Install deps (../../packages/shared/... now resolves to /build/packages/shared/...).
 RUN uv sync --frozen --no-dev --no-install-project
