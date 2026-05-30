@@ -23,6 +23,8 @@ from src.services.event_stream import (
     MAX_DOCS_PER_TICK,
     POLL_INTERVAL_SECONDS,
     event_stream_generator,
+    format_event_id,
+    parse_event_id,
 )
 
 from ._fixtures import make_notification_event
@@ -348,3 +350,93 @@ async def test_generator_skips_bad_doc_in_else_path() -> None:
             "_id": {"$gt": UUID(bad_id)},
         },
     ]
+
+
+# ---------------------------------------------------------------------------
+# Composite event-id helpers (BUG-123 S2)
+# ---------------------------------------------------------------------------
+
+
+def test_format_and_parse_event_id_round_trip() -> None:
+    created_at = "2026-05-18T10:00:01+00:00"
+    event_id = UUID("40000000-0000-0000-0000-000000000001")
+    raw = format_event_id(created_at, event_id)
+    assert raw == f"{created_at}|{event_id}"
+    assert parse_event_id(raw) == (created_at, event_id)
+
+
+def test_parse_event_id_rejects_unusable_values() -> None:
+    assert parse_event_id("no-separator-here") is None  # no pipe
+    assert parse_event_id("2026-05-18T10:00:01+00:00|not-a-uuid") is None  # bad id
+    assert parse_event_id("|40000000-0000-0000-0000-000000000001") is None  # empty created_at
+
+
+# ---------------------------------------------------------------------------
+# Resume from Last-Event-ID (BUG-123 S2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_generator_resumes_from_last_event_id_on_first_poll() -> None:
+    """A reconnect passes the last delivered event id back. The FIRST poll
+    must seed the compound (created_at, _id) watermark from it — NOT now() —
+    so events written during the disconnect gap are delivered, not skipped."""
+    db = _mock_db([[]])
+    resume_ts = "2026-05-18T10:00:05+00:00"
+    resume_id = "40000000-0000-0000-0000-0000000000cc"
+    last_event_id = format_event_id(resume_ts, UUID(resume_id))
+
+    sleep_mock = AsyncMock(side_effect=asyncio.CancelledError)
+    # Freeze now() far in the future so a now()-seed would be obviously wrong.
+    _FrozenDatetime.value = "2099-01-01T00:00:00+00:00"
+    with (
+        patch.object(event_stream_module.asyncio, "sleep", new=sleep_mock),
+        patch.object(event_stream_module, "datetime", _FrozenDatetime),
+    ):
+        gen = event_stream_generator(db, USER_ID, last_event_id=last_event_id)
+        with pytest.raises(asyncio.CancelledError):
+            await gen.__anext__()
+
+    match_stage = db.aggregate.await_args_list[0].args[1][0]["$match"]
+    assert match_stage["$or"] == [
+        {"created_at": {"$gt": resume_ts}},
+        {"created_at": resume_ts, "_id": {"$gt": UUID(resume_id)}},
+    ]
+    assert "created_at" not in match_stage  # compound predicate only
+
+
+@pytest.mark.asyncio
+async def test_generator_malformed_last_event_id_falls_back_to_now() -> None:
+    """A malformed resume token degrades to the now() path rather than
+    replaying the user's full history or crashing the stream."""
+    db = _mock_db([[]])
+
+    sleep_mock = AsyncMock(side_effect=asyncio.CancelledError)
+    fixed_now = "2026-05-18T11:00:00+00:00"
+    _FrozenDatetime.value = fixed_now
+    with (
+        patch.object(event_stream_module.asyncio, "sleep", new=sleep_mock),
+        patch.object(event_stream_module, "datetime", _FrozenDatetime),
+    ):
+        gen = event_stream_generator(db, USER_ID, last_event_id="garbage-no-uuid")
+        with pytest.raises(asyncio.CancelledError):
+            await gen.__anext__()
+
+    match_stage = db.aggregate.await_args_list[0].args[1][0]["$match"]
+    assert match_stage["created_at"] == {"$gt": fixed_now}
+
+
+@pytest.mark.asyncio
+async def test_generator_stamps_composite_id_on_each_frame() -> None:
+    """Every emitted frame carries the composite `id:` so the client can
+    echo it back on reconnect for gap-free resume."""
+    doc_id = "40000000-0000-0000-0000-000000000001"
+    created_at = "2026-05-18T10:00:01+00:00"
+    doc = make_notification_event(notification_id=doc_id, created_at=created_at)
+    db = _mock_db([[doc]])
+
+    with patch.object(event_stream_module.asyncio, "sleep", new=AsyncMock()):
+        gen = event_stream_generator(db, USER_ID)
+        frame = await gen.__anext__()
+
+    assert frame["id"] == f"{created_at}|{doc_id}"
