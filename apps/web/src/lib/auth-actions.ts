@@ -6,6 +6,7 @@ import {
   signInWithPopup,
   signOut,
 } from "firebase/auth";
+import { resetAnimatedCurrencySession } from "@/components/dashboard/hero/animated-currency";
 import { auth, githubProvider, googleProvider } from "@/lib/firebase";
 
 const MAGIC_LINK_EMAIL_KEY = "claimit:emailForSignIn";
@@ -19,6 +20,11 @@ export async function signInWithGithub() {
 }
 
 export async function signOutUser() {
+  try {
+    resetAnimatedCurrencySession();
+  } catch {
+    // Non-blocking — sign-out must always proceed
+  }
   return signOut(auth);
 }
 
