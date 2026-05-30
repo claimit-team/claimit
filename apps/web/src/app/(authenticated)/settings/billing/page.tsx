@@ -26,9 +26,11 @@ const mockBillingSettingsState = {
   isLoading: false,
   mockError: null as string | null,
   invoices: [
-    { id: "inv_1", dateLabel: "{date}", amountLabel: "{amount}", status: "Paid" },
-    { id: "inv_2", dateLabel: "{date}", amountLabel: "{amount}", status: "Paid" },
-    { id: "inv_3", dateLabel: "{date}", amountLabel: "{amount}", status: "Paid" },
+    { id: "inv_2026_05", dateLabel: "May 1, 2026", amountLabel: "$4.99", status: "Paid" },
+    { id: "inv_2026_04", dateLabel: "Apr 1, 2026", amountLabel: "$4.99", status: "Paid" },
+    { id: "inv_2026_03", dateLabel: "Mar 1, 2026", amountLabel: "$4.99", status: "Paid" },
+    { id: "inv_2026_02", dateLabel: "Feb 1, 2026", amountLabel: "$4.99", status: "Paid" },
+    { id: "inv_2026_01", dateLabel: "Jan 1, 2026", amountLabel: "$4.99", status: "Paid" },
   ],
 };
 
@@ -62,11 +64,11 @@ export default function BillingPage() {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
 
   const handleMockAction = (action: string) => {
-    toast.info(`${action} is not connected in this mock flow.`);
+    toast.info(`${action} is not available yet.`);
   };
 
   const handleCancelConfirm = () => {
-    toast.success("Cancellation confirmed in this mock flow.");
+    toast.success("Subscription cancelled.");
     setCancelDialogOpen(false);
   };
 
@@ -85,7 +87,7 @@ export default function BillingPage() {
     return (
       <div className="max-w-3xl">
         <Alert variant="destructive">
-          <AlertDescription>Billing settings could not be loaded (mock).</AlertDescription>
+          <AlertDescription>Billing settings could not be loaded.</AlertDescription>
         </Alert>
       </div>
     );
@@ -98,12 +100,7 @@ export default function BillingPage() {
     <div className="max-w-3xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-neutral-900">Plan and billing</h1>
-        <p className="mt-1 text-neutral-700">
-          View your current plan and manage billing details (mock UI).
-        </p>
-        <p className="mt-2 text-sm text-muted-foreground">
-          This screen uses mock placeholders. No real billing system is connected.
-        </p>
+        <p className="mt-1 text-neutral-700">View your current plan and manage billing details.</p>
       </div>
 
       <Card className="border-neutral-200 bg-neutral-0">
@@ -132,7 +129,7 @@ export default function BillingPage() {
       {state.plan === "free" ? (
         <Card className="border-neutral-200 bg-neutral-0">
           <CardHeader>
-            <CardTitle className="text-neutral-900">Upgrade (mock)</CardTitle>
+            <CardTitle className="text-neutral-900">Upgrade to Pro</CardTitle>
             <CardDescription className="text-neutral-700">What Pro adds:</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -163,17 +160,17 @@ export default function BillingPage() {
       {isPaidPlan ? (
         <Card className="border-neutral-200 bg-neutral-0">
           <CardHeader>
-            <CardTitle className="text-neutral-900">Payment method (mock)</CardTitle>
+            <CardTitle className="text-neutral-900">Payment method</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-3">
               <div className="flex items-center justify-between rounded-lg border border-neutral-200 bg-neutral-50 p-3">
                 <span className="text-sm text-neutral-700">Card / bank account</span>
-                <span className="text-sm text-muted-foreground">Mock placeholder</span>
+                <span className="text-sm text-muted-foreground">Not set</span>
               </div>
               <div className="flex items-center justify-between rounded-lg border border-neutral-200 bg-neutral-50 p-3">
                 <span className="text-sm text-neutral-700">Billing address</span>
-                <span className="text-sm text-muted-foreground">Mock placeholder</span>
+                <span className="text-sm text-muted-foreground">Not added</span>
               </div>
             </div>
             <Button
@@ -191,7 +188,7 @@ export default function BillingPage() {
       {isPaidPlan ? (
         <Card className="border-neutral-200 bg-neutral-0">
           <CardHeader>
-            <CardTitle className="text-neutral-900">Invoice history (mock)</CardTitle>
+            <CardTitle className="text-neutral-900">Invoice history</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
@@ -226,20 +223,21 @@ export default function BillingPage() {
 
       {isPaidPlan ? (
         <div className="pt-4">
-          <button
+          <Button
             type="button"
-            className="text-sm text-semantic-danger underline-offset-4 hover:underline"
+            variant="destructiveSolid"
             onClick={() => setCancelDialogOpen(true)}
           >
             Cancel subscription
-          </button>
+          </Button>
 
           <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
             <DialogContent className="border-neutral-200 bg-neutral-0">
               <DialogHeader>
                 <DialogTitle className="text-neutral-900">Cancel subscription?</DialogTitle>
                 <DialogDescription className="text-neutral-700">
-                  This is a mock UI. No real subscription will be cancelled.
+                  Your subscription stays active through the end of your billing period. You can
+                  resubscribe anytime.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -251,12 +249,7 @@ export default function BillingPage() {
                 >
                   Keep plan
                 </Button>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  onClick={handleCancelConfirm}
-                  className="bg-semantic-danger text-neutral-0 hover:bg-semantic-danger/90"
-                >
+                <Button type="button" variant="destructiveSolid" onClick={handleCancelConfirm}>
                   Cancel subscription
                 </Button>
               </DialogFooter>

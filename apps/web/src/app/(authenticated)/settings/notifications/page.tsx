@@ -91,8 +91,8 @@ const EVENT_TYPE_DEFS: EventTypeRow[] = [
 ];
 
 const channels: Channel[] = [
-  { label: "Email notifications", status: "Coming soon" },
-  { label: "Push notifications", status: "Coming soon" },
+  { label: "Email notifications", status: "Available soon" },
+  { label: "Push notifications", status: "Available soon" },
 ];
 
 export default function NotificationsPage() {
@@ -261,8 +261,8 @@ export default function NotificationsPage() {
         <CardHeader className="pb-0">
           <CardTitle className="text-lg text-neutral-900">Channels</CardTitle>
           <CardDescription className="text-neutral-700">
-            For MVP, this screen controls in-app event visibility. Email and push delivery settings
-            are shown as future options.
+            Control which events appear in your notification center and Assistant. Email and push
+            delivery will be added soon.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
