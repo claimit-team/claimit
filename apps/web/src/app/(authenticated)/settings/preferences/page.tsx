@@ -16,9 +16,9 @@ import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store";
 
 const perPlatformOverrides = [
-  { platform: "Best Buy", status: "Coming soon" },
-  { platform: "Hilton", status: "Coming soon" },
-  { platform: "Southwest", status: "Coming soon" },
+  { platform: "Best Buy", status: "Available soon" },
+  { platform: "Hilton", status: "Available soon" },
+  { platform: "Southwest", status: "Available soon" },
 ];
 
 // Display label for the auto-send delay window. The numeric value is stored
@@ -257,13 +257,10 @@ export default function PreferencesPage() {
                   {autoSendDelayLabel}
                 </span>
               </div>
-              <Badge variant="secondary" className="text-neutral-600">
-                Read-only for MVP
-              </Badge>
             </div>
-            <p className="mt-3 text-sm text-neutral-700">
-              When auto-send is enabled, eligible email claims enter a 5-minute queue before
-              sending. You can cancel, send now, or review during that window.
+            <p className="mt-3 text-sm text-neutral-600">
+              When auto-send is on, eligible email claims wait {autoSendDelayLabel} before sending —
+              long enough for you to cancel from your dashboard or the claim&apos;s detail page.
             </p>
           </CardContent>
         </Card>
@@ -274,13 +271,12 @@ export default function PreferencesPage() {
           <div className="flex flex-wrap items-center gap-3">
             <CardTitle className="text-neutral-900">Per-platform overrides</CardTitle>
             <Badge variant="secondary" className="text-neutral-600">
-              Coming soon
+              Available soon
             </Badge>
           </div>
           <CardDescription className="text-neutral-700">
-            Future versions may let you choose different send behavior by platform or claim type.
-            For MVP, your default send mode applies globally, with per-claim override available in
-            the claim review flow if implemented.
+            Your default send mode applies to all platforms. You can still override individual
+            claims during review.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -304,7 +300,7 @@ export default function PreferencesPage() {
           variant="outline"
           onClick={handleReset}
           disabled={!hasChanges || isSaving}
-          className="border-neutral-200 text-neutral-700 hover:bg-neutral-100"
+          className="w-full border-neutral-200 text-neutral-700 hover:bg-neutral-100 sm:w-auto"
         >
           Reset
         </Button>
@@ -312,7 +308,7 @@ export default function PreferencesPage() {
           type="button"
           onClick={() => void handleSave()}
           disabled={!hasChanges || isSaving}
-          className="bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600"
+          className="w-full bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600 sm:w-auto"
         >
           {isSaving ? "Saving…" : "Save changes"}
         </Button>
