@@ -292,7 +292,8 @@ module "assistant_agent" {
     # Mode B's get_reasoning_trace tool reads this to query spans for a
     # claim (ticket 3.24) AND to construct the in-app deep link the user
     # can click to inspect the trace directly.
-    PHOENIX_BASE_URL = "https://app.phoenix.arize.com/s/claimitbeta"
+    PHOENIX_BASE_URL           = "https://app.phoenix.arize.com/s/claimitbeta"
+    PHOENIX_COLLECTOR_ENDPOINT = "https://app.phoenix.arize.com/s/claimitbeta/v1/traces"
     # Project routing — init_phoenix sets this as the OpenInference
     # `openinference.project.name` resource attribute so spans land in
     # the `claimit` project (not `default`). The read side queries the
