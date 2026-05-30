@@ -20,6 +20,7 @@ dependencies = [
     "claimit-search",
     "claimit-maps",
     "claimit-gmail",
+    "claimit-notifier",
     "google-cloud-secret-manager>=2.20.0",
 ]
 
@@ -32,6 +33,7 @@ claimit-search = { path = "../../packages/shared/search" }
 claimit-elastic = { path = "../../packages/shared/elastic" }
 claimit-maps = { path = "../../packages/shared/maps" }
 claimit-gmail = { path = "../../packages/shared/gmail" }
+claimit-notifier = { path = "../../packages/shared/notifier" }
 
 [dependency-groups]
 dev = [

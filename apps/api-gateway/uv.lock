@@ -351,6 +351,7 @@ dependencies = [
     { name = "claimit-elastic" },
     { name = "claimit-gmail" },
     { name = "claimit-mongodb-models" },
+    { name = "claimit-notifier" },
     { name = "claimit-observability" },
     { name = "claimit-pubsub" },
     { name = "claimit-search" },
@@ -383,6 +384,7 @@ requires-dist = [
     { name = "claimit-elastic", directory = "../../packages/shared/elastic" },
     { name = "claimit-gmail", directory = "../../packages/shared/gmail" },
     { name = "claimit-mongodb-models", directory = "../../packages/shared/mongodb" },
+    { name = "claimit-notifier", directory = "../../packages/shared/notifier" },
     { name = "claimit-observability", directory = "../../packages/shared/observability" },
     { name = "claimit-pubsub", directory = "../../packages/shared/pubsub" },
     { name = "claimit-search", directory = "../../packages/shared/search" },
@@ -474,6 +476,30 @@ requires-dist = [
 dev = [
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", specifier = ">=1.3.0" },
+]
+
+[[package]]
+name = "claimit-notifier"
+version = "0.1.0"
+source = { directory = "../../packages/shared/notifier" }
+dependencies = [
+    { name = "claimit-mongodb-models" },
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "claimit-mongodb-models", directory = "../../packages/shared/mongodb" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "pydantic", specifier = ">=2.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.3" },
+    { name = "pytest-asyncio", specifier = ">=1.3.0" },
+    { name = "ruff", specifier = ">=0.6.0" },
 ]
 
 [[package]]

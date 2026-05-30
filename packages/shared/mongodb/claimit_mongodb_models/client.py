@@ -677,8 +677,26 @@ class MongoDBClient:
     async def upsert_conversation(self, conv: Conversation) -> str:
         return await self.upsert("conversations", conv.id, conv)
 
-    async def upsert_notification_event(self, doc: NotificationEvent) -> str:
-        return await self.upsert("notification_events", doc.id, doc)
+    async def upsert_notification_event(self, doc: NotificationEvent) -> tuple[str, bool]:
+        """Insert a NotificationEvent if its `_id` is new. Returns (id, was_inserted).
+
+        Uses `update_one` with `$setOnInsert` + `upsert=True` so the operation
+        is atomic: if the derived `_id` already exists (concurrent Pub/Sub
+        redelivery) MongoDB does nothing and `result.upserted_id` is None.
+        This is the race-safe replacement for the prior find_one + upsert
+        pattern — without atomicity, two concurrent redelivers could both
+        observe "no existing doc" and both trigger downstream fan-out
+        (sending duplicate emails).
+        """
+        payload = doc.model_dump(by_alias=True)
+        payload["_id"] = doc.id
+        payload["updated_at"] = datetime.now(UTC)
+        result = await self._db["notification_events"].update_one(
+            {"_id": doc.id},
+            {"$setOnInsert": payload},
+            upsert=True,
+        )
+        return str(doc.id), result.upserted_id is not None
 
 
 def _coerce_uuid(value: str | UUID) -> UUID:
