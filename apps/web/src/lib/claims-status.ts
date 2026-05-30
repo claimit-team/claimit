@@ -2,7 +2,7 @@
  * Small presentational helpers for claim list/detail rows.
  *
  * `formatWindowRemaining` delegates to `formatClaimRemainingTime` from
- * `@/lib/claim-detail` (which the detail page already uses) so the same
+ * `@/lib/claim-format` (which the detail page already uses) so the same
  * "11 days remaining" / "Expired" copy is shared between list and detail.
  *
  * `outcomeToGroup` is the inverse of the server's STATUS_GROUP_OUTCOMES
@@ -14,8 +14,8 @@
 
 import type { ClaimOutcome, ClaimType } from "@claimit/mongodb-types";
 import type { StatusGroup } from "@/lib/api/claims";
-import { formatClaimRemainingTime } from "@/lib/claim-detail";
 import type { ClaimDetailWorkflowStatus } from "@/lib/claim-detail-types";
+import { formatClaimRemainingTime } from "@/lib/claim-format";
 import { getPlatformLabel } from "@/lib/platform-labels";
 
 export const EDITABLE_STATUSES = new Set<ClaimDetailWorkflowStatus>(["awaiting_approval"]);

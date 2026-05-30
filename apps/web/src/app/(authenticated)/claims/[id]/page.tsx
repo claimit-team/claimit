@@ -8,14 +8,6 @@
  * `ClaimDetail` view-model by `buildClaimDetailViewModel`
  * (see [apps/web/src/lib/claim-detail-view.ts]).
  *
- * The mock lookup (`getClaimDetail`/`getClaimConversation` in
- * `lib/claim-detail.ts`) is intentionally NOT imported here — that
- * file's formatters (`formatClaimCurrency` / `formatClaimRemainingTime`)
- * are still consumed by claim-header / evidence-pane / claims-status,
- * so the file itself stays put. The mock-lookup helpers are now
- * unreferenced and can be removed in a follow-up cleanup once the
- * formatters move to a dedicated module.
- *
  * Mirrors `app/(authenticated)/purchases/[id]/page.tsx` (PR1) for
  * loading / notFound / error / ready state shape so the two detail
  * pages behave consistently.
