@@ -157,8 +157,14 @@ function categoryIcon(category: string | null) {
 // for `monitoring_degraded` (it shares the brand-primary chip with
 // plain `monitoring`).
 
-function StatusCell({ status }: { status: PurchaseStatus | string | null }) {
-  const badge = getListStatusBadge(status);
+function StatusCell({
+  status,
+  windowExpires,
+}: {
+  status: PurchaseStatus | string | null;
+  windowExpires?: string | null;
+}) {
+  const badge = getListStatusBadge(status, windowExpires);
   const degraded = isMonitoringDegraded(status);
   return (
     <span className="inline-flex items-center gap-1.5">
@@ -261,7 +267,7 @@ function PurchaseRow({ purchase }: { purchase: PurchaseListItem }) {
       className="cursor-pointer"
     >
       <TableCell className="w-[140px]">
-        <StatusCell status={purchase.status} />
+        <StatusCell status={purchase.status} windowExpires={purchase.window_expires} />
       </TableCell>
       <TableCell className="w-[40px]">
         <SourceIcon source={purchase.ingestion_source} />
@@ -325,7 +331,7 @@ function PurchaseCard({ purchase }: { purchase: PurchaseListItem }) {
     >
       <CardContent className="space-y-3 py-4">
         <div className="flex items-center justify-between">
-          <StatusCell status={purchase.status} />
+          <StatusCell status={purchase.status} windowExpires={purchase.window_expires} />
           <span className="font-medium tabular-nums text-neutral-700">
             {formatCurrency(purchase.price_paid, purchase.currency)}
           </span>

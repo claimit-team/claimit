@@ -29,6 +29,21 @@ import type { ClaimOutcome, PurchaseStatus } from "@claimit/mongodb-types";
 
 import type { PurchaseDetailMonitoringStatus } from "@/lib/purchase-detail-view";
 
+/**
+ * Has the price-protection window already closed? Answers from the stored
+ * `window_expires` timestamp rather than the `status` field, so the UI can
+ * surface "Window expired" the instant the window lapses — even before the
+ * monitor-agent cron flips `status` to `expired`, and for the
+ * `monitoring_degraded` rows the cron sweep never scans. Read-tolerant:
+ * a missing/malformed value returns `false` (no override).
+ */
+function isWindowExpired(windowExpires: string | null | undefined): boolean {
+  if (windowExpires === null || windowExpires === undefined) return false;
+  const ms = Date.parse(windowExpires);
+  if (Number.isNaN(ms)) return false;
+  return ms <= Date.now();
+}
+
 /** Display config for the header status badge. */
 export type PurchaseStatusBadge = {
   label: string;
@@ -137,13 +152,23 @@ function mapBackendStatus(status: PurchaseStatus | string | null | undefined): {
  *
  * Resolved/expired/stopped never get promoted — those states have
  * already resolved past the drop signal.
+ *
+ * `windowExpires` (optional) reconciles the badge with the window
+ * countdown: when the base is "monitoring" (covers monitoring,
+ * monitoring_degraded, and the generous unknown default) but the stored
+ * `window_expires` is already past, surface "window_expired" rather than
+ * "monitoring" — so the header never reads "Monitoring" beside an expired
+ * window. Checked before the eligible_drop promotion: an expired window
+ * outranks a stale draft_pending hint.
  */
 export function deriveMonitoringStatus(
   status: PurchaseStatus | string | null | undefined,
   claimOutcomes: ReadonlyArray<ClaimOutcome | string | null>,
+  windowExpires?: string | null,
 ): PurchaseDetailMonitoringStatus {
   const base = mapBackendStatus(status).monitoring;
   if (base === "monitoring") {
+    if (isWindowExpired(windowExpires)) return "window_expired";
     const hasDraftPending = claimOutcomes.some((o) => o === "draft_pending");
     if (hasDraftPending) return "eligible_drop";
   }
@@ -193,11 +218,22 @@ export function getMonitoringStatusBadge(
  */
 export function getListStatusBadge(
   status: PurchaseStatus | string | null | undefined,
+  windowExpires?: string | null,
 ): PurchaseStatusBadge {
   const blue = "bg-blue-100 text-blue-700 border-blue-200";
   const amber = "bg-amber-100 text-amber-700 border-amber-200";
   const green = "bg-green-100 text-green-700 border-green-200";
   const neutral = "bg-neutral-100 text-neutral-600 border-neutral-200";
+
+  // A monitoring row whose window has already closed reads as "Window
+  // expired" — same reconciliation as `deriveMonitoringStatus`, so the list
+  // doesn't show "Monitoring" for a lapsed purchase before the cron flips it.
+  if (
+    (status === "monitoring" || status === "monitoring_degraded") &&
+    isWindowExpired(windowExpires)
+  ) {
+    return { label: "Window expired", className: neutral };
+  }
 
   switch (status) {
     case "monitoring":

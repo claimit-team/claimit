@@ -380,7 +380,14 @@ export function buildPurchaseDetailViewModel(
   const primary = pickPrimaryRelatedClaim(claims);
 
   const claimOutcomes = claims.map((c) => c.outcome);
-  const monitoringStatus = deriveMonitoringStatus(purchase.status, claimOutcomes);
+  // Pass `window_expires` so the badge reconciles with the countdown below
+  // (`windowEndDate`/`daysRemaining`): a `status="monitoring"` purchase whose
+  // window has lapsed surfaces as "Window expired", not "Monitoring".
+  const monitoringStatus = deriveMonitoringStatus(
+    purchase.status,
+    claimOutcomes,
+    purchase.window_expires,
+  );
 
   return {
     purchaseId: purchase._id,

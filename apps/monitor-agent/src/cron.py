@@ -25,6 +25,7 @@ from claimit_mongodb_models import (
     PriceSource,
     Purchase,
     PurchaseReadTolerant,
+    PurchaseStatus,
 )
 from claimit_observability import get_tracer, span_with_attributes
 from claimit_pubsub import TOPIC_PRICE_DROPPED, PriceDroppedEvent, publish_event
@@ -171,6 +172,23 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
                     purchase.id,
                     purchase.window_expires.isoformat(),
                 )
+                # Flip the stored status so the UI (status badge, list rows)
+                # stops reporting "monitoring" for a purchase whose window has
+                # closed. Previously the row was just skipped, leaving it
+                # `status="monitoring"` forever while the window read expired.
+                # Idempotent: the `status="monitoring"` query above won't
+                # re-find it next sweep. Best-effort — a failure here just
+                # retries on the next tick; never abort the sweep.
+                try:
+                    await db.partial_update(
+                        "purchases",
+                        purchase.id,
+                        {"status": PurchaseStatus.EXPIRED.value},
+                        Purchase,
+                    )
+                except Exception:
+                    errors += 1
+                    logger.exception("cron.expire_status_update_error purchase_id=%s", purchase.id)
                 continue
 
             target_cadence = compute_target_cadence_minutes(purchase.window_expires, now)

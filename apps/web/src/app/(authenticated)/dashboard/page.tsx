@@ -645,7 +645,7 @@ function MonitoredPurchaseRow({ purchase }: { purchase: PurchaseListItem }) {
   const cat = purchase.category;
   const Icon =
     cat === "retail" || cat === "airline" || cat === "hotel" ? getCategoryIcon(cat) : ShoppingBag;
-  const statusBadge = getListStatusBadge(purchase.status);
+  const statusBadge = getListStatusBadge(purchase.status, purchase.window_expires);
   const degraded = isMonitoringDegraded(purchase.status);
 
   return (

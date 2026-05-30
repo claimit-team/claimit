@@ -59,6 +59,14 @@ interface ActionBarProps {
    * they can confirm more items from the same receipt.
    */
   lineKey?: string;
+  /**
+   * True when the chosen purchase date is already past the platform's
+   * price-protection window (computed by the parent from the live form +
+   * policy). Disables Confirm — the backend rejects an out-of-window
+   * monitor with 409 `window_expired`, so we block it up-front and steer
+   * the user to Dismiss instead of letting them fire a doomed request.
+   */
+  outsideWindow?: boolean;
 }
 
 /**
@@ -103,6 +111,7 @@ export function ActionBar({
   formState,
   draft,
   lineKey,
+  outsideWindow = false,
 }: ActionBarProps) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
@@ -118,6 +127,18 @@ export function ActionBar({
   const [rememberSender, setRememberSender] = useState(true);
 
   const submitBlocker = getSubmitBlocker(formState);
+
+  // An out-of-window purchase can't be monitored (the backend 409s), so the
+  // Confirm CTA is blocked here too. Surfaced as the action-bar helper text
+  // and enforced in `handleConfirm`. The form-validity blocker takes
+  // precedence (fix the fields first); otherwise this explains the lock.
+  // The upload-draft flow has no Dismiss control (nothing is persisted yet —
+  // see the `!draft` gate on the dialog below), so steer those users to
+  // Cancel/discard rather than a Dismiss button that doesn't exist.
+  const outsideWindowMessage = draft
+    ? "This purchase is past its price-protection window — it can no longer be monitored. Cancel to discard it."
+    : "This purchase is past its price-protection window — it can no longer be monitored. Dismiss it instead.";
+  const confirmBlocker = submitBlocker ?? (outsideWindow ? outsideWindowMessage : null);
 
   const hasSender = typeof purchase.sender === "string" && purchase.sender.trim().length > 0;
 
@@ -155,8 +176,8 @@ export function ActionBar({
 
   const handleConfirm = async () => {
     if (submitting) return;
-    if (submitBlocker) {
-      toast.error(submitBlocker);
+    if (confirmBlocker) {
+      toast.error(confirmBlocker);
       return;
     }
     setSubmitting(true);
@@ -191,9 +212,14 @@ export function ActionBar({
       toast.success(buildConfirmToast(updated, formState));
       router.push(`/purchases/${updated._id}`);
     } catch (err) {
+      // Defense-in-depth: the window can lapse between page load and submit
+      // (or the FE policy lookup can lag), so the server-side 409 is the
+      // backstop. Prefer the friendlier out-of-window copy for that code.
       const message =
         err instanceof PurchasesApiError
-          ? err.message
+          ? err.code === "window_expired"
+            ? outsideWindowMessage
+            : err.message
           : "We couldn't confirm this purchase. Try again.";
       toast.error(message);
       setSubmitting(false);
@@ -237,7 +263,7 @@ export function ActionBar({
     <div className="sticky bottom-0 z-30 border-t border-neutral-200 bg-neutral-0 px-4 py-4 pr-20 lg:px-6 lg:pr-24">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <p className="text-sm text-neutral-500">
-          {submitBlocker ?? "All your edits are local until you confirm"}
+          {confirmBlocker ?? "All your edits are local until you confirm"}
         </p>
 
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:gap-3">
@@ -359,7 +385,7 @@ export function ActionBar({
           <Button
             type="button"
             onClick={handleConfirm}
-            disabled={submitting || submitBlocker !== null}
+            disabled={submitting || confirmBlocker !== null}
             className="bg-brand-primary-500 hover:bg-brand-primary-600 text-neutral-0 w-full sm:w-auto"
           >
             {submitting ? "Confirming…" : "Confirm and start monitoring"}

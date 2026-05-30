@@ -2,46 +2,32 @@
 
 import { AlertTriangle } from "lucide-react";
 
-import { isOutsideWindow, type PolicyWindowDoc } from "@/lib/policy-window";
 import { safePlatformLabel } from "@/lib/purchase-detail-view";
 
 /**
- * Out-of-window warning surface for the confirm page (BUG-59).
+ * Out-of-window warning surface for the confirm + re-upload pages (BUG-59).
  *
- * Reads the live form state (`platform`, `purchaseDate`, `memberTier`)
- * + the policy fetched by `usePlatformPolicy` and renders an amber
- * banner when the chosen purchase date is already past the platform's
- * price-protection window. Purely informational — the Confirm CTA
- * remains submittable so the user can still start monitoring on a
- * known-ineligible purchase if they choose (matches the ticket).
+ * Driven by the parent's `outside` decision rather than recomputing the window
+ * itself, so the banner and the disabled submit CTA can never disagree. Each
+ * caller computes `outside` to match its backend seam — e.g. the confirm path
+ * leaves `outside` false when no Policy exists (the server doesn't 409 there),
+ * while the upload-draft path blocks on the 15-day default.
  *
- * Renders nothing when the inputs aren't yet ready to compute (no
- * platform, no date, policy still loading) so the banner doesn't
- * flicker as the user fills the form.
+ * Copy is intentionally factual (no "dismiss"/"cancel" steering): the action
+ * differs per surface (Dismiss on confirm, Cancel on an upload draft, fix the
+ * date on re-upload) and is already conveyed by the visible controls + the
+ * disabled submit button, so the banner shouldn't hard-code one of them.
  */
 
 interface WindowWarningBannerProps {
   platform: string;
-  purchaseDate: Date | null;
-  memberTier: string;
-  policy: PolicyWindowDoc | null;
-  policyLoading: boolean;
+  /** Parent's gated decision — true only when monitoring is actually blocked. */
+  outside: boolean;
+  /** Applicable price-protection window length, for the message copy. */
+  windowDays: number;
 }
 
-export function WindowWarningBanner({
-  platform,
-  purchaseDate,
-  memberTier,
-  policy,
-  policyLoading,
-}: WindowWarningBannerProps) {
-  if (platform === "" || purchaseDate === null || policyLoading) return null;
-
-  const { outside, windowDays } = isOutsideWindow({
-    purchaseDate,
-    policy,
-    memberTier: memberTier.trim() || null,
-  });
+export function WindowWarningBanner({ platform, outside, windowDays }: WindowWarningBannerProps) {
   if (!outside) return null;
 
   const label = safePlatformLabel(platform);
@@ -54,7 +40,7 @@ export function WindowWarningBanner({
           This purchase is outside {label}&apos;s {windowDays}-day price protection window
         </p>
         <p className="mt-0.5 text-sm text-neutral-500">
-          Confirming will start monitoring but no claim can be filed.
+          It can no longer be monitored — no claim could be filed.
         </p>
       </div>
     </div>
