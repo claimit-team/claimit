@@ -19,6 +19,28 @@ import type { Conversation, ConversationMode } from "@/types/assistant";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 const CONVERSATIONS_TIMEOUT_MS = 10000;
 
+// One automatic retry on transient failure (BUG-62). Cloud Run cold-start
+// occasionally exceeds the 10s client timeout; a single 500ms-backed retry
+// catches the warm second try without the user clicking "Try again".
+//
+// Transient = AbortError (timeout), TypeError (network/DNS/CORS unreachable),
+// or any 5xx response. 4xx never retries — auth / bad input / not-found
+// will just re-fail.
+const _MAX_ATTEMPTS = 2;
+const _RETRY_BACKOFF_MS = 500;
+
+function _sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function _isTransientError(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === "AbortError") return true;
+  // fetch() throws TypeError for network-layer failures (DNS, CORS preflight
+  // rejection, connection refused, TLS error). All worth one retry.
+  if (err instanceof TypeError) return true;
+  return false;
+}
+
 // The backend types claim_id as `UUID | None`. Pydantic returns a 422
 // before our handler runs if the value isn't UUID-shaped. Validate
 // client-side so we surface a clear typed error instead of a generic 422
@@ -52,6 +74,24 @@ export class ConversationsApiError extends Error {
   }
 }
 
+async function _attemptOnce(url: string, init: RequestInit, token: string): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CONVERSATIONS_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      ...init,
+      headers: {
+        ...(init.headers ?? {}),
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function _request<T>(path: string, init: RequestInit, _failureMessage: string): Promise<T> {
   if (!API_BASE_URL) {
     throw new ConversationsApiError(
@@ -64,31 +104,50 @@ async function _request<T>(path: string, init: RequestInit, _failureMessage: str
     throw new ConversationsApiError("unauthenticated", "User must be signed in.");
   }
   const token = await currentUser.getIdToken();
+  const url = `${API_BASE_URL}${path}`;
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), CONVERSATIONS_TIMEOUT_MS);
+  // Only retry safe (idempotent) methods. Retrying a POST that timed out
+  // mid-flight risks creating a duplicate resource server-side — e.g. a
+  // cold-start retry of POST /conversations would land two conversations
+  // for one user click. Mutations (POST/PATCH/DELETE) run once and surface
+  // the transient error to the caller.
+  const method = (init.method ?? "GET").toUpperCase();
+  const retriable = method === "GET" || method === "HEAD";
+  const maxAttempts = retriable ? _MAX_ATTEMPTS : 1;
 
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      ...init,
-      headers: {
-        ...(init.headers ?? {}),
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      signal: controller.signal,
-    });
-  } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") {
+  let response: Response | null = null;
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const candidate = await _attemptOnce(url, init, token);
+      // 5xx is transport-level transient — retry on safe methods only.
+      if (retriable && candidate.status >= 500 && candidate.status < 600 && attempt < maxAttempts) {
+        await _sleep(_RETRY_BACKOFF_MS);
+        continue;
+      }
+      response = candidate;
+      lastError = null;
+      break;
+    } catch (err) {
+      lastError = err;
+      if (!retriable || !_isTransientError(err) || attempt >= maxAttempts) {
+        break;
+      }
+      await _sleep(_RETRY_BACKOFF_MS);
+    }
+  }
+
+  if (response === null) {
+    // Network / timeout exhausted after retries.
+    if (lastError instanceof DOMException && lastError.name === "AbortError") {
       throw new ConversationsApiError(
         "request_timeout",
         "Timed out loading conversations. Please try again.",
       );
     }
-    throw err;
-  } finally {
-    clearTimeout(timeoutId);
+    if (lastError) throw lastError;
+    throw new ConversationsApiError("request_failed", "Request failed for an unknown reason.");
   }
 
   if (!response.ok) {
