@@ -1,27 +1,28 @@
-"use client";
-
-import { Progress } from "@/components/ui/progress";
-import { cn } from "@/lib/utils";
-
 type StepIndicatorProps = {
   currentStep: number;
-  totalSteps?: number;
+  totalSteps: number;
 };
 
-export function StepIndicator({ currentStep, totalSteps = 3 }: StepIndicatorProps) {
-  const progressPercent = Math.round((currentStep / totalSteps) * 100);
+export function StepIndicator({ currentStep, totalSteps }: StepIndicatorProps) {
+  const percent = (currentStep / totalSteps) * 100;
 
   return (
-    <div className="flex w-full flex-col items-center gap-2">
-      <Progress
-        value={progressPercent}
-        className={cn(
-          "w-full [&_[data-slot=progress-track]]:bg-neutral-200 [&_[data-slot=progress-indicator]]:bg-brand-primary-500",
-        )}
-      />
-      <p className="text-xs text-neutral-500">
+    <div className="space-y-3">
+      <p className="text-sm font-medium text-neutral-500">
         Step {currentStep} of {totalSteps}
       </p>
+      <div
+        className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-100"
+        role="progressbar"
+        aria-valuenow={currentStep}
+        aria-valuemin={1}
+        aria-valuemax={totalSteps}
+      >
+        <div
+          className="h-full rounded-full bg-brand-primary-500 transition-all duration-300 ease-out"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
     </div>
   );
 }
