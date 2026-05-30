@@ -69,6 +69,7 @@ async def _user_from_decoded_token(decoded: dict, db: MongoDBClient) -> User:
         raise ApiError("unauthorized", "Token missing email claim", status_code=401) from None
 
     uid: uuid.UUID = derive_user_id(decoded_uid)
+    picture: str | None = decoded.get("picture")
     user = await db.find_one("users", {"_id": uid}, User)
     if user is None:
         now = datetime.now(UTC)
@@ -76,6 +77,8 @@ async def _user_from_decoded_token(decoded: dict, db: MongoDBClient) -> User:
             id=uid,
             email=email,
             name=decoded.get("name", email.split("@")[0]),
+            provider_avatar_url=picture,
+            custom_avatar_url=None,
             updated_at=now,
             default_location={"city": "", "state": "", "lat": 0.0, "lon": 0.0},
             loyalty_memberships=[],
@@ -105,6 +108,16 @@ async def _user_from_decoded_token(decoded: dict, db: MongoDBClient) -> User:
             created_at=now,
         )
         await db.upsert("users", user.id, user)
+    elif picture is not None and picture != user.provider_avatar_url:
+        now = datetime.now(UTC)
+        await db.partial_update(
+            "users",
+            user.id,
+            {"provider_avatar_url": picture, "updated_at": now},
+            model=User,
+        )
+        user.provider_avatar_url = picture
+        user.updated_at = now
 
     return user
 
