@@ -122,8 +122,8 @@ export default function MagicLinkVerifyPage() {
             </>
           ) : (
             <div className="flex flex-col items-center text-center">
-              <div className="flex size-12 items-center justify-center rounded-full bg-red-50">
-                <AlertCircle className="size-6 text-red-600" aria-hidden />
+              <div className="flex size-12 items-center justify-center rounded-full bg-semantic-danger-bg">
+                <AlertCircle className="size-6 text-semantic-danger" aria-hidden />
               </div>
               <h1 className="mt-4 text-2xl font-semibold tracking-tight text-neutral-900">
                 Sign-in failed

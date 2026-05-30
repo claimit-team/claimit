@@ -40,6 +40,7 @@ import type { ClaimDetailDoc } from "@/lib/api/claims";
 import type { ClaimDetail } from "@/lib/claim-detail-types";
 import { EDITABLE_STATUSES } from "@/lib/claims-status";
 import { useUIStore } from "@/store";
+import { useClaimAssistantPromptStore } from "@/store/claim-assistant-prompt";
 import {
   normalizeClaimId,
   REDRAFT_TIMEOUT_MS,
@@ -213,15 +214,35 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
     window.print();
   };
 
+  const isDesktop = useMediaQuery("(min-width: 1024px)");
+  const isTablet = useMediaQuery("(min-width: 768px)");
+
+  const handleTryDifferentAngle = useCallback(() => {
+    const isRegeneratingNow = useClaimRedraftProgressStore
+      .getState()
+      .isRegenerating(claim.claim_id);
+    if (isRegeneratingNow) return;
+
+    const reason = claim.denial_reason?.trim();
+    const reasonClause = reason
+      ? ` with this reason: "${reason}"`
+      : " (no specific reason was recorded)";
+    const prompt = `This claim was denied${reasonClause}. Please try a different angle for the claim — suggest a stronger approach and regenerate the draft with updated wording.`;
+
+    if (!isDesktop && isTablet) setTabletTab("assistant");
+    if (!isDesktop && !isTablet) setMobileTab("assistant");
+
+    toast.info("Asking the Assistant to try a different angle…");
+
+    useClaimAssistantPromptStore.getState().queuePrompt(claim.claim_id, prompt);
+  }, [claim.claim_id, claim.denial_reason, isDesktop, isTablet]);
+
   const assistantExpanded = useUIStore((s) => s.claimEmbeddedAssistantExpanded);
   const setEmbeddedExpanded = useUIStore((s) => s.setClaimEmbeddedAssistantExpanded);
   const toggleEmbedded = useUIStore((s) => s.toggleClaimEmbeddedAssistant);
 
   const outerGroupRef = useRef<GroupImperativeHandle | null>(null);
   const innerGroupRef = useRef<GroupImperativeHandle | null>(null);
-
-  const isDesktop = useMediaQuery("(min-width: 1024px)");
-  const isTablet = useMediaQuery("(min-width: 768px)");
 
   // Pane-layout sync: the global `claimEmbeddedAssistantExpanded` flag can
   // be flipped to `true` from OUTSIDE this component — specifically the
@@ -442,6 +463,7 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
         onClickCancel={handleClickCancel}
         onClickApprove={handleClickApprove}
         onClickPrint={handleClickPrint}
+        onClickTryDifferentAngle={handleTryDifferentAngle}
       />
 
       {/* Banner + outcome prompt are post-action surfaces that have no

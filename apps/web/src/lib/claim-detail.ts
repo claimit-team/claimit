@@ -496,7 +496,7 @@ export function formatClaimCurrency(amount: number, currency = "USD"): string {
 
 export function formatClaimRemainingTime(hours: number): string {
   if (hours <= 0) return "Expired";
-  const days = Math.floor(hours / 24);
+  const days = Math.ceil(hours / 24);
   const remainingHours = hours % 24;
   if (days > 0) return `${days} day${days > 1 ? "s" : ""} remaining`;
   return `${remainingHours} hour${remainingHours !== 1 ? "s" : ""} remaining`;
