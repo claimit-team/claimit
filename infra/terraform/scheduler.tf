@@ -1,9 +1,9 @@
 # ClaimIt Cloud Scheduler jobs.
 #
-# Three scheduled HTTP triggers, all in UTC:
+# Scheduled HTTP triggers, all in UTC:
 #   - claimit-monitor-cron         every 15 min — monitor agent price polling
 #   - claimit-gmail-watch-renewal  daily 03:00  — ingest agent watch refresh
-#   - claimit-smoke-test           daily 04:00  — GitHub Actions dispatch (PAUSED)
+#   - claimit-claim-auto-send      every 1 min  — claim-agent auto-submit
 #
 # Auth model:
 #   - Cloud Run targets use OIDC tokens minted as `pubsub_pusher`, the SA created
@@ -158,47 +158,4 @@ resource "google_cloud_scheduler_job" "claim_auto_send" {
     google_service_account_iam_member.scheduler_service_agent_token_creator,
     google_cloud_run_v2_service_iam_member.scheduler_invoker_on_claim_agent,
   ]
-}
-
-# ---------- Job 3: GitHub Actions smoke test (PAUSED) ----------
-# Daily 04:00 UTC — fires a repository_dispatch event so a CI workflow can run
-# an end-to-end smoke test.
-#
-# Currently PAUSED. To enable:
-#   1. Create a GitHub token that can call repository_dispatch on
-#      claimit-team/claimit, store it in Secret Manager as `github-pat`.
-#      - Classic PAT: `repo` scope
-#      - Fine-grained PAT: repository "Contents" permission (write)
-#   2. Cloud Scheduler cannot inject Secret Manager values into HTTP headers
-#      directly. Two options:
-#        a) Add a tiny proxy endpoint on one of the agents (e.g.
-#           assistant-agent /admin/smoke-test) that reads the PAT and forwards
-#           to GitHub. Repoint this job at that endpoint with oidc_token (same
-#           pattern as Jobs 1 and 2).
-#        b) Use a Cloud Workflow that pulls the secret and calls the GitHub API.
-#   3. Flip `paused = false` once one of the above is in place.
-resource "google_cloud_scheduler_job" "smoke_test" {
-  name        = "claimit-smoke-test"
-  description = "Daily GitHub Actions dispatch for end-to-end smoke testing (PAUSED until PAT wiring)."
-  project     = var.project_id
-  region      = var.region
-  schedule    = "0 4 * * *"
-  time_zone   = "UTC"
-  paused      = true
-
-  retry_config {
-    retry_count        = 1
-    max_retry_duration = "60s"
-  }
-
-  http_target {
-    uri         = "https://api.github.com/repos/claimit-team/claimit/dispatches"
-    http_method = "POST"
-    body        = base64encode(jsonencode({ event_type = "smoke-test" }))
-
-    headers = {
-      "Content-Type" = "application/json"
-      "Accept"       = "application/vnd.github+json"
-    }
-  }
 }
