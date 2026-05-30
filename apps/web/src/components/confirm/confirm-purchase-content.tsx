@@ -172,19 +172,29 @@ export function ConfirmPurchaseContent({
   // with edits to platform / purchase_date / member_tier on the form.
   const { policy, loading: policyLoading } = usePlatformPolicy(formState.platform);
 
-  // Mirror the WindowWarningBanner's gating: only meaningful once we have a
-  // platform + date + a resolved policy. While loading / incomplete, treat as
-  // in-window so Confirm isn't wrongly disabled mid-load. When true, ActionBar
-  // disables Confirm — monitoring a past-window purchase is rejected server-side.
-  const outsideWindow =
-    !policyLoading &&
-    formState.platform !== "" &&
-    formState.purchaseDate !== null &&
-    isOutsideWindow({
-      purchaseDate: formState.purchaseDate,
-      policy,
-      memberTier: formState.memberTier.trim() || null,
-    }).outside;
+  // Out-of-window evaluation, only meaningful once we have a platform + date
+  // and the policy lookup has settled (treat loading/incomplete as in-window
+  // so Confirm isn't wrongly disabled mid-load).
+  const windowEval =
+    !policyLoading && formState.platform !== "" && formState.purchaseDate !== null
+      ? isOutsideWindow({
+          purchaseDate: formState.purchaseDate,
+          policy,
+          memberTier: formState.memberTier.trim() || null,
+        })
+      : null;
+
+  // Only block Confirm when the backend would actually 409. The two confirm
+  // seams diverge when no Policy exists for the platform:
+  //   - confirm-create (upload `draft`): `_resolve_window_expires` runs with
+  //     fallback_default=True → a 15-day default window, so it rejects a past
+  //     window even with no Policy. Block here too (computeWindowDays mirrors
+  //     the same 15-day default).
+  //   - confirm (existing pending doc): fallback_default=False → no Policy
+  //     means the window is left untouched and NO 409 fires. So a missing
+  //     Policy must NOT disable Confirm on this path, or the FE would block
+  //     something the server happily accepts (CodeRabbit #300).
+  const outsideWindow = Boolean(windowEval?.outside) && (Boolean(draft) || policy !== null);
 
   return (
     <div className="flex min-h-[calc(100dvh-4rem)] flex-col">
@@ -246,10 +256,9 @@ export function ConfirmPurchaseContent({
                 />
                 <WindowWarningBanner
                   platform={formState.platform}
-                  purchaseDate={formState.purchaseDate}
-                  memberTier={formState.memberTier}
-                  policy={policy}
-                  policyLoading={policyLoading}
+                  outside={outsideWindow}
+                  windowDays={windowEval?.windowDays ?? 0}
+                  isDraft={Boolean(draft)}
                 />
               </div>
               <ExtractionReviewForm

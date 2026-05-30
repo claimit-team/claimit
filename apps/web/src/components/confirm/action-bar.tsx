@@ -132,8 +132,12 @@ export function ActionBar({
   // Confirm CTA is blocked here too. Surfaced as the action-bar helper text
   // and enforced in `handleConfirm`. The form-validity blocker takes
   // precedence (fix the fields first); otherwise this explains the lock.
-  const outsideWindowMessage =
-    "This purchase is past its price-protection window — it can no longer be monitored. Dismiss it instead.";
+  // The upload-draft flow has no Dismiss control (nothing is persisted yet —
+  // see the `!draft` gate on the dialog below), so steer those users to
+  // Cancel/discard rather than a Dismiss button that doesn't exist.
+  const outsideWindowMessage = draft
+    ? "This purchase is past its price-protection window — it can no longer be monitored. Cancel to discard it."
+    : "This purchase is past its price-protection window — it can no longer be monitored. Dismiss it instead.";
   const confirmBlocker = submitBlocker ?? (outsideWindow ? outsideWindowMessage : null);
 
   const hasSender = typeof purchase.sender === "string" && purchase.sender.trim().length > 0;
