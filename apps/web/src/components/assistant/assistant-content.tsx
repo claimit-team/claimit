@@ -3,7 +3,7 @@
 import { AlertCircle, Loader2, Menu, MoreHorizontal, Search, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { MarkdownMessage } from "@/components/assistant/markdown-message";
@@ -57,8 +57,7 @@ function EmptyConversationState({ onPromptSelect }: { onPromptSelect: (text: str
           What do you want to tackle?
         </h1>
         <p className="mt-3 text-sm leading-relaxed text-neutral-600">
-          Ask about airlines, hospitality policies, drafting chat scripts — or riff on an open
-          claim.
+          Claims, policies, or drafts — ask anything.
         </p>
       </div>
       <div className="w-full max-w-lg">
@@ -171,7 +170,7 @@ type ConversationRowProps = {
   onDelete: (c: Conversation) => void;
 };
 
-function ConversationRow({
+const ConversationRow = memo(function ConversationRow({
   conversation,
   displayTitle,
   isActive,
@@ -249,7 +248,8 @@ function ConversationRow({
       </div>
     </li>
   );
-}
+});
+ConversationRow.displayName = "ConversationRow";
 
 type ConversationListProps = {
   conversations: Conversation[];
@@ -339,9 +339,11 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
   const router = useRouter();
   const {
     conversations,
+    currentId,
     isLoading: convLoading,
     error: convError,
     refetch: refetchConversations,
+    selectConversation,
     createConversation,
     renameConversation,
     archiveConversation,
@@ -377,16 +379,33 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
   }, [activeConversations, searchQuery]);
 
   const active = conversationId ? conversations.find((c) => c._id === conversationId) : undefined;
-  const unknownId = Boolean(conversationId) && !active && !convLoading;
+  // For sidebar highlight ONLY. After a `replaceState`-only first-send, the
+  // URL bar updates to /assistant/<new-id> but useParams() / `conversationId`
+  // prop stay null (we bypassed Next.js's router on purpose to avoid the
+  // remount). The new conv id lives in `currentId` (from useConversations).
+  // Fall back to it so the sidebar row gets highlighted. DO NOT use this for
+  // `active` lookup — that must stay URL-prop-driven so the hydrate effect
+  // doesn't see a "conversation switch" that isn't real.
+  const effectiveConvId = conversationId ?? currentId;
+  // BUG-62: only treat the id as truly "unknown" when the LIST fetch succeeded
+  // and returned at least one conversation. A failed/empty fetch must not
+  // collapse to the "Conversation not found" branch — the user might have a
+  // valid url that we simply couldn't verify yet (cold start, network blip).
+  const unknownId =
+    !convError && conversations.length > 0 && Boolean(conversationId) && !active && !convLoading;
 
   useEffect(() => {
     if (streaming) return;
     const id = active?._id ?? null;
     if (id === prevActiveIdRef.current) return;
+    // Don't wipe a locally-streamed buffer when active is momentarily undefined
+    // (replaceState-only navigation hasn't propagated to the conversationId prop)
+    // so the just-sent messages don't flash to the empty state.
+    if (!active && messages.length > 0) return;
     prevActiveIdRef.current = id;
     if (active) hydrate(wireToUI(active.messages));
     else reset();
-  }, [active, hydrate, reset, streaming]);
+  }, [active, hydrate, reset, streaming, messages.length]);
 
   // Track whether the user is currently near the bottom of the message list.
   // Stored in a ref (not state) so the auto-scroll effect below depends only
@@ -447,12 +466,25 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
     if (!text || streaming) return;
     setDraft("");
 
-    let convId = active?._id ?? null;
+    let convId = active?._id ?? currentId ?? null;
+    let pendingNavConvId: string | null = null;
     if (!convId) {
       try {
         const created = await createConversation("general");
         convId = created._id;
-        router.push(`/assistant/${convId}`);
+        // Seed prevActiveIdRef so the hydrate effect (line ~397) treats this
+        // id as already-seen and skips the post-stream HYDRATE that would
+        // otherwise wipe the local message buffer with the cached empty
+        // active.messages snapshot.
+        prevActiveIdRef.current = convId;
+        // URL bar update is deferred until AFTER sendMessage completes AND
+        // uses replaceState instead of router.push: replaceState updates the
+        // address bar (refresh / share / back-button-target work) but does
+        // NOT trigger Next.js's router → no remount of AssistantContent
+        // mid-stream. The new conv id lives in useConversations.currentId
+        // (set by createConversation), so subsequent sends in this chat
+        // pick it up via the `currentId` fallback above.
+        pendingNavConvId = convId;
       } catch {
         toast.error("Couldn't start a new conversation. Please try again.");
         return;
@@ -463,6 +495,15 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
     // scroll handler will update this ref naturally on subsequent user scrolls.
     isAtBottomRef.current = true;
     await sendMessage(convId, text);
+    if (pendingNavConvId) {
+      window.history.replaceState(null, "", `/assistant/${pendingNavConvId}`);
+      // Fire-and-forget refetch so the sidebar row's deriveTitle preview
+      // (or backend-assigned title) replaces the "New Conversation" literal.
+      // The optimistic `created` object cached in useConversations has
+      // `messages: []` — refetch repopulates it so deriveTitle's preview
+      // branch (firstUser.content) kicks in.
+      refetchConversations();
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -475,14 +516,33 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
     }
   };
 
-  const handleSelectConversation = (_id: string) => {
-    setHistoryOpen(false);
-  };
+  // Full reset for "New chat" — the replaceState approach in
+  // sendDraftIfPossible bypasses Next.js's router, so a plain
+  // router.push("/assistant") doesn't clear the in-component state that
+  // tracks the active chat. We explicitly tear down all three: the hook's
+  // currentId (so the next send's `active?._id ?? currentId` fallback
+  // resolves to null and triggers createConversation), the local message
+  // buffer (so the previous chat's messages don't linger on screen), and
+  // prevActiveIdRef (so the hydrate effect re-arms for the next URL).
+  const handleNewChat = useCallback(() => {
+    selectConversation(null);
+    reset();
+    prevActiveIdRef.current = null;
+    router.push("/assistant");
+  }, [selectConversation, reset, router]);
 
-  const handleRenameOpen = (c: Conversation) => {
+  // Memoized handlers (BUG-110): stable refs let React.memo on ConversationRow
+  // skip re-renders when other AssistantContent state changes (draft, search,
+  // streaming) — otherwise every row would re-render on every keystroke and
+  // the post-create flow would flash the whole list.
+  const handleSelectConversation = useCallback((_id: string) => {
+    setHistoryOpen(false);
+  }, []);
+
+  const handleRenameOpen = useCallback((c: Conversation) => {
     setRenameTarget(c);
     setRenameValue(deriveTitle(c));
-  };
+  }, []);
 
   const handleRenameSave = async () => {
     if (!renameTarget) return;
@@ -497,17 +557,20 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
     }
   };
 
-  const handleArchive = async (id: string) => {
-    try {
-      await archiveConversation(id);
-      toast.success("Conversation archived");
-      if (id === conversationId) {
-        router.push("/assistant");
+  const handleArchive = useCallback(
+    async (id: string) => {
+      try {
+        await archiveConversation(id);
+        toast.success("Conversation archived");
+        if (id === conversationId) {
+          router.push("/assistant");
+        }
+      } catch {
+        toast.error("Couldn't update conversation");
       }
-    } catch {
-      toast.error("Couldn't update conversation");
-    }
-  };
+    },
+    [archiveConversation, conversationId, router],
+  );
 
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
@@ -526,7 +589,25 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
 
   let mainPaneContent: ReactNode;
 
-  if (unknownId) {
+  if (convError && !active) {
+    // BUG-62: list fetch failed (likely Cloud Run cold start past the 10s
+    // client timeout, after the one auto-retry). Mirror the sidebar's
+    // destructive Alert here so the main pane isn't a misleading
+    // "Conversation not found" while the sidebar shows a fetch error.
+    mainPaneContent = (
+      <div className="flex flex-1 items-center justify-center px-6">
+        <Alert variant="destructive" className="max-w-md">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            <p className="mb-3 text-sm">{convError.message}</p>
+            <Button type="button" size="sm" variant="outline" onClick={refetchConversations}>
+              Try again
+            </Button>
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  } else if (unknownId) {
     mainPaneContent = (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
         <h2 className="text-lg font-semibold text-neutral-900">Conversation not found</h2>
@@ -538,7 +619,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
         </Button>
       </div>
     );
-  } else if (!active) {
+  } else if (!active && messages.length === 0) {
     mainPaneContent = (
       <>
         <div className="flex flex-1 flex-col overflow-y-auto px-8 py-12">
@@ -578,14 +659,16 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
   } else {
     mainPaneContent = (
       <>
-        <div className="hidden shrink-0 border-b border-neutral-200 bg-neutral-0 px-6 py-4 md:flex">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-              Assistant
-            </p>
-            <h2 className="text-lg font-semibold text-neutral-900">{deriveTitle(active)}</h2>
+        {active ? (
+          <div className="hidden shrink-0 border-b border-neutral-200 bg-neutral-0 px-6 py-4 md:flex">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                Assistant
+              </p>
+              <h2 className="text-lg font-semibold text-neutral-900">{deriveTitle(active)}</h2>
+            </div>
           </div>
-        </div>
+        ) : null}
         <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-4 px-4 py-6 lg:px-10">
             <ProactiveCard />
@@ -616,15 +699,31 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
                     </p>
                   )}
                   {msg.role === "assistant" ? (
-                    <>
-                      <MarkdownMessage text={msg.content} animate={msg.streaming} />
-                      {msg.streaming ? (
-                        <Loader2
-                          aria-hidden
-                          className="ml-1 inline-block h-3 w-3 animate-spin text-neutral-500 align-middle"
-                        />
-                      ) : null}
-                    </>
+                    msg.streaming && !msg.content.trim() ? (
+                      // Pre-first-token "thinking" state — three pulsing dots
+                      // until the assistant's first text_chunk arrives. Once
+                      // content accumulates, fall through to the streaming
+                      // MarkdownMessage + inline Loader2 spinner below.
+                      <div
+                        className="flex items-center gap-1 py-1"
+                        role="status"
+                        aria-label="Assistant is thinking"
+                      >
+                        <span className="h-2 w-2 animate-pulse rounded-full bg-neutral-400 [animation-delay:0ms]" />
+                        <span className="h-2 w-2 animate-pulse rounded-full bg-neutral-400 [animation-delay:200ms]" />
+                        <span className="h-2 w-2 animate-pulse rounded-full bg-neutral-400 [animation-delay:400ms]" />
+                      </div>
+                    ) : (
+                      <>
+                        <MarkdownMessage text={msg.content} animate={msg.streaming} />
+                        {msg.streaming ? (
+                          <Loader2
+                            aria-hidden
+                            className="ml-1 inline-block h-3 w-3 animate-spin text-neutral-500 align-middle"
+                          />
+                        ) : null}
+                      </>
+                    )
                   ) : (
                     <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                   )}
@@ -674,7 +773,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
 
   const listProps = {
     conversations: filteredConversations,
-    currentId: conversationId,
+    currentId: effectiveConvId,
     searchQuery,
     isLoading: convLoading,
     onSearchChange: setSearchQuery,
@@ -693,7 +792,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
             variant="outline"
             size="sm"
             className="w-full sm:w-auto"
-            onClick={() => router.push("/assistant")}
+            onClick={handleNewChat}
           >
             New chat
           </Button>
@@ -735,7 +834,7 @@ export function AssistantContent({ conversationId }: { conversationId: string | 
                     className="w-full"
                     onClick={() => {
                       setHistoryOpen(false);
-                      router.push("/assistant");
+                      handleNewChat();
                     }}
                   >
                     New chat
