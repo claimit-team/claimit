@@ -5,20 +5,18 @@ import { AlertTriangle } from "lucide-react";
 import { safePlatformLabel } from "@/lib/purchase-detail-view";
 
 /**
- * Out-of-window warning surface for the confirm page (BUG-59).
+ * Out-of-window warning surface for the confirm + re-upload pages (BUG-59).
  *
- * Driven by the parent's `outside` decision (`outsideWindow` in
- * confirm-purchase-content) rather than recomputing the window itself, so the
- * banner and the disabled Confirm CTA can never disagree. That decision is
- * already path-aware: it stays false for the confirm path when no Policy
- * exists (the backend leaves the window untouched and does NOT 409 there), and
- * true for the upload-draft path (the backend uses a 15-day default and will
- * 409 on a past window).
+ * Driven by the parent's `outside` decision rather than recomputing the window
+ * itself, so the banner and the disabled submit CTA can never disagree. Each
+ * caller computes `outside` to match its backend seam — e.g. the confirm path
+ * leaves `outside` false when no Policy exists (the server doesn't 409 there),
+ * while the upload-draft path blocks on the 15-day default.
  *
- * When shown, the Confirm CTA is disabled (ActionBar) and the backend rejects
- * the submit with 409 `window_expired` — a past-window purchase can no longer
- * be monitored, so the user is steered to Dismiss (or, on the upload-draft
- * path, to Cancel/discard, since there is no Dismiss control there).
+ * Copy is intentionally factual (no "dismiss"/"cancel" steering): the action
+ * differs per surface (Dismiss on confirm, Cancel on an upload draft, fix the
+ * date on re-upload) and is already conveyed by the visible controls + the
+ * disabled submit button, so the banner shouldn't hard-code one of them.
  */
 
 interface WindowWarningBannerProps {
@@ -27,16 +25,9 @@ interface WindowWarningBannerProps {
   outside: boolean;
   /** Applicable price-protection window length, for the message copy. */
   windowDays: number;
-  /** Upload-draft flow has no Dismiss control — steer to Cancel instead. */
-  isDraft: boolean;
 }
 
-export function WindowWarningBanner({
-  platform,
-  outside,
-  windowDays,
-  isDraft,
-}: WindowWarningBannerProps) {
+export function WindowWarningBanner({ platform, outside, windowDays }: WindowWarningBannerProps) {
   if (!outside) return null;
 
   const label = safePlatformLabel(platform);
@@ -49,8 +40,7 @@ export function WindowWarningBanner({
           This purchase is outside {label}&apos;s {windowDays}-day price protection window
         </p>
         <p className="mt-0.5 text-sm text-neutral-500">
-          It can no longer be monitored — no claim could be filed.{" "}
-          {isDraft ? "Cancel to discard it." : "Dismiss it instead."}
+          It can no longer be monitored — no claim could be filed.
         </p>
       </div>
     </div>

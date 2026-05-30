@@ -61,6 +61,7 @@ import {
   type ConfirmFormState,
   getSubmitBlocker,
 } from "@/lib/confirm-form-state";
+import { isOutsideWindow } from "@/lib/policy-window";
 import { cn } from "@/lib/utils";
 
 // Mirror the backend upload validators (MAX_UPLOAD_BYTES = 10 MB,
@@ -272,6 +273,21 @@ export function ReuploadReceiptDialog({
     ? deriveLowConfidenceFields(draft.extraction?.extraction_confidence ?? null)
     : { fields: [], isMostlyFailed: false };
 
+  // Out-of-window evaluation for the re-upload review step. Re-upload maps to
+  // `reupload_receipt`, which recomputes the window with fallback_default=False
+  // — so a missing Policy leaves the window untouched and does NOT 409. Block
+  // (and warn) only when a Policy exists and the corrected date is past it;
+  // this is never the create/draft path, so there's no 15-day-default block.
+  const windowEval =
+    inReview && !policyLoading && formState.platform !== "" && formState.purchaseDate !== null
+      ? isOutsideWindow({
+          purchaseDate: formState.purchaseDate,
+          policy,
+          memberTier: formState.memberTier.trim() || null,
+        })
+      : null;
+  const outsideWindow = Boolean(windowEval?.outside) && policy !== null;
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-2xl" showCloseButton={!busy}>
@@ -293,10 +309,8 @@ export function ReuploadReceiptDialog({
             />
             <WindowWarningBanner
               platform={formState.platform}
-              purchaseDate={formState.purchaseDate}
-              memberTier={formState.memberTier}
-              policy={policy}
-              policyLoading={policyLoading}
+              outside={outsideWindow}
+              windowDays={windowEval?.windowDays ?? 0}
             />
             <ExtractionReviewForm
               state={formState}
@@ -379,7 +393,7 @@ export function ReuploadReceiptDialog({
             <Button
               type="button"
               onClick={() => void handleSubmit()}
-              disabled={submitting || getSubmitBlocker(formState) !== null}
+              disabled={submitting || getSubmitBlocker(formState) !== null || outsideWindow}
               className="bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600"
             >
               {submitting ? (

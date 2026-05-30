@@ -258,7 +258,6 @@ export function ConfirmPurchaseContent({
                   platform={formState.platform}
                   outside={outsideWindow}
                   windowDays={windowEval?.windowDays ?? 0}
-                  isDraft={Boolean(draft)}
                 />
               </div>
               <ExtractionReviewForm
