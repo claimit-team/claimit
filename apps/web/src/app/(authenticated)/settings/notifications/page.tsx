@@ -33,11 +33,6 @@ type EventTypeRow = {
   icon: ComponentType<{ className?: string }>;
 };
 
-type Channel = {
-  label: string;
-  status: string;
-};
-
 // The 7 event types we surface in the notifications UI. Keys must match
 // values in the backend NotificationEventType enum
 // (claimit_mongodb_models/enums.py); a `muted_event_types` payload with
@@ -90,11 +85,6 @@ const EVENT_TYPE_DEFS: EventTypeRow[] = [
   },
 ];
 
-const channels: Channel[] = [
-  { label: "Email notifications", status: "Available soon" },
-  { label: "Push notifications", status: "Available soon" },
-];
-
 export default function NotificationsPage() {
   const user = useAuthStore((s) => s.user);
   const isAuthLoading = useAuthStore((s) => s.isLoading);
@@ -106,13 +96,20 @@ export default function NotificationsPage() {
   const [mutedKeys, setMutedKeys] = useState<Set<NotificationEventType>>(new Set());
   // Last successful server state — what Reset reverts to.
   const [savedMutedKeys, setSavedMutedKeys] = useState<Set<NotificationEventType>>(new Set());
+  // Email channel — same edit-buffer + last-saved pattern as mutedKeys so
+  // hasChanges / Reset / Save all treat it uniformly.
+  const [emailEnabled, setEmailEnabled] = useState<boolean>(false);
+  const [savedEmailEnabled, setSavedEmailEnabled] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (user) {
-      const initial = new Set(user.notification_prefs.muted_event_types);
-      setMutedKeys(initial);
-      setSavedMutedKeys(initial);
+      const initialMuted = new Set(user.notification_prefs.muted_event_types);
+      setMutedKeys(initialMuted);
+      setSavedMutedKeys(initialMuted);
+      const initialEmail = user.notification_prefs.email;
+      setEmailEnabled(initialEmail);
+      setSavedEmailEnabled(initialEmail);
     }
   }, [user]);
 
@@ -129,19 +126,23 @@ export default function NotificationsPage() {
     if (!user) return;
     setIsSaving(true);
     try {
-      // PUT /settings/notifications fully replaces notification_prefs, so
-      // we always re-send web_push and email at their current values. The
-      // UI doesn't expose those toggles yet (the "Channels" card shows
-      // them as Coming Soon) — preserving them keeps the backend honest.
+      // PUT /settings/notifications fully replaces notification_prefs.
+      // `email` comes from the local edit buffer (now a real toggle in
+      // the Channels card). `web_push` is still preserved at its current
+      // server value because there's no toggle for it yet (push delivery
+      // ships in a later phase).
       const updated = await updateNotifications({
         web_push: user.notification_prefs.web_push,
-        email: user.notification_prefs.email,
+        email: emailEnabled,
         muted_event_types: Array.from(mutedKeys),
       });
       setUser(updated);
-      const persisted = new Set(updated.notification_prefs.muted_event_types);
-      setMutedKeys(persisted);
-      setSavedMutedKeys(persisted);
+      const persistedMuted = new Set(updated.notification_prefs.muted_event_types);
+      setMutedKeys(persistedMuted);
+      setSavedMutedKeys(persistedMuted);
+      const persistedEmail = updated.notification_prefs.email;
+      setEmailEnabled(persistedEmail);
+      setSavedEmailEnabled(persistedEmail);
       toast.success("Notification settings saved.");
     } catch (err) {
       const message =
@@ -156,15 +157,17 @@ export default function NotificationsPage() {
 
   const handleReset = () => {
     setMutedKeys(new Set(savedMutedKeys));
+    setEmailEnabled(savedEmailEnabled);
     toast.info("Settings reset to last saved state.");
   };
 
   const isLoading = isAuthLoading || !user;
   const hasChanges = useMemo(() => {
+    if (emailEnabled !== savedEmailEnabled) return true;
     if (mutedKeys.size !== savedMutedKeys.size) return true;
     for (const k of mutedKeys) if (!savedMutedKeys.has(k)) return true;
     return false;
-  }, [mutedKeys, savedMutedKeys]);
+  }, [mutedKeys, savedMutedKeys, emailEnabled, savedEmailEnabled]);
 
   return (
     <div className="space-y-6">
@@ -261,33 +264,45 @@ export default function NotificationsPage() {
         <CardHeader className="pb-0">
           <CardTitle className="text-lg text-neutral-900">Channels</CardTitle>
           <CardDescription className="text-neutral-700">
-            Control which events appear in your notification center and Assistant. Email and push
-            delivery will be added soon.
+            Choose how you'd like to receive notifications. Email delivery is now available; push
+            notifications are coming soon.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-4">
           <div className="space-y-0">
-            {channels.map((channel, index) => (
-              <div key={channel.label}>
-                <div className="flex items-center justify-between py-3">
-                  <div className="flex items-center gap-3">
-                    {channel.label === "Email notifications" ? (
-                      <Mail className="size-5 text-neutral-400" aria-hidden="true" />
-                    ) : (
-                      <Smartphone className="size-5 text-neutral-400" aria-hidden="true" />
-                    )}
-                    <span className="text-sm text-neutral-500">{channel.label}</span>
-                  </div>
-                  <Badge
-                    variant="secondary"
-                    className="bg-neutral-100 font-normal text-neutral-500"
-                  >
-                    {channel.status}
-                  </Badge>
-                </div>
-                {index < channels.length - 1 ? <Separator className="bg-neutral-200" /> : null}
+            {/* Email — real toggle wired to local edit buffer */}
+            <div className="flex items-center justify-between py-3">
+              <div className="flex items-center gap-3">
+                <Mail className="size-5 text-neutral-500" aria-hidden="true" />
+                <label
+                  htmlFor="channel-email"
+                  className="cursor-pointer text-sm font-medium text-neutral-900"
+                >
+                  Email notifications
+                </label>
               </div>
-            ))}
+              {isLoading ? (
+                <Skeleton className="h-5 w-8" />
+              ) : (
+                <Switch
+                  id="channel-email"
+                  checked={emailEnabled}
+                  onCheckedChange={(checked) => setEmailEnabled(checked)}
+                  className="ml-4 shrink-0 data-checked:bg-brand-primary-500"
+                />
+              )}
+            </div>
+            <Separator className="bg-neutral-200" />
+            {/* Push — placeholder until VAPID + service worker ship */}
+            <div className="flex items-center justify-between py-3">
+              <div className="flex items-center gap-3">
+                <Smartphone className="size-5 text-neutral-400" aria-hidden="true" />
+                <span className="text-sm text-neutral-500">Push notifications</span>
+              </div>
+              <Badge variant="secondary" className="bg-neutral-100 font-normal text-neutral-500">
+                Coming soon
+              </Badge>
+            </div>
           </div>
         </CardContent>
       </Card>

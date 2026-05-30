@@ -25,6 +25,7 @@ dependencies = [
     "claimit-pubsub",
     "claimit-search",
     "claimit-gmail",
+    "claimit-notifier",
 ]
 
 [tool.uv.sources]
@@ -34,6 +35,7 @@ claimit-elastic = { path = "../../packages/shared/elastic" }
 claimit-pubsub = { path = "../../packages/shared/pubsub" }
 claimit-search = { path = "../../packages/shared/search" }
 claimit-gmail = { path = "../../packages/shared/gmail" }
+claimit-notifier = { path = "../../packages/shared/notifier" }
 
 [dependency-groups]
 dev = [
