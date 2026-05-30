@@ -33,7 +33,7 @@
  */
 
 import { Check, Loader2, Send } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { isValidSelfServiceJson } from "@/components/claims/draft-parsers";
@@ -70,7 +70,20 @@ interface ApproveAction {
   icon: typeof Send;
 }
 
-export function getApproveAction(claimType: string, gmailConnected: boolean): ApproveAction {
+export function getApproveAction(
+  claimType: string,
+  gmailConnected: boolean,
+  status?: string,
+): ApproveAction {
+  if (status === "queued_for_send") {
+    return {
+      headerLabel: "Send now",
+      dialogTitle: "Send now",
+      confirmLabel: "Send now",
+      loadingLabel: "Sending…",
+      icon: Send,
+    };
+  }
   switch (claimType) {
     case "email":
       return gmailConnected
@@ -128,6 +141,11 @@ function summaryCopy(claim: ClaimDetail, gmailConnected: boolean): string {
   const claimType = claim.claim_type satisfies ClaimDetailDraftType;
   switch (claimType) {
     case "email":
+      if (claim.status === "queued_for_send") {
+        return gmailConnected
+          ? "This claim is queued to send automatically from your Gmail in a few minutes. Click Send now to send immediately."
+          : "This claim is queued but Gmail is not connected. Connect Gmail in Settings to enable auto-send, or copy the draft and send it yourself.";
+      }
       return gmailConnected
         ? `This will send your price match request to ${platform} from your Gmail. You'll be notified when they respond.`
         : `Approving locks this email draft. Connect Gmail in Settings to send automatically, or copy the draft and send it yourself.`;
@@ -150,8 +168,12 @@ export function ApproveConfirmDialog({
   refetch,
 }: ApproveConfirmDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Ref mirrors state so handleOpenChange always sees the latest value
+  // even when called synchronously from Esc/backdrop before React
+  // re-renders (stale closure race — isSubmitting state would be stale).
+  const isSubmittingRef = useRef(false);
   const gmailConnected = useAuthStore((s) => s.user?.gmail_integration?.connected ?? false);
-  const action = getApproveAction(claim.claim_type, gmailConnected);
+  const action = getApproveAction(claim.claim_type, gmailConnected, claim.status);
   const description = summaryCopy(claim, gmailConnected);
   const ActionIcon = action.icon;
 
@@ -160,12 +182,12 @@ export function ApproveConfirmDialog({
   // mid-write and re-trigger the action on reopen (mirrors the
   // cancel-dialog fix; CodeRabbit MAJOR finding, PR #168).
   const handleOpenChange = (nextOpen: boolean) => {
-    if (isSubmitting && !nextOpen) return;
+    if (isSubmittingRef.current && !nextOpen) return;
     onOpenChange(nextOpen);
   };
 
   const handleConfirm = async () => {
-    if (isSubmitting) return;
+    if (isSubmittingRef.current) return;
     // Pre-approve validation for dirty self-service drafts: when the
     // reviewer clicks "Approve and send" with unsaved edits, the body
     // includes `edited_draft_content` straight from the editor, which
@@ -180,6 +202,7 @@ export function ApproveConfirmDialog({
       toast.error("Invalid walkthrough format — fix the JSON before approving");
       return;
     }
+    isSubmittingRef.current = true;
     setIsSubmitting(true);
     try {
       const body = dirty ? { edited_draft_content: editedDraftContent } : {};
@@ -212,6 +235,7 @@ export function ApproveConfirmDialog({
       const message = err instanceof Error ? err.message : "Could not approve claim";
       toast.error(message);
     } finally {
+      isSubmittingRef.current = false;
       setIsSubmitting(false);
     }
   };
