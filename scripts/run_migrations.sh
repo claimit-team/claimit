@@ -36,7 +36,9 @@ if uv run \
 else
   echo ""
   echo "::warning::Elastic index creation failed; continuing."
-  echo "::warning::Elastic is being dropped in favor of MongoDB Atlas Search in the next change."
+  echo "::warning::The assistant's policy search uses Elastic Agent Builder MCP over the"
+  echo "::warning::policies-fulltext index — if that index is missing, search_policies_fulltext"
+  echo "::warning::returns no results at runtime. Investigate rather than ignore."
   echo ""
 fi
 

@@ -6,8 +6,8 @@ Both the change-stream sync worker (`apps/sync-worker`) and the one-shot
 initial backfill (`backfill.py` in this package) share these projections so
 the field set indexed by both paths can never drift.
 
-UUIDs are stringified — `elasticsearch-py`'s default JSON serializer does
-not know how to encode `uuid.UUID`, but ES stores these as `keyword` so a
+UUIDs are stringified — `elasticsearch-py`'s default JSON serializer can encode
+neither `uuid.UUID` NOR `bson.Binary`, but ES stores these as `keyword` so a
 plain string round-trips faithfully. Datetimes pass through (the serializer
 handles them natively).
 """
@@ -19,7 +19,33 @@ from uuid import UUID
 
 
 def _stringify_uuid(value: Any) -> Any:
-    return str(value) if isinstance(value, UUID) else value
+    """Coerce a UUID-ish value to its canonical string form for ES.
+
+    Motor/PyMongo return UUID fields as `bson.Binary` (subtype 4) under the
+    default `uuidRepresentation`, NOT `uuid.UUID` — so handling only `UUID`
+    (the previous behaviour) let a raw `Binary` reach `async_bulk`, where
+    `elasticsearch-py` raised `SerializationError: Unable to serialize
+    Binary(...)` and aborted the whole backfill on the first purchase doc.
+
+    We duck-type `Binary.as_uuid()` rather than importing `bson`, so this module
+    stays importable without pymongo. Already-`str` values and non-UUID types
+    pass through unchanged.
+    """
+    if isinstance(value, UUID):
+        return str(value)
+    # bson.Binary (a bytes subclass) exposes as_uuid(); subtype 4 decodes with
+    # the default STANDARD representation.
+    as_uuid = getattr(value, "as_uuid", None)
+    if callable(as_uuid):
+        try:
+            return str(as_uuid())
+        except Exception:
+            # Non-standard subtype or non-UUID Binary: best-effort raw 16-byte
+            # decode, else leave it for the caller (don't crash here).
+            raw = bytes(value)
+            if len(raw) == 16:
+                return str(UUID(bytes=raw))
+    return value
 
 
 def project_purchase(doc: dict[str, Any]) -> dict[str, Any]:

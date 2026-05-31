@@ -32,6 +32,11 @@ locals {
     "sendgrid-api-key",
     "elastic-url",
     "elastic-api-key",
+    # NOTE: elastic-kibana-url (Kibana endpoint for Agent Builder MCP) is
+    # deliberately NOT here — it is managed manually (created out-of-band via
+    # gcloud), exactly like gmail-oauth-* below, so terraform never tries to
+    # create/destroy it. It still appears in assistant_secrets for the IAM grant
+    # + env mount. See the comment on ELASTIC_KIBANA_URL in assistant_secrets.
     # amadeus-client-id and amadeus-client-secret removed — self-service portal
     # closing July 2026, no sandbox credentials available. Re-add when an
     # alternative travel-price source is set up.
@@ -152,7 +157,16 @@ locals {
     ANTHROPIC_API_KEY = "anthropic-api-key"
     ELASTIC_URL       = "elastic-url"
     ELASTIC_API_KEY   = "elastic-api-key"
-    PHOENIX_API_KEY   = "phoenix-api-key"
+    # Kibana endpoint for Elastic Agent Builder MCP (search_policies_fulltext).
+    # MANUALLY MANAGED like gmail-oauth-* (NOT in google_secret_manager_secret.shared):
+    # the elastic-kibana-url secret is created out-of-band via `gcloud secrets
+    # create / versions add`, so terraform never creates or destroys it. The
+    # cloud-run module still grants secretAccessor + mounts it here because
+    # secret_ids takes the id as a string. The deployed Agent Engine runtime gets
+    # it injected as a plain env_var by scripts/deploy_agents.py (Agent Engine
+    # can't read SecretRef mounts).
+    ELASTIC_KIBANA_URL = "elastic-kibana-url"
+    PHOENIX_API_KEY    = "phoenix-api-key"
   }
   # sync-worker: tails MongoDB change streams and mirrors writes into
   # Elasticsearch indices. Not an ADK agent — no Vertex AI dependency.
