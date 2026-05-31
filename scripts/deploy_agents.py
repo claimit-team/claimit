@@ -94,6 +94,15 @@ AGENT_READONLY_MAP = {
 }
 MONGODB_MCP_SERVICE_READONLY = "claimit-mongodb-mcp-readonly"
 
+# Phoenix MCP routing. A single shared Cloud Run bridge serves all four agents
+# (no readonly/readwrite split). `PHOENIX_MCP_URL` is injected into each agent's
+# Agent Engine env so its Phoenix MCP read tool (get_recent_trace_summary, and
+# the assistant's read_claim_reasoning_spans) reaches the bridge over Streamable
+# HTTP + OIDC. `PHOENIX_PROJECT_NAME` routes the read at the project that
+# init_phoenix on the Cloud Run agents writes their spans into.
+PHOENIX_MCP_SERVICE = "claimit-phoenix-mcp"
+PHOENIX_PROJECT_NAME = "claimit"
+
 
 @dataclass
 class DeployResult:
@@ -277,6 +286,35 @@ def get_mongodb_mcp_url(agent_name: str) -> str:
     return service.uri
 
 
+def get_phoenix_mcp_url() -> str:
+    """Resolve the Cloud Run service URL for the Phoenix MCP supergateway bridge.
+
+    Shared by all four agents (unlike MongoDB MCP's readonly/readwrite split,
+    there is a single Phoenix MCP service). Returns the bare service URI (no
+    /mcp suffix); `claimit_mcp.call_phoenix_mcp_tool` appends the MCP path, and
+    the bare URL is also the OIDC audience the runtime SA must target.
+
+    Raises RuntimeError when the service doesn't exist yet — terraform apply
+    (infra/terraform/phoenix_mcp.tf) must run before this script, same ordering
+    constraint as get_mongodb_mcp_url.
+    """
+    project = get_project_id()
+    location = get_location()
+    full_name = f"projects/{project}/locations/{location}/services/{PHOENIX_MCP_SERVICE}"
+    try:
+        run_client = run_v2.ServicesClient()
+        service = run_client.get_service(name=full_name)
+    except gcp_exc.NotFound as e:
+        raise RuntimeError(
+            f"Cloud Run service '{PHOENIX_MCP_SERVICE}' not found in "
+            f"{project}/{location}. Run terraform apply (see "
+            "infra/terraform/phoenix_mcp.tf) before deploying agents."
+        ) from e
+    except Exception as e:
+        raise RuntimeError(f"Cannot resolve PHOENIX_MCP_URL: {e}") from e
+    return service.uri
+
+
 def find_existing_agent(client, display_name: str):
     """Find a deployed AgentEngine by display_name. Returns AgentEngine or None.
 
@@ -316,6 +354,11 @@ def deploy_one(
     # baked in, useful if a future refactor moves to lazy resolution.
     if not dry_run:
         os.environ["MDB_MCP_URL"] = get_mongodb_mcp_url(agent_name)
+        # Parity with MDB_MCP_URL: the Phoenix MCP wrappers read PHOENIX_MCP_URL
+        # at call time (not import), so this isn't strictly load-bearing today,
+        # but set it before import to stay correct if a future agent.py builds a
+        # Phoenix toolset at module level (same cloudpickle trap as MDB_MCP_URL).
+        os.environ["PHOENIX_MCP_URL"] = get_phoenix_mcp_url()
 
     raw_agent = import_agent(module_path, agent_name)
     print(f"  Loaded: {raw_agent.name} (model={raw_agent.model})")
@@ -368,6 +411,16 @@ def deploy_one(
     env_vars: dict[str, str] = {}
     if not dry_run:
         env_vars["MDB_MCP_URL"] = get_mongodb_mcp_url(agent_name)
+        # Phoenix MCP read path for ALL four agents: PHOENIX_MCP_URL routes the
+        # get_recent_trace_summary tool (and, on the assistant, Mode B's
+        # read_claim_reasoning_spans) to the Cloud Run bridge; PHOENIX_PROJECT_NAME
+        # targets the project init_phoenix on the Cloud Run agents writes spans
+        # into. The Phoenix API key is NOT injected here — the bridge holds it
+        # (the agents authenticate to the bridge with OIDC, not the Phoenix key),
+        # and init_phoenix (the only PHOENIX_API_KEY consumer) runs in the Cloud
+        # Run FastAPI lifespan, not the Agent Engine reasoning runtime.
+        env_vars["PHOENIX_MCP_URL"] = get_phoenix_mcp_url()
+        env_vars["PHOENIX_PROJECT_NAME"] = PHOENIX_PROJECT_NAME
         # Ticket 5.10 Plan B: assistant_agent talks to MongoDB directly
         # (bypasses the Cloud Run MCP service). It needs MONGODB_URI in
         # the Agent Engine runtime env so claimit_mongodb_models.MongoDBClient

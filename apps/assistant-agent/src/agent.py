@@ -49,10 +49,16 @@ user_id is injected via `tool_context`:
     chat content.
 """
 
+import os
 from typing import Any
 from uuid import UUID
 
-from claimit_mcp import call_mongodb_mcp_tool, extract_tool_documents
+from claimit_mcp import (
+    call_mongodb_mcp_tool,
+    call_phoenix_mcp_tool,
+    extract_tool_documents,
+    summarize_recent_spans,
+)
 from claimit_mongodb_models import MongoDBClient
 from google.adk import Agent
 from google.adk.tools import FunctionTool, ToolContext
@@ -165,6 +171,37 @@ async def search_platform_policy(platform: str) -> list[dict[str, Any]]:
     return await _find_policy_for_platform(platform)
 
 
+async def get_recent_trace_summary(limit: int = 50) -> list[dict[str, Any]]:
+    """Summarize the assistant's recent reasoning traces from Phoenix.
+
+    GENUINE runtime Phoenix MCP usage: calls the `get-spans` tool over Streamable
+    HTTP + OIDC via `claimit_mcp.call_phoenix_mcp_tool` (`PHOENIX_MCP_URL` injected
+    at deploy time). Returns ONLY operation names, status codes, and counts —
+    span attributes (which carry prompt/response content across users) are
+    stripped by `summarize_recent_spans`, so no purchase/claim/policy content or
+    other-user data can leak through this tool.
+
+    Args:
+        limit: Max recent spans to scan (1-200).
+
+    Returns:
+        A list of `{span_name, status_code, count}` summaries, or
+        `[{"error": "phoenix_unavailable", "detail": <class>}]` on failure.
+    """
+    capped = max(1, min(limit, 200))
+    try:
+        result = await call_phoenix_mcp_tool(
+            "get-spans",
+            {
+                "project_identifier": os.environ.get("PHOENIX_PROJECT_NAME", "claimit"),
+                "limit": capped,
+            },
+        )
+    except Exception as exc:
+        return [{"error": "phoenix_unavailable", "detail": type(exc).__name__}]
+    return summarize_recent_spans(result)
+
+
 MODE_A_SYSTEM_PROMPT = """You are the ClaimIt Assistant, a helpful AI assistant for the ClaimIt price-protection platform.
 
 ## Your Role
@@ -181,6 +218,7 @@ You help users understand their purchases, claims, savings, and platform policie
 ## Tools You Have
 - `get_all_purchases_for_user(limit=50)` — returns the active user's monitored purchases. The user is scoped automatically by the session; you do not pass a user id. Call this for any "my purchases" / "what am I monitoring" / "what did I buy" question.
 - `search_platform_policy(platform)` — looks up a platform's price-protection / price-match / best-rate-guarantee policy. Pass the platform identifier in lowercase with underscores (e.g. "hilton", "best_buy", "delta", "amazon"); identify it from the user's question. Returns the window, exclusions, claim method, and the relevant policy text. Call this for any "how does <platform>'s policy work" / BRG / price-match question.
+- `get_recent_trace_summary(limit=50)` — returns a sanitized summary (operation names, status codes, and counts only) of recent agent observability traces from Phoenix. Use for "what has the assistant been doing", "show recent activity / traces" style questions. It contains no purchase, claim, or policy content.
 
 ## How to Respond
 - Be friendly, concise, and accurate
@@ -202,5 +240,9 @@ assistant_agent = Agent(
     name="assistant_agent",
     model="gemini-2.5-flash",
     instruction=MODE_A_SYSTEM_PROMPT,
-    tools=[FunctionTool(get_all_purchases_for_user), FunctionTool(search_platform_policy)],
+    tools=[
+        FunctionTool(get_all_purchases_for_user),
+        FunctionTool(search_platform_policy),
+        FunctionTool(get_recent_trace_summary),
+    ],
 )

@@ -60,6 +60,8 @@ def main() -> int:
     # Stub env so module-level imports / factory calls don't blow up
     # on missing infra config. We never actually connect to anything.
     os.environ.setdefault("MDB_MCP_URL", "https://example.run.app")
+    os.environ.setdefault("PHOENIX_MCP_URL", "https://example.run.app")
+    os.environ.setdefault("PHOENIX_PROJECT_NAME", "claimit")
     os.environ.setdefault("MONGODB_URI", "mongodb://localhost:27017/test")
     os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "claimit-beta")
 

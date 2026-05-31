@@ -29,8 +29,8 @@ import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from claimit_mcp.phoenix import QueryResult, SpanRecord, read_claim_reasoning_spans
 from claimit_mongodb_models import Claim, MongoDBClient, SendMode
-from claimit_observability import QueryResult, SpanRecord, query_claim_spans
 from claimit_pubsub import (
     TOPIC_CLAIM_REDRAFT_REQUESTED,
     ClaimRedraftRequestedEvent,
@@ -39,7 +39,17 @@ from claimit_pubsub import (
 
 logger = logging.getLogger(__name__)
 
-_REASONING_TRACE_TIMEOUT_SECONDS = 5.0
+# Outer budget for the whole get_reasoning_trace tool (Mongo get_claim + the
+# Phoenix MCP read). Raised from 5.0 to 8.0 when the trace read moved off the
+# in-process phoenix.client (1.5s) onto a Phoenix MCP round-trip (agent ->
+# Cloud Run supergateway -> stdio phoenix-mcp -> Phoenix API + OIDC mint + MCP
+# handshake), which is materially slower.
+_REASONING_TRACE_TIMEOUT_SECONDS = 8.0
+# Inner budget passed to the Phoenix MCP read — kept strictly below the outer
+# budget so a slow Phoenix yields a graceful status="timeout" rather than
+# tripping the outer wait_for (which returns the terser timeout payload), and
+# leaves headroom for the Mongo get_claim call in the same _run().
+_PHOENIX_QUERY_TIMEOUT_SECONDS = 6.0
 # Mongo MCP calls inside the same VPC should resolve in well under a
 # second; 5s is a generous outer bound so a wedged MCP server can never
 # hang the tool call indefinitely (BUG-61).
@@ -333,7 +343,7 @@ def make_get_reasoning_trace(
     user_id: str,
     claim_id: str,
     db_factory: _DBFactory = MongoDBClient,
-    phoenix_query: _PhoenixQueryFn = query_claim_spans,
+    phoenix_query: _PhoenixQueryFn = read_claim_reasoning_spans,
 ) -> Callable[[], Awaitable[_ToolResult]]:
     """Build the `get_reasoning_trace` tool bound to (user_id, claim_id).
 
@@ -360,7 +370,7 @@ def make_get_reasoning_trace(
                           self_eval_attempts are populated.
         - "pending"     — claim exists but spans haven't been exported
                           yet (BatchSpanProcessor has a 5s schedule).
-        - "timeout"     — query exceeded the 5s budget.
+        - "timeout"     — query exceeded the Phoenix MCP read budget.
         - "unavailable" — Phoenix env vars unset or the API rejected us.
         """
 
@@ -422,7 +432,7 @@ def make_get_reasoning_trace(
             try:
                 query_result = await phoenix_query(
                     claim_id,
-                    timeout=_REASONING_TRACE_TIMEOUT_SECONDS,
+                    timeout=_PHOENIX_QUERY_TIMEOUT_SECONDS,
                 )
             except Exception:
                 logger.exception("get_reasoning_trace phoenix query raised claim_id=%s", claim_id)
@@ -523,7 +533,7 @@ def _as_int(value: Any, *, default: int) -> int:
 
 
 def _as_list(value: Any) -> list[Any]:
-    """Tolerate either a real list (phoenix_client already parsed it) or
+    """Tolerate either a real list (claimit_mcp.phoenix already parsed it) or
     a raw string left over from an unparseable stringified-list attr."""
     if isinstance(value, list):
         return value

@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
-from claimit_observability import QueryResult, SpanRecord
+from claimit_mcp.phoenix import QueryResult, SpanRecord
 from src.tools.claim_tools import (
     make_get_claim_context,
     make_get_reasoning_trace,
