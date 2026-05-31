@@ -1,6 +1,13 @@
 "use client";
 
-import { AlertTriangle, CircleDot, Sparkles, TrendingDown, TrendingUp } from "lucide-react";
+import {
+  AlertTriangle,
+  CircleDot,
+  Loader2,
+  Sparkles,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
 import { type ReactNode, useState } from "react";
 import {
   Line,
@@ -123,15 +130,22 @@ function ChartEmptyState({
   onAddProductUrl,
 }: ChartEmptyStateProps) {
   if (monitorErrorCode === "missing_product_url") {
+    // Resolvable retail platforms (best_buy / target) keep auto-resolving a
+    // product link on every monitor sweep, and notify via the bell once found
+    // — so this is an active "searching" state, not a dead end. The user can
+    // paste the link to skip the wait. (Honors the confirm-page promise.)
     return (
-      <div className="flex flex-col items-center justify-center rounded-md border border-semantic-warning/40 border-dashed bg-semantic-warning/5 px-4 py-10 text-center">
-        <div className="flex size-10 items-center justify-center rounded-full bg-semantic-warning/10 text-semantic-warning">
-          <AlertTriangle className="size-5" aria-hidden />
+      <div
+        className="flex flex-col items-center justify-center rounded-md border border-neutral-200 border-dashed bg-neutral-50 px-4 py-10 text-center"
+        aria-live="polite"
+      >
+        <div className="flex size-10 items-center justify-center rounded-full bg-neutral-100 text-neutral-500">
+          <Loader2 className="size-5 animate-spin" aria-hidden />
         </div>
-        <p className="mt-3 font-medium text-neutral-900 text-sm">Monitoring is blocked</p>
+        <p className="mt-3 font-medium text-neutral-900 text-sm">Searching for the product link…</p>
         <p className="mt-1 max-w-sm text-neutral-500 text-xs">
-          This purchase doesn&apos;t have a product URL yet, so ClaimIt can&apos;t check the live{" "}
-          {platform} price. Add a URL to start monitoring.
+          ClaimIt is looking for the {platform} product page and will notify you once it&apos;s
+          found. Know the link? Add it to start monitoring right away.
         </p>
         <Button
           type="button"
@@ -219,7 +233,11 @@ export function PriceHistoryChart({
   // "Updated …" timestamp would lie about the data state. Branch on
   // `monitorErrorCode` to surface the error timestamp + "Last check
   // failed" copy instead.
-  const inErrorState = monitorErrorCode != null;
+  // `missing_product_url` is framed as an active "searching for the link"
+  // state (the cron re-resolves every sweep + notifies via the bell), NOT a
+  // failure — so it's excluded from the error footer and gets its own line.
+  const searchingLink = monitorErrorCode === "missing_product_url";
+  const inErrorState = monitorErrorCode != null && !searchingLink;
   const errorTimeAgo = monitorErrorAt !== null ? getPurchaseRelativeTime(monitorErrorAt) : null;
   const timeAgo = lastChecked !== null ? getPurchaseRelativeTime(lastChecked) : null;
 
@@ -309,7 +327,9 @@ export function PriceHistoryChart({
         </div>
 
         <p className="mt-4 text-neutral-500 text-xs">
-          {inErrorState ? (
+          {searchingLink ? (
+            <>Searching for the product link · {platform}</>
+          ) : inErrorState ? (
             <>
               Last check failed {errorTimeAgo ?? "recently"} · {platform}
             </>

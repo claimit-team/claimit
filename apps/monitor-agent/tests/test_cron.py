@@ -262,6 +262,32 @@ class TestRunCron(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(db.price_history), 1)
         self.assertIsNotNone(_last_checked_update(db, purchase.id))
 
+    async def test_lazy_resolves_missing_product_url(self) -> None:
+        """A monitoring best_buy purchase with no product_url is resolved in-tick."""
+        from src.resolver.base import ResolveResult, Scenario
+
+        now = datetime.now(UTC)
+        purchase = _make_purchase(last_checked_at=None, window_expires=now + timedelta(days=3))
+        purchase.product_url = None
+        db = _FakeDB([purchase])
+        adapter = _StubAdapter()
+        resolved_url = "https://www.bestbuy.com/site/x/6505727.p"
+
+        async def _fake_resolve(_db, p, *, notify_unresolved=True):
+            p.product_url = resolved_url
+            return ResolveResult(url=resolved_url, scenario=Scenario.RESOLVED, confidence=0.9)
+
+        with (
+            patch.object(cron_module, "get_adapter", return_value=adapter),
+            patch.object(cron_module, "_resolve_and_persist", side_effect=_fake_resolve) as resolve,
+        ):
+            summary = await run_cron(db)  # type: ignore[arg-type]
+
+        resolve.assert_awaited_once()
+        self.assertEqual(summary["resolved"], 1)
+        self.assertEqual(summary["fetched"], 1)
+        self.assertEqual(purchase.product_url, resolved_url)
+
     async def test_adapter_error_still_bumps_last_checked_at(self) -> None:
         now = datetime.now(UTC)
         purchase = _make_purchase(

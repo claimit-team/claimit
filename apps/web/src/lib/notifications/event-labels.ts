@@ -30,6 +30,7 @@ import type { NotificationEventType } from "@claimit/mongodb-types";
 import {
   CheckCircle2,
   FileText,
+  Link2,
   type LucideIcon,
   ShieldAlert,
   Sparkles,
@@ -48,6 +49,9 @@ export const EVENT_LABELS: Record<NotificationEventType, string> = {
   first_time_dashboard: "Welcome",
   user_returned_after_long_absence: "Welcome back",
   consecutive_rejections: "Pattern alert",
+  product_url_resolved: "Product link found",
+  product_url_corrected: "Product link corrected",
+  product_url_unresolved: "Product link needed",
 };
 
 export const EVENT_ICONS: Record<NotificationEventType, LucideIcon> = {
@@ -61,6 +65,9 @@ export const EVENT_ICONS: Record<NotificationEventType, LucideIcon> = {
   first_time_dashboard: Sparkles,
   user_returned_after_long_absence: Sparkles,
   consecutive_rejections: ShieldAlert,
+  product_url_resolved: Link2,
+  product_url_corrected: Link2,
+  product_url_unresolved: TriangleAlert,
 };
 
 /**
@@ -76,6 +83,9 @@ export const FILTERABLE_EVENT_TYPES: readonly NotificationEventType[] = [
   "claim_resolved_success",
   "price_dropped",
   "low_confidence_extract",
+  "product_url_resolved",
+  "product_url_corrected",
+  "product_url_unresolved",
   "consecutive_rejections",
   "first_time_dashboard",
   "user_returned_after_long_absence",

@@ -8,7 +8,10 @@ export type NotificationEventType =
   | "low_confidence_extract"
   | "first_time_dashboard"
   | "user_returned_after_long_absence"
-  | "consecutive_rejections";
+  | "consecutive_rejections"
+  | "product_url_resolved"
+  | "product_url_corrected"
+  | "product_url_unresolved";
 
 export type NotificationEntityType = "purchase" | "claim" | "conversation";
 
