@@ -110,6 +110,10 @@ locals {
     GMAIL_OAUTH_CLIENT_ID     = "gmail-oauth-client-id"
     GMAIL_OAUTH_CLIENT_SECRET = "gmail-oauth-client-secret"
     SENDGRID_API_KEY          = "sendgrid-api-key"
+    # Required for OTel->Phoenix export; without it init_phoenix short-circuits
+    # and ingest-agent's spans never reach Phoenix (paired with
+    # PHOENIX_PROJECT_NAME in env_vars below).
+    PHOENIX_API_KEY = "phoenix-api-key"
   }
   # monitor: polls current prices via Keepa (Amazon), Amadeus (travel),
   # ScraperAPI (retail fallback); writes price-history records.
@@ -120,6 +124,9 @@ locals {
     # AMADEUS_CLIENT_ID and AMADEUS_CLIENT_SECRET removed — Amadeus
     # self-service portal closing July 2026, no sandbox credentials available.
     # Re-add when an alternative travel-price source is set up.
+    # Required for OTel->Phoenix export (paired with PHOENIX_PROJECT_NAME in the
+    # monitor_agent env_vars below).
+    PHOENIX_API_KEY = "phoenix-api-key"
   }
   # claim: drafts refund claims via Anthropic + Agent Builder; sends them via
   # the user's Gmail (OAuth client); telemetry to Elastic.
@@ -201,6 +208,11 @@ module "ingest_agent" {
     # `infra/terraform/iam.tf`), so this is the only missing piece.
     GOOGLE_GENAI_USE_VERTEXAI = "true"
     GOOGLE_CLOUD_LOCATION     = var.region
+    # Phoenix tracing: land ingest-agent's OTel spans in the `claimit` project
+    # (not `default`) so the assistant's reasoning-trace reader can see them.
+    # PHOENIX_API_KEY is mounted via ingest_secrets; the OTLP collector endpoint
+    # falls back to init_phoenix's claimitbeta default.
+    PHOENIX_PROJECT_NAME = "claimit"
     # Ticket 5.14: the /pubsub/purchase.uploaded handler reads receipt
     # blobs out of this bucket. Same value as api-gateway's mount so the
     # gs:// URI written on upload is the URI ingest-agent fetches.
@@ -226,13 +238,20 @@ module "ingest_agent" {
 module "monitor_agent" {
   source = "./modules/cloud-run-agent"
 
-  project_id          = var.project_id
-  region              = var.region
-  service_name        = "claimit-monitor-agent"
-  image               = var.monitor_agent_image
-  memory_limit        = "2Gi" # monitor-agent runs Playwright + Chromium; default 1Gi will OOM
-  secret_ids          = values(local.monitor_secrets)
-  secret_env_map      = local.monitor_secrets
+  project_id     = var.project_id
+  region         = var.region
+  service_name   = "claimit-monitor-agent"
+  image          = var.monitor_agent_image
+  memory_limit   = "2Gi" # monitor-agent runs Playwright + Chromium; default 1Gi will OOM
+  secret_ids     = values(local.monitor_secrets)
+  secret_env_map = local.monitor_secrets
+  env_vars = {
+    # Phoenix tracing: land monitor-agent's OTel spans in the `claimit` project
+    # (not `default`) so the assistant's reasoning-trace reader can see them.
+    # PHOENIX_API_KEY is mounted via monitor_secrets; the OTLP collector
+    # endpoint falls back to init_phoenix's claimitbeta default.
+    PHOENIX_PROJECT_NAME = "claimit"
+  }
   deletion_protection = false
 
   depends_on = [google_secret_manager_secret.shared]
@@ -291,19 +310,22 @@ module "assistant_agent" {
   secret_env_map = local.assistant_secrets
   env_vars = {
     # Query base URL for Phoenix Cloud — distinct from the OTLP collector
-    # path (.../v1/traces) that PHOENIX_COLLECTOR_ENDPOINT points at.
-    # Mode B's get_reasoning_trace tool reads this to query spans for a
-    # claim (ticket 3.24) AND to construct the in-app deep link the user
-    # can click to inspect the trace directly.
+    # path (.../v1/traces) that PHOENIX_COLLECTOR_ENDPOINT points at. Mode B's
+    # get_reasoning_trace tool reads this to construct the in-app deep link the
+    # user can click to inspect the trace directly (the span READ itself now
+    # goes through Phoenix MCP via PHOENIX_MCP_URL below, not this URL).
     PHOENIX_BASE_URL           = "https://app.phoenix.arize.com/s/claimitbeta"
     PHOENIX_COLLECTOR_ENDPOINT = "https://app.phoenix.arize.com/s/claimitbeta/v1/traces"
+    # Phoenix MCP bridge — Mode B's read_claim_reasoning_spans reads the claim's
+    # validator/self-eval spans through this Cloud Run service over MCP (OIDC-
+    # gated; the assistant Cloud Run SA holds run.invoker, see phoenix_mcp.tf).
+    # Bare service URL; claimit_mcp appends /mcp.
+    PHOENIX_MCP_URL = module.phoenix_mcp.service_url
     # Project routing — init_phoenix sets this as the OpenInference
-    # `openinference.project.name` resource attribute so spans land in
-    # the `claimit` project (not `default`). The read side queries the
-    # same project name. Until claim-agent / monitor-agent / ingest-
-    # agent also set this, the assistant only sees its OWN spans, not
-    # the claim-agent spans it needs for Mode B explanations — tracked
-    # as a follow-up issue.
+    # `openinference.project.name` resource attribute so spans land in the
+    # `claimit` project (not `default`); the read side queries the same name.
+    # ingest/monitor/claim/api-gateway now also set it (see their modules), so
+    # the Mode B read sees the claim-agent spans it needs for explanations.
     PHOENIX_PROJECT_NAME = "claimit"
     # Mode B ADK runner + Pub/Sub publish (request_redraft).
     GOOGLE_CLOUD_PROJECT      = var.project_id
@@ -353,9 +375,13 @@ module "api_gateway" {
   env_vars = {
     CORS_ALLOWED_ORIGINS      = "https://claimitai.vercel.app,http://localhost:3000"
     CORS_ALLOWED_ORIGIN_REGEX = "https://claimitai[a-z0-9-]*\\.vercel\\.app"
-    GMAIL_OAUTH_REDIRECT_URI  = "https://claimit-api-gateway-i4zxjn67hq-ue.a.run.app/api/v1/gmail/callback"
-    FRONTEND_BASE_URL         = var.web_frontend_url
-    GCP_PROJECT_ID            = var.project_id
+    # Phoenix tracing: land api-gateway's OTel spans in the `claimit` project
+    # (not `default`). PHOENIX_API_KEY is mounted via api_gateway_secrets; the
+    # OTLP collector endpoint falls back to init_phoenix's claimitbeta default.
+    PHOENIX_PROJECT_NAME     = "claimit"
+    GMAIL_OAUTH_REDIRECT_URI = "https://claimit-api-gateway-i4zxjn67hq-ue.a.run.app/api/v1/gmail/callback"
+    FRONTEND_BASE_URL        = var.web_frontend_url
+    GCP_PROJECT_ID           = var.project_id
     # Post-5.14 prod-verification fix: pubsub_publisher.py reads
     # GOOGLE_CLOUD_PROJECT only — without this, POST /purchases/upload
     # 503'd at the first publish call. Codify alongside GCP_PROJECT_ID so a

@@ -5,6 +5,10 @@ description = "ClaimIt shared observability — Phoenix/OTel SDK initialization 
 requires-python = ">=3.12"
 dependencies = [
     "arize-phoenix-otel>=0.6.0",
+    # NOTE: the span-read path moved to claimit_mcp.phoenix (Phoenix MCP), so
+    # arize-phoenix-client is no longer imported by this package. Retained here
+    # only to avoid churning the five app uv.lock files (Docker builds run
+    # `uv sync --frozen`); safe to drop in a follow-up that regenerates locks.
     "arize-phoenix-client>=1.0.0",
     "opentelemetry-api>=1.27.0",
     "opentelemetry-sdk>=1.27.0",

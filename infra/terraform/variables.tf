@@ -55,6 +55,12 @@ variable "api_gateway_image" {
   default     = "us-docker.pkg.dev/cloudrun/container/hello"
 }
 
+variable "phoenix_mcp_image" {
+  type        = string
+  description = "Container image URL for the Phoenix MCP supergateway bridge (apps/phoenix-mcp/Dockerfile). Defaults to the hello placeholder so the first apply succeeds before CI builds the image; deploy-prod.yml's gcloud run deploy swaps in the :sha image."
+  default     = "us-docker.pkg.dev/cloudrun/container/hello"
+}
+
 variable "web_frontend_url" {
   type        = string
   description = "Base URL of the Vercel-hosted web frontend. Used as Pub/Sub push target and as FRONTEND_BASE_URL for ingest-agent (confirmation email deep links) and api-gateway."

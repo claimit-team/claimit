@@ -7,6 +7,7 @@ on:
       - "infra/**"
       - "apps/*-agent/**"
       - "!apps/*-agent/src/agent.py"
+      - "apps/phoenix-mcp/**"
       - "apps/sync-worker/**"
       - "apps/api-gateway/**"
       - "apps/web/**"
@@ -119,6 +120,12 @@ jobs:
             dockerfile: apps/Dockerfile.agent
           - agent: api-gateway
             dockerfile: apps/Dockerfile.agent
+          # Phoenix MCP stdio->HTTP supergateway bridge. Custom image (unlike the
+          # MongoDB MCP service, which runs a prebuilt public image); built here
+          # and swapped onto the terraform-managed claimit-phoenix-mcp service by
+          # the deploy-cloud-run job below.
+          - agent: phoenix-mcp
+            dockerfile: apps/phoenix-mcp/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
@@ -160,7 +167,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        agent: [ingest-agent, claim-agent, assistant-agent, monitor-agent, sync-worker, api-gateway]
+        agent: [ingest-agent, claim-agent, assistant-agent, monitor-agent, sync-worker, api-gateway, phoenix-mcp]
     steps:
       - uses: actions/checkout@v4
 
