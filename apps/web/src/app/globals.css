@@ -435,7 +435,6 @@ body {
  *   - floating assistant FAB    (authenticated/layout.tsx FloatingAssistant)
  *   - claim page sticky header  (claim-header.tsx outer <div>)
  *   - PostApproveBanner         (claim-detail-shell.tsx)
- *   - ClaimOutcomePrompt        (claim-detail-shell.tsx)
  *   - EvidencePane              (claim-detail-shell.tsx — desktop+tablet)
  *   - AssistantPane             (claim-detail-shell.tsx — desktop+tablet)
  *   - DraftPane preview/edit tabs + version dropdown (draft-pane.tsx)

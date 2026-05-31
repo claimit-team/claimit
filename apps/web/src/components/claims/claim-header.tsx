@@ -12,7 +12,7 @@
  *
  * Actions per status (mapped via mapOutcomeToWorkflowStatus):
  *   - awaiting_approval → Edit draft / Cancel claim / Approve and send
- *   - submitted         → (none — see PostApproveBanner)
+ *   - submitted         → Approved / refunded + Denied (outcome dialogs)
  *   - approved          → Reclaimed $X (view receipt deferred)
  *   - denied            → denial reason + Try a different angle
  *   - cancelled         → muted cancel reason subtext
@@ -23,6 +23,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Check,
+  CheckCircle2,
   Clock,
   Edit,
   Loader2,
@@ -60,6 +61,10 @@ interface ClaimHeaderProps {
   onClickPrint: () => void;
   /** Header → shell: queue an Assistant redraft for a denied claim. */
   onClickTryDifferentAngle?: () => void;
+  /** Header → shell: open the record-approved-outcome dialog. */
+  onClickRecordApproved?: () => void;
+  /** Header → shell: open the record-denied-outcome dialog. */
+  onClickRecordDenied?: () => void;
 }
 
 // Tooltip copy for View receipt — still missing backend (BUG-125).
@@ -140,6 +145,8 @@ export function ClaimHeader({
   onClickApprove,
   onClickPrint,
   onClickTryDifferentAngle,
+  onClickRecordApproved,
+  onClickRecordDenied,
 }: ClaimHeaderProps) {
   // Hook called unconditionally (rules-of-hooks). The interval is
   // always on; `countdown` is only read on the queued_for_send branch.
@@ -216,9 +223,31 @@ export function ClaimHeader({
         );
 
       case "submitted":
-        // Submitted to the merchant — outcome reporting lives in
-        // ClaimOutcomePrompt below PostApproveBanner in the shell.
-        return null;
+        return (
+          <>
+            <Button
+              size="sm"
+              type="button"
+              onClick={onClickRecordApproved}
+              disabled={!onClickRecordApproved}
+              className="w-full sm:w-auto"
+            >
+              <CheckCircle2 className="mr-2 h-4 w-4" />
+              Approved / refunded
+            </Button>
+            <Button
+              size="sm"
+              type="button"
+              variant="destructiveSolid"
+              onClick={onClickRecordDenied}
+              disabled={!onClickRecordDenied}
+              className="w-full sm:w-auto"
+            >
+              <XCircle className="mr-2 h-4 w-4" />
+              Denied
+            </Button>
+          </>
+        );
 
       case "approved":
         return (
