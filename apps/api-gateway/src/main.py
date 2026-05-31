@@ -39,7 +39,11 @@ _log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    init_phoenix("claimit-api-gateway")
+    # Drop the SSE notifications poll's Mongo spans: services/event_stream.py
+    # runs an `aggregate` on `notification_events` every second per open
+    # connection, which otherwise floods Phoenix with empty `claimit.aggregate`
+    # spans (pymongo auto-instrumentation). No observability value; pure noise.
+    init_phoenix("claimit-api-gateway", drop_db_collections={"notification_events"})
     # Firebase Admin — uses default GCP service account in Cloud Run;
     # falls back to GOOGLE_APPLICATION_CREDENTIALS locally.
     try:

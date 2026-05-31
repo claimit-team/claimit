@@ -17,30 +17,76 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any
 
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace.export import (
+    BatchSpanProcessor,
+    SpanExporter,
+    SpanExportResult,
+)
 from opentelemetry.trace import Span, Tracer
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_ENDPOINT = "https://app.phoenix.arize.com/s/claimitbeta/v1/traces"
 
+# OTel semconv attribute the pymongo instrumentation sets to the collection name.
+_DB_COLLECTION_ATTR = "db.mongodb.collection"
+
 _initialized = False
 
 
-def init_phoenix(service_name: str) -> None:
+class _CollectionFilterSpanExporter(SpanExporter):
+    """Wrap a SpanExporter, dropping auto-instrumented Mongo (pymongo/Motor)
+    spans whose collection is in `drop_collections`.
+
+    Silences high-frequency, low-value DB spans. Concretely: the api-gateway
+    SSE notifications stream (`services/event_stream.py`) issues an `aggregate`
+    on `notification_events` every second per open connection, flooding Phoenix
+    with empty `claimit.aggregate` spans. Filtering at export (not the call
+    site via `suppress_instrumentation()`) is deliberate — Motor runs the
+    command on a thread-pool executor, so a suppression context attached on the
+    event loop would not reach the worker thread where the span is created.
+    """
+
+    def __init__(self, inner: SpanExporter, drop_collections: set[str]) -> None:
+        self._inner = inner
+        self._drop = drop_collections
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        kept = [
+            span
+            for span in spans
+            if (span.attributes or {}).get(_DB_COLLECTION_ATTR) not in self._drop
+        ]
+        if not kept:
+            return SpanExportResult.SUCCESS
+        return self._inner.export(kept)
+
+    def shutdown(self) -> None:
+        self._inner.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30_000) -> bool:
+        return self._inner.force_flush(timeout_millis)
+
+
+def init_phoenix(service_name: str, *, drop_db_collections: set[str] | None = None) -> None:
     """Configure OTel tracing for one ClaimIt agent.
 
     Idempotent. If PHOENIX_API_KEY is unset, returns without configuring the
     pipeline so the agent process still boots — `get_tracer` will then return
     a no-op tracer from the OTel default provider.
+
+    `drop_db_collections`: optional set of MongoDB collection names whose
+    auto-instrumented spans should be dropped before export. Use for
+    high-frequency, low-value DB chatter — e.g. the api-gateway passes
+    `{"notification_events"}` to silence its 1s SSE-poll `aggregate` spans.
     """
     global _initialized
     if _initialized:
@@ -68,10 +114,12 @@ def init_phoenix(service_name: str) -> None:
         resource_attrs["openinference.project.name"] = project_name
     resource = Resource.create(resource_attrs)
     provider = TracerProvider(resource=resource)
-    exporter = OTLPSpanExporter(
+    exporter: SpanExporter = OTLPSpanExporter(
         endpoint=endpoint,
         headers={"Authorization": f"Bearer {api_key}"},
     )
+    if drop_db_collections:
+        exporter = _CollectionFilterSpanExporter(exporter, drop_db_collections)
     provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
 
