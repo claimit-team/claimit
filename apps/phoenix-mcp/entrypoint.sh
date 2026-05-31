@@ -9,7 +9,8 @@
 #
 # Secrets/config come from the environment (mounted by Cloud Run):
 #   PHOENIX_BASE_URL  — Phoenix Cloud query host (the MCP --baseUrl), plain env
-#   PHOENIX_API_KEY   — from Secret Manager; read here, never baked into the image
+#   PHOENIX_API_KEY   — from Secret Manager; consumed by run-phoenix-mcp.sh, NOT
+#                       passed on supergateway's --stdio arg (which it logs)
 #   PORT              — injected by Cloud Run (defaults to 8080)
 set -euo pipefail
 
@@ -18,8 +19,12 @@ set -euo pipefail
 PORT="${PORT:-8080}"
 
 # `exec` so supergateway becomes PID 1 and receives Cloud Run's SIGTERM directly.
+# --stdio points at run-phoenix-mcp.sh (not an inline command with the key):
+# supergateway prints its --stdio argument to the logs at startup, so the key
+# must NOT appear there. The wrapper reads PHOENIX_API_KEY from the env it
+# inherits and never echoes it.
 exec npx supergateway \
-  --stdio "npx @arizeai/phoenix-mcp --baseUrl ${PHOENIX_BASE_URL} --apiKey ${PHOENIX_API_KEY}" \
+  --stdio /app/run-phoenix-mcp.sh \
   --outputTransport streamableHttp \
   --port "${PORT}" \
   --streamableHttpPath /mcp \
