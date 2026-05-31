@@ -138,52 +138,6 @@ class GoogleIDTokenAuth(httpx.Auth):
         self, request: httpx.Request
     ) -> Generator[httpx.Request, httpx.Response, None]:
         token = self._bearer()
-
-        # DEBUG (5.10 layer 4 diagnosis): decode the JWT *without* signature
-        # verification and log iss/sub/aud/email so we can identify which
-        # runtime SA Agent Engine actually uses. We've granted run.invoker
-        # to four candidate SAs (compute default, claimit-assistant-agent,
-        # gcp-sa-aiplatform-re, gcp-sa-aiplatform) and Cloud Run still
-        # returns 403 — meaning the runtime is signed by a fifth, unknown
-        # identity. The `email` claim on a Google-minted OIDC token names
-        # the principal directly. REMOVE this block in the follow-up PR
-        # once we've granted run.invoker to the correct SA. All imports
-        # are inline to keep the removal a single contiguous delete.
-        #
-        # Output goes to stderr via print() rather than logging.getLogger
-        # because a previous iteration (PR #192) used a custom logger
-        # ("claimit_mcp.oidc_debug") that has no handler attached in the
-        # Agent Engine runtime — propagation to root dropped silently and
-        # the line never appeared in Cloud Logging. stderr is captured
-        # unconditionally by the container runtime regardless of Python
-        # logging configuration.
-        try:
-            import base64
-            import json as _json
-            import sys as _sys
-
-            parts = token.split(".")
-            if len(parts) >= 2:
-                payload = parts[1]
-                payload += "=" * ((4 - len(payload) % 4) % 4)
-                decoded = _json.loads(base64.urlsafe_b64decode(payload))
-                print(
-                    f"OIDC_TOKEN_DEBUG: iss={decoded.get('iss')!r} "
-                    f"sub={decoded.get('sub')!r} "
-                    f"aud={decoded.get('aud')!r} "
-                    f"email={decoded.get('email')!r}",
-                    file=_sys.stderr,
-                    flush=True,
-                )
-        except Exception as exc:
-            import sys as _sys
-
-            print(
-                f"OIDC_TOKEN_DEBUG_DECODE_FAIL: {exc}",
-                file=_sys.stderr,
-                flush=True,
-            )
-
         request.headers["Authorization"] = f"Bearer {token}"
         yield request
 

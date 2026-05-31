@@ -95,32 +95,56 @@ def _http_toolset(mcp_url: str) -> McpToolset:
     run.invoker validation checks the audience against the service URL
     without the path.
     """
-    # Import locally to keep the stdio-only path import-cheap (no httpx
-    # / google-auth pull-in until someone actually uses HTTP).
+    audience = mcp_url.rstrip("/")
+    connection_url = f"{audience}{_MCP_HTTP_PATH}"
+    return McpToolset(
+        connection_params=StreamableHTTPConnectionParams(
+            url=connection_url,
+            timeout=_HTTP_CONNECT_TIMEOUT_SECONDS,
+            sse_read_timeout=_HTTP_READ_TIMEOUT_SECONDS,
+            httpx_client_factory=_build_oidc_client_factory(audience),
+        ),
+    )
+
+
+def _build_oidc_client_factory(audience: str):
+    """Return an httpx client factory whose `AsyncClient` attaches a fresh Google
+    OIDC ID token (audience = bare Cloud Run service URL) to every request.
+
+    The token is injected by a `request` **event hook**, NOT httpx's client-level
+    `auth=` flow. On Vertex AI Agent Engine the deployed mcp/httpx stack does not
+    apply the `AsyncClient.auth` to Streamable-HTTP MCP requests (verified
+    2026-05-31: pre-fix every POST /mcp reached Cloud Run unauthenticated -> 403,
+    and `GoogleIDTokenAuth.sync_auth_flow` never ran). An event hook fires inside
+    `client.send()` for every request unconditionally, so the bearer is always
+    present. `_bearer()` is a cached, blocking metadata fetch minting a token for
+    the *runtime* service account.
+
+    Shared by `_http_toolset` (raw ADK toolset) and `call_mongodb_mcp_tool` (the
+    Gemini-friendly FunctionTool path) so both authenticate identically.
+    """
+    # Local imports keep the stdio-only path import-cheap (no httpx /
+    # google-auth pull-in until someone actually uses the HTTP transport).
     import httpx
 
     from .auth import GoogleIDTokenAuth
 
-    audience = mcp_url.rstrip("/")
-    connection_url = f"{audience}{_MCP_HTTP_PATH}"
     oidc_auth = GoogleIDTokenAuth(audience=audience)
+
+    async def _inject_oidc_header(request) -> None:
+        request.headers["Authorization"] = f"Bearer {oidc_auth._bearer()}"
 
     def client_factory(
         headers: httpx.Headers | None = None,
         timeout: httpx.Timeout | None = None,
         auth: httpx.Auth | None = None,
     ) -> httpx.AsyncClient:
-        # ADK's mcp session manager calls this factory with kwargs named
-        # `headers`, `timeout`, `auth` — the `auth` kwarg matches
-        # httpx.AsyncClient's own parameter name, so we accept it under
-        # that exact name (renaming it caused TypeError at session
-        # creation, ticket 5.10 hotfix #3). The kwarg `auth` here
-        # shadows the closure capture deliberately; the OIDC auth we
-        # actually want to install is bound to `oidc_auth` above, and
-        # we always use it — ADK's `auth` (typically None) is ignored
-        # because OIDC is a transport-layer concern the MCP client
-        # itself doesn't need to know about.
-        del auth  # explicit: we intentionally do not honor ADK's auth here
+        # ADK / mcp call this factory with kwargs `headers`, `timeout`, `auth`
+        # (the `auth` name matches AsyncClient's own param; renaming it broke
+        # session creation — ticket 5.10 hotfix #3). We ignore the passed `auth`
+        # and install our own via both `auth=` (for stacks that honor it) and
+        # the event hook (which actually authenticates on Agent Engine).
+        del auth
         return httpx.AsyncClient(
             headers=headers or {},
             timeout=timeout
@@ -131,16 +155,77 @@ def _http_toolset(mcp_url: str) -> McpToolset:
                 pool=_HTTP_CONNECT_TIMEOUT_SECONDS,
             ),
             auth=oidc_auth,
+            event_hooks={"request": [_inject_oidc_header]},
         )
 
-    return McpToolset(
-        connection_params=StreamableHTTPConnectionParams(
-            url=connection_url,
-            timeout=_HTTP_CONNECT_TIMEOUT_SECONDS,
-            sse_read_timeout=_HTTP_READ_TIMEOUT_SECONDS,
-            httpx_client_factory=client_factory,
-        ),
-    )
+    return client_factory
+
+
+async def call_mongodb_mcp_tool(
+    tool_name: str,
+    arguments: dict,
+    *,
+    mcp_url: str | None = None,
+):
+    """Open an authenticated Streamable-HTTP MCP session and invoke ONE tool.
+
+    This is the Gemini-friendly runtime path. Registering the raw MongoDB MCP
+    toolset fails under Gemini: `mongodb-mcp-server`'s `find`/`aggregate` input
+    schemas use JSON-Schema `const`/`oneOf`, which google-genai's function-calling
+    schema (`_ExtendedJSONSchema`) rejects (verified 2026-05-31, error 498 ->
+    zero tools loaded). Instead, a thin ADK `FunctionTool` with a simple,
+    Gemini-parseable signature calls this helper, so a *real* MongoDB MCP tool
+    call still executes at runtime while the model only sees the wrapper schema.
+
+    Auth reuses `_build_oidc_client_factory` (the event-hook OIDC fix). Reads the
+    target service from `MDB_MCP_URL` unless `mcp_url` is given.
+
+    Returns the raw mcp `CallToolResult`; use `extract_tool_documents` for dicts.
+    """
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+
+    resolved = (mcp_url or os.environ.get("MDB_MCP_URL", "")).strip()
+    if not resolved:
+        raise RuntimeError("MDB_MCP_URL not set; MongoDB MCP HTTP transport unavailable")
+    audience = resolved.rstrip("/")
+    url = f"{audience}{_MCP_HTTP_PATH}"
+    factory = _build_oidc_client_factory(audience)
+    async with (
+        streamablehttp_client(url=url, httpx_client_factory=factory) as (read, write, _),
+        ClientSession(read, write) as session,
+    ):
+        await session.initialize()
+        return await session.call_tool(tool_name, arguments)
+
+
+def extract_tool_documents(result) -> list[dict]:
+    """Best-effort parse of an mcp `CallToolResult` into a list of dicts.
+
+    `mongodb-mcp-server` returns query results as text content (JSON / EJSON).
+    We collect each `TextContent`, parse JSON objects/arrays where possible, and
+    fall back to a `{"text": ...}` wrapper so the caller always gets usable data.
+    """
+    import json
+
+    docs: list[dict] = []
+    texts: list[str] = []
+    for item in getattr(result, "content", None) or []:
+        text = getattr(item, "text", None)
+        if text is None:
+            continue
+        texts.append(text)
+        try:
+            parsed = json.loads(text)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(parsed, list):
+            docs.extend(d for d in parsed if isinstance(d, dict))
+        elif isinstance(parsed, dict):
+            docs.append(parsed)
+    if docs:
+        return docs
+    return [{"text": t} for t in texts]
 
 
 def _stdio_toolset(read_only: bool) -> McpToolset:
