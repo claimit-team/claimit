@@ -1,11 +1,11 @@
 "use client";
 
 import {
+  ArrowLeft,
   ArrowRight,
   Clock,
   Edit,
   FileText,
-  Image as ImageIcon,
   Mail,
   RotateCcw,
   Send,
@@ -30,12 +30,15 @@ const DEMO = {
     version: "v1",
     source: "AI draft",
     when: "1 day ago",
-    subject: "Price match refund — Order demo-ord-e273a5c7b4",
+    subject: "Price match refund for Order demo-ord-e273a5c7b4",
     body: `Hello Best Buy Customer Care,
 
-I'm writing to request a price match refund on a recent purchase. Order demo-ord-e273a5c7b4 — Sony WH-1000XM5 Headphones at $399.99.
+I'm writing about a recent purchase. Order demo-ord-e273a5c7b4 for Sony WH-1000XM5 Headphones at $399.99.
 
-The current price is $349.99 — a $50.00 difference, within the 30-day price match window.`,
+The current listed price is $349.99. That's a $50.00 difference within the 30-day price match window. Could you refund the difference to my original payment method?
+
+Thanks,
+[Your name]`,
   },
   evidence: {
     originalPrice: 399.99,
@@ -45,7 +48,8 @@ The current price is $349.99 — a $50.00 difference, within the 30-day price ma
     source: "Best Buy",
   },
   assistant: {
-    initial: `I matched this against Best Buy's published Price Match Guarantee. The current $349.99 is $50 less than what you paid, well within the 30-day window. The draft uses their standard refund request template — formal but not stiff. Want me to soften the tone?`,
+    initialPart1: `I matched this against Best Buy's published Price Match Guarantee.`,
+    initialPart2: `The current $349.99 is $50 less than what you paid, well within the 30-day window. Want me to soften the tone?`,
   },
 } as const;
 
@@ -94,6 +98,8 @@ type Phase =
   | { kind: "done-auto" }
   | { kind: "scripted-response"; action: QuickAction };
 
+type AssistantStage = "none" | "part1" | "indicator" | "part2" | "done";
+
 function useTypewriter(
   fullText: string,
   enabled: boolean,
@@ -128,6 +134,7 @@ export function ClaimDetailDemo() {
   const [assistantHighlight, setAssistantHighlight] = useState(false);
   const [approveGlow, setApproveGlow] = useState(false);
   const [differenceDisplay, setDifferenceDisplay] = useState("0.00");
+  const [assistantStage, setAssistantStage] = useState<AssistantStage>("none");
   const containerRef = useRef<HTMLDivElement>(null);
   const timersRef = useRef<number[]>([]);
   const inView = useInView(containerRef, { once: true, amount: 0.4 });
@@ -143,9 +150,11 @@ export function ClaimDetailDemo() {
   const beginAutoPlay = useCallback(() => {
     clearTimers();
     setPhase({ kind: "idle" });
+    setAssistantStage("none");
 
     if (reduceMotion) {
       setPhase({ kind: "done-auto" });
+      setAssistantStage("done");
       setHasPlayedOnce(true);
       return;
     }
@@ -206,8 +215,16 @@ export function ClaimDetailDemo() {
     return () => cancelAnimationFrame(raf);
   }, [inView, reduceMotion]);
 
+  useEffect(() => {
+    if (phase.kind !== "playing-assistant") return;
+    if (reduceMotion) {
+      setAssistantStage("done");
+      return;
+    }
+    setAssistantStage("part1");
+  }, [phase, reduceMotion]);
+
   const draftPlaying = phase.kind === "playing-draft";
-  const assistantPlaying = phase.kind === "playing-assistant";
   const scriptedPlaying = phase.kind === "scripted-response";
 
   const draftTypewriterEnabled =
@@ -222,33 +239,65 @@ export function ClaimDetailDemo() {
     TIMING.bodyTypeMs,
   );
 
-  const assistantFullText =
-    phase.kind === "scripted-response" ? SCRIPTED_RESPONSES[phase.action] : DEMO.assistant.initial;
+  const part1Enabled =
+    assistantStage === "part1" ||
+    assistantStage === "indicator" ||
+    assistantStage === "part2" ||
+    assistantStage === "done";
 
-  const assistantTypewriterEnabled =
-    assistantPlaying || scriptedPlaying || (phase.kind === "done-auto" && !reduceMotion);
+  const part2Enabled = assistantStage === "part2" || assistantStage === "done";
+
+  const { text: part1Text, done: part1Done } = useTypewriter(
+    DEMO.assistant.initialPart1,
+    part1Enabled,
+    TIMING.assistantTypeMs,
+  );
+
+  const { text: part2Text, done: part2Done } = useTypewriter(
+    DEMO.assistant.initialPart2,
+    part2Enabled,
+    TIMING.assistantTypeMs,
+  );
 
   const { text: assistantText, done: assistantDone } = useTypewriter(
-    assistantFullText,
-    assistantTypewriterEnabled,
+    phase.kind === "scripted-response" ? SCRIPTED_RESPONSES[phase.action] : "",
+    scriptedPlaying,
     TIMING.assistantTypeMs,
   );
 
   useEffect(() => {
-    if (phase.kind === "playing-assistant" && assistantDone) {
+    if (assistantStage === "part1" && part1Done) {
+      const t1 = window.setTimeout(() => setAssistantStage("indicator"), 200);
+      const t2 = window.setTimeout(() => setAssistantStage("part2"), 700);
+      return () => {
+        window.clearTimeout(t1);
+        window.clearTimeout(t2);
+      };
+    }
+  }, [assistantStage, part1Done]);
+
+  useEffect(() => {
+    if (assistantStage === "part2" && part2Done) {
+      setAssistantStage("done");
+    }
+  }, [assistantStage, part2Done]);
+
+  useEffect(() => {
+    if (phase.kind === "playing-assistant" && assistantStage === "done") {
       const t = window.setTimeout(() => {
         setPhase({ kind: "done-auto" });
         setHasPlayedOnce(true);
       }, TIMING.watchAgainDelay);
       return () => window.clearTimeout(t);
     }
-  }, [phase, assistantDone]);
+  }, [phase, assistantStage]);
 
   const handleChipClick = (action: QuickAction) => {
     clearTimers();
     if (phase.kind === "playing-draft" || phase.kind === "playing-assistant") {
       setHasPlayedOnce(true);
     }
+    setAssistantStage("none");
     setPhase({ kind: "scripted-response", action });
     setHasPlayedOnce(true);
   };
@@ -258,19 +307,23 @@ export function ClaimDetailDemo() {
     setPhase({ kind: "idle" });
     setHasPlayedOnce(false);
     setApproveGlow(false);
+    setAssistantStage("none");
   };
 
   const draftDisplay = phase.kind === "idle" ? "" : draftPlaying ? draftText : DEMO.draft.body;
 
-  const assistantDisplay =
-    phase.kind === "idle"
-      ? ""
-      : phase.kind === "done-auto"
-        ? DEMO.assistant.initial
-        : assistantText;
+  const part1Display =
+    assistantStage === "done" || phase.kind === "done-auto"
+      ? DEMO.assistant.initialPart1
+      : part1Text;
+
+  const part2Display =
+    assistantStage === "done" || phase.kind === "done-auto"
+      ? DEMO.assistant.initialPart2
+      : part2Text;
 
   const showDraftCursor = draftPlaying && !draftDone;
-  const showAssistantCursor = (assistantPlaying || scriptedPlaying) && !assistantDone;
+  const showInitialAssistant = assistantStage !== "none" || phase.kind === "done-auto";
 
   return (
     <>
@@ -303,110 +356,139 @@ export function ClaimDetailDemo() {
           animation: s3-shimmer 4s linear infinite;
           pointer-events: none;
         }
+        @keyframes s3-typing-bounce {
+          0%, 60%, 100% { transform: translateY(0); opacity: 0.6; }
+          30% { transform: translateY(-2px); opacity: 1; }
+        }
+        .s3-typing-dot {
+          animation: s3-typing-bounce 1s ease-in-out infinite;
+        }
         @media (prefers-reduced-motion: reduce) {
           .s3-cursor-blink, .s3-approve-glow {
             animation: none !important;
           }
           .s3-cursor-blink { opacity: 1; }
           .s3-shimmer::before { animation: none; }
+          .s3-typing-dot { animation: none; opacity: 0.8; }
         }
       `}</style>
 
       <div className="mx-auto mt-10 max-w-6xl" ref={containerRef}>
         <p className="text-center text-sm text-neutral-500">See Step 3 in action</p>
 
-        <div className="relative mt-4 overflow-hidden rounded-2xl border border-neutral-200/80 bg-gradient-to-b from-neutral-0 to-neutral-50/40 shadow-neutral-900/[0.06] shadow-xl ring-1 ring-neutral-900/[0.03]">
-          <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-full border border-neutral-200 bg-neutral-0/90 px-2 py-1 backdrop-blur-sm">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-semantic-success opacity-75" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-semantic-success" />
-            </span>
-            <span className="font-medium text-[10px] text-neutral-700">Live demo</span>
-          </div>
-
-          <div className="border-neutral-200 border-b bg-neutral-0 px-4 py-3 sm:px-6">
-            <div className="text-neutral-500 text-xs">← Claims / {DEMO.title}</div>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span className="rounded-md bg-brand-primary-50 px-2 py-0.5 font-medium text-brand-primary-500 text-xs ring-1 ring-brand-primary-500/20">
-                {DEMO.status.label}
-              </span>
-              <span className="text-neutral-500 text-sm">{DEMO.platform}</span>
-              <span className="text-neutral-300 text-sm">·</span>
-              <span className="font-medium text-neutral-700 text-sm">
-                ${DEMO.refundAmount.toFixed(2)}
-              </span>
-              <span className="text-neutral-300 text-sm">·</span>
-              <span className="flex items-center gap-1 text-semantic-warning text-sm">
-                <Clock className="h-3.5 w-3.5" aria-hidden />
-                {DEMO.daysRemaining} days remaining
+        <div
+          className="relative mt-4 overflow-hidden rounded-2xl border border-neutral-200/60 shadow-neutral-900/[0.06] shadow-xl ring-1 ring-neutral-900/[0.03]"
+          style={{
+            backgroundImage: `
+              radial-gradient(circle at 1px 1px, rgba(15, 23, 42, 0.04) 1px, transparent 0)
+            `,
+            backgroundSize: "24px 24px",
+            backgroundColor: "var(--color-neutral-0, white)",
+          }}
+        >
+          {/* Mini ClaimHeader */}
+          <div className="border-neutral-200/60 border-b bg-neutral-0/80 px-6 py-4 backdrop-blur-sm">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="inline-flex items-center gap-1 text-neutral-500 text-xs">
+                <ArrowLeft className="h-3 w-3" aria-hidden />
+                <span>Claims</span>
+                <span className="text-neutral-300">/</span>
+                <span className="font-medium text-neutral-700">{DEMO.title}</span>
+              </div>
+              <span className="inline-flex items-center gap-1.5 font-medium text-[10px] text-neutral-500">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-semantic-success opacity-75" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-semantic-success" />
+                </span>
+                Live
               </span>
             </div>
 
-            <motion.div
-              className="mt-3 flex flex-wrap gap-1.5"
-              initial={reduceMotion ? false : "hidden"}
-              animate="visible"
-              variants={{
-                hidden: { opacity: 0 },
-                visible: {
-                  opacity: 1,
-                  transition: {
-                    staggerChildren: 0.06,
-                    delayChildren: TIMING.headerStaggerDelay / 1000,
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="rounded-md bg-brand-primary-50 px-2 py-0.5 font-medium text-[11px] text-brand-primary-500 ring-1 ring-brand-primary-500/20">
+                  {DEMO.status.label}
+                </span>
+                <span className="text-neutral-600 text-sm">{DEMO.platform}</span>
+                <span className="text-neutral-300">·</span>
+                <span className="font-semibold text-neutral-900 text-sm tabular-nums">
+                  ${DEMO.refundAmount.toFixed(2)}
+                </span>
+                <span className="text-neutral-300">·</span>
+                <span className="inline-flex items-center gap-1 font-medium text-semantic-warning text-sm">
+                  <Clock className="h-3.5 w-3.5" aria-hidden />
+                  {DEMO.daysRemaining} days remaining
+                </span>
+              </div>
+
+              <motion.div
+                className="flex items-center gap-2"
+                initial={reduceMotion ? false : "hidden"}
+                animate="visible"
+                variants={{
+                  hidden: { opacity: 0 },
+                  visible: {
+                    opacity: 1,
+                    transition: {
+                      staggerChildren: 0.06,
+                      delayChildren: TIMING.headerStaggerDelay / 1000,
+                    },
                   },
-                },
-              }}
-            >
-              <motion.button
-                variants={HEADER_BUTTON_VARIANTS}
-                type="button"
-                className="inline-flex cursor-default items-center gap-1 rounded-md border border-neutral-200 bg-transparent px-2.5 py-1 font-medium text-neutral-700 text-xs transition-all hover:bg-neutral-50"
-                tabIndex={-1}
-                aria-disabled
+                }}
               >
-                <Edit className="h-3 w-3" aria-hidden />
-                Edit draft
-              </motion.button>
-              <motion.button
-                variants={HEADER_BUTTON_VARIANTS}
-                type="button"
-                className="inline-flex cursor-default items-center gap-1 rounded-md border border-neutral-200 bg-transparent px-2.5 py-1 font-medium text-semantic-danger text-xs transition-all hover:bg-neutral-50"
-                tabIndex={-1}
-                aria-disabled
-              >
-                <XCircle className="h-3 w-3" aria-hidden />
-                Cancel claim
-              </motion.button>
-              <motion.button
-                variants={HEADER_BUTTON_VARIANTS}
-                type="button"
-                className={cn(
-                  "inline-flex cursor-default items-center gap-1.5 rounded-md px-3.5 py-1.5 font-medium text-neutral-0 text-sm",
-                  "bg-gradient-to-b from-brand-primary-500 to-brand-primary-600",
-                  "shadow-brand-primary-500/30 shadow-sm transition-all",
-                  approveGlow && "s3-approve-glow",
-                )}
-                tabIndex={-1}
-                aria-disabled
-              >
-                <Send className="h-3.5 w-3.5" aria-hidden />
-                Approve and send
-              </motion.button>
-            </motion.div>
+                <motion.button
+                  variants={HEADER_BUTTON_VARIANTS}
+                  type="button"
+                  tabIndex={-1}
+                  aria-disabled
+                  className="inline-flex cursor-default items-center gap-1 rounded-md border border-neutral-200/80 bg-transparent px-2.5 py-1 font-medium text-neutral-700 text-xs transition-all hover:bg-neutral-50"
+                >
+                  <Edit className="h-3 w-3" aria-hidden />
+                  Edit draft
+                </motion.button>
+                <motion.button
+                  variants={HEADER_BUTTON_VARIANTS}
+                  type="button"
+                  tabIndex={-1}
+                  aria-disabled
+                  className="inline-flex cursor-default items-center gap-1 rounded-md border border-neutral-200/80 bg-transparent px-2.5 py-1 font-medium text-semantic-danger text-xs transition-all hover:bg-semantic-danger/5"
+                >
+                  <XCircle className="h-3 w-3" aria-hidden />
+                  Cancel claim
+                </motion.button>
+                <motion.button
+                  variants={HEADER_BUTTON_VARIANTS}
+                  type="button"
+                  tabIndex={-1}
+                  aria-disabled
+                  className={cn(
+                    "inline-flex cursor-default items-center gap-1.5 rounded-md px-3.5 py-1.5 font-medium text-neutral-0 text-sm",
+                    "bg-gradient-to-b from-brand-primary-500 to-brand-primary-600",
+                    "shadow-brand-primary-500/30 shadow-sm transition-all hover:scale-[1.02]",
+                    approveGlow && "s3-approve-glow",
+                  )}
+                >
+                  <Send className="h-3.5 w-3.5" aria-hidden />
+                  Approve and send
+                </motion.button>
+              </motion.div>
+            </div>
           </div>
 
-          <div className="grid gap-4 bg-neutral-50 p-4 sm:p-6 lg:grid-cols-[3fr_2fr]">
-            <div className="min-h-[440px] overflow-hidden rounded-lg border border-neutral-200 bg-neutral-0 transition-shadow hover:shadow-md">
-              <div className="flex items-center gap-2 border-neutral-200 border-b px-4 py-2.5">
-                <Mail className="h-4 w-4 text-neutral-500" aria-hidden />
-                <span className="font-medium text-neutral-900 text-sm">Email Draft</span>
+          <div className="grid gap-5 bg-neutral-50/40 p-6 sm:p-8 lg:grid-cols-[3fr_2fr]">
+            <div className="min-h-[440px] overflow-hidden rounded-lg border border-neutral-200/60 bg-neutral-0 transition-shadow hover:shadow-md">
+              <div className="flex items-center gap-2 border-neutral-200/60 border-b px-4 py-2.5">
+                <Mail className="h-[15px] w-[15px] text-neutral-500" aria-hidden />
+                <span className="font-semibold text-[14px] text-neutral-900 tracking-tight">
+                  Email Draft
+                </span>
               </div>
-              <div className="border-neutral-200 border-b px-4 py-2">
+              <div className="border-neutral-200/60 border-b px-4 py-2">
                 <span className="text-neutral-500 text-xs">
                   {DEMO.draft.version} · {DEMO.draft.source} · {DEMO.draft.when}
                 </span>
               </div>
-              <div className="border-neutral-200 border-b px-4 py-1.5">
+              <div className="border-neutral-200/60 border-b px-4 py-1.5">
                 <div className="inline-flex items-center rounded-md bg-neutral-100 p-0.5 text-[11px]">
                   <span className="rounded-[5px] bg-neutral-0 px-2 py-0.5 font-medium text-neutral-900 shadow-sm">
                     Preview
@@ -415,13 +497,15 @@ export function ClaimDetailDemo() {
                 </div>
               </div>
               <div className="space-y-3 p-4">
-                <div className="space-y-1.5 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-xs">
+                <div className="space-y-1.5 rounded-lg border border-neutral-200/60 bg-neutral-50 p-3 text-xs">
                   <div className="flex">
-                    <span className="w-16 shrink-0 text-neutral-500">Subject:</span>
+                    <span className="w-16 shrink-0 font-mono text-[10px] text-neutral-500">
+                      Subject:
+                    </span>
                     <span className="text-neutral-900">{DEMO.draft.subject}</span>
                   </div>
                 </div>
-                <div className="relative overflow-hidden rounded-lg border border-neutral-200 bg-neutral-0 p-3">
+                <div className="relative overflow-hidden rounded-lg border border-neutral-200/60 bg-neutral-0 p-3">
                   <div className="min-h-[200px] whitespace-pre-wrap text-neutral-700 text-xs leading-relaxed">
                     {draftDisplay}
                     {showDraftCursor ? (
@@ -441,23 +525,25 @@ export function ClaimDetailDemo() {
             </div>
 
             <div className="grid gap-4 lg:auto-rows-fr">
-              <div className="overflow-hidden rounded-lg border border-neutral-200 bg-neutral-0 transition-shadow hover:shadow-md">
-                <div className="flex items-center gap-2 border-neutral-200 border-b px-4 py-2.5">
-                  <FileText className="h-4 w-4 text-neutral-500" aria-hidden />
-                  <span className="font-medium text-neutral-900 text-sm">Evidence</span>
+              <div className="overflow-hidden rounded-lg border border-neutral-200/60 bg-neutral-0 transition-shadow hover:shadow-md">
+                <div className="flex items-center gap-2 border-neutral-200/60 border-b px-4 py-2.5">
+                  <FileText className="h-[15px] w-[15px] text-neutral-500" aria-hidden />
+                  <span className="font-semibold text-[14px] text-neutral-900 tracking-tight">
+                    Evidence
+                  </span>
                 </div>
                 <div className="space-y-3 p-4">
-                  <Card className="border-neutral-200">
-                    <CardContent className="pt-4">
-                      <div className="flex items-end justify-between gap-2">
+                  <Card className="border-neutral-200/60">
+                    <CardContent className="p-4">
+                      <div className="mb-2 font-medium text-[10px] text-neutral-400 uppercase tracking-wider">
+                        Current price
+                      </div>
+                      <div className="flex items-end justify-between gap-3">
                         <div>
-                          <div className="font-medium text-[10px] text-neutral-400 uppercase tracking-wider">
-                            Current price
-                          </div>
-                          <div className="mt-1 font-bold text-3xl text-neutral-900 tabular-nums leading-none">
+                          <div className="font-bold text-3xl text-neutral-900 tabular-nums leading-none">
                             ${DEMO.evidence.currentPrice.toFixed(2)}
                           </div>
-                          <div className="mt-1 text-[11px] text-neutral-500 tabular-nums">
+                          <div className="mt-1.5 text-[11px] text-neutral-500 tabular-nums">
                             from{" "}
                             <span className="line-through">
                               ${DEMO.evidence.originalPrice.toFixed(2)}
@@ -465,39 +551,56 @@ export function ClaimDetailDemo() {
                           </div>
                         </div>
                         <div className="min-w-[5.5rem] text-right">
-                          <div className="flex items-baseline justify-end gap-0.5">
-                            <span
-                              className="font-bold text-semantic-success text-xl tabular-nums"
-                              style={{ color: "var(--color-semantic-success, #15803d)" }}
-                            >
-                              -$
-                              <motion.span>{differenceDisplay}</motion.span>
-                            </span>
+                          <div className="font-bold text-semantic-success text-xl tabular-nums leading-none">
+                            -${differenceDisplay}
                           </div>
-                          <div className="mt-0.5 text-[10px] text-neutral-500">you saved</div>
+                          <div className="mt-1.5 text-[11px] text-neutral-500">you saved</div>
                         </div>
                       </div>
                     </CardContent>
                   </Card>
-                  <div className="s3-shimmer relative h-[110px] overflow-hidden rounded-lg bg-gradient-to-br from-neutral-800 to-neutral-900 shadow-md ring-1 ring-white/10">
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="flex flex-col items-center gap-1.5 text-neutral-500">
-                        <ImageIcon className="h-7 w-7" aria-hidden />
-                        <span className="text-[10px] text-neutral-400 tracking-wide">
-                          RECEIPT.PNG
-                        </span>
+
+                  <div className="s3-shimmer relative overflow-hidden rounded-lg bg-gradient-to-br from-neutral-800 to-neutral-900 shadow-md ring-1 ring-white/10">
+                    <div className="flex items-center gap-1.5 border-white/5 border-b px-2.5 py-1.5">
+                      <div className="h-1.5 w-1.5 rounded-full bg-red-500/50" />
+                      <div className="h-1.5 w-1.5 rounded-full bg-amber-500/50" />
+                      <div className="h-1.5 w-1.5 rounded-full bg-green-500/50" />
+                      <div className="ml-2 font-mono text-[9px] text-neutral-500">
+                        bestbuy.com/sony-wh1000xm5
                       </div>
                     </div>
-                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-neutral-900 to-transparent p-2">
-                      <div className="text-[10px] text-neutral-300 leading-relaxed">
+                    <div className="space-y-2 p-3">
+                      <div className="space-y-1">
+                        <div className="h-1.5 w-3/5 rounded bg-neutral-700" />
+                        <div className="h-1.5 w-2/5 rounded bg-neutral-700/60" />
+                      </div>
+                      <div className="flex items-baseline gap-2 pt-1">
+                        <span className="font-mono text-[9px] text-neutral-500 line-through">
+                          $399.99
+                        </span>
+                        <span className="font-bold font-mono text-neutral-100 text-sm">
+                          $349.99
+                        </span>
+                        <span className="font-medium font-mono text-[10px] text-semantic-success">
+                          −$50.00
+                        </span>
+                      </div>
+                      <div className="space-y-1 pt-1">
+                        <div className="h-1 w-4/5 rounded bg-neutral-700/40" />
+                        <div className="h-1 w-3/4 rounded bg-neutral-700/40" />
+                      </div>
+                    </div>
+                    <div className="border-white/5 border-t px-3 py-1.5">
+                      <div className="font-mono text-[9px] text-neutral-400">
                         Captured 2026-05-29 11:34 UTC
                       </div>
-                      <div className="text-[10px] text-neutral-400 leading-relaxed">
-                        Price drop detected by ClaimIt monitor-agent
+                      <div className="mt-0.5 text-[9px] text-neutral-500">
+                        by ClaimIt monitor-agent
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between pt-1 text-[10px] text-neutral-500">
+
+                  <div className="flex items-center justify-between pt-1 font-mono text-[10px] text-neutral-500">
                     <span>
                       Source:{" "}
                       <span className="font-medium text-brand-primary-500">
@@ -511,13 +614,15 @@ export function ClaimDetailDemo() {
 
               <div
                 className={cn(
-                  "overflow-hidden rounded-lg border border-neutral-200 bg-neutral-0 transition-all hover:shadow-md",
+                  "overflow-hidden rounded-lg border border-neutral-200/60 bg-neutral-0 transition-all hover:shadow-md",
                   assistantHighlight && "ring-2 ring-brand-primary-300",
                 )}
               >
-                <div className="flex items-center gap-2 border-neutral-200 border-b px-4 py-2.5">
-                  <Sparkles className="h-4 w-4 text-neutral-500" aria-hidden />
-                  <span className="font-medium text-neutral-900 text-sm">Assistant</span>
+                <div className="flex items-center gap-2 border-neutral-200/60 border-b px-4 py-2.5">
+                  <Sparkles className="h-[15px] w-[15px] text-neutral-500" aria-hidden />
+                  <span className="font-semibold text-[14px] text-neutral-900 tracking-tight">
+                    Assistant
+                  </span>
                   <div className="ml-auto flex items-center gap-1.5">
                     <span className="inline-flex items-center gap-1 text-[10px] text-neutral-500">
                       <span className="inline-block h-1 w-1 rounded-full bg-semantic-success" />
@@ -528,34 +633,87 @@ export function ClaimDetailDemo() {
                     </span>
                   </div>
                 </div>
-                <div className="flex flex-col space-y-3 p-4">
-                  <div className="min-h-[120px] space-y-2.5">
-                    <div className="flex items-start gap-2">
-                      <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-100">
-                        <Sparkles className="h-2.5 w-2.5 text-neutral-500" aria-hidden />
-                      </div>
-                      <div className="max-w-[88%] rounded-lg bg-neutral-100 px-2.5 py-1.5 text-neutral-900 text-xs leading-relaxed">
-                        {assistantDisplay}
-                        {showAssistantCursor ? (
-                          <span className="s3-cursor-blink ml-px inline-block h-[10px] w-[2px] bg-neutral-700 align-middle" />
-                        ) : null}
-                      </div>
-                    </div>
-                    {phase.kind === "scripted-response" ? (
-                      <div className="flex items-start justify-end gap-2">
-                        <div className="max-w-[80%] rounded-lg bg-brand-primary-500 px-2.5 py-1.5 text-neutral-0 text-xs">
-                          {phase.action}
+
+                <div className="flex flex-col">
+                  <div className="space-y-2.5 p-4">
+                    {showInitialAssistant && phase.kind !== "scripted-response" ? (
+                      <>
+                        <div className="flex items-start gap-2">
+                          <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-100">
+                            <Sparkles className="h-2.5 w-2.5 text-neutral-500" aria-hidden />
+                          </div>
+                          <div className="max-w-[88%] rounded-2xl bg-neutral-100 px-3 py-2 text-neutral-900 text-xs leading-relaxed">
+                            {part1Display}
+                            {assistantStage === "part1" && !part1Done ? (
+                              <span className="s3-cursor-blink ml-px inline-block h-[10px] w-[2px] bg-neutral-700 align-middle" />
+                            ) : null}
+                          </div>
                         </div>
-                      </div>
+
+                        {assistantStage === "indicator" ? (
+                          <div className="flex items-start gap-2 pl-7">
+                            <div className="inline-flex gap-1 rounded-2xl bg-neutral-100 px-3 py-2.5">
+                              <span
+                                className="s3-typing-dot h-1.5 w-1.5 rounded-full bg-neutral-400"
+                                style={{ animationDelay: "0ms" }}
+                              />
+                              <span
+                                className="s3-typing-dot h-1.5 w-1.5 rounded-full bg-neutral-400"
+                                style={{ animationDelay: "150ms" }}
+                              />
+                              <span
+                                className="s3-typing-dot h-1.5 w-1.5 rounded-full bg-neutral-400"
+                                style={{ animationDelay: "300ms" }}
+                              />
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {assistantStage === "part2" || assistantStage === "done" ? (
+                          <div className="flex items-start gap-2">
+                            <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-100">
+                              <Sparkles className="h-2.5 w-2.5 text-neutral-500" aria-hidden />
+                            </div>
+                            <div className="max-w-[88%] rounded-2xl bg-neutral-100 px-3 py-2 text-neutral-900 text-xs leading-relaxed">
+                              {part2Display}
+                              {assistantStage === "part2" && !part2Done ? (
+                                <span className="s3-cursor-blink ml-px inline-block h-[10px] w-[2px] bg-neutral-700 align-middle" />
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
+                      </>
+                    ) : null}
+
+                    {phase.kind === "scripted-response" ? (
+                      <>
+                        <div className="flex items-start justify-end gap-2">
+                          <div className="max-w-[80%] rounded-2xl bg-brand-primary-500 px-3 py-2 text-neutral-0 text-xs">
+                            {phase.action}
+                          </div>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-100">
+                            <Sparkles className="h-2.5 w-2.5 text-neutral-500" aria-hidden />
+                          </div>
+                          <div className="max-w-[88%] rounded-2xl bg-neutral-100 px-3 py-2 text-neutral-900 text-xs leading-relaxed">
+                            {assistantText}
+                            {scriptedPlaying && !assistantDone ? (
+                              <span className="s3-cursor-blink ml-px inline-block h-[10px] w-[2px] bg-neutral-700 align-middle" />
+                            ) : null}
+                          </div>
+                        </div>
+                      </>
                     ) : null}
                   </div>
-                  <div className="flex flex-wrap gap-1.5 border-neutral-200 border-t pt-3">
+
+                  <div className="grid grid-cols-2 gap-1.5 border-neutral-200/60 border-t px-4 pt-3 pb-3">
                     {QUICK_ACTIONS.map((action) => (
                       <button
                         key={action}
                         type="button"
                         onClick={() => handleChipClick(action)}
-                        className="rounded-full border border-neutral-200 bg-neutral-0 px-3 py-1 text-[11px] text-neutral-700 transition-all hover:-translate-y-0.5 hover:bg-neutral-100 hover:shadow-sm"
+                        className="truncate rounded-full border border-neutral-200/80 bg-neutral-0 px-3 py-1.5 text-center font-medium text-[11px] text-neutral-700 transition-all hover:-translate-y-0.5 hover:border-neutral-300 hover:bg-neutral-50 hover:shadow-sm"
                         style={{
                           transitionTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)",
                           transitionDuration: "200ms",
@@ -564,6 +722,20 @@ export function ClaimDetailDemo() {
                         {action}
                       </button>
                     ))}
+                  </div>
+
+                  <div className="border-neutral-200/60 border-t bg-neutral-50/40 p-3">
+                    <div className="flex items-center gap-2 rounded-lg border border-neutral-200/80 bg-neutral-0 px-3 py-2 transition-all hover:border-brand-primary-300 hover:ring-2 hover:ring-brand-primary-100">
+                      <span className="flex-1 text-neutral-400 text-xs">Ask about this claim…</span>
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        aria-disabled
+                        className="cursor-default rounded-md bg-neutral-100 p-1 text-neutral-400"
+                      >
+                        <Send className="h-3 w-3" aria-hidden />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
