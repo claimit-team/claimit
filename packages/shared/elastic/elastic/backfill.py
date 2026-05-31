@@ -72,6 +72,34 @@ async def _iter_actions(
         }
 
 
+async def backfill_collection(
+    db: AsyncIOMotorDatabase,
+    es: AsyncElasticsearch,
+    collection_name: str,
+    index_name: str,
+    project_fn: ProjectFn,
+) -> dict[str, int]:
+    """Backfill a single collection. Returns `{ok, errors}`.
+
+    Re-used by the sync worker's `ChangeStreamHistoryLost` recovery path to
+    close the data gap left when a resume token rolls off the oplog.
+    """
+    logger.info("Backfilling collection=%s -> index=%s", collection_name, index_name)
+    success_count, error_count = await async_bulk(
+        es,
+        _iter_actions(db, collection_name, index_name, project_fn),
+        raise_on_error=False,
+        stats_only=True,
+    )
+    logger.info(
+        "Finished collection=%s: ok=%d errors=%d",
+        collection_name,
+        success_count,
+        error_count,
+    )
+    return {"ok": success_count, "errors": error_count}
+
+
 async def backfill(
     db: AsyncIOMotorDatabase,
     es: AsyncElasticsearch,
@@ -79,19 +107,8 @@ async def backfill(
     """Backfill all four collections. Returns per-collection {ok, errors}."""
     results: dict[str, dict[str, int]] = {}
     for collection_name, index_name, project_fn in COLLECTION_INDEX_MAP:
-        logger.info("Backfilling collection=%s -> index=%s", collection_name, index_name)
-        success_count, error_count = await async_bulk(
-            es,
-            _iter_actions(db, collection_name, index_name, project_fn),
-            raise_on_error=False,
-            stats_only=True,
-        )
-        results[collection_name] = {"ok": success_count, "errors": error_count}
-        logger.info(
-            "Finished collection=%s: ok=%d errors=%d",
-            collection_name,
-            success_count,
-            error_count,
+        results[collection_name] = await backfill_collection(
+            db, es, collection_name, index_name, project_fn
         )
     return results
 
