@@ -366,7 +366,14 @@ export function ClaimDetailDemo() {
         <p className="text-center text-sm text-neutral-500">See Step 3 in action</p>
 
         <div
-          className="relative mt-4 overflow-hidden rounded-2xl border border-neutral-200/60 shadow-neutral-900/[0.06] shadow-xl ring-1 ring-neutral-900/[0.03]"
+          className={cn(
+            "relative mt-6 overflow-hidden rounded-2xl",
+            "border border-neutral-200/60",
+            "shadow-neutral-900/[0.06] shadow-xl ring-1 ring-neutral-900/[0.03]",
+            "dark:border-white/10",
+            "dark:shadow-[0_0_60px_rgba(255,255,255,0.06)]",
+            "dark:ring-1 dark:ring-white/10",
+          )}
           style={{
             backgroundImage: `
               radial-gradient(circle at 1px 1px, rgba(15, 23, 42, 0.04) 1px, transparent 0)
@@ -376,8 +383,8 @@ export function ClaimDetailDemo() {
           }}
         >
           {/* Mini ClaimHeader */}
-          <div className="border-neutral-200/60 border-b bg-neutral-0/80 px-6 py-4 backdrop-blur-sm sm:px-8 sm:py-5">
-            <div className="mb-3 flex items-center justify-between">
+          <div className="border-neutral-200/60 border-b bg-neutral-0/80 px-6 py-3 backdrop-blur-sm sm:px-8 sm:py-4">
+            <div className="mb-2 flex items-center justify-between">
               <div className="inline-flex min-w-0 items-center gap-1 text-neutral-500 text-xs">
                 <ArrowLeft className="h-3 w-3 shrink-0" aria-hidden />
                 <span className="shrink-0">Claims</span>
@@ -464,7 +471,7 @@ export function ClaimDetailDemo() {
             </div>
           </div>
 
-          <div className="grid gap-5 bg-neutral-50/40 p-6 sm:p-8 lg:grid-cols-[3fr_2fr] lg:items-stretch">
+          <div className="grid gap-5 bg-neutral-50/40 px-6 pt-4 pb-6 sm:px-8 sm:pt-5 sm:pb-8 lg:grid-cols-[3fr_2fr] lg:items-stretch">
             <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-neutral-200/60 bg-neutral-0 transition-shadow hover:shadow-md">
               <div className="flex items-center gap-2 border-neutral-200/60 border-b px-4 py-2.5">
                 <Mail className="h-[15px] w-[15px] text-neutral-500" aria-hidden />
@@ -603,7 +610,7 @@ export function ClaimDetailDemo() {
 
               <div
                 className={cn(
-                  "flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-neutral-200/60 bg-neutral-0 transition-all hover:shadow-md",
+                  "flex h-[320px] min-h-0 flex-col overflow-hidden rounded-lg border border-neutral-200/60 bg-neutral-0 transition-all hover:shadow-md",
                   assistantHighlight && "ring-2 ring-brand-primary-300",
                 )}
               >
