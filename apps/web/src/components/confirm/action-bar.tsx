@@ -386,7 +386,7 @@ export function ActionBar({
             type="button"
             onClick={handleConfirm}
             disabled={submitting || confirmBlocker !== null}
-            className="bg-brand-primary-500 hover:bg-brand-primary-600 text-neutral-0 w-full sm:w-auto"
+            className="bg-brand-primary-500 hover:bg-brand-primary-600 text-neutral-0 w-full sm:w-auto disabled:bg-neutral-200 disabled:text-neutral-400 disabled:opacity-100"
           >
             {submitting ? "Confirming…" : "Confirm and start monitoring"}
           </Button>

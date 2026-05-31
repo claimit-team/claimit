@@ -28,17 +28,18 @@ import { ApproveConfirmDialog } from "@/components/claims/approve-confirm-dialog
 import { AssistantPane } from "@/components/claims/assistant-pane";
 import { CancelConfirmDialog } from "@/components/claims/cancel-confirm-dialog";
 import { ClaimHeader } from "@/components/claims/claim-header";
-import { ClaimOutcomePrompt } from "@/components/claims/claim-outcome-prompt";
 import type { DraftMode } from "@/components/claims/draft-pane";
 import { DraftPane } from "@/components/claims/draft-pane";
 import { EvidencePane } from "@/components/claims/evidence-pane";
+import { OutcomeApprovedDialog } from "@/components/claims/outcome-approved-dialog";
+import { OutcomeDeniedDialog } from "@/components/claims/outcome-denied-dialog";
 import { PostApproveBanner } from "@/components/claims/post-approve-banner";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import type { ClaimDetailDoc } from "@/lib/api/claims";
+import type { ClaimDetailDoc, RecordClaimOutcomeResponse } from "@/lib/api/claims";
 import type { ClaimDetail } from "@/lib/claim-detail-types";
-import { EDITABLE_STATUSES } from "@/lib/claims-status";
+import { EDITABLE_STATUSES, toPlatformLabel } from "@/lib/claims-status";
 import { useUIStore } from "@/store";
 import { useClaimAssistantPromptStore } from "@/store/claim-assistant-prompt";
 import {
@@ -159,6 +160,7 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
 
   const [approveOpen, setApproveOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [outcomeDialog, setOutcomeDialog] = useState<"approved" | "denied" | null>(null);
 
   useEffect(() => {
     if (!EDITABLE_STATUSES.has(claim.status) || claim.claim_type !== "email") {
@@ -190,6 +192,20 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
     setApproveOpen(true);
   };
   const handleClickCancel = () => setCancelOpen(true);
+
+  const handleOutcomeRecorded = useCallback(
+    async (result: RecordClaimOutcomeResponse) => {
+      applyOptimistic({
+        outcome: result.outcome,
+        reclaimed_amount: result.reclaimed_amount,
+        resolved_at: result.resolved_at,
+        outcome_note: result.outcome_note,
+      });
+      await refetch();
+      setOutcomeDialog(null);
+    },
+    [applyOptimistic, refetch],
+  );
 
   /**
    * In-store guide print handler (ticket 5.16). Toggles
@@ -465,14 +481,14 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
         onClickApprove={handleClickApprove}
         onClickPrint={handleClickPrint}
         onClickTryDifferentAngle={handleTryDifferentAngle}
+        onClickRecordApproved={() => setOutcomeDialog("approved")}
+        onClickRecordDenied={() => setOutcomeDialog("denied")}
       />
 
-      {/* Banner + outcome prompt are post-action surfaces that have no
-          place on the printed in-store guide — `data-print-hide` per
-          5.16 (see globals.css print stylesheet). */}
+      {/* Banner is a post-action surface with no place on the printed
+          in-store guide — `data-print-hide` per 5.16. */}
       <div data-print-hide>
         <PostApproveBanner claim={claim} />
-        <ClaimOutcomePrompt claim={claim} refetch={refetch} applyOptimistic={applyOptimistic} />
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden bg-neutral-50">
@@ -494,6 +510,25 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
         claim={claim}
         applyOptimistic={applyOptimistic}
         refetch={refetch}
+      />
+      <OutcomeApprovedDialog
+        open={outcomeDialog === "approved"}
+        onOpenChange={(open) => {
+          if (!open) setOutcomeDialog(null);
+        }}
+        claimId={claim.claim_id}
+        defaultAmount={claim.refund_amount}
+        platformLabel={toPlatformLabel(claim.platform)}
+        onRecorded={handleOutcomeRecorded}
+      />
+      <OutcomeDeniedDialog
+        open={outcomeDialog === "denied"}
+        onOpenChange={(open) => {
+          if (!open) setOutcomeDialog(null);
+        }}
+        claimId={claim.claim_id}
+        platformLabel={toPlatformLabel(claim.platform)}
+        onRecorded={handleOutcomeRecorded}
       />
     </div>
   );
