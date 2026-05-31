@@ -339,7 +339,7 @@ export function UploadDialog() {
             type="button"
             onClick={handleSubmit}
             disabled={!file || uploading}
-            className="bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600"
+            className="bg-brand-primary-500 text-neutral-0 hover:bg-brand-primary-600 disabled:bg-neutral-200 disabled:text-neutral-400 disabled:opacity-100"
           >
             {uploading ? "Uploading…" : "Upload receipt"}
           </Button>
