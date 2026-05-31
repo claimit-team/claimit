@@ -1,21 +1,22 @@
 "use client";
 
 import {
+  ArrowRight,
   Clock,
   Edit,
   FileText,
+  Image as ImageIcon,
   Mail,
   RotateCcw,
   Send,
   Sparkles,
-  TrendingDown,
   XCircle,
 } from "lucide-react";
 import { motion, useInView, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 const DEMO = {
@@ -32,14 +33,9 @@ const DEMO = {
     subject: "Price match refund — Order demo-ord-e273a5c7b4",
     body: `Hello Best Buy Customer Care,
 
-I'm writing to request a price match refund on a recent purchase.
+I'm writing to request a price match refund on a recent purchase. Order demo-ord-e273a5c7b4 — Sony WH-1000XM5 Headphones at $399.99.
 
-Order demo-ord-e273a5c7b4 — Sony WH-1000XM5 Headphones at $399.99. The current price is $349.99, a difference of $50.00 within the published price match window.
-
-Could you please refund the $50.00 difference to my original payment method? I have the order confirmation and a screenshot of the current price ready to share if you need them.
-
-Thank you,
-[Your name]`,
+The current price is $349.99 — a $50.00 difference, within the 30-day price match window.`,
   },
   evidence: {
     originalPrice: 399.99,
@@ -131,6 +127,7 @@ export function ClaimDetailDemo() {
   const [hasPlayedOnce, setHasPlayedOnce] = useState(false);
   const [assistantHighlight, setAssistantHighlight] = useState(false);
   const [approveGlow, setApproveGlow] = useState(false);
+  const [differenceDisplay, setDifferenceDisplay] = useState("0.00");
   const containerRef = useRef<HTMLDivElement>(null);
   const timersRef = useRef<number[]>([]);
   const inView = useInView(containerRef, { once: true, amount: 0.4 });
@@ -189,6 +186,25 @@ export function ClaimDetailDemo() {
       return () => window.clearTimeout(t);
     }
   }, [phase, reduceMotion]);
+
+  useEffect(() => {
+    if (!inView || reduceMotion) {
+      setDifferenceDisplay(DEMO.evidence.difference.toFixed(2));
+      return;
+    }
+    const target = DEMO.evidence.difference;
+    const startTime = performance.now();
+    const duration = 1000;
+    let raf: number;
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - startTime) / duration);
+      const eased = 1 - (1 - t) ** 3;
+      setDifferenceDisplay((target * eased).toFixed(2));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [inView, reduceMotion]);
 
   const draftPlaying = phase.kind === "playing-draft";
   const assistantPlaying = phase.kind === "playing-assistant";
@@ -274,11 +290,25 @@ export function ClaimDetailDemo() {
         .s3-approve-glow {
           animation: s3-approve-pulse 1.4s cubic-bezier(0.16, 1, 0.3, 1) 1;
         }
+        @keyframes s3-shimmer {
+          0% { background-position: -200% 0; }
+          100% { background-position: 200% 0; }
+        }
+        .s3-shimmer::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%);
+          background-size: 200% 100%;
+          animation: s3-shimmer 4s linear infinite;
+          pointer-events: none;
+        }
         @media (prefers-reduced-motion: reduce) {
           .s3-cursor-blink, .s3-approve-glow {
             animation: none !important;
           }
           .s3-cursor-blink { opacity: 1; }
+          .s3-shimmer::before { animation: none; }
         }
       `}</style>
 
@@ -351,7 +381,7 @@ export function ClaimDetailDemo() {
                 variants={HEADER_BUTTON_VARIANTS}
                 type="button"
                 className={cn(
-                  "inline-flex cursor-default items-center gap-1 rounded-md px-2.5 py-1 font-medium text-neutral-0 text-xs",
+                  "inline-flex cursor-default items-center gap-1.5 rounded-md px-3.5 py-1.5 font-medium text-neutral-0 text-sm",
                   "bg-gradient-to-b from-brand-primary-500 to-brand-primary-600",
                   "shadow-brand-primary-500/30 shadow-sm transition-all",
                   approveGlow && "s3-approve-glow",
@@ -359,7 +389,7 @@ export function ClaimDetailDemo() {
                 tabIndex={-1}
                 aria-disabled
               >
-                <Send className="h-3 w-3" aria-hidden />
+                <Send className="h-3.5 w-3.5" aria-hidden />
                 Approve and send
               </motion.button>
             </motion.div>
@@ -376,6 +406,14 @@ export function ClaimDetailDemo() {
                   {DEMO.draft.version} · {DEMO.draft.source} · {DEMO.draft.when}
                 </span>
               </div>
+              <div className="border-neutral-200 border-b px-4 py-1.5">
+                <div className="inline-flex items-center rounded-md bg-neutral-100 p-0.5 text-[11px]">
+                  <span className="rounded-[5px] bg-neutral-0 px-2 py-0.5 font-medium text-neutral-900 shadow-sm">
+                    Preview
+                  </span>
+                  <span className="px-2 py-0.5 text-neutral-500">Edit</span>
+                </div>
+              </div>
               <div className="space-y-3 p-4">
                 <div className="space-y-1.5 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-xs">
                   <div className="flex">
@@ -383,12 +421,20 @@ export function ClaimDetailDemo() {
                     <span className="text-neutral-900">{DEMO.draft.subject}</span>
                   </div>
                 </div>
-                <div className="rounded-lg border border-neutral-200 bg-neutral-0 p-3">
-                  <div className="min-h-[260px] whitespace-pre-wrap text-neutral-700 text-xs leading-relaxed">
+                <div className="relative overflow-hidden rounded-lg border border-neutral-200 bg-neutral-0 p-3">
+                  <div className="min-h-[200px] whitespace-pre-wrap text-neutral-700 text-xs leading-relaxed">
                     {draftDisplay}
                     {showDraftCursor ? (
                       <span className="s3-cursor-blink ml-px inline-block h-[12px] w-[2px] bg-neutral-700 align-middle" />
                     ) : null}
+                  </div>
+                  <div className="pointer-events-none absolute inset-x-3 bottom-0 h-12 bg-gradient-to-t from-neutral-0 to-neutral-0/0" />
+                  <div className="relative mt-2 flex items-center justify-between border-neutral-100 border-t pt-2 text-[10px] text-neutral-400">
+                    <span>Showing first 3 paragraphs</span>
+                    <span className="inline-flex items-center gap-0.5 text-brand-primary-500">
+                      Open in app for full draft
+                      <ArrowRight className="h-2.5 w-2.5" aria-hidden />
+                    </span>
                   </div>
                 </div>
               </div>
@@ -402,38 +448,63 @@ export function ClaimDetailDemo() {
                 </div>
                 <div className="space-y-3 p-4">
                   <Card className="border-neutral-200">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="flex items-center gap-1.5 text-xs">
-                        <TrendingDown className="h-3 w-3 text-semantic-warning" aria-hidden />
-                        Current price
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex items-baseline justify-between">
-                        <div className="space-y-0.5">
-                          <div className="text-[11px] text-neutral-500 tabular-nums">
-                            Original: ${DEMO.evidence.originalPrice.toFixed(2)}
+                    <CardContent className="pt-4">
+                      <div className="flex items-end justify-between gap-2">
+                        <div>
+                          <div className="font-medium text-[10px] text-neutral-400 uppercase tracking-wider">
+                            Current price
                           </div>
-                          <div className="font-semibold text-neutral-900 text-xl tabular-nums">
+                          <div className="mt-1 font-bold text-3xl text-neutral-900 tabular-nums leading-none">
                             ${DEMO.evidence.currentPrice.toFixed(2)}
                           </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="font-semibold text-base text-semantic-warning tabular-nums">
-                            -${DEMO.evidence.difference.toFixed(2)}
+                          <div className="mt-1 text-[11px] text-neutral-500 tabular-nums">
+                            from{" "}
+                            <span className="line-through">
+                              ${DEMO.evidence.originalPrice.toFixed(2)}
+                            </span>
                           </div>
-                          <div className="text-[11px] text-neutral-500">difference</div>
+                        </div>
+                        <div className="min-w-[5.5rem] text-right">
+                          <div className="flex items-baseline justify-end gap-0.5">
+                            <span
+                              className="font-bold text-semantic-success text-xl tabular-nums"
+                              style={{ color: "var(--color-semantic-success, #15803d)" }}
+                            >
+                              -$
+                              <motion.span>{differenceDisplay}</motion.span>
+                            </span>
+                          </div>
+                          <div className="mt-0.5 text-[10px] text-neutral-500">you saved</div>
                         </div>
                       </div>
                     </CardContent>
                   </Card>
-                  <div className="rounded-md border border-neutral-200 bg-neutral-50 p-2.5">
-                    <div className="text-[11px] text-neutral-500">
-                      Captured: {DEMO.evidence.captured}
+                  <div className="s3-shimmer relative h-[110px] overflow-hidden rounded-lg bg-gradient-to-br from-neutral-800 to-neutral-900 shadow-md ring-1 ring-white/10">
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="flex flex-col items-center gap-1.5 text-neutral-500">
+                        <ImageIcon className="h-7 w-7" aria-hidden />
+                        <span className="text-[10px] text-neutral-400 tracking-wide">
+                          RECEIPT.PNG
+                        </span>
+                      </div>
                     </div>
-                    <div className="mt-1 text-[11px] text-neutral-700">
-                      Price drop detected by ClaimIt monitor-agent
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-neutral-900 to-transparent p-2">
+                      <div className="text-[10px] text-neutral-300 leading-relaxed">
+                        Captured 2026-05-29 11:34 UTC
+                      </div>
+                      <div className="text-[10px] text-neutral-400 leading-relaxed">
+                        Price drop detected by ClaimIt monitor-agent
+                      </div>
                     </div>
+                  </div>
+                  <div className="flex items-center justify-between pt-1 text-[10px] text-neutral-500">
+                    <span>
+                      Source:{" "}
+                      <span className="font-medium text-brand-primary-500">
+                        {DEMO.evidence.source}
+                      </span>
+                    </span>
+                    <span>{DEMO.evidence.captured}</span>
                   </div>
                 </div>
               </div>
@@ -447,9 +518,15 @@ export function ClaimDetailDemo() {
                 <div className="flex items-center gap-2 border-neutral-200 border-b px-4 py-2.5">
                   <Sparkles className="h-4 w-4 text-neutral-500" aria-hidden />
                   <span className="font-medium text-neutral-900 text-sm">Assistant</span>
-                  <span className="ml-auto rounded-md bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-600">
-                    Claim-focused
-                  </span>
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1 text-[10px] text-neutral-500">
+                      <span className="inline-block h-1 w-1 rounded-full bg-semantic-success" />
+                      95% policy match
+                    </span>
+                    <span className="rounded-md bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-600">
+                      Claim-focused
+                    </span>
+                  </div>
                 </div>
                 <div className="flex flex-col space-y-3 p-4">
                   <div className="min-h-[120px] space-y-2.5">
