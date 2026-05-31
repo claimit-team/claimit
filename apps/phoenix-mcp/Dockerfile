@@ -28,8 +28,8 @@ RUN npm install --omit=dev --save-exact \
       "supergateway@${SUPERGATEWAY_VERSION}" \
       "@arizeai/phoenix-mcp@${PHOENIX_MCP_VERSION}"
 
-COPY apps/phoenix-mcp/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh && chown -R node:node /app
+COPY apps/phoenix-mcp/entrypoint.sh apps/phoenix-mcp/run-phoenix-mcp.sh /app/
+RUN chmod +x /app/entrypoint.sh /app/run-phoenix-mcp.sh && chown -R node:node /app
 
 # Drop privileges — the bridge needs no root at runtime. The official node image
 # ships a `node` user with a writable home (/home/node) for the npm cache.
