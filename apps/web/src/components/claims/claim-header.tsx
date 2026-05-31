@@ -155,16 +155,18 @@ export function ClaimHeader({
         const ApproveIcon = approveAction.icon;
         return (
           <>
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              onClick={onClickEdit}
-              className="w-full sm:w-auto"
-            >
-              <Edit className="mr-2 h-4 w-4" />
-              Edit draft
-            </Button>
+            {claim.claim_type === "email" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                onClick={onClickEdit}
+                className="w-full sm:w-auto"
+              >
+                <Edit className="mr-2 h-4 w-4" />
+                Edit draft
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"

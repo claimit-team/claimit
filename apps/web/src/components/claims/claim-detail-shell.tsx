@@ -161,13 +161,14 @@ export function ClaimDetailShell({ claim, refetch, applyOptimistic }: ClaimDetai
   const [cancelOpen, setCancelOpen] = useState(false);
 
   useEffect(() => {
-    if (!EDITABLE_STATUSES.has(claim.status)) {
+    if (!EDITABLE_STATUSES.has(claim.status) || claim.claim_type !== "email") {
       setDraftMode("preview");
     }
-  }, [claim.status]);
+  }, [claim.status, claim.claim_type]);
 
   const handleClickEdit = () => {
     if (!EDITABLE_STATUSES.has(claim.status)) return;
+    if (claim.claim_type !== "email") return;
     // Jump to the latest version before flipping to edit mode — older
     // versions are read-only in DraftPane (it forces preview-only via
     // a guard `useEffect`), so without this the header's "Edit draft"

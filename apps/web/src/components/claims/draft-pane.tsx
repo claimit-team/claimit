@@ -652,7 +652,7 @@ export function DraftPane({
   // #168). The empty-draft Alert in `renderPreview` already covers the
   // user-facing message; the header navigation stays calm.
   const onLatestVersion = totalVersions === 0 || selectedVersion === totalVersions;
-  const isEditable = EDITABLE_STATUSES.has(claim.status);
+  const isEditable = EDITABLE_STATUSES.has(claim.status) && claim.claim_type === "email";
   // When the user browses an older version, force preview-only — editing
   // an older version is not a supported rollback flow in 5.7.
   useEffect(() => {
