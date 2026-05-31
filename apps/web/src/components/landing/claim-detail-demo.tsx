@@ -266,20 +266,20 @@ export function ClaimDetailDemo() {
   );
 
   useEffect(() => {
-    if (assistantStage === "part1" && part1Done) {
-      const t1 = window.setTimeout(() => setAssistantStage("indicator"), 200);
-      const t2 = window.setTimeout(() => setAssistantStage("part2"), 700);
-      return () => {
-        window.clearTimeout(t1);
-        window.clearTimeout(t2);
-      };
-    }
+    if (assistantStage !== "part1" || !part1Done) return;
+    const t = window.setTimeout(() => setAssistantStage("indicator"), 200);
+    return () => window.clearTimeout(t);
   }, [assistantStage, part1Done]);
 
   useEffect(() => {
-    if (assistantStage === "part2" && part2Done) {
-      setAssistantStage("done");
-    }
+    if (assistantStage !== "indicator") return;
+    const t = window.setTimeout(() => setAssistantStage("part2"), 600);
+    return () => window.clearTimeout(t);
+  }, [assistantStage]);
+
+  useEffect(() => {
+    if (assistantStage !== "part2" || !part2Done) return;
+    setAssistantStage("done");
   }, [assistantStage, part2Done]);
 
   useEffect(() => {
@@ -312,18 +312,7 @@ export function ClaimDetailDemo() {
 
   const draftDisplay = phase.kind === "idle" ? "" : draftPlaying ? draftText : DEMO.draft.body;
 
-  const part1Display =
-    assistantStage === "done" || phase.kind === "done-auto"
-      ? DEMO.assistant.initialPart1
-      : part1Text;
-
-  const part2Display =
-    assistantStage === "done" || phase.kind === "done-auto"
-      ? DEMO.assistant.initialPart2
-      : part2Text;
-
   const showDraftCursor = draftPlaying && !draftDone;
-  const showInitialAssistant = assistantStage !== "none" || phase.kind === "done-auto";
 
   return (
     <>
@@ -387,18 +376,18 @@ export function ClaimDetailDemo() {
           }}
         >
           {/* Mini ClaimHeader */}
-          <div className="border-neutral-200/60 border-b bg-neutral-0/80 px-6 py-4 backdrop-blur-sm">
+          <div className="border-neutral-200/60 border-b bg-neutral-0/80 px-6 py-4 backdrop-blur-sm sm:px-8 sm:py-5">
             <div className="mb-3 flex items-center justify-between">
-              <div className="inline-flex items-center gap-1 text-neutral-500 text-xs">
-                <ArrowLeft className="h-3 w-3" aria-hidden />
-                <span>Claims</span>
+              <div className="inline-flex min-w-0 items-center gap-1 text-neutral-500 text-xs">
+                <ArrowLeft className="h-3 w-3 shrink-0" aria-hidden />
+                <span className="shrink-0">Claims</span>
                 <span className="text-neutral-300">/</span>
-                <span className="font-medium text-neutral-700">{DEMO.title}</span>
+                <span className="truncate font-medium text-neutral-700">{DEMO.title}</span>
               </div>
-              <span className="inline-flex items-center gap-1.5 font-medium text-[10px] text-neutral-500">
-                <span className="relative flex h-1.5 w-1.5">
+              <span className="inline-flex shrink-0 items-center gap-2 font-medium text-neutral-600 text-xs">
+                <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-semantic-success opacity-75" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-semantic-success" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-semantic-success" />
                 </span>
                 Live
               </span>
@@ -475,8 +464,8 @@ export function ClaimDetailDemo() {
             </div>
           </div>
 
-          <div className="grid gap-5 bg-neutral-50/40 p-6 sm:p-8 lg:grid-cols-[3fr_2fr]">
-            <div className="min-h-[440px] overflow-hidden rounded-lg border border-neutral-200/60 bg-neutral-0 transition-shadow hover:shadow-md">
+          <div className="grid gap-5 bg-neutral-50/40 p-6 sm:p-8 lg:grid-cols-[3fr_2fr] lg:items-stretch">
+            <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-neutral-200/60 bg-neutral-0 transition-shadow hover:shadow-md">
               <div className="flex items-center gap-2 border-neutral-200/60 border-b px-4 py-2.5">
                 <Mail className="h-[15px] w-[15px] text-neutral-500" aria-hidden />
                 <span className="font-semibold text-[14px] text-neutral-900 tracking-tight">
@@ -496,23 +485,23 @@ export function ClaimDetailDemo() {
                   <span className="px-2 py-0.5 text-neutral-500">Edit</span>
                 </div>
               </div>
-              <div className="space-y-3 p-4">
+              <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
                 <div className="space-y-1.5 rounded-lg border border-neutral-200/60 bg-neutral-50 p-3 text-xs">
                   <div className="flex">
-                    <span className="w-16 shrink-0 font-mono text-[10px] text-neutral-500">
-                      Subject:
+                    <span className="mt-0.5 w-16 shrink-0 font-mono text-[10px] text-neutral-500 uppercase tracking-wider">
+                      Subject
                     </span>
                     <span className="text-neutral-900">{DEMO.draft.subject}</span>
                   </div>
                 </div>
-                <div className="relative overflow-hidden rounded-lg border border-neutral-200/60 bg-neutral-0 p-3">
-                  <div className="min-h-[200px] whitespace-pre-wrap text-neutral-700 text-xs leading-relaxed">
+                <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-neutral-200/60 bg-neutral-0 p-3">
+                  <div className="flex-1 whitespace-pre-wrap text-neutral-700 text-xs leading-relaxed">
                     {draftDisplay}
                     {showDraftCursor ? (
                       <span className="s3-cursor-blink ml-px inline-block h-[12px] w-[2px] bg-neutral-700 align-middle" />
                     ) : null}
                   </div>
-                  <div className="pointer-events-none absolute inset-x-3 bottom-0 h-12 bg-gradient-to-t from-neutral-0 to-neutral-0/0" />
+                  <div className="pointer-events-none absolute inset-x-3 bottom-10 h-12 bg-gradient-to-t from-neutral-0 to-neutral-0/0" />
                   <div className="relative mt-2 flex items-center justify-between border-neutral-100 border-t pt-2 text-[10px] text-neutral-400">
                     <span>Showing first 3 paragraphs</span>
                     <span className="inline-flex items-center gap-0.5 text-brand-primary-500">
@@ -524,7 +513,7 @@ export function ClaimDetailDemo() {
               </div>
             </div>
 
-            <div className="grid gap-4 lg:auto-rows-fr">
+            <div className="flex min-h-0 flex-col gap-5">
               <div className="overflow-hidden rounded-lg border border-neutral-200/60 bg-neutral-0 transition-shadow hover:shadow-md">
                 <div className="flex items-center gap-2 border-neutral-200/60 border-b px-4 py-2.5">
                   <FileText className="h-[15px] w-[15px] text-neutral-500" aria-hidden />
@@ -614,7 +603,7 @@ export function ClaimDetailDemo() {
 
               <div
                 className={cn(
-                  "overflow-hidden rounded-lg border border-neutral-200/60 bg-neutral-0 transition-all hover:shadow-md",
+                  "flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-neutral-200/60 bg-neutral-0 transition-all hover:shadow-md",
                   assistantHighlight && "ring-2 ring-brand-primary-300",
                 )}
               >
@@ -634,108 +623,109 @@ export function ClaimDetailDemo() {
                   </div>
                 </div>
 
-                <div className="flex flex-col">
-                  <div className="space-y-2.5 p-4">
-                    {showInitialAssistant && phase.kind !== "scripted-response" ? (
-                      <>
-                        <div className="flex items-start gap-2">
-                          <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-100">
-                            <Sparkles className="h-2.5 w-2.5 text-neutral-500" aria-hidden />
-                          </div>
-                          <div className="max-w-[88%] rounded-2xl bg-neutral-100 px-3 py-2 text-neutral-900 text-xs leading-relaxed">
-                            {part1Display}
-                            {assistantStage === "part1" && !part1Done ? (
-                              <span className="s3-cursor-blink ml-px inline-block h-[10px] w-[2px] bg-neutral-700 align-middle" />
-                            ) : null}
-                          </div>
+                <div className="flex min-h-0 flex-1 flex-col justify-end gap-2 overflow-hidden px-4 pt-4 pb-2">
+                  {(assistantStage === "part1" ||
+                    assistantStage === "indicator" ||
+                    assistantStage === "part2" ||
+                    assistantStage === "done") &&
+                    phase.kind !== "scripted-response" && (
+                      <div className="flex items-start gap-2">
+                        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-100">
+                          <Sparkles className="h-2.5 w-2.5 text-neutral-500" aria-hidden />
                         </div>
-
-                        {assistantStage === "indicator" ? (
-                          <div className="flex items-start gap-2 pl-7">
-                            <div className="inline-flex gap-1 rounded-2xl bg-neutral-100 px-3 py-2.5">
-                              <span
-                                className="s3-typing-dot h-1.5 w-1.5 rounded-full bg-neutral-400"
-                                style={{ animationDelay: "0ms" }}
-                              />
-                              <span
-                                className="s3-typing-dot h-1.5 w-1.5 rounded-full bg-neutral-400"
-                                style={{ animationDelay: "150ms" }}
-                              />
-                              <span
-                                className="s3-typing-dot h-1.5 w-1.5 rounded-full bg-neutral-400"
-                                style={{ animationDelay: "300ms" }}
-                              />
-                            </div>
-                          </div>
-                        ) : null}
-
-                        {assistantStage === "part2" || assistantStage === "done" ? (
-                          <div className="flex items-start gap-2">
-                            <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-100">
-                              <Sparkles className="h-2.5 w-2.5 text-neutral-500" aria-hidden />
-                            </div>
-                            <div className="max-w-[88%] rounded-2xl bg-neutral-100 px-3 py-2 text-neutral-900 text-xs leading-relaxed">
-                              {part2Display}
-                              {assistantStage === "part2" && !part2Done ? (
-                                <span className="s3-cursor-blink ml-px inline-block h-[10px] w-[2px] bg-neutral-700 align-middle" />
-                              ) : null}
-                            </div>
-                          </div>
-                        ) : null}
-                      </>
-                    ) : null}
-
-                    {phase.kind === "scripted-response" ? (
-                      <>
-                        <div className="flex items-start justify-end gap-2">
-                          <div className="max-w-[80%] rounded-2xl bg-brand-primary-500 px-3 py-2 text-neutral-0 text-xs">
-                            {phase.action}
-                          </div>
+                        <div className="max-w-[88%] rounded-2xl bg-neutral-100 px-3 py-2 text-neutral-900 text-xs leading-relaxed">
+                          {assistantStage === "done" ? DEMO.assistant.initialPart1 : part1Text}
+                          {assistantStage === "part1" && !part1Done ? (
+                            <span className="s3-cursor-blink ml-px inline-block h-[10px] w-[2px] bg-neutral-700 align-middle" />
+                          ) : null}
                         </div>
-                        <div className="flex items-start gap-2">
-                          <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-100">
-                            <Sparkles className="h-2.5 w-2.5 text-neutral-500" aria-hidden />
-                          </div>
-                          <div className="max-w-[88%] rounded-2xl bg-neutral-100 px-3 py-2 text-neutral-900 text-xs leading-relaxed">
-                            {assistantText}
-                            {scriptedPlaying && !assistantDone ? (
-                              <span className="s3-cursor-blink ml-px inline-block h-[10px] w-[2px] bg-neutral-700 align-middle" />
-                            ) : null}
-                          </div>
-                        </div>
-                      </>
-                    ) : null}
-                  </div>
+                      </div>
+                    )}
 
-                  <div className="grid grid-cols-2 gap-1.5 border-neutral-200/60 border-t px-4 pt-3 pb-3">
-                    {QUICK_ACTIONS.map((action) => (
-                      <button
-                        key={action}
-                        type="button"
-                        onClick={() => handleChipClick(action)}
-                        className="truncate rounded-full border border-neutral-200/80 bg-neutral-0 px-3 py-1.5 text-center font-medium text-[11px] text-neutral-700 transition-all hover:-translate-y-0.5 hover:border-neutral-300 hover:bg-neutral-50 hover:shadow-sm"
-                        style={{
-                          transitionTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)",
-                          transitionDuration: "200ms",
-                        }}
-                      >
-                        {action}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="border-neutral-200/60 border-t bg-neutral-50/40 p-3">
-                    <div className="flex items-center gap-2 rounded-lg border border-neutral-200/80 bg-neutral-0 px-3 py-2 transition-all hover:border-brand-primary-300 hover:ring-2 hover:ring-brand-primary-100">
-                      <span className="flex-1 text-neutral-400 text-xs">Ask about this claim…</span>
-                      <button
-                        type="button"
-                        tabIndex={-1}
-                        aria-disabled
-                        className="cursor-default rounded-md bg-neutral-100 p-1 text-neutral-400"
-                      >
-                        <Send className="h-3 w-3" aria-hidden />
-                      </button>
+                  {assistantStage === "indicator" && (
+                    <div className="flex items-start gap-2 pl-7">
+                      <div className="inline-flex gap-1 rounded-2xl bg-neutral-100 px-3 py-2.5">
+                        <span
+                          className="s3-typing-dot h-1.5 w-1.5 rounded-full bg-neutral-400"
+                          style={{ animationDelay: "0ms" }}
+                        />
+                        <span
+                          className="s3-typing-dot h-1.5 w-1.5 rounded-full bg-neutral-400"
+                          style={{ animationDelay: "150ms" }}
+                        />
+                        <span
+                          className="s3-typing-dot h-1.5 w-1.5 rounded-full bg-neutral-400"
+                          style={{ animationDelay: "300ms" }}
+                        />
+                      </div>
                     </div>
+                  )}
+
+                  {(assistantStage === "part2" || assistantStage === "done") &&
+                    phase.kind !== "scripted-response" && (
+                      <div className="flex items-start gap-2">
+                        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-100">
+                          <Sparkles className="h-2.5 w-2.5 text-neutral-500" aria-hidden />
+                        </div>
+                        <div className="max-w-[88%] rounded-2xl bg-neutral-100 px-3 py-2 text-neutral-900 text-xs leading-relaxed">
+                          {assistantStage === "done" ? DEMO.assistant.initialPart2 : part2Text}
+                          {assistantStage === "part2" && !part2Done ? (
+                            <span className="s3-cursor-blink ml-px inline-block h-[10px] w-[2px] bg-neutral-700 align-middle" />
+                          ) : null}
+                        </div>
+                      </div>
+                    )}
+
+                  {phase.kind === "scripted-response" && (
+                    <>
+                      <div className="flex items-start justify-end gap-2">
+                        <div className="max-w-[80%] rounded-2xl bg-brand-primary-500 px-3 py-2 text-neutral-0 text-xs">
+                          {phase.action}
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-100">
+                          <Sparkles className="h-2.5 w-2.5 text-neutral-500" aria-hidden />
+                        </div>
+                        <div className="max-w-[88%] rounded-2xl bg-neutral-100 px-3 py-2 text-neutral-900 text-xs leading-relaxed">
+                          {assistantText}
+                          {scriptedPlaying && !assistantDone ? (
+                            <span className="s3-cursor-blink ml-px inline-block h-[10px] w-[2px] bg-neutral-700 align-middle" />
+                          ) : null}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5 border-neutral-200/60 border-t px-4 py-3">
+                  {QUICK_ACTIONS.map((action) => (
+                    <button
+                      key={action}
+                      type="button"
+                      onClick={() => handleChipClick(action)}
+                      className="truncate rounded-full border border-neutral-200/80 bg-neutral-0 px-3 py-1.5 text-center font-medium text-[11px] text-neutral-700 transition-all hover:-translate-y-0.5 hover:border-neutral-300 hover:bg-neutral-50 hover:shadow-sm"
+                      style={{
+                        transitionTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)",
+                        transitionDuration: "200ms",
+                      }}
+                    >
+                      {action}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="border-neutral-200/60 border-t bg-neutral-50/40 p-3">
+                  <div className="flex items-center gap-2 rounded-lg border border-neutral-200/80 bg-neutral-0 px-3 py-2 transition-all hover:border-brand-primary-300 hover:ring-2 hover:ring-brand-primary-100">
+                    <span className="flex-1 text-neutral-400 text-xs">Ask about this claim…</span>
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      aria-disabled
+                      className="cursor-default rounded-md bg-neutral-100 p-1 text-neutral-400"
+                    >
+                      <Send className="h-3 w-3" aria-hidden />
+                    </button>
                   </div>
                 </div>
               </div>
