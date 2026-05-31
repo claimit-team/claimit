@@ -144,3 +144,64 @@ def test_http_path_httpx_client_factory_is_set(monkeypatch: pytest.MonkeyPatch) 
     toolset = get_mongodb_mcp_toolset()
     params = _connection_params(toolset)
     assert callable(params.httpx_client_factory)
+
+
+# ---------------------------------------------------------------------------
+# call_mongodb_mcp_tool + extract_tool_documents — the Gemini-friendly path
+# (thin FunctionTool wrappers call these; raw MCP toolset schemas are rejected
+# by google-genai function-calling, so the wrapper is the runtime MCP path).
+# ---------------------------------------------------------------------------
+
+
+def test_call_tool_requires_mcp_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no MDB_MCP_URL and no explicit override, the helper raises before
+    attempting any connection — the HTTP transport is the only reachable one
+    from Agent Engine (no Node for stdio)."""
+    import asyncio
+
+    from claimit_mcp import call_mongodb_mcp_tool
+
+    monkeypatch.delenv("MDB_MCP_URL", raising=False)
+    with pytest.raises(RuntimeError, match="MDB_MCP_URL"):
+        asyncio.run(call_mongodb_mcp_tool("find", {}))
+
+
+class _FakeContent:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _FakeResult:
+    def __init__(self, content) -> None:
+        self.content = content
+
+
+def test_extract_documents_parses_json_array() -> None:
+    from claimit_mcp import extract_tool_documents
+
+    result = _FakeResult([_FakeContent('[{"platform": "amazon"}, {"platform": "hilton"}]')])
+    assert extract_tool_documents(result) == [{"platform": "amazon"}, {"platform": "hilton"}]
+
+
+def test_extract_documents_parses_single_object() -> None:
+    from claimit_mcp import extract_tool_documents
+
+    result = _FakeResult([_FakeContent('{"platform": "best_buy", "window_days": 15}')])
+    assert extract_tool_documents(result) == [{"platform": "best_buy", "window_days": 15}]
+
+
+def test_extract_documents_falls_back_to_text_when_not_json() -> None:
+    """mongodb-mcp-server sometimes prefixes results with prose; if a content
+    block isn't parseable JSON we surface it as {"text": ...} so the LLM still
+    gets something rather than the wrapper silently returning []."""
+    from claimit_mcp import extract_tool_documents
+
+    result = _FakeResult([_FakeContent("No documents matched the filter.")])
+    assert extract_tool_documents(result) == [{"text": "No documents matched the filter."}]
+
+
+def test_extract_documents_handles_empty_or_missing_content() -> None:
+    from claimit_mcp import extract_tool_documents
+
+    assert extract_tool_documents(_FakeResult([])) == []
+    assert extract_tool_documents(_FakeResult(None)) == []

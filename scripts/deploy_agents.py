@@ -72,21 +72,27 @@ AGENT_FRAMEWORK = "google-adk"
 VERIFY_PROMPT = "Say hello"
 VERIFY_USER_ID = "deploy-agents-verify-bot"
 
-# Ticket 5.10: per-agent MongoDB MCP transport routing. The factory in
-# `claimit_mcp.get_mongodb_mcp_toolset` picks Streamable-HTTP transport
-# when MDB_MCP_URL is set in the environment, stdio otherwise. For each
-# agent we resolve the right Cloud Run service URL (readonly vs
-# readwrite) and inject it as MDB_MCP_URL. The keys here are the agent
-# name with the "_agent" suffix stripped (per AGENT_MODULES); the
-# values are True iff the agent should target the read-only service.
+# MongoDB MCP routing. `MDB_MCP_URL` is injected into each agent's Agent Engine
+# env (and baked into the cloudpickle at import — see deploy_one) so the agent's
+# runtime MCP calls reach the Cloud Run service.
+#
+# All four agents are READ-ONLY at runtime: each calls only the MongoDB MCP `find`
+# tool, via a thin FunctionTool wrapper (the raw MCP toolset can't be registered
+# with Gemini — its `const`/`oneOf` tool schemas are rejected by google-genai
+# function-calling; see apps/*/src/agent.py). No agent writes via MCP — every
+# write stays on deterministic direct-Mongo Python in the Cloud Run main.py
+# handlers. The read-write MCP service was therefore retired (see
+# infra/terraform/mongodb_mcp.tf) and every agent targets the read-only service.
+# The map is kept for the unknown-agent guard in get_mongodb_mcp_url + future
+# per-agent routing flexibility. Keys are the agent name minus the "_agent"
+# suffix (per AGENT_MODULES).
 AGENT_READONLY_MAP = {
     "assistant": True,
-    "ingest": False,
-    "monitor": False,
-    "claim": False,
+    "ingest": True,
+    "monitor": True,
+    "claim": True,
 }
 MONGODB_MCP_SERVICE_READONLY = "claimit-mongodb-mcp-readonly"
-MONGODB_MCP_SERVICE_READWRITE = "claimit-mongodb-mcp-readwrite"
 
 
 @dataclass
@@ -250,8 +256,10 @@ def get_mongodb_mcp_url(agent_name: str) -> str:
     key = agent_name.removesuffix("_agent")
     if key not in AGENT_READONLY_MAP:
         raise RuntimeError(f"Unknown agent '{agent_name}' — add it to AGENT_READONLY_MAP.")
-    read_only = AGENT_READONLY_MAP[key]
-    service_name = MONGODB_MCP_SERVICE_READONLY if read_only else MONGODB_MCP_SERVICE_READWRITE
+    # Every agent is read-only; the read-write service was retired, so all
+    # routes resolve to the read-only service (the membership check above
+    # validates the agent name and the map documents the read-only intent).
+    service_name = MONGODB_MCP_SERVICE_READONLY
     project = get_project_id()
     location = get_location()
     full_name = f"projects/{project}/locations/{location}/services/{service_name}"

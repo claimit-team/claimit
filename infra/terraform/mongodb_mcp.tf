@@ -1,34 +1,33 @@
-# MongoDB MCP Cloud Run services (ticket 5.10).
+# MongoDB MCP Cloud Run service (ticket 5.10; re-architected 2026-05-31).
 #
 # The Vertex AI Agent Engine runtime can't run the upstream
-# `mongodb-mcp-server` over stdio — it has no Node.js. Hosting the
-# server as two Cloud Run services (one readonly, one readwrite) lets
-# the agent reach it over MCP Streamable HTTP instead. The same upstream
-# image runs in both; the readonly service has `MDB_MCP_READ_ONLY=true`,
-# which makes mongodb-mcp-server skip registering create/update/delete
-# tools (per its README — readOnly is a tool-registration-time gate).
+# `mongodb-mcp-server` over stdio — it has no Node.js. Hosting the server as a
+# Cloud Run service lets the agents reach it over MCP Streamable HTTP instead.
 #
-# Why two services rather than one:
-# - Assistant agent is LLM-controlled + user-input-driven; prompt
-#   injection into a server that even REGISTERS write tools is a real
-#   attack surface. Separate readonly service eliminates the class.
-# - Cost is bounded: 2× warm instances (min_instances=1) at ~$5/mo each.
-# - Matches the per-agent-SA / per-secret-grant principle of least
-#   privilege the rest of the infra follows.
+# Single READ-ONLY service for all four agents (assistant + ingest/monitor/claim).
+# Each agent calls only the MongoDB MCP `find` tool at runtime, via thin
+# FunctionTool wrappers — the RAW MCP toolset can't be registered with Gemini
+# (its `find`/`aggregate` schemas use JSON-Schema `const`/`oneOf`, rejected by
+# google-genai function-calling; verified 2026-05-31, error 498). No agent writes
+# via MCP — every write stays on deterministic direct-Mongo Python in the Cloud
+# Run main.py handlers — so the former read-write service was RETIRED.
 #
-# Probe: TCP-connect on the main MCP port (Option A from the design
-# discussion). The upstream image's monitoring server runs on a
-# separate port that Cloud Run's container-port-bound probe can't
-# reach, so we drop the monitoring server entirely. "Port bound" is
-# good enough for v1 health; a stale revision still binding the port
-# is still observable in Cloud Run's serving metrics.
+# `MDB_MCP_READ_ONLY=true` makes mongodb-mcp-server skip registering
+# create/update/delete tools (defense in depth). Cross-collection scoping is
+# enforced by the wrappers, which hard-code collection + filter shape (never an
+# LLM arg) — the wrapper IS the tenancy boundary. Optional future hardening: a
+# separate policies-scoped service backed by an Atlas DB user limited to `find`
+# on `claimit.policies`; NOT required given the wrappers.
 #
-# Auth: roles/run.invoker granted to the Vertex AI Reasoning Engine
-# service agent (verified existing principal:
-# service-${PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com).
-# Each agent's per-service SA could also be granted here if any Cloud
-# Run agent service ever calls the MCP server directly, but today the
-# only consumer is Agent Engine reasoning runs.
+# Probe: TCP-connect on the main MCP port. The upstream image's monitoring server
+# runs on a separate port Cloud Run's container-port probe can't reach, so we
+# drop it; port-bound is good enough for v1 health.
+#
+# Auth: roles/run.invoker granted to the Vertex AI Reasoning Engine service agent
+# (service-${PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com). The
+# OIDC bearer is attached by a request EVENT HOOK in claimit_mcp — the deployed
+# httpx/mcp stack does NOT honor the AsyncClient's client-level `auth=` (verified
+# 2026-05-31; pre-fix every POST /mcp reached Cloud Run unauthenticated -> 403).
 
 locals {
   # Env vars common to both services. The connection string is mounted
@@ -59,7 +58,7 @@ locals {
   mongodb_mcp_image = "mongodb/mongodb-mcp-server:1.10.0"
 }
 
-# ---------- Read-only service (Assistant agent target) ----------
+# ---------- Read-only service (all four agents target this) ----------
 module "mongodb_mcp_readonly" {
   source = "./modules/cloud-run-agent"
 
@@ -97,51 +96,17 @@ module "mongodb_mcp_readonly" {
   deletion_protection = false
 }
 
-# ---------- Read-write service (ingest / monitor / claim targets) ----------
-module "mongodb_mcp_readwrite" {
-  source = "./modules/cloud-run-agent"
-
-  project_id   = var.project_id
-  region       = var.region
-  service_name = "claimit-mongodb-mcp-readwrite"
-  image        = local.mongodb_mcp_image
-
-  # No MDB_MCP_READ_ONLY → upstream registers all tools (read, write,
-  # connect, metadata). The three write agents (ingest, monitor, claim)
-  # point at THIS service via MDB_MCP_URL; assistant points at the
-  # readonly one above.
-  env_vars = local.mongodb_mcp_common_env
-
-  secret_ids = ["mongodb-uri"]
-  secret_env_map = {
-    MDB_MCP_CONNECTION_STRING = "mongodb-uri"
-  }
-
-  container_port = 8080
-  probe_type     = "tcp"
-  min_instances  = 1
-
-  deletion_protection = false
-}
-
-# ---------- IAM: Agent Engine runtime → run.invoker on each MCP service ----------
-# The Reasoning Engine runtime calls these services via ADK's
-# StreamableHTTPConnectionParams with a Google OIDC ID token; Cloud
-# Run validates `roles/run.invoker` for the bearer's email claim. One
-# grant per service direction.
+# ---------- IAM: Agent Engine runtime → run.invoker on the MCP service ----------
+# The Reasoning Engine runtime calls this service via ADK's
+# StreamableHTTPConnectionParams. The OIDC bearer is attached by a request event
+# hook in claimit_mcp (the deployed httpx/mcp stack does not apply the
+# AsyncClient's client-level auth); Cloud Run validates `roles/run.invoker` for
+# the bearer's email claim.
 
 resource "google_cloud_run_v2_service_iam_member" "agent_engine_invoker_on_mongodb_mcp_readonly" {
   project  = var.project_id
   location = var.region
   name     = module.mongodb_mcp_readonly.service_name
-  role     = "roles/run.invoker"
-  member   = local.agent_engine_reasoning_sa
-}
-
-resource "google_cloud_run_v2_service_iam_member" "agent_engine_invoker_on_mongodb_mcp_readwrite" {
-  project  = var.project_id
-  location = var.region
-  name     = module.mongodb_mcp_readwrite.service_name
   role     = "roles/run.invoker"
   member   = local.agent_engine_reasoning_sa
 }
@@ -153,11 +118,6 @@ resource "google_cloud_run_v2_service_iam_member" "agent_engine_invoker_on_mongo
 # without scraping `terraform output`.
 
 output "mongodb_mcp_readonly_url" {
-  description = "Cloud Run service URL for the read-only mongodb-mcp-server. Injected as MDB_MCP_URL into the assistant agent's Agent Engine env."
+  description = "Cloud Run service URL for the read-only mongodb-mcp-server. Injected as MDB_MCP_URL into all four agents' Agent Engine env."
   value       = module.mongodb_mcp_readonly.service_url
-}
-
-output "mongodb_mcp_readwrite_url" {
-  description = "Cloud Run service URL for the read-write mongodb-mcp-server. Injected as MDB_MCP_URL into the ingest/monitor/claim agents' Agent Engine env."
-  value       = module.mongodb_mcp_readwrite.service_url
 }
