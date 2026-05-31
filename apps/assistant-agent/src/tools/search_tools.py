@@ -1,9 +1,14 @@
-"""Elastic search tools for the Assistant Agent.
+"""Elastic search tools for the Assistant Agent (off-hot-path adapter bridge).
 
-These are ADK FunctionTools that wrap the shared SearchAdapter. Elastic does
-not currently provide an MCP server, so we bridge it via FunctionTool while
-MongoDB access goes through the MongoDB MCP toolset (consistent with all
-other agents in the system).
+These are ADK FunctionTools that wrap the shared SearchAdapter directly. NOTE:
+the assistant's runtime policy search now goes through **Elastic Agent Builder
+MCP** (`claimit_mcp.call_elastic_mcp_tool`, see agent.py `search_policies_fulltext`
+and mode_a.py), so `search_policies` here is no longer the agent's policy path.
+This module is retained for (a) non-MCP `SearchAdapter` consumers and (b)
+`search_user_purchases`, the closure-scoped per-user purchase search used by
+mode_a's local `handle_message` path (per-user purchase search is intentionally
+NOT exposed over Elastic MCP — it would need a session-driven user_id baked into
+the Kibana tool, never an LLM-fillable arg).
 
 The adapter is constructed and closed inside each tool call rather than held
 on the agent. Tools are cloudpickled when deployed to Vertex AI Agent

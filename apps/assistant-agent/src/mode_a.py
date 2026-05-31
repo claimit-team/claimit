@@ -1,15 +1,16 @@
 """Assistant Agent Mode A — General Support.
 
 Handles user messages when no specific claim is open. Read-only access to
-user data via MongoDB MCP + Elastic search via FunctionTool.
+user data via MongoDB MCP + Elastic policy search via Elastic Agent Builder MCP.
 
 Tool routing design (the only thing worth understanding about this file):
 - MongoDB queries → MongoDB MCP toolset (npx -y mongodb-mcp-server@latest).
   Consistent with every other agent in the codebase (ingest, monitor, claim).
-- Elastic queries → ADK FunctionTool wrapping the shared SearchAdapter.
-  Elastic does not have an MCP server. FunctionTool is the deliberate
-  bridge for this single capability; it is not the default pattern for
-  ClaimIt agents.
+- Elastic policy search → Elastic Agent Builder MCP (`call_elastic_mcp_tool`,
+  Kibana `/api/agent_builder/mcp`), wrapped in a thin FunctionTool because
+  Gemini rejects raw MCP tool schemas. Mirrors agent.py's
+  `search_policies_fulltext` so the local/test path and the deployed object
+  stay in sync.
 
 Production traffic path (for context — this module is NOT on the hot path):
 - The frontend POSTs to api-gateway /api/v1/conversations/{id}/messages
@@ -35,19 +36,59 @@ from collections.abc import AsyncIterator
 from typing import Any
 from uuid import uuid4
 
-from claimit_mcp import get_mongodb_mcp_toolset
+from claimit_mcp import (
+    call_elastic_mcp_tool,
+    extract_agent_builder_documents,
+    get_mongodb_mcp_toolset,
+)
 from google.adk import Agent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.tools import FunctionTool
 from google.genai import types
 
-from .tools.search_tools import search_policies, search_user_purchases
+from .tools.search_tools import search_user_purchases
 
 logger = logging.getLogger(__name__)
 
 _APP_NAME = "claimit-assistant-mode-a"
 _MODEL_NAME = "gemini-2.5-flash"
+# Kibana Agent Builder tool id invoked over MCP (matches agent.py + the tool
+# defined in Kibana: a single `query` param over policies-fulltext, row cap is
+# a hardcoded LIMIT in the ES|QL).
+_ELASTIC_SEARCH_POLICIES_TOOL = "search_policies"
+
+
+async def search_policies_fulltext(query: str) -> list[dict[str, Any]]:
+    """Full-text search across all platforms' price-protection policies.
+
+    GENUINE runtime Elastic Agent Builder MCP usage (mirrors agent.py): invokes
+    the Kibana `search_policies` tool over Streamable HTTP + an `ApiKey` header.
+    Use for policy questions, exclusions, claim windows, or claim methods.
+
+    Args:
+        query: Natural-language policy search terms (e.g. "Best Buy exclusions",
+            "hotels with a 24-hour price-match window").
+
+    Returns:
+        Matching policy documents, or `[]` when none match. On a lookup failure:
+        `[{"error": "search_unavailable", ...}]`; on a blank query:
+        `[{"error": "empty_query"}]`.
+    """
+    cleaned = (query or "").strip()
+    if not cleaned:
+        return [{"error": "empty_query"}]
+    try:
+        result = await call_elastic_mcp_tool(
+            _ELASTIC_SEARCH_POLICIES_TOOL,
+            {"query": cleaned},
+        )
+    except Exception as exc:
+        # BUG-31/61 contract; detail is the exception CLASS ONLY — never
+        # str(exc), which leaks the Kibana URL embedded in httpx errors.
+        return [{"error": "search_unavailable", "detail": type(exc).__name__}]
+    return extract_agent_builder_documents(result)
+
 
 MODE_A_SYSTEM_PROMPT = """You are the ClaimIt Assistant, a helpful AI assistant for the ClaimIt price-protection platform.
 
@@ -82,7 +123,8 @@ def create_mode_a_agent() -> Agent:
 
     Tools wired here:
     - MongoDB MCP toolset (read-only) — for purchase / claim / conversation lookups
-    - FunctionTool(search_policies) — Elastic policy search, no user scoping needed
+    - FunctionTool(search_policies_fulltext) — Elastic Agent Builder MCP policy
+      search (global data, no user scoping needed)
 
     Notably absent: search_user_purchases. That tool requires a user_id
     argument; exposing it via FunctionTool would force the model to fill in
@@ -105,8 +147,9 @@ def create_mode_a_agent() -> Agent:
         tools=[
             # MongoDB access via MCP — consistent with all other ClaimIt agents.
             get_mongodb_mcp_toolset(read_only=True),
-            # Elastic policy search via FunctionTool — no user scoping needed.
-            FunctionTool(search_policies),
+            # Elastic policy search via Elastic Agent Builder MCP — global data,
+            # no user scoping needed.
+            FunctionTool(search_policies_fulltext),
         ],
     )
 
@@ -164,7 +207,7 @@ async def handle_message(user_id: str, message: str) -> AsyncIterator[dict[str, 
         instruction=MODE_A_SYSTEM_PROMPT,
         tools=[
             get_mongodb_mcp_toolset(read_only=True),
-            FunctionTool(search_policies),
+            FunctionTool(search_policies_fulltext),
             # Closure-scoped purchase search — user_id is baked in, not exposed.
             FunctionTool(_search_my_purchases),
         ],

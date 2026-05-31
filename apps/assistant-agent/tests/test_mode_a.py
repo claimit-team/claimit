@@ -34,7 +34,8 @@ def test_create_mode_a_agent_returns_fresh_instance_each_call() -> None:
 
 
 def test_create_mode_a_agent_wires_two_tool_slots() -> None:
-    """Deploy-path agent: 1 MongoDB MCP toolset + 1 FunctionTool (search_policies).
+    """Deploy-path agent: 1 MongoDB MCP toolset + 1 FunctionTool
+    (search_policies_fulltext, Elastic Agent Builder MCP policy search).
 
     Does NOT include search_user_purchases — that would expose user_id to the
     model. handle_message() wires a closure-scoped replacement for that tool

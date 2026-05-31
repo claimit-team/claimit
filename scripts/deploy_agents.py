@@ -241,6 +241,43 @@ def get_mongodb_uri_for_agent_engine() -> str:
     return response.payload.data.decode("utf-8")
 
 
+def get_elastic_kibana_url_for_agent_engine() -> str:
+    """Read the Kibana base URL from Secret Manager for the assistant runtime.
+
+    Elastic Agent Builder MCP lives behind Kibana (NOT ELASTIC_URL, which is the
+    Elasticsearch data endpoint). The assistant's `search_policies_fulltext`
+    tool reads ELASTIC_KIBANA_URL at call time via
+    `claimit_mcp.call_elastic_mcp_tool`, so it must be a plain-string env_var on
+    the deployed agent. Same SecretRef-dict-crashes-Agent-Engine constraint as
+    get_mongodb_uri_for_agent_engine, so we resolve to a plain string here.
+
+    Secret "elastic-kibana-url" is wired in infra/terraform/main.tf. NOTE: the
+    secret must have a VERSION before this runs (terraform creates only the
+    empty shell); a versionless secret raises NotFound and aborts the deploy.
+    """
+    project = get_project_id()
+    secret_name = f"projects/{project}/secrets/elastic-kibana-url/versions/latest"
+    sm_client = secretmanager.SecretManagerServiceClient()
+    response = sm_client.access_secret_version(name=secret_name)
+    return response.payload.data.decode("utf-8")
+
+
+def get_elastic_api_key_for_agent_engine() -> str:
+    """Read the Elasticsearch API key from Secret Manager for the assistant runtime.
+
+    Reuses the existing "elastic-api-key" secret (the same key Cloud Run
+    services use for ES reads); it must be granted Kibana
+    feature_agentBuilder.read + feature_actions.read for Agent Builder MCP.
+    Agent Engine gets almost no env, so inject it as a plain-string
+    ELASTIC_API_KEY (the env name elastic.py reads via the auth event hook).
+    """
+    project = get_project_id()
+    secret_name = f"projects/{project}/secrets/elastic-api-key/versions/latest"
+    sm_client = secretmanager.SecretManagerServiceClient()
+    response = sm_client.access_secret_version(name=secret_name)
+    return response.payload.data.decode("utf-8")
+
+
 def get_mongodb_mcp_url(agent_name: str) -> str:
     """Resolve the Cloud Run service URL for the MongoDB MCP server this
     agent should target (readonly vs readwrite per AGENT_READONLY_MAP).
@@ -429,6 +466,14 @@ def deploy_one(
         # leaking the secret value into agents that don't use it.
         if agent_name == "assistant_agent":
             env_vars["MONGODB_URI"] = get_mongodb_uri_for_agent_engine()
+            # Elastic Agent Builder MCP (search_policies_fulltext): the Kibana
+            # endpoint + the ES API key as plain strings (SecretRef dict crashes
+            # Agent Engine startup). Both are read at call time by
+            # call_elastic_mcp_tool — no import-time toolset — so env_vars-only
+            # injection (matching MONGODB_URI above) is sufficient; do NOT set
+            # them in os.environ here, which would leak across the 4-agent loop.
+            env_vars["ELASTIC_KIBANA_URL"] = get_elastic_kibana_url_for_agent_engine()
+            env_vars["ELASTIC_API_KEY"] = get_elastic_api_key_for_agent_engine()
 
     config = {
         "staging_bucket": staging_bucket,
@@ -742,8 +787,33 @@ def main() -> int:
 
                             entries = _json.loads(log_result.stdout)
                             print(f"  [DEBUG] Cloud Logging: {len(entries)} entries")
+                            # Redact secret values from Cloud Run log text before
+                            # printing — a failed deploy must not surface a key
+                            # into CI logs (cf. the #304 PHOENIX_API_KEY leak).
+                            # These are the plain-string secrets injected into the
+                            # agent runtimes (deploy_one); resolve them here so
+                            # their values are scrubbed. Longest-first so
+                            # overlapping values redact cleanly.
+                            secret_values: list[str] = []
+                            for _sid in ("mongodb-uri", "elastic-api-key"):
+                                try:
+                                    _v = (
+                                        sm_client.access_secret_version(
+                                            name=f"projects/{project}/secrets/{_sid}/versions/latest"
+                                        )
+                                        .payload.data.decode("utf-8")
+                                        .strip()
+                                    )
+                                except Exception:
+                                    _v = ""
+                                if _v and len(_v) >= 8:
+                                    secret_values.append(_v)
+                            secret_values.sort(key=len, reverse=True)
                             for idx, entry in enumerate(entries):
                                 tp = entry.get("textPayload", "")
+                                for sv in secret_values:
+                                    if sv in tp:
+                                        tp = tp.replace(sv, "***REDACTED***")
                                 sev = entry.get("severity", "")
                                 ln = entry.get("logName", "").split("/")[-1]
                                 if any(
