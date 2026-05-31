@@ -9,9 +9,14 @@ off — Mongo's change-stream cursor recovers from an oplog-resident token.
 
 Reconnect policy: on any unexpected exception the loop logs the failure,
 sleeps `_RECONNECT_DELAY_SECONDS`, and re-enters with the last persisted
-resume token. `asyncio.CancelledError` (lifespan shutdown) is not caught
-because it inherits from `BaseException`, so the `async with` cleanly
-closes the cursor and the task exits.
+resume token. The exception is `ChangeStreamHistoryLost` (code 286 /
+errorLabel `NonResumableChangeStreamError`), which means the persisted
+token has rolled off the Atlas oplog and is — by definition — not
+resumable. The loop discards the stale token, runs a one-shot backfill
+to close the data gap, and reopens the stream from the current time.
+`asyncio.CancelledError` (lifespan shutdown) is not caught because it
+inherits from `BaseException`, so the `async with` cleanly closes the
+cursor and the task exits.
 """
 
 from __future__ import annotations
@@ -22,8 +27,10 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from elastic.backfill import backfill_collection
 from elasticsearch import AsyncElasticsearch
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.errors import OperationFailure
 
 from .projections import (
     project_claim,
@@ -37,6 +44,11 @@ logger = logging.getLogger(__name__)
 _SYNC_STATE_COLLECTION = "sync_state"
 _RECONNECT_DELAY_SECONDS = 5
 
+# MongoDB raises this code (with errorLabel `NonResumableChangeStreamError`)
+# when the persisted resume token is no longer in the oplog window.
+_CHANGE_STREAM_HISTORY_LOST_CODE = 286
+_NON_RESUMABLE_LABEL = "NonResumableChangeStreamError"
+
 ProjectFn = Callable[[dict[str, Any]], dict[str, Any]]
 
 # (mongo collection, es index, projection). Order is preserved for /health.
@@ -46,6 +58,16 @@ COLLECTION_INDEX_MAP: list[tuple[str, str, ProjectFn]] = [
     ("policies", "policies-fulltext", project_policy),
     ("price_history", "price-history-analytics", project_price_history),
 ]
+
+
+def _is_non_resumable(exc: OperationFailure) -> bool:
+    """True if the change stream cannot be resumed from its stored token.
+
+    Server-side check is `code == 286`; the errorLabel check is a belt-and-
+    braces guard for future codes that share the `NonResumableChangeStreamError`
+    label (the label is the contract).
+    """
+    return exc.code == _CHANGE_STREAM_HISTORY_LOST_CODE or exc.has_error_label(_NON_RESUMABLE_LABEL)
 
 
 async def _load_resume_token(
@@ -69,6 +91,16 @@ async def _save_resume_token(
         },
         upsert=True,
     )
+
+
+async def _clear_resume_token(db: AsyncIOMotorDatabase, collection_name: str) -> None:
+    """Drop the persisted resume token for `collection_name` (no-op if absent).
+
+    Called from the `ChangeStreamHistoryLost` recovery path: with the stored
+    token gone, the next `watch()` opens a token-less cursor (i.e. from
+    "now"), breaking the crash loop.
+    """
+    await db[_SYNC_STATE_COLLECTION].delete_one({"_id": collection_name})
 
 
 async def _handle_change(
@@ -153,6 +185,51 @@ async def watch_collection(
                         )
                     finally:
                         await _save_resume_token(db, collection_name, change["_id"])
+        except OperationFailure as exc:
+            if _is_non_resumable(exc):
+                # Resume token has rolled off the oplog; the worker would
+                # otherwise crash-loop forever on the same token. Clear it,
+                # backfill to close the gap, and let the next iteration reopen
+                # the stream from "now".
+                logger.error(
+                    "Resume token for collection=%s rolled off the oplog "
+                    "(ChangeStreamHistoryLost, code=%s) — discarding token and "
+                    "backfilling collection=%s -> index=%s to close the gap",
+                    collection_name,
+                    exc.code,
+                    collection_name,
+                    index_name,
+                )
+                await _clear_resume_token(db, collection_name)
+                try:
+                    counts = await backfill_collection(
+                        db, es, collection_name, index_name, project_fn
+                    )
+                    logger.info(
+                        "Recovery backfill collection=%s ok=%d errors=%d — "
+                        "stream will reopen from current time",
+                        collection_name,
+                        counts["ok"],
+                        counts["errors"],
+                    )
+                except Exception:
+                    # Token is already gone, so the next iteration will still
+                    # reopen the stream cleanly; the gap just won't be closed.
+                    logger.exception(
+                        "Recovery backfill failed collection=%s — stream will "
+                        "reopen from current time but the historical gap "
+                        "remains; run `python -m elastic.backfill` to retry",
+                        collection_name,
+                    )
+                await asyncio.sleep(_RECONNECT_DELAY_SECONDS)
+                continue
+            logger.exception(
+                "Change stream OperationFailure collection=%s index=%s — reconnecting in %ds",
+                collection_name,
+                index_name,
+                _RECONNECT_DELAY_SECONDS,
+            )
+            await asyncio.sleep(_RECONNECT_DELAY_SECONDS)
         except Exception:
             logger.exception(
                 "Change stream error collection=%s index=%s — reconnecting in %ds",
