@@ -4,6 +4,7 @@ import {
   Clock,
   Edit,
   FileText,
+  Mail,
   RotateCcw,
   Send,
   Sparkles,
@@ -15,7 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 
 const DEMO = {
   title: "Sony WH-1000XM5 Headphones",
@@ -74,11 +75,21 @@ const SCRIPTED_RESPONSES: Record<QuickAction, string> = {
 
 const TIMING = {
   startDelay: 400,
+  headerStaggerDelay: 200,
   bodyTypeMs: 8,
-  switchToAssistantAt: 4200,
+  switchToAssistantAt: 5000,
   assistantTypeMs: 18,
-  watchAgainDelay: 600,
+  watchAgainDelay: 2800,
 } as const;
+
+const HEADER_BUTTON_VARIANTS = {
+  hidden: { opacity: 0, y: 4 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { ease: [0.16, 1, 0.3, 1] as const, duration: 0.4 },
+  },
+};
 
 type Phase =
   | { kind: "idle" }
@@ -87,8 +98,6 @@ type Phase =
   | { kind: "done-auto" }
   | { kind: "scripted-response"; action: QuickAction };
 
-type DemoTab = "draft" | "evidence" | "assistant";
-
 function useTypewriter(
   fullText: string,
   enabled: boolean,
@@ -96,7 +105,6 @@ function useTypewriter(
 ): { text: string; done: boolean } {
   const [index, setIndex] = useState(0);
 
-  // Reset index when the target string changes (e.g. scripted chip reply).
   // biome-ignore lint/correctness/useExhaustiveDependencies: fullText must reset the cursor
   useEffect(() => {
     setIndex(0);
@@ -120,8 +128,9 @@ function useTypewriter(
 
 export function ClaimDetailDemo() {
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
-  const [activeTab, setActiveTab] = useState<DemoTab>("draft");
   const [hasPlayedOnce, setHasPlayedOnce] = useState(false);
+  const [assistantHighlight, setAssistantHighlight] = useState(false);
+  const [approveGlow, setApproveGlow] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const timersRef = useRef<number[]>([]);
   const inView = useInView(containerRef, { once: true, amount: 0.4 });
@@ -136,13 +145,11 @@ export function ClaimDetailDemo() {
 
   const beginAutoPlay = useCallback(() => {
     clearTimers();
-    setActiveTab("draft");
     setPhase({ kind: "idle" });
 
     if (reduceMotion) {
       setPhase({ kind: "done-auto" });
       setHasPlayedOnce(true);
-      setActiveTab("assistant");
       return;
     }
 
@@ -153,7 +160,6 @@ export function ClaimDetailDemo() {
     );
     timersRef.current.push(
       window.setTimeout(() => {
-        setActiveTab("assistant");
         setPhase({ kind: "playing-assistant" });
       }, TIMING.switchToAssistantAt),
     );
@@ -166,6 +172,23 @@ export function ClaimDetailDemo() {
   }, [inView, hasPlayedOnce, beginAutoPlay, clearTimers]);
 
   useEffect(() => () => clearTimers(), [clearTimers]);
+
+  useEffect(() => {
+    if (reduceMotion) return;
+    if (phase.kind === "playing-assistant" || phase.kind === "scripted-response") {
+      setAssistantHighlight(true);
+      const t = window.setTimeout(() => setAssistantHighlight(false), 700);
+      return () => window.clearTimeout(t);
+    }
+  }, [phase, reduceMotion]);
+
+  useEffect(() => {
+    if (phase.kind === "done-auto" && !reduceMotion) {
+      setApproveGlow(true);
+      const t = window.setTimeout(() => setApproveGlow(false), 2500);
+      return () => window.clearTimeout(t);
+    }
+  }, [phase, reduceMotion]);
 
   const draftPlaying = phase.kind === "playing-draft";
   const assistantPlaying = phase.kind === "playing-assistant";
@@ -207,26 +230,18 @@ export function ClaimDetailDemo() {
 
   const handleChipClick = (action: QuickAction) => {
     clearTimers();
-    setActiveTab("assistant");
+    if (phase.kind === "playing-draft" || phase.kind === "playing-assistant") {
+      setHasPlayedOnce(true);
+    }
     setPhase({ kind: "scripted-response", action });
     setHasPlayedOnce(true);
   };
 
   const handleWatchAgain = () => {
     clearTimers();
-    setActiveTab("draft");
     setPhase({ kind: "idle" });
     setHasPlayedOnce(false);
-  };
-
-  const handleTabChange = (value: string) => {
-    const next = value as DemoTab;
-    setActiveTab(next);
-    if (phase.kind === "playing-draft" || phase.kind === "playing-assistant") {
-      clearTimers();
-      setPhase({ kind: "done-auto" });
-      setHasPlayedOnce(true);
-    }
+    setApproveGlow(false);
   };
 
   const draftDisplay = phase.kind === "idle" ? "" : draftPlaying ? draftText : DEMO.draft.body;
@@ -242,198 +257,257 @@ export function ClaimDetailDemo() {
   const showAssistantCursor = (assistantPlaying || scriptedPlaying) && !assistantDone;
 
   return (
-    <div className="mx-auto mt-10 max-w-md" ref={containerRef}>
-      <p className="text-center text-sm text-neutral-500">See Step 3 in action</p>
+    <>
+      <style>{`
+        @keyframes s3-blink {
+          0%, 50% { opacity: 1; }
+          51%, 100% { opacity: 0; }
+        }
+        .s3-cursor-blink {
+          animation: s3-blink 1.1s steps(1, end) infinite;
+        }
+        @keyframes s3-approve-pulse {
+          0% { box-shadow: 0 1px 2px rgba(24,95,165,0.25), 0 0 0 0 rgba(24,95,165,0.45); }
+          50% { box-shadow: 0 1px 2px rgba(24,95,165,0.25), 0 0 0 6px rgba(24,95,165,0); }
+          100% { box-shadow: 0 1px 2px rgba(24,95,165,0.25), 0 0 0 0 rgba(24,95,165,0); }
+        }
+        .s3-approve-glow {
+          animation: s3-approve-pulse 1.4s cubic-bezier(0.16, 1, 0.3, 1) 1;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .s3-cursor-blink, .s3-approve-glow {
+            animation: none !important;
+          }
+          .s3-cursor-blink { opacity: 1; }
+        }
+      `}</style>
 
-      <div className="mt-4 overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-0 shadow-sm">
-        <div className="border-neutral-200 border-b bg-neutral-0 px-4 py-3">
-          <div className="text-neutral-500 text-xs">← Claims / {DEMO.title}</div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <span className="rounded-md bg-brand-primary-50 px-2 py-0.5 font-medium text-brand-primary-500 text-xs ring-1 ring-brand-primary-500/20">
-              {DEMO.status.label}
+      <div className="mx-auto mt-10 max-w-6xl" ref={containerRef}>
+        <p className="text-center text-sm text-neutral-500">See Step 3 in action</p>
+
+        <div className="relative mt-4 overflow-hidden rounded-2xl border border-neutral-200/80 bg-gradient-to-b from-neutral-0 to-neutral-50/40 shadow-neutral-900/[0.06] shadow-xl ring-1 ring-neutral-900/[0.03]">
+          <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-full border border-neutral-200 bg-neutral-0/90 px-2 py-1 backdrop-blur-sm">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-semantic-success opacity-75" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-semantic-success" />
             </span>
-            <span className="text-neutral-500 text-sm">{DEMO.platform}</span>
-            <span className="text-neutral-300 text-sm">·</span>
-            <span className="font-medium text-neutral-700 text-sm">
-              ${DEMO.refundAmount.toFixed(2)}
-            </span>
-            <span className="text-neutral-300 text-sm">·</span>
-            <span className="flex items-center gap-1 text-semantic-warning text-sm">
-              <Clock className="h-3.5 w-3.5" aria-hidden />
-              {DEMO.daysRemaining} days remaining
-            </span>
+            <span className="font-medium text-[10px] text-neutral-700">Live demo</span>
           </div>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              className="inline-flex cursor-default items-center gap-1 rounded-md border border-neutral-200 bg-transparent px-2.5 py-1 font-medium text-neutral-700 text-xs"
-              tabIndex={-1}
-              aria-disabled
+
+          <div className="border-neutral-200 border-b bg-neutral-0 px-4 py-3 sm:px-6">
+            <div className="text-neutral-500 text-xs">← Claims / {DEMO.title}</div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="rounded-md bg-brand-primary-50 px-2 py-0.5 font-medium text-brand-primary-500 text-xs ring-1 ring-brand-primary-500/20">
+                {DEMO.status.label}
+              </span>
+              <span className="text-neutral-500 text-sm">{DEMO.platform}</span>
+              <span className="text-neutral-300 text-sm">·</span>
+              <span className="font-medium text-neutral-700 text-sm">
+                ${DEMO.refundAmount.toFixed(2)}
+              </span>
+              <span className="text-neutral-300 text-sm">·</span>
+              <span className="flex items-center gap-1 text-semantic-warning text-sm">
+                <Clock className="h-3.5 w-3.5" aria-hidden />
+                {DEMO.daysRemaining} days remaining
+              </span>
+            </div>
+
+            <motion.div
+              className="mt-3 flex flex-wrap gap-1.5"
+              initial={reduceMotion ? false : "hidden"}
+              animate="visible"
+              variants={{
+                hidden: { opacity: 0 },
+                visible: {
+                  opacity: 1,
+                  transition: {
+                    staggerChildren: 0.06,
+                    delayChildren: TIMING.headerStaggerDelay / 1000,
+                  },
+                },
+              }}
             >
-              <Edit className="h-3 w-3" aria-hidden />
-              Edit draft
-            </button>
-            <button
-              type="button"
-              className="inline-flex cursor-default items-center gap-1 rounded-md border border-neutral-200 bg-transparent px-2.5 py-1 font-medium text-semantic-danger text-xs"
-              tabIndex={-1}
-              aria-disabled
-            >
-              <XCircle className="h-3 w-3" aria-hidden />
-              Cancel claim
-            </button>
-            <button
-              type="button"
-              className="inline-flex cursor-default items-center gap-1 rounded-md bg-brand-primary-500 px-2.5 py-1 font-medium text-neutral-0 text-xs"
-              tabIndex={-1}
-              aria-disabled
-            >
-              <Send className="h-3 w-3" aria-hidden />
-              Approve and send
-            </button>
+              <motion.button
+                variants={HEADER_BUTTON_VARIANTS}
+                type="button"
+                className="inline-flex cursor-default items-center gap-1 rounded-md border border-neutral-200 bg-transparent px-2.5 py-1 font-medium text-neutral-700 text-xs transition-all hover:bg-neutral-50"
+                tabIndex={-1}
+                aria-disabled
+              >
+                <Edit className="h-3 w-3" aria-hidden />
+                Edit draft
+              </motion.button>
+              <motion.button
+                variants={HEADER_BUTTON_VARIANTS}
+                type="button"
+                className="inline-flex cursor-default items-center gap-1 rounded-md border border-neutral-200 bg-transparent px-2.5 py-1 font-medium text-semantic-danger text-xs transition-all hover:bg-neutral-50"
+                tabIndex={-1}
+                aria-disabled
+              >
+                <XCircle className="h-3 w-3" aria-hidden />
+                Cancel claim
+              </motion.button>
+              <motion.button
+                variants={HEADER_BUTTON_VARIANTS}
+                type="button"
+                className={cn(
+                  "inline-flex cursor-default items-center gap-1 rounded-md px-2.5 py-1 font-medium text-neutral-0 text-xs",
+                  "bg-gradient-to-b from-brand-primary-500 to-brand-primary-600",
+                  "shadow-brand-primary-500/30 shadow-sm transition-all",
+                  approveGlow && "s3-approve-glow",
+                )}
+                tabIndex={-1}
+                aria-disabled
+              >
+                <Send className="h-3 w-3" aria-hidden />
+                Approve and send
+              </motion.button>
+            </motion.div>
+          </div>
+
+          <div className="grid gap-4 bg-neutral-50 p-4 sm:p-6 lg:grid-cols-[3fr_2fr]">
+            <div className="min-h-[440px] overflow-hidden rounded-lg border border-neutral-200 bg-neutral-0 transition-shadow hover:shadow-md">
+              <div className="flex items-center gap-2 border-neutral-200 border-b px-4 py-2.5">
+                <Mail className="h-4 w-4 text-neutral-500" aria-hidden />
+                <span className="font-medium text-neutral-900 text-sm">Email Draft</span>
+              </div>
+              <div className="border-neutral-200 border-b px-4 py-2">
+                <span className="text-neutral-500 text-xs">
+                  {DEMO.draft.version} · {DEMO.draft.source} · {DEMO.draft.when}
+                </span>
+              </div>
+              <div className="space-y-3 p-4">
+                <div className="space-y-1.5 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-xs">
+                  <div className="flex">
+                    <span className="w-16 shrink-0 text-neutral-500">Subject:</span>
+                    <span className="text-neutral-900">{DEMO.draft.subject}</span>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-neutral-200 bg-neutral-0 p-3">
+                  <div className="min-h-[260px] whitespace-pre-wrap text-neutral-700 text-xs leading-relaxed">
+                    {draftDisplay}
+                    {showDraftCursor ? (
+                      <span className="s3-cursor-blink ml-px inline-block h-[12px] w-[2px] bg-neutral-700 align-middle" />
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 lg:auto-rows-fr">
+              <div className="overflow-hidden rounded-lg border border-neutral-200 bg-neutral-0 transition-shadow hover:shadow-md">
+                <div className="flex items-center gap-2 border-neutral-200 border-b px-4 py-2.5">
+                  <FileText className="h-4 w-4 text-neutral-500" aria-hidden />
+                  <span className="font-medium text-neutral-900 text-sm">Evidence</span>
+                </div>
+                <div className="space-y-3 p-4">
+                  <Card className="border-neutral-200">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="flex items-center gap-1.5 text-xs">
+                        <TrendingDown className="h-3 w-3 text-semantic-warning" aria-hidden />
+                        Current price
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex items-baseline justify-between">
+                        <div className="space-y-0.5">
+                          <div className="text-[11px] text-neutral-500 tabular-nums">
+                            Original: ${DEMO.evidence.originalPrice.toFixed(2)}
+                          </div>
+                          <div className="font-semibold text-neutral-900 text-xl tabular-nums">
+                            ${DEMO.evidence.currentPrice.toFixed(2)}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-semibold text-base text-semantic-warning tabular-nums">
+                            -${DEMO.evidence.difference.toFixed(2)}
+                          </div>
+                          <div className="text-[11px] text-neutral-500">difference</div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <div className="rounded-md border border-neutral-200 bg-neutral-50 p-2.5">
+                    <div className="text-[11px] text-neutral-500">
+                      Captured: {DEMO.evidence.captured}
+                    </div>
+                    <div className="mt-1 text-[11px] text-neutral-700">
+                      Price drop detected by ClaimIt monitor-agent
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                className={cn(
+                  "overflow-hidden rounded-lg border border-neutral-200 bg-neutral-0 transition-all hover:shadow-md",
+                  assistantHighlight && "ring-2 ring-brand-primary-300",
+                )}
+              >
+                <div className="flex items-center gap-2 border-neutral-200 border-b px-4 py-2.5">
+                  <Sparkles className="h-4 w-4 text-neutral-500" aria-hidden />
+                  <span className="font-medium text-neutral-900 text-sm">Assistant</span>
+                  <span className="ml-auto rounded-md bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-600">
+                    Claim-focused
+                  </span>
+                </div>
+                <div className="flex flex-col space-y-3 p-4">
+                  <div className="min-h-[120px] space-y-2.5">
+                    <div className="flex items-start gap-2">
+                      <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-100">
+                        <Sparkles className="h-2.5 w-2.5 text-neutral-500" aria-hidden />
+                      </div>
+                      <div className="max-w-[88%] rounded-lg bg-neutral-100 px-2.5 py-1.5 text-neutral-900 text-xs leading-relaxed">
+                        {assistantDisplay}
+                        {showAssistantCursor ? (
+                          <span className="s3-cursor-blink ml-px inline-block h-[10px] w-[2px] bg-neutral-700 align-middle" />
+                        ) : null}
+                      </div>
+                    </div>
+                    {phase.kind === "scripted-response" ? (
+                      <div className="flex items-start justify-end gap-2">
+                        <div className="max-w-[80%] rounded-lg bg-brand-primary-500 px-2.5 py-1.5 text-neutral-0 text-xs">
+                          {phase.action}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 border-neutral-200 border-t pt-3">
+                    {QUICK_ACTIONS.map((action) => (
+                      <button
+                        key={action}
+                        type="button"
+                        onClick={() => handleChipClick(action)}
+                        className="rounded-full border border-neutral-200 bg-neutral-0 px-3 py-1 text-[11px] text-neutral-700 transition-all hover:-translate-y-0.5 hover:bg-neutral-100 hover:shadow-sm"
+                        style={{
+                          transitionTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)",
+                          transitionDuration: "200ms",
+                        }}
+                      >
+                        {action}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <Tabs value={activeTab} onValueChange={handleTabChange} className="flex flex-col">
-          <div className="border-neutral-200 border-b px-2">
-            <TabsList className="h-10 w-full bg-transparent">
-              <TabsTrigger value="draft" className="flex-1 text-xs data-active:bg-neutral-100">
-                Draft
-              </TabsTrigger>
-              <TabsTrigger value="evidence" className="flex-1 text-xs data-active:bg-neutral-100">
-                Evidence
-              </TabsTrigger>
-              <TabsTrigger value="assistant" className="flex-1 text-xs data-active:bg-neutral-100">
-                Assistant
-              </TabsTrigger>
-            </TabsList>
-          </div>
-
-          <TabsContent value="draft" className="m-0 min-h-[420px] bg-neutral-50 p-3">
-            <div className="mb-2 text-neutral-500 text-xs">
-              {DEMO.draft.version} · {DEMO.draft.source} · {DEMO.draft.when}
-            </div>
-            <div className="space-y-1.5 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-xs">
-              <div className="flex">
-                <span className="w-16 shrink-0 text-neutral-500">Subject:</span>
-                <span className="text-neutral-900">{DEMO.draft.subject}</span>
-              </div>
-            </div>
-            <div className="mt-2 rounded-lg border border-neutral-200 bg-neutral-0 p-3">
-              <div className="min-h-[280px] whitespace-pre-wrap text-neutral-700 text-xs leading-relaxed">
-                {draftDisplay}
-                {showDraftCursor ? (
-                  <span className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-neutral-400 align-middle" />
-                ) : null}
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="evidence" className="m-0 min-h-[420px] bg-neutral-50 p-3">
-            <Card className="border-neutral-200">
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-1.5 text-sm">
-                  <TrendingDown className="h-3.5 w-3.5 text-semantic-warning" aria-hidden />
-                  Current price
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-baseline justify-between">
-                  <div className="space-y-0.5">
-                    <div className="text-neutral-500 text-xs tabular-nums">
-                      Original: ${DEMO.evidence.originalPrice.toFixed(2)}
-                    </div>
-                    <div className="font-semibold text-2xl text-neutral-900 tabular-nums">
-                      ${DEMO.evidence.currentPrice.toFixed(2)}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-semibold text-lg text-semantic-warning tabular-nums">
-                      -${DEMO.evidence.difference.toFixed(2)}
-                    </div>
-                    <div className="text-neutral-500 text-xs">difference</div>
-                  </div>
-                </div>
-                <div className="mt-3 rounded-md border border-neutral-200 bg-neutral-50 p-2.5">
-                  <div className="text-neutral-500 text-xs">Captured: {DEMO.evidence.captured}</div>
-                  <div className="mt-1 text-neutral-700 text-xs">
-                    Price drop detected by ClaimIt monitor-agent
-                  </div>
-                </div>
-                <div className="mt-2 text-neutral-500 text-xs">
-                  Source: <span className="text-brand-primary-500">{DEMO.evidence.source}</span>
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="mt-3 border-neutral-200">
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-1.5 text-sm">
-                  <FileText className="h-3.5 w-3.5" aria-hidden />
-                  Best Buy price match policy
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-neutral-600 text-xs leading-relaxed">
-                  We&apos;ll match the price of select online and local retail competitors. Within
-                  30 days of purchase, we&apos;ll refund the difference if our price drops.
-                </p>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent
-            value="assistant"
-            className="m-0 flex min-h-[420px] flex-col bg-neutral-50 p-3"
+        {phase.kind === "done-auto" ? (
+          <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            className="mt-4 flex justify-center"
           >
-            <div className="flex-1 space-y-3 overflow-hidden">
-              <div className="flex items-start gap-2">
-                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neutral-100">
-                  <Sparkles className="h-3 w-3 text-neutral-500" aria-hidden />
-                </div>
-                <div className="max-w-[88%] rounded-lg bg-neutral-100 px-3 py-2 text-neutral-900 text-xs leading-relaxed">
-                  {assistantDisplay}
-                  {showAssistantCursor ? (
-                    <span className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-neutral-500 align-middle" />
-                  ) : null}
-                </div>
-              </div>
-              {phase.kind === "scripted-response" ? (
-                <div className="flex items-start justify-end gap-2">
-                  <div className="max-w-[80%] rounded-lg bg-brand-primary-500 px-3 py-2 text-neutral-0 text-xs">
-                    {phase.action}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-            <div className="mt-3 flex flex-wrap gap-1.5 border-neutral-200 border-t pt-3">
-              {QUICK_ACTIONS.map((action) => (
-                <button
-                  key={action}
-                  type="button"
-                  onClick={() => handleChipClick(action)}
-                  className="rounded-full border border-neutral-200 bg-neutral-0 px-3 py-1 text-neutral-700 text-xs transition-colors hover:bg-neutral-100"
-                >
-                  {action}
-                </button>
-              ))}
-            </div>
-          </TabsContent>
-        </Tabs>
+            <Button variant="outline" size="sm" onClick={handleWatchAgain} className="text-xs">
+              <RotateCcw className="mr-1.5 h-3 w-3" aria-hidden />
+              Watch again
+            </Button>
+          </motion.div>
+        ) : null}
       </div>
-
-      {phase.kind === "done-auto" ? (
-        <motion.div
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-          className="mt-4 flex justify-center"
-        >
-          <Button variant="outline" size="sm" onClick={handleWatchAgain} className="text-xs">
-            <RotateCcw className="mr-1.5 h-3 w-3" aria-hidden />
-            Watch again
-          </Button>
-        </motion.div>
-      ) : null}
-    </div>
+    </>
   );
 }
