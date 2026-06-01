@@ -115,10 +115,7 @@ async def _run(limit: int, apply: bool, sleep_seconds: float) -> None:
                 failed += 1
                 import traceback
 
-                print(
-                    f"[{purchase.platform}] {purchase.product_name!r}\n"
-                    f"    -> ERROR (continuing)"
-                )
+                print(f"[{purchase.platform}] {purchase.product_name!r}\n    -> ERROR (continuing)")
                 traceback.print_exc()
             await asyncio.sleep(sleep_seconds)
 
