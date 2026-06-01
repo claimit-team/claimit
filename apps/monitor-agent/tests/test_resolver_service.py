@@ -150,3 +150,38 @@ async def test_resolve_and_persist_unresolved_can_skip_notification() -> None:
     assert result.url is None
     db.partial_update.assert_not_awaited()
     notify.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persist_failure_returns_url_none_scenario_preserved() -> None:
+    """A DB write failure must NOT leak the resolved URL to callers.
+
+    Cron counters and the pubsub handler treat ``result.url is not None`` as
+    "successful resolve". If persist throws after the URL is decided, callers
+    must see ``url=None`` so the cron's `resolved` counter isn't incremented
+    and no NotificationEvent is written.
+    """
+    db = SimpleNamespace(partial_update=AsyncMock(side_effect=RuntimeError("mongo down")))
+    purchase = SimpleNamespace(
+        id=uuid4(),
+        user_id=uuid4(),
+        platform="best_buy",
+        product_name="Sony WH-1000XM5",
+        product_url=None,
+        price_paid=100.0,
+    )
+    with (
+        _patch_resolver([_match_candidate(listed_price=120.0)]),
+        patch.object(svc, "write_notification_event", AsyncMock()) as notify,
+    ):
+        result = await svc._resolve_and_persist(db, purchase)
+
+    # url cleared so caller doesn't count this as a successful resolve…
+    assert result.url is None
+    # …but the original scenario is preserved for diagnostics / logging.
+    assert result.scenario is Scenario.RESOLVED
+    # purchase.product_url stays None because the in-memory mutation only
+    # happens after the awaited partial_update returns.
+    assert purchase.product_url is None
+    # No notification because the persist failed before we got there.
+    notify.assert_not_awaited()

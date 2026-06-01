@@ -146,7 +146,15 @@ async def _resolve_and_persist(db, purchase, *, notify_unresolved: bool = True) 
             purchase.product_url = result.url
         except Exception:
             logger.exception("resolver.persist_failed purchase_id=%s", purchase.id)
-            return result
+            # Clear url so callers (cron counters / pubsub handler) don't count
+            # a DB failure as a successful resolve.
+            return ResolveResult(
+                url=None,
+                scenario=result.scenario,
+                confidence=result.confidence,
+                candidate_price=result.candidate_price,
+                candidate_id=result.candidate_id,
+            )
         data["product_url"] = result.url
         data["confidence"] = round(result.confidence, 3)
         data["low_confidence"] = result.confidence < MIN_CONFIDENCE

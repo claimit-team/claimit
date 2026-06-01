@@ -33,9 +33,11 @@ from .base import (
     get_scraperapi_key,
 )
 
-# Public RedSky web key observed on target.com network traffic. Overridable in
+# Public RedSky web key observed on target.com network traffic (no auth
+# required, served by the public site to anonymous browsers). Overridable in
 # case Target rotates it; the render fallback does not depend on it.
-_DEFAULT_REDSKY_KEY = "9f36aeafbe60771e321a7cc95a78140772ab3e96"
+# Annotated to silence generic-api-key secret scanners.
+_DEFAULT_REDSKY_KEY = "9f36aeafbe60771e321a7cc95a78140772ab3e96"  # pragma: allowlist secret
 _REDSKY_SEARCH_URL = "https://redsky.target.com/redsky_aggregations/v1/web/plp_search_v2"
 
 # Canonical Target product page carries the TCIN after "/A-": /p/<slug>/-/A-<tcin>

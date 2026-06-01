@@ -32,7 +32,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "apps" / "monitor-agent"))
 
 from claimit_mongodb_models import MongoDBClient, Purchase  # noqa: E402
-from src.resolver import RESOLVABLE_PLATFORMS, Scenario, resolve_product_url  # noqa: E402
+from src.resolver import (  # noqa: E402
+    MIN_CONFIDENCE,
+    RESOLVABLE_PLATFORMS,
+    Scenario,
+    resolve_product_url,
+)
 
 _QUERY = {
     "status": "monitoring",
@@ -50,42 +55,76 @@ async def _run(limit: int, apply: bool, sleep_seconds: float) -> None:
     try:
         purchases = await db.find_purchases(_QUERY, limit=limit)
         print(f"Found {len(purchases)} candidate purchase(s) (limit={limit}, apply={apply})\n")
-        resolved = unresolved = 0
+        resolved = unresolved = already_valid = failed = 0
         for purchase in purchases:
             if purchase.platform not in RESOLVABLE_PLATFORMS or not purchase.product_name:
                 continue
-            result = await resolve_product_url(
-                platform=purchase.platform,
-                product_name=purchase.product_name,
-                price_paid=purchase.price_paid or 0.0,
-                existing_url=purchase.product_url,
-            )
-            if result.url and result.scenario is not Scenario.ALREADY_VALID:
-                resolved += 1
+            try:
+                result = await resolve_product_url(
+                    platform=purchase.platform,
+                    product_name=purchase.product_name,
+                    price_paid=purchase.price_paid or 0.0,
+                    existing_url=purchase.product_url,
+                )
+
+                if result.scenario is Scenario.ALREADY_VALID:
+                    already_valid += 1
+                    print(
+                        f"[{purchase.platform}] {purchase.product_name!r}\n"
+                        f"    -> ALREADY VALID (clearing stale error)"
+                    )
+                    if apply and purchase.last_monitor_error_code == "missing_product_url":
+                        await db.partial_update(
+                            "purchases",
+                            purchase.id,
+                            {
+                                "last_monitor_error": None,
+                                "last_monitor_error_at": None,
+                                "last_monitor_error_code": None,
+                            },
+                            Purchase,
+                        )
+                        print("    stale flags cleared.")
+                elif result.url:
+                    resolved += 1
+                    low_conf_marker = (
+                        "  ⚠ LOW CONFIDENCE" if result.confidence < MIN_CONFIDENCE else ""
+                    )
+                    print(
+                        f"[{purchase.platform}] {purchase.product_name!r}\n"
+                        f"    -> {result.url}  (confidence={result.confidence:.2f})"
+                        f"{low_conf_marker}"
+                    )
+                    if apply:
+                        await db.partial_update(
+                            "purchases",
+                            purchase.id,
+                            {
+                                "product_url": result.url,
+                                "last_monitor_error": None,
+                                "last_monitor_error_at": None,
+                                "last_monitor_error_code": None,
+                            },
+                            Purchase,
+                        )
+                        print("    written.")
+                else:
+                    unresolved += 1
+                    print(f"[{purchase.platform}] {purchase.product_name!r}\n    -> UNRESOLVED")
+            except Exception:
+                failed += 1
+                import traceback
+
                 print(
                     f"[{purchase.platform}] {purchase.product_name!r}\n"
-                    f"    -> {result.url}  (confidence={result.confidence:.2f})"
+                    f"    -> ERROR (continuing)"
                 )
-                if apply:
-                    await db.partial_update(
-                        "purchases",
-                        purchase.id,
-                        {
-                            "product_url": result.url,
-                            "last_monitor_error": None,
-                            "last_monitor_error_at": None,
-                            "last_monitor_error_code": None,
-                        },
-                        Purchase,
-                    )
-                    print("    written.")
-            else:
-                unresolved += 1
-                print(f"[{purchase.platform}] {purchase.product_name!r}\n    -> UNRESOLVED")
+                traceback.print_exc()
             await asyncio.sleep(sleep_seconds)
 
         print(
             f"\nDone. resolved={resolved} unresolved={unresolved} "
+            f"already_valid={already_valid} failed={failed} "
             f"(apply={apply} — {'wrote changes' if apply else 'dry run, no writes'})"
         )
     finally:
