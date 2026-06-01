@@ -2,7 +2,7 @@
 
 import type { Platform } from "@claimit/mongodb-types";
 import { format } from "date-fns";
-import { CalendarIcon, ChevronDown } from "lucide-react";
+import { CalendarIcon, ChevronDown, Loader2 } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -86,6 +86,14 @@ export function ExtractionReviewForm({
   const lowPlaceholder = (field: string, base: string) =>
     isLow(field) ? "Verify this — we weren't sure" : base;
   const update = (patch: Partial<ConfirmFormState>) => onChange({ ...state, ...patch });
+
+  // Product-URL "searching" affordance: for the scrape-backed platforms
+  // (best_buy / target) the monitor-agent resolves a product link async after
+  // confirm and notifies via the bell. While the field is blank we show a
+  // live "we're searching…" state so the user knows it's handled and the URL
+  // is optional. Hidden once they type a link or for non-scraped platforms.
+  const resolvable = state.platform === "best_buy" || state.platform === "target";
+  const searchingProductUrl = resolvable && !state.productUrl.trim();
 
   return (
     <div className="space-y-6">
@@ -270,12 +278,28 @@ export function ExtractionReviewForm({
               type="url"
               value={state.productUrl}
               onChange={(e) => update({ productUrl: e.target.value })}
-              placeholder={lowPlaceholder("product_url", "https://www.bestbuy.com/site/...")}
+              placeholder={lowPlaceholder(
+                "product_url",
+                state.platform === "target"
+                  ? "https://www.target.com/p/..."
+                  : "https://www.bestbuy.com/site/...",
+              )}
               className={cn(
                 isLow("product_url") && "placeholder:italic placeholder:text-neutral-400",
               )}
               disabled={disabled}
             />
+            {searchingProductUrl && (
+              <div className="flex items-start gap-2 text-xs text-neutral-500" aria-live="polite">
+                <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin" aria-hidden />
+                <span>
+                  We are searching for the product link and will notify you once found.
+                  <span className="block text-neutral-400">
+                    Know the link? Paste it above to skip the wait.
+                  </span>
+                </span>
+              </div>
+            )}
           </div>
         </CollapsibleContent>
       </Collapsible>

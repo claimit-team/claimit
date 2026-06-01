@@ -418,6 +418,7 @@ async def confirm_purchase(
     user: User,
     purchase_id: UUID,
     corrected_fields: dict[str, Any] | None,
+    publisher: PubSubPublisher,
 ) -> PurchaseReadTolerant:
     """Apply any user corrections and transition status → monitoring.
 
@@ -515,6 +516,33 @@ async def confirm_purchase(
         user.id,
         sorted(corrected_fields.keys()) if corrected_fields else [],
     )
+
+    # Kick off the post-confirm pipeline (product-URL resolution in the
+    # monitor-agent + frontend fan-out). The upload path already publishes
+    # this in `create_purchase_from_confirm`; the email-confirm path did not,
+    # so a confirmed email purchase never triggered async resolution. Publish
+    # best-effort — the status is already committed, so a broker hiccup must
+    # NOT roll it back; the cron lazy resolve is the safety-net.
+    try:
+        confidence = updated.extraction_confidence
+        overall = getattr(confidence, "overall_min", None) if confidence else None
+        event = PurchaseIngestedEvent(
+            user_id=str(user.id),
+            purchase_id=str(purchase_id),
+            platform=str(updated.platform),
+            category=str(updated.category),
+            status="monitoring",
+            ingestion_source=str(updated.ingestion_source),
+            overall_confidence=overall if overall is not None else 1.0,
+        )
+        await publisher.publish(TOPIC_PURCHASE_INGESTED, event.model_dump(mode="json"))
+    except Exception:
+        _log.exception(
+            "Failed to publish purchase.ingested after confirm purchase_id=%s; "
+            "product-URL resolution may be delayed to the next cron tick",
+            purchase_id,
+        )
+
     return updated
 
 

@@ -108,12 +108,15 @@ def _set_overrides(
             return uploader
 
         app.dependency_overrides[get_receipts_uploader] = _override_uploader
-    if publisher is not None:
+    # Both /confirm and /confirm-create depend on the publisher. Always install
+    # an override so the dependency resolves; default to a no-op AsyncMock for
+    # tests that don't assert on publishing.
+    pub = publisher if publisher is not None else AsyncMock(spec=PubSubPublisher)
 
-        async def _override_publisher() -> PubSubPublisher:
-            return publisher
+    async def _override_publisher() -> PubSubPublisher:
+        return pub
 
-        app.dependency_overrides[get_pubsub_publisher] = _override_publisher
+    app.dependency_overrides[get_pubsub_publisher] = _override_publisher
 
 
 def _clear_overrides() -> None:
@@ -900,6 +903,55 @@ async def test_confirm_purchase_sets_monitoring(client: AsyncClient) -> None:
         assert "_id" not in update_args.args[2]
         # No Policy → server intentionally does not fabricate a window.
         assert "window_expires" not in update_args.args[2]
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_purchase_publishes_ingested(client: AsyncClient) -> None:
+    """The email-confirm path publishes purchase.ingested so the monitor-agent
+
+    resolver runs (parity with the upload confirm-create path)."""
+    pending = _purchase_fixture()
+    monitoring = _purchase_fixture(status="monitoring")
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(side_effect=[pending, monitoring])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    mock_db.get_policy = AsyncMock(return_value=None)
+    publisher = _publisher_mock()
+    _set_overrides(mock_db, publisher=publisher)
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/confirm",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+        publisher.publish.assert_awaited_once()
+        topic, body = publisher.publish.await_args.args
+        assert topic == "purchase.ingested"
+        assert body["purchase_id"] == str(PURCHASE_ID)
+        assert body["status"] == "monitoring"
+    finally:
+        _clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_confirm_purchase_survives_publish_failure(client: AsyncClient) -> None:
+    """A broker hiccup on publish must not fail the confirm (status committed)."""
+    pending = _purchase_fixture()
+    monitoring = _purchase_fixture(status="monitoring")
+    mock_db = AsyncMock(spec=MongoDBClient)
+    mock_db.get_purchase = AsyncMock(side_effect=[pending, monitoring])
+    mock_db.partial_update = AsyncMock(return_value=True)
+    mock_db.get_policy = AsyncMock(return_value=None)
+    _set_overrides(mock_db, publisher=_publisher_mock(fail=True))
+    try:
+        response = await client.post(
+            f"/api/v1/purchases/{PURCHASE_ID}/confirm",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+        assert response.json()["purchase"]["status"] == PurchaseStatus.MONITORING
     finally:
         _clear_overrides()
 

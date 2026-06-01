@@ -35,6 +35,7 @@ from .adapters.config import get_adapter
 from .cadence import compute_target_cadence_minutes, is_due
 from .comparison import PriceComparison, compare_prices
 from .eligibility import validate_eligibility
+from .resolver import RESOLVABLE_PLATFORMS, _resolve_and_persist
 
 logger = logging.getLogger(__name__)
 tracer = get_tracer(__name__)
@@ -140,6 +141,7 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
     skipped_degraded = 0
     eligible = ineligible = no_policy = 0
     emitted = eligible_dedup = 0
+    resolved = resolve_failed = 0
 
     purchases = await db.find_purchases({"status": "monitoring"}, limit=_SCAN_LIMIT)
 
@@ -233,6 +235,24 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
                 target_cadence,
                 days_remaining,
             )
+
+            # Lazy product-URL resolution safety-net. If a resolvable retail
+            # purchase reached monitoring without a product_url (a missed/late
+            # purchase.ingested event, or a pre-existing N/A row), resolve it
+            # now so the adapter fetch below has a URL. Best-effort — never
+            # abort the sweep. notify_unresolved=False: the missing_product_url
+            # badge already covers the not-found case, so we don't re-notify
+            # every tick (the Pub/Sub handler owns the first-time notification).
+            if not purchase.product_url and purchase.platform in RESOLVABLE_PLATFORMS:
+                try:
+                    resolve_result = await _resolve_and_persist(
+                        db, purchase, notify_unresolved=False
+                    )
+                    if resolve_result.url:
+                        resolved += 1
+                except Exception:
+                    resolve_failed += 1
+                    logger.exception("cron.resolve_error purchase_id=%s", purchase.id)
 
             try:
                 # `purchase.platform` is the raw string (validated by
@@ -380,11 +400,14 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
         "no_policy": no_policy,
         "emitted": emitted,
         "eligible_dedup": eligible_dedup,
+        "resolved": resolved,
+        "resolve_failed": resolve_failed,
     }
     logger.info(
         "cron.summary scanned=%d due=%d fetched=%d errors=%d "
         "skipped_expired=%d skipped_source=%d skipped_degraded=%d "
-        "eligible=%d ineligible=%d no_policy=%d emitted=%d eligible_dedup=%d",
+        "eligible=%d ineligible=%d no_policy=%d emitted=%d eligible_dedup=%d "
+        "resolved=%d resolve_failed=%d",
         scanned,
         due_count,
         fetched,
@@ -397,6 +420,8 @@ async def run_cron(db: MongoDBClient) -> dict[str, int]:
         no_policy,
         emitted,
         eligible_dedup,
+        resolved,
+        resolve_failed,
     )
     return summary
 

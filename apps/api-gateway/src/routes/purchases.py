@@ -318,6 +318,7 @@ async def confirm_purchase(
     purchase_id: Annotated[str, Path()],
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[MongoDBClient, Depends(get_db)],
+    publisher: Annotated[PubSubPublisher, Depends(get_pubsub_publisher)],
     body: ConfirmPurchaseRequest | None = None,
 ) -> dict[str, object]:
     """Confirm a low-confidence extraction and start monitoring."""
@@ -328,6 +329,7 @@ async def confirm_purchase(
         user=user,
         purchase_id=uid,
         corrected_fields=corrected,
+        publisher=publisher,
     )
     return {"purchase": serialize_purchase(purchase)}
 

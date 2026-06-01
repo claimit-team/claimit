@@ -160,6 +160,14 @@ class NotificationEventType(StrEnum):
     FIRST_TIME_DASHBOARD = "first_time_dashboard"
     USER_RETURNED_AFTER_LONG_ABSENCE = "user_returned_after_long_absence"
     CONSECUTIVE_REJECTIONS = "consecutive_rejections"
+    # Product-URL resolution outcomes (monitor-agent resolves a scrapeable
+    # product page from the receipt's product name). RESOLVED = blank URL,
+    # system found one; CORRECTED = user's URL was wrong, system replaced it;
+    # UNRESOLVED = system could not find one (data.had_url distinguishes a
+    # bad user URL from a blank one).
+    PRODUCT_URL_RESOLVED = "product_url_resolved"
+    PRODUCT_URL_CORRECTED = "product_url_corrected"
+    PRODUCT_URL_UNRESOLVED = "product_url_unresolved"
 
 
 class NotificationEntityType(StrEnum):
