@@ -49,9 +49,14 @@ export const EVENT_LABELS: Record<NotificationEventType, string> = {
   first_time_dashboard: "Welcome",
   user_returned_after_long_absence: "Welcome back",
   consecutive_rejections: "Pattern alert",
+  // Filter-dropdown labels (category-level). Per-notification card titles
+  // for these three event types are computed dynamically in
+  // `notification-row.tsx::buildTitle` because the title varies by
+  // `data.had_url` (e.g. resolved+had_url=true reads "verified" instead of
+  // "found"). Keep these terse — they show up in the type-filter dropdown.
   product_url_resolved: "Product link found",
-  product_url_corrected: "Product link corrected",
-  product_url_unresolved: "Product link needed",
+  product_url_corrected: "Product link verified",
+  product_url_unresolved: "Product link not found",
 };
 
 export const EVENT_ICONS: Record<NotificationEventType, LucideIcon> = {

@@ -293,7 +293,8 @@ export function ExtractionReviewForm({
               <div className="flex items-start gap-2 text-xs text-neutral-500" aria-live="polite">
                 <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin" aria-hidden />
                 <span>
-                  We are searching for the product link and will notify you once found.
+                  We&apos;re finding your {PLATFORM_LABELS[state.platform]} product link —
+                  we&apos;ll notify you once it&apos;s ready.
                   <span className="block text-neutral-400">
                     Know the link? Paste it above to skip the wait.
                   </span>

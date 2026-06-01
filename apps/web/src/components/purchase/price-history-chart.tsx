@@ -142,10 +142,12 @@ function ChartEmptyState({
         <div className="flex size-10 items-center justify-center rounded-full bg-neutral-100 text-neutral-500">
           <Loader2 className="size-5 animate-spin" aria-hidden />
         </div>
-        <p className="mt-3 font-medium text-neutral-900 text-sm">Searching for the product link…</p>
+        <p className="mt-3 font-medium text-neutral-900 text-sm">
+          We&apos;re finding your {platform} product link…
+        </p>
         <p className="mt-1 max-w-sm text-neutral-500 text-xs">
-          ClaimIt is looking for the {platform} product page and will notify you once it&apos;s
-          found. Know the link? Add it to start monitoring right away.
+          We&apos;ll notify you when it&apos;s ready. Know the link? Add it to start monitoring
+          right away.
         </p>
         <Button
           type="button"
@@ -328,7 +330,7 @@ export function PriceHistoryChart({
 
         <p className="mt-4 text-neutral-500 text-xs">
           {searchingLink ? (
-            <>Searching for the product link · {platform}</>
+            <>Finding your {platform} product link</>
           ) : inErrorState ? (
             <>
               Last check failed {errorTimeAgo ?? "recently"} · {platform}
