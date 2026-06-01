@@ -20,6 +20,11 @@ function sniffNumber(data: Record<string, unknown>, key: string): number | null 
   return typeof v === "number" ? v : null;
 }
 
+function sniffBoolean(data: Record<string, unknown>, key: string): boolean | null {
+  const v = data[key];
+  return typeof v === "boolean" ? v : null;
+}
+
 function sniffPlatform(data: Record<string, unknown>): string | null {
   // Returns the raw slug or merchant string. Callers wrap with
   // `getPlatformLabel()` so brand-specific casing (IHG, Macy's, JetBlue,
@@ -97,9 +102,73 @@ const EVENT_BODY_BUILDERS: Partial<
   consecutive_rejections: () => "Several recent claims were denied — let's review your strategy",
   first_time_dashboard: () => "Welcome to ClaimIt! Let's set up your first purchase to monitor",
   user_returned_after_long_absence: () => "Welcome back! Here's what you missed",
+  // Resolver outcomes (BUG-82). Both `resolved` and `unresolved` flip copy
+  // on `data.had_url`: when the user provided a URL we describe the action
+  // as "verified" / "couldn't verify" rather than "found" / "couldn't find".
+  // `corrected` implies the user URL was wrong by definition, so it always
+  // takes the verified branch — no had_url check needed.
+  product_url_resolved: (d) => {
+    const platform = sniffPlatform(d);
+    const hadUrl = sniffBoolean(d, "had_url") === true;
+    if (hadUrl) {
+      return platform
+        ? `Your ${getPlatformLabel(platform)} product link has been verified — we'll start tracking the price`
+        : "Your product link has been verified — we'll start tracking the price";
+    }
+    return platform
+      ? `Your ${getPlatformLabel(platform)} product link is ready — we'll start tracking the price`
+      : "Your product link is ready — we'll start tracking the price";
+  },
+  product_url_corrected: (d) => {
+    const platform = sniffPlatform(d);
+    return platform
+      ? `Your ${getPlatformLabel(platform)} product link has been verified — we'll start tracking the price`
+      : "Your product link has been verified — we'll start tracking the price";
+  },
+  product_url_unresolved: (d) => {
+    const platform = sniffPlatform(d);
+    const hadUrl = sniffBoolean(d, "had_url") === true;
+    // Deliberately no "you can add/update it" tail: the resolver runs the
+    // same search whether the user provides a URL or not, so promising a
+    // user-driven remedy here would be misleading. The persistent "Add
+    // product URL" affordance in the chart empty-state is the right place
+    // to surface that option (search context, not failure context).
+    if (hadUrl) {
+      return platform
+        ? `We couldn't verify the ${getPlatformLabel(platform)} link you provided`
+        : "We couldn't verify the link you provided";
+    }
+    return platform
+      ? `We couldn't find your ${getPlatformLabel(platform)} product link`
+      : "We couldn't find your product link";
+  },
 };
 
-function buildBody(notification: NotificationEvent): string {
+// Per-event-type title overrides. EVENT_LABELS gives the category label
+// used in the type-filter dropdown; per-card titles can vary by data when
+// (as with product_url_resolved / product_url_unresolved) the same
+// event_type rendered with different `data.had_url` deserves a different
+// short label. Builders return null when the static EVENT_LABELS title is
+// already correct; buildTitle falls back to EVENT_LABELS in that case.
+const EVENT_TITLE_BUILDERS: Partial<
+  Record<NotificationEventType, (data: Record<string, unknown>) => string | null>
+> = {
+  product_url_resolved: (d) =>
+    sniffBoolean(d, "had_url") === true ? "Product link verified" : "Product link found",
+  product_url_unresolved: (d) =>
+    sniffBoolean(d, "had_url") === true ? "Product link invalid" : "Product link not found",
+  // product_url_corrected: EVENT_LABELS already reads "Product link
+  // verified" (the corrected scenario implies had_url=true by definition),
+  // so no override needed.
+};
+
+export function buildTitle(notification: NotificationEvent): string {
+  const data = notification.data ?? {};
+  const builder = EVENT_TITLE_BUILDERS[notification.event_type];
+  return builder?.(data) ?? EVENT_LABELS[notification.event_type];
+}
+
+export function buildBody(notification: NotificationEvent): string {
   const data = notification.data ?? {};
   const builder = EVENT_BODY_BUILDERS[notification.event_type];
   const custom = builder?.(data);
@@ -148,7 +217,7 @@ export function NotificationRow({
   onCardClick?: (notification: NotificationEvent) => void;
 }) {
   const Icon = EVENT_ICONS[notification.event_type];
-  const title = EVENT_LABELS[notification.event_type];
+  const title = buildTitle(notification);
   const description = buildBody(notification);
   const timeLabel = formatTimeLabel(notification.created_at);
   const isAcked = notification.acknowledged;
