@@ -1,0 +1,33 @@
+# HyperFrames render outputs (regenerable from source)
+renders/
+*.mp4
+*.webm
+*.mov
+png-sequence/
+
+# HyperFrames caches / temp
+.hyperframes/
+.thumbnails/
+.cache/
+tmp/
+*.log
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Early-phase screenshots — never auto-committed
+screenshots/
+
+# Audio test/audition takes — keep production audio (vo/sfx/music) tracked
+public/audio/*_test/
+
+# Keep production audio (*.wav, *.mp3) under public/audio/{vo,sfx,music}/ tracked.
+# For very large captures, prefer Git LFS over ignoring.
