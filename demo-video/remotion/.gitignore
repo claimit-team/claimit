@@ -1,0 +1,8 @@
+node_modules
+.cache
+out/*.mp4
+.DS_Store
+
+# Secrets — never commit. Covers .env, .env.local, .env.production, etc.
+.env
+.env.*

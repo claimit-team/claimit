@@ -1,0 +1,101 @@
+/*
+ * Re-import the real app's stylesheet so we inherit every design token
+ * and animation. Tailwind v4 PostCSS resolves the relative @import;
+ * Tailwind, tw-animate-css and shadcn/tailwind.css are installed
+ * locally for this experiment.
+ *
+ * The two @source rules below tell Tailwind v4 to scan our local
+ * compositions AND the apps/web source tree for class names — without
+ * these, Tailwind only generates utilities for the strings that appear
+ * relative to apps/web/src/app/, missing the classes we use here.
+ */
+@import "../../../apps/web/src/app/globals.css";
+
+@source "./";
+@source "../../../apps/web/src";
+
+/* @font-face declarations — Inter weights served from public/fonts/.
+ * Local files so headless Chromium doesn't have to hit Google Fonts
+ * (which times out in some Remotion render contexts).
+ * font-display: block means the browser waits indefinitely for the
+ * font (= delayRender + a real-Inter first paint).
+ */
+@font-face {
+  font-family: "Inter";
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+  src: url("../public/fonts/inter-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-weight: 500;
+  font-style: normal;
+  font-display: block;
+  src: url("../public/fonts/inter-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-weight: 600;
+  font-style: normal;
+  font-display: block;
+  src: url("../public/fonts/inter-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+  src: url("../public/fonts/inter-latin-700-normal.woff2") format("woff2");
+}
+
+/* Font setup —————————————————————————————————————————————————————
+ * @remotion/google-fonts/Inter loads the actual Inter font family at
+ * runtime (see polish/font.ts). The fontFamily it returns is the
+ * literal value "Inter". apps/web's Tailwind config maps `font-sans`
+ * to `var(--font-sans)`, which (in production) is set by next/font.
+ * Here we pin --font-sans directly so every component picks up Inter.
+ *
+ * IMPORTANT: the font import is gated by delayRender so when Remotion
+ * captures any frame, the font has already loaded — no fallback flash.
+ */
+:root {
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --font-heading: var(--font-sans);
+}
+
+html,
+body {
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+body {
+  background: var(--neutral-0);
+  color: var(--neutral-700);
+}
+
+/* JITTER GUARD —————————————————————————————————————————————————————
+ * Disable every CSS transition / animation in reused apps/web
+ * components. The product UI ships with `transition-colors`,
+ * `transition-all`, hover/focus animations, and a few keyframes
+ * (shimmer, breathe, ring-pulse). Under Remotion's deterministic
+ * seeking renderer these animate non-deterministically from frame to
+ * frame — i.e., flicker. Force every interactive state to its static
+ * pose by killing transitions globally.
+ *
+ * The polish layer never relies on CSS transitions for motion (we use
+ * Remotion's interpolate / spring), so this is safe to apply
+ * everywhere.
+ */
+*,
+*::before,
+*::after {
+  transition: none !important;
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  animation-play-state: paused !important;
+}
