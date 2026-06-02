@@ -21,20 +21,9 @@ import { useAssistantStream } from "@/hooks/useAssistantStream";
 import { useConversations } from "@/hooks/useConversations";
 import { acknowledgeProactiveEvent } from "@/lib/api/conversations";
 import { dismissPurchase, PurchasesApiError } from "@/lib/api/purchases";
+import { extractClaimId, extractPurchaseId } from "@/lib/proactive-action-router";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store";
-
-/**
- * Defensively pull `purchase_id` (string) out of the raw notification
- * data payload. The payload is producer-defined wire JSON, so we
- * narrow without trusting any field. Returns `null` for any
- * malformed shape so the caller can pick a safe fallback.
- */
-function extractPurchaseId(data: unknown): string | null {
-  if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
-  const id = (data as Record<string, unknown>).purchase_id;
-  return typeof id === "string" && id.length > 0 ? id : null;
-}
 
 // Auto-scroll-to-bottom pins the viewport only when the user is within this
 // many pixels of the bottom. Above the threshold, message-list updates do not
@@ -101,10 +90,13 @@ export function FloatingAssistant({ variant = "default" }: FloatingAssistantProp
         case "redraft":
         case "explain_claim":
         case "resolve_claim": {
-          // For now all claim-related actions just deep-link to the
-          // claims index. Once individual claim ids are surfaced in
-          // the proactive payload, route to /claims/[id] directly.
-          router.push("/claims");
+          // Deep-link to /claims/<id> when the notification payload
+          // carries data.claim_id (always true for backend-written
+          // claim_* NotificationEvents — see claims_service.py). Falls
+          // back to the index when the id is missing/malformed so a
+          // legacy producer doesn't push `/claims/undefined`.
+          const claimId = extractClaimId(proactiveEvent?.data);
+          router.push(claimId ? `/claims/${encodeURIComponent(claimId)}` : "/claims");
           clearProactiveEvent();
           return;
         }
