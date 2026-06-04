@@ -93,7 +93,13 @@ export const ClaimShellLayer: React.FC<Props> = ({ state, claim }) => {
 
       {/* Cursor (Shot 11) */}
       {state.showCursor && (
-        <Cursor x={state.cursorX} y={state.cursorY} pressed={state.cursorPressed} />
+        <Cursor
+          x={state.cursorX}
+          y={state.cursorY}
+          pressed={state.cursorPressed}
+          arrow={state.cursorArrow}
+          pulse={state.cursorClickPulse}
+        />
       )}
     </div>
   );
@@ -234,20 +240,79 @@ const DialogButton: React.FC<{
 };
 
 // ---------- Cursor (Shot 11) ----------
-const Cursor: React.FC<{ x: number; y: number; pressed: boolean }> = ({ x, y, pressed }) => (
-  <div
-    style={{
-      position: "absolute",
-      left: x - 8,
-      top: y - 8,
-      width: 16,
-      height: 16,
-      borderRadius: "50%",
-      background: COLOR.NAVY,
-      opacity: pressed ? 0.9 : 0.75,
-      transform: pressed ? "scale(0.9)" : "scale(1)",
-      boxShadow: "0 2px 6px rgba(0,0,0,0.30)",
-      pointerEvents: "none",
-    }}
-  />
-);
+// Two looks: the legacy navy dot (Act III, arrow=false) and a real arrow
+// pointer with a click ripple (the new video, arrow=true). Coords are the
+// arrow TIP (hotspot), in native shell space.
+const Cursor: React.FC<{
+  x: number;
+  y: number;
+  pressed: boolean;
+  arrow?: boolean;
+  pulse?: number;
+}> = ({ x, y, pressed, arrow = false, pulse = 0 }) => {
+  if (!arrow) {
+    return (
+      <div
+        style={{
+          position: "absolute",
+          left: x - 8,
+          top: y - 8,
+          width: 16,
+          height: 16,
+          borderRadius: "50%",
+          background: COLOR.NAVY,
+          opacity: pressed ? 0.9 : 0.75,
+          transform: pressed ? "scale(0.9)" : "scale(1)",
+          boxShadow: "0 2px 6px rgba(0,0,0,0.30)",
+          pointerEvents: "none",
+        }}
+      />
+    );
+  }
+
+  // Click ripple: expanding, fading ring centered on the tip.
+  const ringScale = 0.4 + pulse * 1.9;
+  const ringOpacity = pulse > 0.001 ? (1 - pulse) * 0.55 : 0;
+  const RING = 64;
+  const arrowScale = pressed ? 0.84 : 1;
+
+  return (
+    <div style={{ position: "absolute", left: x, top: y, pointerEvents: "none", zIndex: 9999 }}>
+      {/* Ripple ring */}
+      {ringOpacity > 0.001 && (
+        <div
+          style={{
+            position: "absolute",
+            left: -RING / 2,
+            top: -RING / 2,
+            width: RING,
+            height: RING,
+            borderRadius: "50%",
+            border: `3px solid ${COLOR.NAVY}`,
+            opacity: ringOpacity,
+            transform: `scale(${ringScale.toFixed(3)})`,
+            willChange: "transform, opacity",
+          }}
+        />
+      )}
+      {/* Arrow pointer — tip at (0,0) = the (x,y) hotspot */}
+      <div style={{ transform: `scale(${arrowScale})`, transformOrigin: "top left" }}>
+        <svg
+          width="28"
+          height="37"
+          viewBox="0 0 18 24"
+          aria-label="Cursor"
+          style={{ display: "block", filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.35))" }}
+        >
+          <path
+            d="M0 0 L0 20 L5.4 15 L9 23 L12.4 21.4 L8.8 13.6 L16 13.6 Z"
+            fill={COLOR.WHITE}
+            stroke="#111827"
+            strokeWidth={1.6}
+            strokeLinejoin="round"
+          />
+        </svg>
+      </div>
+    </div>
+  );
+};

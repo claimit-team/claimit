@@ -24,6 +24,7 @@ import { LightScene } from "../../shots/_shared/LightScene";
 import { Stage } from "../../shots/_shared/Stage";
 import { EASE_UI } from "../../shots/_shared/tokens";
 import { type Act3FrameState, defaultAct3FrameState } from "../../shots/_shared/types";
+import { AgentBadge } from "../brand";
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: EASE_UI } as const;
 const iv = (f: number, range: number[], out: number[]) => interpolate(f, range, out, clamp);
@@ -54,7 +55,7 @@ function computeState(f: number): Act3FrameState {
 
   // Shell visible the whole scene (fades in at the top).
   s.layers.claimShell = iv(f, [0, 80], [0, 1]);
-  s.cameraScale = iv(f, [0, 120, 1800, 1880, 2220, 2340], [1.0, 1.03, 1.03, 1.0, 1.0, 1.04]);
+  s.cameraScale = iv(f, [0, 120, 1800, 1880, 2220, 2340], [1.0, 1.02, 1.02, 1.0, 1.0, 1.04]);
 
   const WORKSPACE = f < 1800;
   if (WORKSPACE) {
@@ -105,12 +106,24 @@ function computeState(f: number): Act3FrameState {
   s.assistantToolLineOpacity = 1;
   s.assistantStreaming = false;
 
-  // Cursor → approve button → dialog → send.
-  s.showCursor = f >= 1820 && f < 2160;
-  s.cursorX = iv(f, [1820, 1900, 1980, 2040], [1480, 1480, 980, 952]);
-  s.cursorY = iv(f, [1820, 1900, 1980, 2040], [420, 70, 70, 600]);
-  s.cursorPressed = (f >= 1900 && f < 1920) || (f >= 2040 && f < 2060);
-  s.approveButtonHover = f >= 1880 && f < 1920;
+  // Cursor → approve button → dialog → send. Arrow pointer; tip lands on
+  // each button (measured native coords) and HOLDS through the press.
+  //   Approve "Approve and send"  ≈ (1560, 70)
+  //   Dialog  "Send email"        ≈ (959, 567)
+  const PRESS_A = 1900;
+  const PRESS_S = 2040;
+  s.showCursor = f >= 1810 && f < 2090;
+  s.cursorArrow = true;
+  s.cursorX = iv(f, [1810, 1890, 1930, 1990, 2040], [1500, 1560, 1560, 1080, 959]);
+  s.cursorY = iv(f, [1810, 1890, 1930, 1990, 2040], [430, 70, 70, 330, 567]);
+  s.cursorPressed = (f >= PRESS_A && f < PRESS_A + 20) || (f >= PRESS_S && f < PRESS_S + 20);
+  s.approveButtonHover = f >= 1880 && f < 1925;
+  // Click ripple (0→1) after each press.
+  let pulse = 0;
+  for (const cf of [PRESS_A, PRESS_S]) {
+    if (f >= cf && f < cf + 24) pulse = (f - cf) / 24;
+  }
+  s.cursorClickPulse = pulse;
 
   s.approveDialogOpacity = iv(f, [1920, 1960, 2060, 2100], [0, 1, 1, 0]);
   s.approveDialogRise = iv(f, [1920, 1960], [12, 0]);
@@ -136,6 +149,10 @@ export const Scene06DemoCore: React.FC = () => {
   const state = computeState(frame);
   const claim = buildPerFrameClaim(state);
 
+  // Name the agent powering each beat (hidden once we hit approve/money).
+  const claimBadgeOp = iv(frame, [40, 90, 1040, 1090], [0, 1, 1, 0]);
+  const asstBadgeOp = iv(frame, [1090, 1140, 1700, 1740], [0, 1, 1, 0]);
+
   return (
     <DemoStateProvider value={state}>
       <LightScene>
@@ -159,6 +176,10 @@ export const Scene06DemoCore: React.FC = () => {
         >
           <MoneyOverlayLayer state={state} />
         </AbsoluteFill>
+
+        {/* Agent labels — Claim agent drafts, Assistant agent answers. */}
+        <AgentBadge name="Claim Agent" opacity={claimBadgeOp} />
+        <AgentBadge name="Assistant Agent" opacity={asstBadgeOp} />
       </LightScene>
     </DemoStateProvider>
   );
