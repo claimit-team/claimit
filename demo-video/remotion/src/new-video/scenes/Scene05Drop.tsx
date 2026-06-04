@@ -1,7 +1,7 @@
-// Scene 5 — The Drop · 0:58–1:14 · 960f · light.
-// Reuses the REAL PriceChartLayer (Recharts) inside the Stage. The line
-// draws L→R, amber drop dots pop, the $349.99 label + monitor caption
-// land, then an "Eligible · $50 back" pill confirms the policy check.
+// Scene 5 — The Drop · 0:54–1:10 · 960f · light.
+// The MONITOR AGENT watches the price. Reuses the REAL PriceChartLayer
+// (Recharts): the line draws L→R, amber drop dots pop, the $349.99 label
+// + caption land, then an "eligible · $50 back" pill confirms the policy.
 
 import { BadgeCheck } from "lucide-react";
 import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
@@ -17,6 +17,7 @@ import {
 import { LightScene } from "../../shots/_shared/LightScene";
 import { Stage } from "../../shots/_shared/Stage";
 import { COLOR, EASE_UI, TYPE } from "../../shots/_shared/tokens";
+import { AgentBadge } from "../brand";
 import { S5_DROP_F } from "../durations";
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: EASE_UI } as const;
@@ -47,6 +48,7 @@ export const Scene05Drop: React.FC = () => {
   // Eligibility pill (canvas space, true size)
   const pillOp = interpolate(frame, [680, 720], [0, 1], clamp);
   const pillY = interpolate(frame, [680, 720], [16, 0], clamp);
+  const badgeOp = interpolate(frame, [12, 52], [0, 1], clamp);
   const outOp = interpolate(frame, [S5_DROP_F - 36, S5_DROP_F], [1, 0], clamp);
 
   return (
@@ -103,6 +105,8 @@ export const Scene05Drop: React.FC = () => {
           </div>
         </div>
       </AbsoluteFill>
+
+      <AgentBadge name="Monitor Agent" opacity={badgeOp} />
     </LightScene>
   );
 };

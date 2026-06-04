@@ -40,7 +40,8 @@ function computeState(f: number): Act3FrameState {
     s.gridCellFooterOpacity[id] = iv(f, [at + 150, at + 190], [0, 1]);
   });
 
-  s.gridClosingOpacity = iv(f, [640, 700], [0, 1]);
+  // gridClosingOpacity intentionally left at 0 — the small bottom caption
+  // overlapped the lower cells, so it's removed per feedback.
   return s;
 }
 

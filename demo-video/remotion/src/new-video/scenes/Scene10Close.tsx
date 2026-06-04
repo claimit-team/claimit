@@ -1,4 +1,4 @@
-// Scene 9 — Close · 2:42–3:00 · 1080f · light sign-off.
+// Scene 10 — Close · 2:42–3:00 · 1080f · light sign-off.
 // Tagline reprise (brand letter-spacing tighten) → closing line →
 // shield + wordmark → team · site · repo. Calm upbeat button.
 
@@ -9,17 +9,17 @@ import { Camera } from "../../shots/_shared/Camera";
 import { DP3_TAGLINE, DP16_CLOSE } from "../../shots/_shared/data";
 import { LightScene } from "../../shots/_shared/LightScene";
 import { COLOR, EASE_UI, TYPE } from "../../shots/_shared/tokens";
-import { S9_CLOSE_F } from "../durations";
+import { S10_CLOSE_F } from "../durations";
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: EASE_UI } as const;
 const iv = (f: number, range: number[], out: number[]) => interpolate(f, range, out, clamp);
 
 const REPO = "github.com/claimit-team/claimit";
 
-export const Scene09Close: React.FC = () => {
+export const Scene10Close: React.FC = () => {
   return (
     <LightScene>
-      <Camera from={1.0} to={1.012} startF={0} endF={S9_CLOSE_F}>
+      <Camera from={1.0} to={1.012} startF={0} endF={S10_CLOSE_F}>
         <Inner />
       </Camera>
     </LightScene>
@@ -39,7 +39,7 @@ const Inner: React.FC = () => {
   const teamOp = iv(frame, [300, 350], [0, 1]);
   const linksOp = iv(frame, [350, 400], [0, 1]);
 
-  const outOp = iv(frame, [S9_CLOSE_F - 60, S9_CLOSE_F], [1, 0.0]);
+  const outOp = iv(frame, [S10_CLOSE_F - 60, S10_CLOSE_F], [1, 0.0]);
 
   return (
     <AbsoluteFill style={{ opacity: outOp }}>
