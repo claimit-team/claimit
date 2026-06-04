@@ -45,6 +45,29 @@ import {
   UiSentConfirmation,
   UiUploadModalOnDashboard,
 } from "./uirefs";
+// ===== PEER — NewVideo + 9 Scenes (for audit preview) =====
+import { NewVideo } from "./new-video/NewVideo";
+import {
+  NEW_VIDEO_DURATION_F,
+  S1_HOOK_F,
+  S2_GAP_F,
+  S3_MEET_F,
+  S4_INGEST_F,
+  S5_DROP_F,
+  S6_DEMO_F,
+  S7_PLATFORMS_F,
+  S8_REACH_F,
+  S9_CLOSE_F,
+} from "./new-video/durations";
+import { Scene01Hook } from "./new-video/scenes/Scene01Hook";
+import { Scene02Gap } from "./new-video/scenes/Scene02Gap";
+import { Scene03Meet } from "./new-video/scenes/Scene03Meet";
+import { Scene04Ingest } from "./new-video/scenes/Scene04Ingest";
+import { Scene05Drop } from "./new-video/scenes/Scene05Drop";
+import { Scene06DemoCore } from "./new-video/scenes/Scene06DemoCore";
+import { Scene07Platforms } from "./new-video/scenes/Scene07Platforms";
+import { Scene08Reach } from "./new-video/scenes/Scene08Reach";
+import { Scene09Close } from "./new-video/scenes/Scene09Close";
 
 // ============================================================================
 // BATCH 0 LEGACY — Erdun's 18-shot structure, archived 2026-06-03.
@@ -182,6 +205,22 @@ export const RemotionRoot = () => {
       <Composition id="ui-ocr-fields-populated" component={UiOcrFieldsPopulated} durationInFrames={60} fps={60} width={1920} height={1080} />
       <Composition id="ui-purchase-detail-with-chart" component={UiPurchaseDetailWithChart} durationInFrames={60} fps={60} width={1920} height={1080} />
       <Composition id="ui-sent-confirmation" component={UiSentConfirmation} durationInFrames={60} fps={60} width={1920} height={1080} />
+      {/* ====================================================================== */}
+      {/* PEER — NewVideo + 9 Scenes (for audit preview).                        */}
+      {/* Pulled from origin/dev (no merge); shots/_shared restored from archive */}
+      {/* (COPY) so peer's Erdun-design-system imports resolve. Each Scene also  */}
+      {/* registered standalone for side-by-side preview vs CC's beats.          */}
+      {/* ====================================================================== */}
+      <Composition id="NewVideo" component={NewVideo} durationInFrames={NEW_VIDEO_DURATION_F} fps={60} width={1920} height={1080} />
+      <Composition id="peer-scene-01-hook" component={Scene01Hook} durationInFrames={S1_HOOK_F} fps={60} width={1920} height={1080} />
+      <Composition id="peer-scene-02-gap" component={Scene02Gap} durationInFrames={S2_GAP_F} fps={60} width={1920} height={1080} />
+      <Composition id="peer-scene-03-meet" component={Scene03Meet} durationInFrames={S3_MEET_F} fps={60} width={1920} height={1080} />
+      <Composition id="peer-scene-04-ingest" component={Scene04Ingest} durationInFrames={S4_INGEST_F} fps={60} width={1920} height={1080} />
+      <Composition id="peer-scene-05-drop" component={Scene05Drop} durationInFrames={S5_DROP_F} fps={60} width={1920} height={1080} />
+      <Composition id="peer-scene-06-democore" component={Scene06DemoCore} durationInFrames={S6_DEMO_F} fps={60} width={1920} height={1080} />
+      <Composition id="peer-scene-07-platforms" component={Scene07Platforms} durationInFrames={S7_PLATFORMS_F} fps={60} width={1920} height={1080} />
+      <Composition id="peer-scene-08-reach" component={Scene08Reach} durationInFrames={S8_REACH_F} fps={60} width={1920} height={1080} />
+      <Composition id="peer-scene-09-close" component={Scene09Close} durationInFrames={S9_CLOSE_F} fps={60} width={1920} height={1080} />
     </>
   );
 };

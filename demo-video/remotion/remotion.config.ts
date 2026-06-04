@@ -73,6 +73,16 @@ Config.overrideWebpackConfig((current) => {
     resolve: {
       ...withTailwind.resolve,
       alias: merged,
+      // apps/web component files live OUTSIDE this project, so Node's
+      // resolver walks up from apps/web/ and never sees our local
+      // node_modules (lucide-react, tailwindcss, class-variance-authority,
+      // @base-ui/react, etc. are all installed HERE). Add our node_modules
+      // as an explicit search root so those bare imports resolve no matter
+      // where the importing file physically lives.
+      modules: [
+        path.resolve(CWD, "node_modules"),
+        ...(withTailwind.resolve?.modules ?? ["node_modules"]),
+      ],
     },
   };
 });
