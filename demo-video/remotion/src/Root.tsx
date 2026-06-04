@@ -143,7 +143,7 @@ export const RemotionRoot = () => {
       {/* DEMO — new b06 (upload → OCR extract); will consolidate b10-b14 pending review. */}
       <Composition id="Beat06" component={Beat06} durationInFrames={960} fps={60} width={1920} height={1080} />
       {/* DEMO — new b07 (monitor → drop detect); will consolidate b15-b17 pending review. */}
-      <Composition id="Beat07" component={Beat07} durationInFrames={780} fps={60} width={1920} height={1080} />
+      <Composition id="Beat07" component={Beat07} durationInFrames={760} fps={60} width={1920} height={1080} />
       {/* BATCH E — REFUND DEMO (beats 10-27). */}
       <Composition id="Beat10" component={Beat10} durationInFrames={300} fps={60} width={1920} height={1080} />
       <Composition id="Beat11" component={Beat11} durationInFrames={300} fps={60} width={1920} height={1080} />
