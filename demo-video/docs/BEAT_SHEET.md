@@ -104,6 +104,8 @@ Real high-level flow (per audit):
 
 ## REFUND DEMO (0:50–2:20)
 
+> [2026-06-04] b10-b29 superseded by b06-b08 (and upcoming b09) — the consolidated DEMO section. Legacy folders renamed to `_legacy_bNN_*`, files preserved for reference, deregistered from Root.tsx. Their vo_bNN.mp3 remain on disk but unreferenced.
+
 Goal: Show the main product flow in a friendly, premium, human way. Apple
 narration tone. Use "you," not "the user." Don't say ClaimIt guarantees money
 back — say ClaimIt prepares, drafts, sends.

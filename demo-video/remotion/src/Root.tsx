@@ -12,26 +12,7 @@ import { Beat05 } from "./beats/b05_arch-master/Beat05";
 import { Beat06 } from "./beats/b06_demo-upload-extract/Beat06";
 import { Beat07 } from "./beats/b07_demo-monitor-drop/Beat07";
 import { Beat08 } from "./beats/b08_demo-3panel-claimshell/Beat08";
-import { Beat10 } from "./beats/b10_refund-receipt-intro__050-055/Beat10";
-import { Beat11 } from "./beats/b11_refund-upload__055-060/Beat11";
-import { Beat12 } from "./beats/b12_refund-extract__100-105/Beat12";
-import { Beat13 } from "./beats/b13_refund-fields__105-110/Beat13";
-import { Beat14 } from "./beats/b14_refund-confirm__110-115/Beat14";
-import { Beat15 } from "./beats/b15_refund-watch__115-120/Beat15";
-import { Beat16 } from "./beats/b16_refund-timepass__120-125/Beat16";
-import { Beat17 } from "./beats/b17_refund-detect__125-130/Beat17";
-import { Beat18 } from "./beats/b18_refund-policy__130-135/Beat18";
-import { Beat19 } from "./beats/b19_refund-draft__135-140/Beat19";
-import { Beat20 } from "./beats/b20_refund-rewrite-ask__140-145/Beat20";
-import { Beat21 } from "./beats/b21_refund-rewrite-result__145-150/Beat21";
-import { Beat22 } from "./beats/b22_refund-edit__150-155/Beat22";
-import { Beat23 } from "./beats/b23_refund-saved__155-200/Beat23";
-import { Beat24 } from "./beats/b24_refund-review__200-205/Beat24";
-import { Beat25 } from "./beats/b25_refund-approve__205-210/Beat25";
-import { Beat26 } from "./beats/b26_refund-sent__210-215/Beat26";
-import { Beat27 } from "./beats/b27_refund-bridge__215-220/Beat27";
-import { Beat28 } from "./beats/b28_cred-grid__220-226/Beat28";
-import { Beat29 } from "./beats/b29_cred-channels__226-232/Beat29";
+// LEGACY b10-b29 imports removed — superseded by b06-b09 (DEMO consolidation 2026-06-04).
 import { Beat35 } from "./beats/b35_payoff-final__252-300/Beat35";
 import {
   UiAppShellEmpty,
@@ -147,28 +128,10 @@ export const RemotionRoot = () => {
       <Composition id="Beat07" component={Beat07} durationInFrames={760} fps={60} width={1920} height={1080} />
       {/* DEMO — new b08 (3-panel ClaimShell + chat→redraft); will consolidate b19-b26 pending review. */}
       <Composition id="Beat08" component={Beat08} durationInFrames={1150} fps={60} width={1920} height={1080} />
-      {/* BATCH E — REFUND DEMO (beats 10-27). */}
-      <Composition id="Beat10" component={Beat10} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat11" component={Beat11} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat12" component={Beat12} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat13" component={Beat13} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat14" component={Beat14} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat15" component={Beat15} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat16" component={Beat16} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat17" component={Beat17} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat18" component={Beat18} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat19" component={Beat19} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat20" component={Beat20} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat21" component={Beat21} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat22" component={Beat22} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat23" component={Beat23} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat24" component={Beat24} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat25" component={Beat25} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat26" component={Beat26} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat27" component={Beat27} durationInFrames={300} fps={60} width={1920} height={1080} />
-      {/* BATCH F — CREDIBILITY (28-29). */}
-      <Composition id="Beat28" component={Beat28} durationInFrames={300} fps={60} width={1920} height={1080} />
-      <Composition id="Beat29" component={Beat29} durationInFrames={300} fps={60} width={1920} height={1080} />
+      {/* =================================================================== */}
+      {/* LEGACY b10-b29: superseded by b06-b09 (DEMO consolidation 2026-06-04). */}
+      {/* Folder files preserved under src/beats/_legacy_bNN_ folders. Not registered. */}
+      {/* =================================================================== */}
       {/* BATCH G — IMPLEMENTATION PROOF (30-34) — REMOVED 2026-06-03 (DEMO_INTERACTION_SPEC_v1 Phase 1). */}
       {/* BATCH H — PAYOFF (35) — 480f. */}
       <Composition id="Beat35" component={Beat35} durationInFrames={480} fps={60} width={1920} height={1080} />
