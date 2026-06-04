@@ -57,6 +57,13 @@
 
 ## HOOK (0:00–0:20)
 
+> **[2026-06-04] HOOK restructure:** b02/b03/b04 replaced with wrappers around
+> peer scenes (`peer-scene-01-hook` / `peer-scene-02-gap` / `peer-scene-03-meet`).
+> Subtitle text for the new beats is **no longer from this sheet** — CC wrote new
+> subtitles by inspecting the peer scene visuals. Beat01 retained (retimed
+> 300f→240f, slower enter/exit). The historical b02–b04 VO rows below are kept
+> for reference only (their `vo_b02/03/04.mp3` are preserved but unused).
+
 Goal: Create the feeling that money is being lost quietly, then reposition 
 ClaimIt as the workflow that captures it.
 

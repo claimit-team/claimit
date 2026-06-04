@@ -4,9 +4,10 @@ import "./globals.css";
 import { Composition } from "remotion";
 
 import { Beat01 } from "./beats/b01_hook-cracks__000-005/Beat01";
-import { Beat02 } from "./beats/b02_hook-categories__005-010/Beat02";
-import { Beat03 } from "./beats/b03_hook-twopercent__010-015/Beat03";
-import { Beat04 } from "./beats/b04_hook-claimit__015-020/Beat04";
+// b02-b04 (old HOOK beats) replaced 2026-06-04 by peer-scene wrappers — imported below.
+import { Beat02 } from "./beats/b02_peer-hook/Beat02";
+import { Beat03 } from "./beats/b03_peer-gap/Beat03";
+import { Beat04 } from "./beats/b04_peer-meet/Beat04";
 import { Beat05 } from "./beats/b05_arch-receipt__020-026/Beat05";
 import { Beat06 } from "./beats/b06_arch-extract__026-032/Beat06";
 import { Beat07 } from "./beats/b07_arch-monitor__032-038/Beat07";
@@ -126,39 +127,19 @@ import { Scene09Close } from "./new-video/scenes/Scene09Close";
 export const RemotionRoot = () => {
   return (
     <>
-      {/* BATCH C — HOOK (beats 1-4). */}
+      {/* BATCH C — HOOK. Beat01 = CC original (retimed 240f). b02-b04 replaced
+          2026-06-04 by wrappers around peer scenes (Scene01Hook/02Gap/03Meet). */}
       <Composition
         id="Beat01"
         component={Beat01}
-        durationInFrames={300}
+        durationInFrames={240}
         fps={60}
         width={1920}
         height={1080}
       />
-      <Composition
-        id="Beat02"
-        component={Beat02}
-        durationInFrames={300}
-        fps={60}
-        width={1920}
-        height={1080}
-      />
-      <Composition
-        id="Beat03"
-        component={Beat03}
-        durationInFrames={300}
-        fps={60}
-        width={1920}
-        height={1080}
-      />
-      <Composition
-        id="Beat04"
-        component={Beat04}
-        durationInFrames={300}
-        fps={60}
-        width={1920}
-        height={1080}
-      />
+      <Composition id="Beat02" component={Beat02} durationInFrames={600} fps={60} width={1920} height={1080} />
+      <Composition id="Beat03" component={Beat03} durationInFrames={1080} fps={60} width={1920} height={1080} />
+      <Composition id="Beat04" component={Beat04} durationInFrames={720} fps={60} width={1920} height={1080} />
       {/* BATCH D — ARCHITECTURE (beats 5-9). */}
       <Composition id="Beat05" component={Beat05} durationInFrames={300} fps={60} width={1920} height={1080} />
       <Composition id="Beat06" component={Beat06} durationInFrames={300} fps={60} width={1920} height={1080} />
