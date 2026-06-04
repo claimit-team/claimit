@@ -35,7 +35,7 @@ function safeGet(data: PayloadDict, key: string, fallback = "unknown"): string {
  * (BUG-115 finding #3a).
  */
 function sniffPlatformLabel(data: PayloadDict): string | null {
-  const raw = data["platform"] ?? data["merchant"];
+  const raw = data.platform ?? data.merchant;
   if (raw === undefined || raw === null || raw === "") return null;
   return getPlatformLabel(String(raw));
 }

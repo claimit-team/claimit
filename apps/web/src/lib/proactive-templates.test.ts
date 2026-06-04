@@ -31,8 +31,8 @@ describe("priceDropped — platform-sniffer", () => {
       window_remaining_hours: 24,
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "Your Best Buy item");
-    expect(out!.key_facts).toContain("Platform: Best Buy");
+    expectIncludes(out?.opening_message, "Your Best Buy item");
+    expect(out?.key_facts).toContain("Platform: Best Buy");
   });
 
   it("falls back to data.merchant when platform is missing", () => {
@@ -42,8 +42,8 @@ describe("priceDropped — platform-sniffer", () => {
       window_remaining_hours: 24,
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "Your Target item");
-    expect(out!.key_facts).toContain("Platform: Target");
+    expectIncludes(out?.opening_message, "Your Target item");
+    expect(out?.key_facts).toContain("Platform: Target");
   });
 
   it("omits the platform clause when neither key is present", () => {
@@ -52,10 +52,10 @@ describe("priceDropped — platform-sniffer", () => {
       window_remaining_hours: 24,
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "Your item just dropped");
-    expect(out!.opening_message).not.toContain("unknown");
-    expect(out!.opening_message).not.toContain("Your  item"); // double-space sanity
-    expect(out!.key_facts.some((f) => f.startsWith("Platform:"))).toBe(false);
+    expectIncludes(out?.opening_message, "Your item just dropped");
+    expect(out?.opening_message).not.toContain("unknown");
+    expect(out?.opening_message).not.toContain("Your  item"); // double-space sanity
+    expect(out?.key_facts.some((f) => f.startsWith("Platform:"))).toBe(false);
   });
 
   it("prefers data.platform when both keys are present", () => {
@@ -65,8 +65,8 @@ describe("priceDropped — platform-sniffer", () => {
       refund_amount: 50,
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "Your Best Buy item");
-    expect(out!.key_facts).toContain("Platform: Best Buy");
+    expectIncludes(out?.opening_message, "Your Best Buy item");
+    expect(out?.key_facts).toContain("Platform: Best Buy");
   });
 });
 
@@ -82,8 +82,8 @@ describe("claimDrafted — platform-sniffer", () => {
       claim_type: "email",
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "I drafted your Amazon email");
-    expect(out!.key_facts).toContain("Platform: Amazon");
+    expectIncludes(out?.opening_message, "I drafted your Amazon email");
+    expect(out?.key_facts).toContain("Platform: Amazon");
   });
 
   it("falls back to data.merchant when platform is missing (BUG-115 finding 3a)", () => {
@@ -93,8 +93,8 @@ describe("claimDrafted — platform-sniffer", () => {
       claim_type: "email",
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "I drafted your Best Buy email");
-    expect(out!.key_facts).toContain("Platform: Best Buy");
+    expectIncludes(out?.opening_message, "I drafted your Best Buy email");
+    expect(out?.key_facts).toContain("Platform: Best Buy");
   });
 
   it("omits the platform clause when neither key is present", () => {
@@ -103,9 +103,9 @@ describe("claimDrafted — platform-sniffer", () => {
       claim_type: "email",
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "I drafted your email");
-    expect(out!.opening_message).not.toContain("unknown");
-    expect(out!.key_facts.some((f) => f.startsWith("Platform:"))).toBe(false);
+    expectIncludes(out?.opening_message, "I drafted your email");
+    expect(out?.opening_message).not.toContain("unknown");
+    expect(out?.key_facts.some((f) => f.startsWith("Platform:"))).toBe(false);
   });
 
   it("prefers data.platform when both keys are present", () => {
@@ -116,7 +116,7 @@ describe("claimDrafted — platform-sniffer", () => {
       claim_type: "email",
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "I drafted your Amazon email");
+    expectIncludes(out?.opening_message, "I drafted your Amazon email");
   });
 });
 
@@ -128,23 +128,23 @@ describe("claimSubmitted — platform-sniffer", () => {
   it("uses data.platform when present", () => {
     const out = generateProactiveOutput("claim_submitted", { platform: "hilton" });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "Your Hilton claim has been submitted");
-    expect(out!.key_facts).toContain("Platform: Hilton");
+    expectIncludes(out?.opening_message, "Your Hilton claim has been submitted");
+    expect(out?.key_facts).toContain("Platform: Hilton");
   });
 
   it("falls back to data.merchant", () => {
     const out = generateProactiveOutput("claim_submitted", { merchant: "amazon" });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "Your Amazon claim has been submitted");
-    expect(out!.key_facts).toContain("Platform: Amazon");
+    expectIncludes(out?.opening_message, "Your Amazon claim has been submitted");
+    expect(out?.key_facts).toContain("Platform: Amazon");
   });
 
   it("omits platform clause when neither key is present", () => {
     const out = generateProactiveOutput("claim_submitted", {});
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "Your claim has been submitted");
-    expect(out!.opening_message).not.toContain("unknown");
-    expect(out!.key_facts).toEqual(["Status: submitted"]);
+    expectIncludes(out?.opening_message, "Your claim has been submitted");
+    expect(out?.opening_message).not.toContain("unknown");
+    expect(out?.key_facts).toEqual(["Status: submitted"]);
   });
 
   it("prefers data.platform when both keys are present", () => {
@@ -153,7 +153,7 @@ describe("claimSubmitted — platform-sniffer", () => {
       merchant: "amazon",
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "Your Hilton claim has been submitted");
+    expectIncludes(out?.opening_message, "Your Hilton claim has been submitted");
   });
 });
 
@@ -168,8 +168,8 @@ describe("claimDenied — platform-sniffer", () => {
       denial_reason_extracted: "basic_economy",
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "Delta denied your claim");
-    expect(out!.key_facts).toContain("Platform: Delta");
+    expectIncludes(out?.opening_message, "Delta denied your claim");
+    expect(out?.key_facts).toContain("Platform: Delta");
   });
 
   it("falls back to data.merchant", () => {
@@ -178,8 +178,8 @@ describe("claimDenied — platform-sniffer", () => {
       denial_reason_extracted: "window_expired",
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "United Airlines denied your claim");
-    expect(out!.key_facts).toContain("Platform: United Airlines");
+    expectIncludes(out?.opening_message, "United Airlines denied your claim");
+    expect(out?.key_facts).toContain("Platform: United Airlines");
   });
 
   it("omits platform clause when neither key is present (no 'unknown denied your claim')", () => {
@@ -187,9 +187,9 @@ describe("claimDenied — platform-sniffer", () => {
       denial_reason_extracted: "other",
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "Your claim was denied");
-    expect(out!.opening_message).not.toContain("unknown");
-    expect(out!.key_facts.some((f) => f.startsWith("Platform:"))).toBe(false);
+    expectIncludes(out?.opening_message, "Your claim was denied");
+    expect(out?.opening_message).not.toContain("unknown");
+    expect(out?.key_facts.some((f) => f.startsWith("Platform:"))).toBe(false);
   });
 
   it("prefers data.platform when both keys are present", () => {
@@ -199,7 +199,7 @@ describe("claimDenied — platform-sniffer", () => {
       denial_reason_extracted: "basic_economy",
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "Delta denied your claim");
+    expectIncludes(out?.opening_message, "Delta denied your claim");
   });
 });
 
@@ -214,8 +214,8 @@ describe("claimResolvedSuccess — platform-sniffer", () => {
       refund_amount: 75,
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "back from Best Buy");
-    expect(out!.key_facts).toContain("Platform: Best Buy");
+    expectIncludes(out?.opening_message, "back from Best Buy");
+    expect(out?.key_facts).toContain("Platform: Best Buy");
   });
 
   it("falls back to data.merchant", () => {
@@ -224,8 +224,8 @@ describe("claimResolvedSuccess — platform-sniffer", () => {
       refund_amount: 75,
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "back from Target");
-    expect(out!.key_facts).toContain("Platform: Target");
+    expectIncludes(out?.opening_message, "back from Target");
+    expect(out?.key_facts).toContain("Platform: Target");
   });
 
   it("omits 'from <platform>' when neither key is present", () => {
@@ -233,12 +233,12 @@ describe("claimResolvedSuccess — platform-sniffer", () => {
       refund_amount: 75,
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "🎉 You got $75.00 back!");
-    expect(out!.opening_message).not.toContain("unknown");
-    expect(out!.opening_message).not.toContain(" from ");
-    expect(out!.key_facts.some((f) => f.startsWith("Platform:"))).toBe(false);
+    expectIncludes(out?.opening_message, "🎉 You got $75.00 back!");
+    expect(out?.opening_message).not.toContain("unknown");
+    expect(out?.opening_message).not.toContain(" from ");
+    expect(out?.key_facts.some((f) => f.startsWith("Platform:"))).toBe(false);
     // Refund fact still surfaces
-    expect(out!.key_facts).toContain("Refund: $75.00");
+    expect(out?.key_facts).toContain("Refund: $75.00");
   });
 
   it("prefers data.platform when both keys are present", () => {
@@ -248,6 +248,6 @@ describe("claimResolvedSuccess — platform-sniffer", () => {
       refund_amount: 75,
     });
     expect(out).not.toBeNull();
-    expectIncludes(out!.opening_message, "back from Best Buy");
+    expectIncludes(out?.opening_message, "back from Best Buy");
   });
 });
