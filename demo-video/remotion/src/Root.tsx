@@ -138,8 +138,8 @@ export const RemotionRoot = () => {
         height={1080}
       />
       <Composition id="Beat02" component={Beat02} durationInFrames={600} fps={60} width={1920} height={1080} />
-      <Composition id="Beat03" component={Beat03} durationInFrames={1080} fps={60} width={1920} height={1080} />
-      <Composition id="Beat04" component={Beat04} durationInFrames={720} fps={60} width={1920} height={1080} />
+      <Composition id="Beat03" component={Beat03} durationInFrames={540} fps={60} width={1920} height={1080} />
+      <Composition id="Beat04" component={Beat04} durationInFrames={300} fps={60} width={1920} height={1080} />
       {/* BATCH D — ARCHITECTURE (beats 5-9). */}
       <Composition id="Beat05" component={Beat05} durationInFrames={300} fps={60} width={1920} height={1080} />
       <Composition id="Beat06" component={Beat06} durationInFrames={300} fps={60} width={1920} height={1080} />
