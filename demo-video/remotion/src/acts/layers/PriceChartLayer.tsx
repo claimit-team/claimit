@@ -19,6 +19,12 @@ interface Props {
   refLineOpacity: number;
   finalLabelOpacity: number;
   captionOpacity: number;
+  /**
+   * Optional per-dot radius multiplier (aligned to the visible amber-dot
+   * order). Lets a caller "pop" each dot as it appears. Omitted → every
+   * dot renders at its static r=6 (original Act III behavior, unchanged).
+   */
+  dotScales?: number[];
 }
 
 const fmtMoney = (n: number) =>
@@ -42,6 +48,7 @@ export const PriceChartLayer: React.FC<Props> = ({
   refLineOpacity,
   finalLabelOpacity,
   captionOpacity,
+  dotScales,
 }) => {
   const data = series.map((p) => ({
     ...p,
@@ -180,9 +187,10 @@ export const PriceChartLayer: React.FC<Props> = ({
             strokeDasharray={totalLen}
             strokeDashoffset={dashOffset}
           />
-          {amberDotIndices.slice(0, amberDotsVisible).map((idx) => {
+          {amberDotIndices.slice(0, amberDotsVisible).map((idx, k) => {
             const p = pts[idx];
-            return <circle key={idx} cx={p.x} cy={p.y} r={6} fill={COLOR.AMBER} />;
+            const r = 6 * (dotScales?.[k] ?? 1);
+            return <circle key={idx} cx={p.x} cy={p.y} r={r} fill={COLOR.AMBER} />;
           })}
           {/* Final label at last point */}
           {finalLabelOpacity > 0 && (

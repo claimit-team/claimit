@@ -15,6 +15,8 @@ import {
   Shot13Debug,
   Shot14Debug,
 } from "./acts/ActIII_Stage";
+import { NEW_VIDEO_DURATION_F } from "./new-video/durations";
+import { NewVideo } from "./new-video/NewVideo";
 import {
   SHOT_01_DURATION_F,
   SHOT_02_DURATION_F,
@@ -55,6 +57,14 @@ const H = 1080;
 export const RemotionRoot = () => {
   return (
     <>
+      <Composition
+        id="NewVideo"
+        component={NewVideo}
+        durationInFrames={NEW_VIDEO_DURATION_F}
+        fps={FPS}
+        width={W}
+        height={H}
+      />
       <Composition
         id="ClaimItFilm"
         component={Timeline}

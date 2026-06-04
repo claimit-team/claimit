@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" font-family="Inter, system-ui, sans-serif">
+  <rect width="1200" height="760" fill="#FFFFFF"/>
+  <!-- browser chrome -->
+  <rect x="0" y="0" width="1200" height="64" fill="#F1F3F5"/>
+  <circle cx="32" cy="32" r="7" fill="#E2433B"/>
+  <circle cx="58" cy="32" r="7" fill="#F5B945"/>
+  <circle cx="84" cy="32" r="7" fill="#37C04A"/>
+  <rect x="140" y="16" width="900" height="32" rx="16" fill="#FFFFFF" stroke="#DDE1E6"/>
+  <text x="164" y="38" font-size="18" fill="#6B7280">https://www.bestbuy.com/site/sony-wh-1000xm5</text>
+  <!-- Best Buy brand bar -->
+  <rect x="0" y="64" width="1200" height="88" fill="#0046BE"/>
+  <rect x="48" y="92" width="120" height="44" rx="6" fill="#FFE000"/>
+  <text x="62" y="123" font-size="26" font-weight="700" fill="#0046BE">BEST</text>
+  <text x="186" y="123" font-size="28" font-weight="700" fill="#FFFFFF">BUY</text>
+  <!-- product -->
+  <rect x="80" y="220" width="360" height="300" rx="12" fill="#F4F6F8" stroke="#E2E6EB"/>
+  <rect x="150" y="280" width="220" height="180" rx="90" fill="#1B1B1F"/>
+  <rect x="190" y="300" width="140" height="150" rx="70" fill="#2C2C33"/>
+  <text x="500" y="270" font-size="34" font-weight="700" fill="#101318">Sony WH-1000XM5</text>
+  <text x="500" y="312" font-size="26" fill="#303845">Wireless Noise Cancelling Headphones</text>
+  <!-- rating -->
+  <text x="500" y="364" font-size="24" fill="#F59E0B">★★★★★</text>
+  <text x="610" y="364" font-size="22" fill="#6B7280">4.8 (12,418 reviews)</text>
+  <!-- price -->
+  <text x="500" y="452" font-size="76" font-weight="700" fill="#0046BE">$349.99</text>
+  <text x="500" y="500" font-size="28" fill="#9AA0A6" text-decoration="line-through">Was $399.99</text>
+  <rect x="760" y="412" width="170" height="56" rx="8" fill="#FFFBEB" stroke="#F59E0B"/>
+  <text x="784" y="449" font-size="26" font-weight="700" fill="#9A6700">Save $50</text>
+  <!-- add to cart -->
+  <rect x="500" y="540" width="280" height="64" rx="8" fill="#0046BE"/>
+  <text x="560" y="581" font-size="26" font-weight="600" fill="#FFFFFF">Add to Cart</text>
+  <!-- footer timestamp -->
+  <text x="80" y="700" font-size="20" fill="#6B7280">Captured by ClaimIt monitor-agent · 2026-05-29 11:34 UTC</text>
+</svg>
