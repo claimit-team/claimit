@@ -13,6 +13,7 @@ import { Beat06 } from "./beats/b06_demo-upload-extract/Beat06";
 import { Beat07 } from "./beats/b07_demo-monitor-drop/Beat07";
 import { Beat08 } from "./beats/b08_demo-3panel-claimshell/Beat08";
 import { Beat09 } from "./beats/b09_demo-reach-policies/Beat09";
+import { Beat10 } from "./beats/b10_payoff-claimit/Beat10";
 // LEGACY b10-b29 imports removed — superseded by b06-b09 (DEMO consolidation 2026-06-04).
 import { Beat35 } from "./beats/b35_payoff-final__252-300/Beat35";
 import {
@@ -131,6 +132,8 @@ export const RemotionRoot = () => {
       <Composition id="Beat08" component={Beat08} durationInFrames={1150} fps={60} width={1920} height={1080} />
       {/* DEMO — new b09 (26-retailer reach + 4 platform policies). */}
       <Composition id="Beat09" component={Beat09} durationInFrames={880} fps={60} width={1920} height={1080} />
+      {/* PAYOFF — new b10 closing ClaimIt lockup (peer Scene09Close base). b35 kept for comparison. */}
+      <Composition id="Beat10" component={Beat10} durationInFrames={560} fps={60} width={1920} height={1080} />
       {/* =================================================================== */}
       {/* LEGACY b10-b29: superseded by b06-b09 (DEMO consolidation 2026-06-04). */}
       {/* Folder files preserved under src/beats/_legacy_bNN_ folders. Not registered. */}
