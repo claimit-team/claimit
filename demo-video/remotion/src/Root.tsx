@@ -137,7 +137,7 @@ export const RemotionRoot = () => {
       <Composition id="Beat03" component={Beat03} durationInFrames={540} fps={60} width={1920} height={1080} />
       <Composition id="Beat04" component={Beat04} durationInFrames={300} fps={60} width={1920} height={1080} />
       {/* BATCH D — ARCH (single narrative beat b05; merged b06-b09+b09b 2026-06-04). */}
-      <Composition id="Beat05" component={Beat05} durationInFrames={1980} fps={60} width={1920} height={1080} />
+      <Composition id="Beat05" component={Beat05} durationInFrames={2280} fps={60} width={1920} height={1080} />
       {/* BATCH E — REFUND DEMO (beats 10-27). */}
       <Composition id="Beat10" component={Beat10} durationInFrames={300} fps={60} width={1920} height={1080} />
       <Composition id="Beat11" component={Beat11} durationInFrames={300} fps={60} width={1920} height={1080} />
