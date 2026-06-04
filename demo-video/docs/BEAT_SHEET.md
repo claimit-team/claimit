@@ -78,6 +78,13 @@ ClaimIt as the workflow that captures it.
 
 Status: **VO LOCKED (v3.1)** — grounded in `FRONTEND_AUDIT_v1.md` §2 / §7.
 
+> **[2026-06-04] b06–b09 + b09b merged into a single narrative beat `b05`**
+> (`src/beats/b05_arch-master/`, 1980f / 33s) — progressive diagram build-up +
+> camera moves + techstack outro, paced by subtitle reading. The per-beat VO rows
+> below are kept for reference but are UNUSED; `vo_b05–b09.mp3` are preserved on
+> disk but unreferenced (the merged beat is subtitle-only, CC-written narration).
+> `src/shims/ArchFlow.tsx` is retired (no longer imported).
+
 Real high-level flow (per audit):
 1. Receipts/emails enter via Gmail push or manual upload
 2. Gemini (multimodal) extracts merchant, item, date, price → MongoDB

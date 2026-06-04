@@ -1,3 +1,6 @@
+// RETIRED 2026-06-04 — no longer imported. src/beats/b05_arch-master/Beat05.tsx
+// supersedes this (single progressive-build narrative beat). Kept for reference.
+//
 // ArchFlow v2 — REAL ClaimIt architecture for the Architecture section (b5-9).
 //
 // Ground truth (from apps/* + packages/shared/pubsub + infra/terraform):
