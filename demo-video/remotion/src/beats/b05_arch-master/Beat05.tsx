@@ -341,9 +341,8 @@ const GeminiOcrLabel: React.FC<{ x: number; y: number; fromFrame: number }> = ({
   const r = useReveal(fromFrame);
   return (
     <div style={{ position: "absolute", left: x, top: y, transform: `translate(-50%, 0) translateY(${r.translateY.toFixed(1)}px)`, opacity: r.opacity, display: "flex", alignItems: "center", gap: 6, fontFamily: FONT_STACK_TEXT, fontSize: 12, color: colors.text.muted, whiteSpace: "nowrap" }}>
-      <Img src={GEM} style={{ width: 13, height: 13, opacity: 0.8 }} />
-      Gemini read it (OCR)
-    </div>
+      <Img src={GEM} style={{ width: 13, height: 13, opacity: 0.8 }} />Gemini read it (OCR)
+                            </div>
   );
 };
 
