@@ -18,7 +18,8 @@ import { Scene05Drop } from "./scenes/Scene05Drop";
 import { Scene06DemoCore } from "./scenes/Scene06DemoCore";
 import { Scene07Platforms } from "./scenes/Scene07Platforms";
 import { Scene08Reach } from "./scenes/Scene08Reach";
-import { Scene09Close } from "./scenes/Scene09Close";
+import { Scene09Sponsors } from "./scenes/Scene09Sponsors";
+import { Scene10Close } from "./scenes/Scene10Close";
 
 export const NewVideo: React.FC = () => {
   return (
@@ -47,8 +48,11 @@ export const NewVideo: React.FC = () => {
       <Series.Sequence durationInFrames={D.S8_REACH_F}>
         <Scene08Reach />
       </Series.Sequence>
-      <Series.Sequence durationInFrames={D.S9_CLOSE_F}>
-        <Scene09Close />
+      <Series.Sequence durationInFrames={D.S9_SPONSORS_F}>
+        <Scene09Sponsors />
+      </Series.Sequence>
+      <Series.Sequence durationInFrames={D.S10_CLOSE_F}>
+        <Scene10Close />
       </Series.Sequence>
     </Series>
   );

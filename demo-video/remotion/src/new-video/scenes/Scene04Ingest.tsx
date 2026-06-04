@@ -1,7 +1,7 @@
-// Scene 4 — Ingest · 0:42–0:58 · 960f · light.
+// Scene 4 — Ingest · 0:38–0:54 · 960f · light.
 // Left: connect-Gmail badge + receipt dropzone (HeroNewUser look).
-// Center: Gemini reads it. Right: extracted fields fill in one by one,
-// then a "Now monitoring" confirmation lands.
+// Right: extracted fields fill in one by one, then "Now monitoring".
+// Bottom: names the INGEST AGENT powering this step (powered by Gemini).
 
 import { ArrowRight, CheckCircle2, Mail, UploadCloud } from "lucide-react";
 import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
@@ -9,6 +9,7 @@ import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
 import { Camera } from "../../shots/_shared/Camera";
 import { LightScene } from "../../shots/_shared/LightScene";
 import { COLOR, EASE_UI, TYPE } from "../../shots/_shared/tokens";
+import { GEMINI_GRADIENT_TEXT, GeminiSpark, GOOGLE_SANS } from "../brand";
 import { S4_INGEST_F } from "../durations";
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: EASE_UI } as const;
@@ -253,72 +254,41 @@ const Inner: React.FC = () => {
         </div>
       </div>
 
-      {/* Bottom brand mark — the real Gemini gradient spark + "Gemini reads it" */}
+      {/* Bottom mark — names the INGEST AGENT powering this step */}
       <div
         style={{
           position: "absolute",
           left: 0,
           right: 0,
-          top: 872,
+          top: 854,
           display: "flex",
+          flexDirection: "column",
           alignItems: "center",
-          justifyContent: "center",
-          gap: 22,
+          gap: 8,
           opacity: geminiOp,
           transform: `translateY(${geminiY}px)`,
         }}
       >
-        <GeminiSpark size={62} />
-        <span
-          style={{ fontFamily: GOOGLE_SANS, fontSize: 58, fontWeight: 500, letterSpacing: "-1px" }}
-        >
+        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          <GeminiSpark size={50} />
+          <span
+            style={{
+              fontFamily: GOOGLE_SANS,
+              fontSize: 54,
+              fontWeight: 500,
+              letterSpacing: "-1.5px",
+              color: COLOR.INK,
+            }}
+          >
+            Ingest Agent
+          </span>
+        </div>
+        <span style={{ fontFamily: GOOGLE_SANS, fontSize: 26, fontWeight: 500 }}>
+          <span style={{ color: COLOR.MUTE }}>powered by </span>
           <span style={GEMINI_GRADIENT_TEXT}>Gemini</span>
-          <span style={{ color: COLOR.INK }}> reads it</span>
+          <span style={{ color: COLOR.MUTE }}> — reads your receipt or email</span>
         </span>
       </div>
     </AbsoluteFill>
   );
 };
-
-// Google Sans where available (falls back to the locally-served Inter in
-// headless renders, since Google Sans is not a freely-distributable webfont).
-const GOOGLE_SANS = '"Google Sans", "Product Sans", Inter, system-ui, sans-serif';
-
-const GEMINI_GRADIENT_TEXT: React.CSSProperties = {
-  backgroundImage: "linear-gradient(90deg, #4285F4 0%, #9B72CB 50%, #D96570 100%)",
-  WebkitBackgroundClip: "text",
-  backgroundClip: "text",
-  color: "transparent",
-  WebkitTextFillColor: "transparent",
-};
-
-// The official Gemini 4-point spark, filled with Google's blue→purple→coral
-// gradient (path from the simple-icons Google Gemini glyph).
-const GeminiSpark: React.FC<{ size: number }> = ({ size }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    xmlns="http://www.w3.org/2000/svg"
-    aria-label="Gemini"
-  >
-    <defs>
-      <linearGradient
-        id="nv-gemini-grad"
-        x1="0"
-        y1="0"
-        x2="24"
-        y2="24"
-        gradientUnits="userSpaceOnUse"
-      >
-        <stop offset="0" stopColor="#4285F4" />
-        <stop offset="0.5" stopColor="#9B72CB" />
-        <stop offset="1" stopColor="#D96570" />
-      </linearGradient>
-    </defs>
-    <path
-      d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"
-      fill="url(#nv-gemini-grad)"
-    />
-  </svg>
-);

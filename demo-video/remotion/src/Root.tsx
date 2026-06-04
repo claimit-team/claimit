@@ -41,7 +41,8 @@ import {
   S6_DEMO_F,
   S7_PLATFORMS_F,
   S8_REACH_F,
-  S9_CLOSE_F,
+  S9_SPONSORS_F,
+  S10_CLOSE_F,
 } from "./new-video/durations";
 import { Scene01Hook } from "./new-video/scenes/Scene01Hook";
 import { Scene02Gap } from "./new-video/scenes/Scene02Gap";
@@ -51,7 +52,8 @@ import { Scene05Drop } from "./new-video/scenes/Scene05Drop";
 import { Scene06DemoCore } from "./new-video/scenes/Scene06DemoCore";
 import { Scene07Platforms } from "./new-video/scenes/Scene07Platforms";
 import { Scene08Reach } from "./new-video/scenes/Scene08Reach";
-import { Scene09Close } from "./new-video/scenes/Scene09Close";
+import { Scene09Sponsors } from "./new-video/scenes/Scene09Sponsors";
+import { Scene10Close } from "./new-video/scenes/Scene10Close";
 
 // ============================================================================
 // BATCH 0 LEGACY — Erdun's 18-shot structure, archived 2026-06-03.
@@ -172,7 +174,8 @@ export const RemotionRoot = () => {
       <Composition id="peer-scene-06-democore" component={Scene06DemoCore} durationInFrames={S6_DEMO_F} fps={60} width={1920} height={1080} />
       <Composition id="peer-scene-07-platforms" component={Scene07Platforms} durationInFrames={S7_PLATFORMS_F} fps={60} width={1920} height={1080} />
       <Composition id="peer-scene-08-reach" component={Scene08Reach} durationInFrames={S8_REACH_F} fps={60} width={1920} height={1080} />
-      <Composition id="peer-scene-09-close" component={Scene09Close} durationInFrames={S9_CLOSE_F} fps={60} width={1920} height={1080} />
+      <Composition id="peer-scene-09-sponsors" component={Scene09Sponsors} durationInFrames={S9_SPONSORS_F} fps={60} width={1920} height={1080} />
+      <Composition id="peer-scene-10-close" component={Scene10Close} durationInFrames={S10_CLOSE_F} fps={60} width={1920} height={1080} />
       {/* MASTER — full b01-b10 sequence for review (excludes legacy + b35). */}
       <Composition id="MasterDemo" component={MasterDemo} durationInFrames={8270} fps={60} width={1920} height={1080} />
     </>

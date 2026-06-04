@@ -60,6 +60,10 @@ export interface Act3FrameState {
   cursorX: number;
   cursorY: number;
   cursorPressed: boolean;
+  /** Render a real arrow pointer (true) vs the legacy dot (false). */
+  cursorArrow: boolean;
+  /** 0→1 click ripple progress; drives the expanding ring on press. */
+  cursorClickPulse: number;
   approveDialogOpacity: number;
   approveDialogRise: number;
   approveButtonHover: boolean;
@@ -117,6 +121,8 @@ export function defaultAct3FrameState(): Act3FrameState {
     cursorX: 1600,
     cursorY: 200,
     cursorPressed: false,
+    cursorArrow: false,
+    cursorClickPulse: 0,
     approveDialogOpacity: 0,
     approveDialogRise: 12,
     approveButtonHover: false,

@@ -209,4 +209,4 @@ cd apps/ingest-agent && uv run ruff check . && uv run ruff format .
 
 ## License
 
-MIT
+Proprietary License
