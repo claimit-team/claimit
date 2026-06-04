@@ -13,6 +13,7 @@ import { Beat06 } from "./beats/b06_arch-extract__026-032/Beat06";
 import { Beat07 } from "./beats/b07_arch-monitor__032-038/Beat07";
 import { Beat08 } from "./beats/b08_arch-draft__038-044/Beat08";
 import { Beat09 } from "./beats/b09_arch-trace__044-050/Beat09";
+import { Beat09b } from "./beats/b09b_techstack/Beat09b";
 import { Beat10 } from "./beats/b10_refund-receipt-intro__050-055/Beat10";
 import { Beat11 } from "./beats/b11_refund-upload__055-060/Beat11";
 import { Beat12 } from "./beats/b12_refund-extract__100-105/Beat12";
@@ -140,12 +141,13 @@ export const RemotionRoot = () => {
       <Composition id="Beat02" component={Beat02} durationInFrames={600} fps={60} width={1920} height={1080} />
       <Composition id="Beat03" component={Beat03} durationInFrames={540} fps={60} width={1920} height={1080} />
       <Composition id="Beat04" component={Beat04} durationInFrames={300} fps={60} width={1920} height={1080} />
-      {/* BATCH D — ARCHITECTURE (beats 5-9). */}
+      {/* BATCH D — ARCH (5-9 + 9b techstack). */}
       <Composition id="Beat05" component={Beat05} durationInFrames={300} fps={60} width={1920} height={1080} />
       <Composition id="Beat06" component={Beat06} durationInFrames={300} fps={60} width={1920} height={1080} />
       <Composition id="Beat07" component={Beat07} durationInFrames={300} fps={60} width={1920} height={1080} />
       <Composition id="Beat08" component={Beat08} durationInFrames={300} fps={60} width={1920} height={1080} />
       <Composition id="Beat09" component={Beat09} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat09b" component={Beat09b} durationInFrames={300} fps={60} width={1920} height={1080} />
       {/* BATCH E — REFUND DEMO (beats 10-27). */}
       <Composition id="Beat10" component={Beat10} durationInFrames={300} fps={60} width={1920} height={1080} />
       <Composition id="Beat11" component={Beat11} durationInFrames={300} fps={60} width={1920} height={1080} />

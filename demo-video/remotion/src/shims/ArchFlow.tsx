@@ -14,9 +14,11 @@
 //     (answers user questions; only emits claim.redraft_requested).
 //
 // `litCount` (1-5) drives the stage-by-stage reveal for beats 5-9.
+import { UploadCloud } from "lucide-react";
 import { Img, interpolate, staticFile, useCurrentFrame } from "remotion";
 
 import { easings } from "../polish/easings";
+import { useReveal } from "../polish/RevealCard";
 import { colors, FONT_STACK_TEXT } from "../polish/tokens";
 
 const C = { extrapolateLeft: "clamp" as const, extrapolateRight: "clamp" as const };
@@ -41,9 +43,13 @@ const AGENTS = [
 
 export const ArchFlow: React.FC<{ litCount: number }> = ({ litCount }) => {
   const frame = useCurrentFrame();
-  const enter = interpolate(frame, [15, 45], [0, 1], { ...C, easing: easings.easeOut });
+  // Universal reveal: shared spring (damping 14, mass 0.5, 18f) so each newly-lit
+  // node's icon + text land TOGETHER, crisply — fixes the faint-fade
+  // "text-before-icon" look. Same primitive the techstack beat (b09b) uses, so
+  // b05-b09 + b09b share one tempo.
+  const enter = useReveal(12).progress;
   const vis = (minStage: number) => (litCount < minStage ? 0 : litCount === minStage ? enter : 1);
-  const sc = (minStage: number) => (litCount === minStage ? 0.85 + 0.15 * enter : 1);
+  const sc = (minStage: number) => (litCount === minStage ? 0.95 + 0.05 * enter : 1);
   const pulse = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin((frame * 2 * Math.PI) / 40));
   const draftChars = Math.max(0, Math.floor(interpolate(frame, [45, 85], [0, 22], C)));
 
@@ -120,9 +126,9 @@ export const ArchFlow: React.FC<{ litCount: number }> = ({ litCount }) => {
       {pill(CLM.x + NW / 2 + 60, CLM.y - 30, "claim.drafted", vis(5))}
 
       {/* ---- input chip ---- */}
-      <div style={{ ...cardBase, left: INPUT.x - 46, top: INPUT.y - 46, width: 92, height: 92, borderRadius: 18, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, opacity: vis(1) }}>
-        <Img src={staticFile("brandlogos/gmail.svg")} style={{ width: 30, height: 30 }} />
-        <span style={{ fontSize: 11, fontWeight: 600, color: colors.text.muted }}>Inbox / Upload</span>
+      <div style={{ ...cardBase, left: INPUT.x - 46, top: INPUT.y - 46, width: 92, height: 92, borderRadius: 18, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, opacity: vis(1), transform: `scale(${sc(1).toFixed(4)})`, transformOrigin: "center" }}>
+        <UploadCloud size={30} color={colors.brand.primary} strokeWidth={2} aria-hidden />
+        <span style={{ fontSize: 11, fontWeight: 600, color: colors.text.muted }}>Upload</span>
       </div>
 
       {/* ---- 3 workflow agent cards ---- */}
@@ -156,7 +162,7 @@ export const ArchFlow: React.FC<{ litCount: number }> = ({ litCount }) => {
 
       {/* ---- field chips out of ingest (stage 2) ---- */}
       {["Merchant", "Item", "Date", "Price"].map((f, j) => {
-        const t = vis(2) * interpolate(frame, [40 + j * 7, 64 + j * 7], [0, 1], { ...C, easing: easings.easeOut });
+        const t = vis(2) * interpolate(frame, [40 + j * 8, 64 + j * 8], [0, 1], { ...C, easing: easings.easeOut });
         return (
           <div key={f} style={{ position: "absolute", left: ING.x - 40, top: ING.y + 70 + j * 34, opacity: t, transform: `translateY(${((1 - t) * 6).toFixed(1)}px)`, fontFamily: FONT_STACK_TEXT, fontSize: 12, fontWeight: 500, color: colors.text.dark, backgroundColor: colors.bg.surface, border: BORDER, borderRadius: 999, padding: "4px 12px", boxShadow: "0 3px 10px rgba(15,20,25,0.06)" }}>
             {f}
@@ -165,7 +171,7 @@ export const ArchFlow: React.FC<{ litCount: number }> = ({ litCount }) => {
       })}
 
       {/* ---- Cloud Scheduler clock → monitor ---- */}
-      <div style={{ ...cardBase, left: SCHED.x - 70, top: SCHED.y - 26, width: 140, height: 52, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: vis(3) }}>
+      <div style={{ ...cardBase, left: SCHED.x - 70, top: SCHED.y - 26, width: 140, height: 52, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: vis(3), transform: `scale(${sc(3).toFixed(4)})`, transformOrigin: "center" }}>
         <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={colors.brand.primary} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="9" />
           <path d="M12 7v5l3 2" />
@@ -174,7 +180,7 @@ export const ArchFlow: React.FC<{ litCount: number }> = ({ litCount }) => {
       </div>
 
       {/* ---- MongoDB Atlas state store ---- */}
-      <div style={{ ...cardBase, left: MONGO.x - 130, top: MONGO.y - 40, width: 260, height: 80, display: "flex", alignItems: "center", gap: 14, padding: "0 20px", opacity: vis(3) }}>
+      <div style={{ ...cardBase, left: MONGO.x - 130, top: MONGO.y - 40, width: 260, height: 80, display: "flex", alignItems: "center", gap: 14, padding: "0 20px", opacity: vis(3), transform: `scale(${sc(3).toFixed(4)})`, transformOrigin: "center" }}>
         <Img src={staticFile("brandlogos/mongodb.svg")} style={{ width: 34, height: 34 }} />
         <div>
           <div style={{ fontSize: 15, fontWeight: 700, color: colors.text.dark }}>MongoDB Atlas</div>
@@ -190,7 +196,7 @@ export const ArchFlow: React.FC<{ litCount: number }> = ({ litCount }) => {
       </div>
 
       {/* ---- Assistant sidecar (NOT in workflow) ---- */}
-      <div style={{ ...cardBase, left: ASST.x - 130, top: ASST.y - 70, width: 260, height: 140, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 16, opacity: vis(5) }}>
+      <div style={{ ...cardBase, left: ASST.x - 130, top: ASST.y - 70, width: 260, height: 140, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 16, opacity: vis(5), transform: `scale(${sc(5).toFixed(4)})`, transformOrigin: "center" }}>
         <Img src={staticFile("brandlogos/googlegemini.svg")} style={{ width: 24, height: 24 }} />
         <span style={{ fontSize: 15, fontWeight: 700, color: colors.text.dark }}>assistant-agent</span>
         <span style={{ fontSize: 11, color: colors.text.muted, textAlign: "center", lineHeight: 1.35 }}>
