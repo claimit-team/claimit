@@ -15,6 +15,7 @@
     "@react-three/fiber": "^9.6.1",
     "@remotion/bundler": "4.0.470",
     "@remotion/cli": "4.0.470",
+    "@remotion/fonts": "4.0.470",
     "@remotion/google-fonts": "4.0.470",
     "@remotion/motion-blur": "4.0.470",
     "@remotion/shapes": "4.0.470",

@@ -1,220 +1,187 @@
+import "./load-fonts";
 import "./globals.css";
-// Side-effect import: kicks off the Inter font load + registers the
-// delayRender handle so no frame paints with a fallback.
-import "./polish/font";
 
 import { Composition } from "remotion";
-import {
-  Shot06Debug,
-  Shot07Debug,
-  Shot08Debug,
-  Shot09Debug,
-  Shot10Debug,
-  Shot11Debug,
-  Shot12Debug,
-  Shot13Debug,
-  Shot14Debug,
-} from "./acts/ActIII_Stage";
-import {
-  SHOT_01_DURATION_F,
-  SHOT_02_DURATION_F,
-  SHOT_03_DURATION_F,
-  SHOT_04_DURATION_F,
-  SHOT_05_DURATION_F,
-  SHOT_06_DURATION_F,
-  SHOT_07_DURATION_F,
-  SHOT_08_DURATION_F,
-  SHOT_09_DURATION_F,
-  SHOT_10_DURATION_F,
-  SHOT_11_DURATION_F,
-  SHOT_12_DURATION_F,
-  SHOT_13_DURATION_F,
-  SHOT_14_DURATION_F,
-  SHOT_15_DURATION_F,
-  SHOT_16_DURATION_F,
-  SHOT_17_DURATION_F,
-  SHOT_17B_DURATION_F,
-  SHOT_18_DURATION_F,
-} from "./shots/_shared/durations";
-import { Shot01 } from "./shots/shot-01-coldopen__0000-0003/Shot01";
-import { Shot02 } from "./shots/shot-02-things__0003-0012/Shot02";
-import { Shot03 } from "./shots/shot-03-gap__0012-0018/Shot03";
-import { Shot04 } from "./shots/shot-04-light-logo__0018-0028/Shot04";
-import { Shot05 } from "./shots/shot-05-whatitis__0028-0036/Shot05";
-import { Shot15 } from "./shots/shot-15-boundary__0211-0230/Shot15";
-import { Shot16 } from "./shots/shot-16-seed__0230-0241/Shot16";
-import { Shot17 } from "./shots/shot-17-tagline__0241-0252/Shot17";
-import { Shot17b } from "./shots/shot-17b-techstack__0247-0254/Shot17b";
-import { Shot18 } from "./shots/shot-18-signoff__0252-0300/Shot18";
-import { TIMELINE_DURATION_FRAMES, Timeline } from "./Timeline";
 
-const FPS = 60;
-const W = 1920;
-const H = 1080;
+import { Beat01 } from "./beats/b01_hook-cracks__000-005/Beat01";
+import { Beat02 } from "./beats/b02_hook-categories__005-010/Beat02";
+import { Beat03 } from "./beats/b03_hook-twopercent__010-015/Beat03";
+import { Beat04 } from "./beats/b04_hook-claimit__015-020/Beat04";
+import { Beat05 } from "./beats/b05_arch-receipt__020-026/Beat05";
+import { Beat06 } from "./beats/b06_arch-extract__026-032/Beat06";
+import { Beat07 } from "./beats/b07_arch-monitor__032-038/Beat07";
+import { Beat08 } from "./beats/b08_arch-draft__038-044/Beat08";
+import { Beat09 } from "./beats/b09_arch-trace__044-050/Beat09";
+import { Beat10 } from "./beats/b10_refund-receipt-intro__050-055/Beat10";
+import { Beat11 } from "./beats/b11_refund-upload__055-060/Beat11";
+import { Beat12 } from "./beats/b12_refund-extract__100-105/Beat12";
+import { Beat13 } from "./beats/b13_refund-fields__105-110/Beat13";
+import { Beat14 } from "./beats/b14_refund-confirm__110-115/Beat14";
+import { Beat15 } from "./beats/b15_refund-watch__115-120/Beat15";
+import { Beat16 } from "./beats/b16_refund-timepass__120-125/Beat16";
+import { Beat17 } from "./beats/b17_refund-detect__125-130/Beat17";
+import { Beat18 } from "./beats/b18_refund-policy__130-135/Beat18";
+import { Beat19 } from "./beats/b19_refund-draft__135-140/Beat19";
+import { Beat20 } from "./beats/b20_refund-rewrite-ask__140-145/Beat20";
+import { Beat21 } from "./beats/b21_refund-rewrite-result__145-150/Beat21";
+import { Beat22 } from "./beats/b22_refund-edit__150-155/Beat22";
+import { Beat23 } from "./beats/b23_refund-saved__155-200/Beat23";
+import { Beat24 } from "./beats/b24_refund-review__200-205/Beat24";
+import { Beat25 } from "./beats/b25_refund-approve__205-210/Beat25";
+import { Beat26 } from "./beats/b26_refund-sent__210-215/Beat26";
+import { Beat27 } from "./beats/b27_refund-bridge__215-220/Beat27";
+import { Beat28 } from "./beats/b28_cred-grid__220-226/Beat28";
+import { Beat29 } from "./beats/b29_cred-channels__226-232/Beat29";
+import { Beat35 } from "./beats/b35_payoff-final__252-300/Beat35";
+import {
+  UiAppShellEmpty,
+  UiClaimshellApprovedState,
+  UiClaimshellAssistantActive,
+  UiClaimshellLoaded,
+  UiClaimsList,
+  UiDashboardLoaded,
+  UiOcrFieldsPopulated,
+  UiPurchaseDetailWithChart,
+  UiSentConfirmation,
+  UiUploadModalOnDashboard,
+} from "./uirefs";
+
+// ============================================================================
+// BATCH 0 LEGACY — Erdun's 18-shot structure, archived 2026-06-03.
+//
+// Original Root.tsx (Shot01–Shot18 + ClaimItFilm Composition registrations)
+// preserved in git history: `git log -- src/Root.tsx`.
+// Shot sources moved to src/_archive/erdun_shots_v1/.
+// To restore an individual shot in a future batch: copy its folder back
+// from the archive and re-add the import + <Composition> line below.
+//
+// The lines that were here (commented out, not deleted, per instructions):
+//
+//   import { Composition } from "remotion";
+//   import {
+//     Shot06Debug, Shot07Debug, Shot08Debug, Shot09Debug,
+//     Shot10Debug, Shot11Debug, Shot12Debug, Shot13Debug, Shot14Debug,
+//   } from "./_archive/erdun_shots_v1/acts/ActIII_Stage";
+//   import { SHOT_01_DURATION_F, … SHOT_18_DURATION_F }
+//     from "./_archive/erdun_shots_v1/shots/_shared/durations";
+//   import { Shot01 } from "./_archive/erdun_shots_v1/shots/shot-01-coldopen__0000-0003/Shot01";
+//   import { Shot02 } from "./_archive/erdun_shots_v1/shots/shot-02-things__0003-0012/Shot02";
+//   import { Shot03 } from "./_archive/erdun_shots_v1/shots/shot-03-gap__0012-0018/Shot03";
+//   import { Shot04 } from "./_archive/erdun_shots_v1/shots/shot-04-light-logo__0018-0028/Shot04";
+//   import { Shot05 } from "./_archive/erdun_shots_v1/shots/shot-05-whatitis__0028-0036/Shot05";
+//   import { Shot15 } from "./_archive/erdun_shots_v1/shots/shot-15-boundary__0211-0230/Shot15";
+//   import { Shot16 } from "./_archive/erdun_shots_v1/shots/shot-16-seed__0230-0241/Shot16";
+//   import { Shot17 } from "./_archive/erdun_shots_v1/shots/shot-17-tagline__0241-0252/Shot17";
+//   import { Shot17b } from "./_archive/erdun_shots_v1/shots/shot-17b-techstack__0247-0254/Shot17b";
+//   import { Shot18 } from "./_archive/erdun_shots_v1/shots/shot-18-signoff__0252-0300/Shot18";
+//   import { TIMELINE_DURATION_FRAMES, Timeline }
+//     from "./_archive/erdun_shots_v1/Timeline";
+//
+//   <Composition id="ClaimItFilm" component={Timeline}
+//     durationInFrames={TIMELINE_DURATION_FRAMES} fps={60} width={1920} height={1080} />
+//   <Composition id="Shot01" component={Shot01} durationInFrames={180}  fps={60} width={1920} height={1080} />
+//   <Composition id="Shot02" component={Shot02} durationInFrames={540}  fps={60} width={1920} height={1080} />
+//   <Composition id="Shot03" component={Shot03} durationInFrames={360}  fps={60} width={1920} height={1080} />
+//   <Composition id="Shot04" component={Shot04} durationInFrames={600}  fps={60} width={1920} height={1080} />
+//   <Composition id="Shot05" component={Shot05} durationInFrames={480}  fps={60} width={1920} height={1080} />
+//   <Composition id="Shot06" component={Shot06Debug} durationInFrames={480}  fps={60} width={1920} height={1080} />
+//   <Composition id="Shot07" component={Shot07Debug} durationInFrames={300}  fps={60} width={1920} height={1080} />
+//   <Composition id="Shot08" component={Shot08Debug} durationInFrames={600}  fps={60} width={1920} height={1080} />
+//   <Composition id="Shot09" component={Shot09Debug} durationInFrames={480}  fps={60} width={1920} height={1080} />
+//   <Composition id="Shot10" component={Shot10Debug} durationInFrames={600}  fps={60} width={1920} height={1080} />
+//   <Composition id="Shot11" component={Shot11Debug} durationInFrames={420}  fps={60} width={1920} height={1080} />
+//   <Composition id="Shot12" component={Shot12Debug} durationInFrames={480}  fps={60} width={1920} height={1080} />
+//   <Composition id="Shot13" component={Shot13Debug} durationInFrames={1200} fps={60} width={1920} height={1080} />
+//   <Composition id="Shot14" component={Shot14Debug} durationInFrames={1140} fps={60} width={1920} height={1080} />
+//   <Composition id="Shot15" component={Shot15}      durationInFrames={1140} fps={60} width={1920} height={1080} />
+//   <Composition id="Shot16" component={Shot16}      durationInFrames={660}  fps={60} width={1920} height={1080} />
+//   <Composition id="Shot17" component={Shot17}      durationInFrames={360}  fps={60} width={1920} height={1080} />
+//   <Composition id="Shot17b" component={Shot17b}    durationInFrames={420}  fps={60} width={1920} height={1080} />
+//   <Composition id="Shot18" component={Shot18}      durationInFrames={360}  fps={60} width={1920} height={1080} />
+// ============================================================================
 
 export const RemotionRoot = () => {
   return (
     <>
+      {/* BATCH C — HOOK (beats 1-4). */}
       <Composition
-        id="ClaimItFilm"
-        component={Timeline}
-        durationInFrames={TIMELINE_DURATION_FRAMES}
-        fps={FPS}
-        width={W}
-        height={H}
+        id="Beat01"
+        component={Beat01}
+        durationInFrames={300}
+        fps={60}
+        width={1920}
+        height={1080}
       />
       <Composition
-        id="Shot01"
-        component={Shot01}
-        durationInFrames={SHOT_01_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
+        id="Beat02"
+        component={Beat02}
+        durationInFrames={300}
+        fps={60}
+        width={1920}
+        height={1080}
       />
       <Composition
-        id="Shot02"
-        component={Shot02}
-        durationInFrames={SHOT_02_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
+        id="Beat03"
+        component={Beat03}
+        durationInFrames={300}
+        fps={60}
+        width={1920}
+        height={1080}
       />
       <Composition
-        id="Shot03"
-        component={Shot03}
-        durationInFrames={SHOT_03_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
+        id="Beat04"
+        component={Beat04}
+        durationInFrames={300}
+        fps={60}
+        width={1920}
+        height={1080}
       />
-      <Composition
-        id="Shot04"
-        component={Shot04}
-        durationInFrames={SHOT_04_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
-      />
-      <Composition
-        id="Shot05"
-        component={Shot05}
-        durationInFrames={SHOT_05_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
-      />
-      <Composition
-        id="Shot06"
-        component={Shot06Debug}
-        durationInFrames={SHOT_06_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
-      />
-      <Composition
-        id="Shot07"
-        component={Shot07Debug}
-        durationInFrames={SHOT_07_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
-      />
-      <Composition
-        id="Shot08"
-        component={Shot08Debug}
-        durationInFrames={SHOT_08_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
-      />
-      <Composition
-        id="Shot09"
-        component={Shot09Debug}
-        durationInFrames={SHOT_09_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
-      />
-      <Composition
-        id="Shot10"
-        component={Shot10Debug}
-        durationInFrames={SHOT_10_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
-      />
-      <Composition
-        id="Shot11"
-        component={Shot11Debug}
-        durationInFrames={SHOT_11_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
-      />
-      <Composition
-        id="Shot12"
-        component={Shot12Debug}
-        durationInFrames={SHOT_12_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
-      />
-      <Composition
-        id="Shot13"
-        component={Shot13Debug}
-        durationInFrames={SHOT_13_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
-      />
-      <Composition
-        id="Shot14"
-        component={Shot14Debug}
-        durationInFrames={SHOT_14_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
-      />
-      <Composition
-        id="Shot15"
-        component={Shot15}
-        durationInFrames={SHOT_15_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
-      />
-      <Composition
-        id="Shot16"
-        component={Shot16}
-        durationInFrames={SHOT_16_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
-      />
-      <Composition
-        id="Shot17"
-        component={Shot17}
-        durationInFrames={SHOT_17_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
-      />
-      <Composition
-        id="Shot17b"
-        component={Shot17b}
-        durationInFrames={SHOT_17B_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
-      />
-      <Composition
-        id="Shot18"
-        component={Shot18}
-        durationInFrames={SHOT_18_DURATION_F}
-        fps={FPS}
-        width={W}
-        height={H}
-      />
+      {/* BATCH D — ARCHITECTURE (beats 5-9). */}
+      <Composition id="Beat05" component={Beat05} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat06" component={Beat06} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat07" component={Beat07} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat08" component={Beat08} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat09" component={Beat09} durationInFrames={300} fps={60} width={1920} height={1080} />
+      {/* BATCH E — REFUND DEMO (beats 10-27). */}
+      <Composition id="Beat10" component={Beat10} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat11" component={Beat11} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat12" component={Beat12} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat13" component={Beat13} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat14" component={Beat14} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat15" component={Beat15} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat16" component={Beat16} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat17" component={Beat17} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat18" component={Beat18} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat19" component={Beat19} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat20" component={Beat20} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat21" component={Beat21} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat22" component={Beat22} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat23" component={Beat23} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat24" component={Beat24} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat25" component={Beat25} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat26" component={Beat26} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat27" component={Beat27} durationInFrames={300} fps={60} width={1920} height={1080} />
+      {/* BATCH F — CREDIBILITY (28-29). */}
+      <Composition id="Beat28" component={Beat28} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition id="Beat29" component={Beat29} durationInFrames={300} fps={60} width={1920} height={1080} />
+      {/* BATCH G — IMPLEMENTATION PROOF (30-34) — REMOVED 2026-06-03 (DEMO_INTERACTION_SPEC_v1 Phase 1). */}
+      {/* BATCH H — PAYOFF (35) — 480f. */}
+      <Composition id="Beat35" component={Beat35} durationInFrames={480} fps={60} width={1920} height={1080} />
+      {/* ====================================================================== */}
+      {/* UI — apps/web visual reference stills (UI_INTEGRATION_AUDIT_v2).        */}
+      {/* Static replicas of production surfaces; rendered at frame 0 to          */}
+      {/* out/uirefs/. Not part of the film timeline.                            */}
+      {/* ====================================================================== */}
+      <Composition id="ui-app-shell-empty" component={UiAppShellEmpty} durationInFrames={60} fps={60} width={1920} height={1080} />
+      <Composition id="ui-dashboard-loaded" component={UiDashboardLoaded} durationInFrames={60} fps={60} width={1920} height={1080} />
+      <Composition id="ui-claims-list" component={UiClaimsList} durationInFrames={60} fps={60} width={1920} height={1080} />
+      <Composition id="ui-claimshell-loaded" component={UiClaimshellLoaded} durationInFrames={60} fps={60} width={1920} height={1080} />
+      <Composition id="ui-claimshell-assistant-active" component={UiClaimshellAssistantActive} durationInFrames={60} fps={60} width={1920} height={1080} />
+      <Composition id="ui-claimshell-approved-state" component={UiClaimshellApprovedState} durationInFrames={60} fps={60} width={1920} height={1080} />
+      <Composition id="ui-upload-modal-on-dashboard" component={UiUploadModalOnDashboard} durationInFrames={60} fps={60} width={1920} height={1080} />
+      <Composition id="ui-ocr-fields-populated" component={UiOcrFieldsPopulated} durationInFrames={60} fps={60} width={1920} height={1080} />
+      <Composition id="ui-purchase-detail-with-chart" component={UiPurchaseDetailWithChart} durationInFrames={60} fps={60} width={1920} height={1080} />
+      <Composition id="ui-sent-confirmation" component={UiSentConfirmation} durationInFrames={60} fps={60} width={1920} height={1080} />
     </>
   );
 };

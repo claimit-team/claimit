@@ -1,159 +1,193 @@
-// Generate the 18 narration mp3s via ElevenLabs TTS.
+// Generate the beat-level narration mp3s via ElevenLabs TTS.
+//
+// Reads src/data/vo_lines.json as the single source of truth (mirror of
+// BEAT_SHEET.md EN column). Skips entries with text === null (silent
+// beats). Writes one file per spoken beat to public/audio/vo/vo_<id>.mp3.
 //
 // Usage (from demo-video/remotion/):
 //   node --env-file=.env scripts/gen_vo.mjs
+//   # or
+//   ELEVENLABS_API_KEY=sk_... node scripts/gen_vo.mjs
+//   # or with --dry-run to skip API calls and just list what WOULD generate:
+//   node scripts/gen_vo.mjs --dry-run
+//   # or with --only <id> to spot-test a single line:
+//   node --env-file=.env scripts/gen_vo.mjs --only b01
 //
-// This script:
-//   • Loads ELEVENLABS_API_KEY from .env via Node 20's --env-file flag
-//     (never logs the key).
-//   • POSTs each line to ElevenLabs TTS with voice Paige
-//     (NDTYOmYEjbDIVCKB35i3), model eleven_multilingual_v2, mp3 44.1 kHz.
-//   • Voice settings tuned sober / trustworthy: higher stability,
-//     moderate style, speaker boost on.
-//   • Writes each mp3 to public/audio/vo/<id>.mp3.
-//   • STOPS on the first HTTP error so the user can investigate
-//     before any more API spend.
+// Voice: Leo v2 (bbGtsRRKUfYO634UxSjz) — "Technical and Precise" library voice.
+// Prominent, direct, deep. Native pacing (speed=1.0).
+// stability 0.78 / style 0.20. Model eleven_multilingual_v2, 128 kbps mp3.
 //
-// No audio mixing, no video integration. Output is just raw mp3 files.
+// After each successful write the script spawns ffprobe to read the
+// actual duration so we can flag any line that exceeds the 5 s beat
+// budget. ffprobe is required (system-installed or @remotion/renderer's
+// bundled binary will work via PATH).
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 const OUT_DIR = join(ROOT, "public/audio/vo");
+const VO_LINES_PATH = join(ROOT, "src/data/vo_lines.json");
 
-const VOICE_ID = "NDTYOmYEjbDIVCKB35i3"; // Paige
+const VOICE_ID = "bbGtsRRKUfYO634UxSjz"; // Leo v2 — "Technical and Precise" (ElevenLabs voice library)
 const MODEL = "eleven_multilingual_v2";
+// Note: BEAT_SHEET §VO 配音规范 specifies 192 kbps but that tier costs
+// Creator+ on ElevenLabs; this account is Starter, so we fall back to
+// 128 kbps. Audible difference for spoken-word narration is negligible.
 const OUTPUT_FORMAT = "mp3_44100_128"; // 44.1 kHz mp3, 128 kbps
 
-// Voice settings — sober, calm, trustworthy (per user direction).
-// stability higher → more consistent / less expressive.
-// style moderate-low → less performative.
 const VOICE_SETTINGS = {
-  stability: 0.65,
+  stability: 0.78,
   similarity_boost: 0.75,
-  style: 0.3,
+  style: 0.2,
   use_speaker_boost: true,
+  // No `speed` param — native 1.0 pacing (Leo v2 reads at its natural cadence).
 };
 
-const PROMPTS = [
-  {
-    id: "vo_s02",
-    text:
-      "Every day, the things you buy quietly drop in price after you've paid. That difference? It's yours to claim — and it slips away unnoticed.",
-  },
-  {
-    id: "vo_s03",
-    text:
-      "Most major retailers offer price adjustments. Almost no one ever claims one.",
-  },
-  { id: "vo_s04", text: "Your Money, Still Yours." },
-  {
-    id: "vo_s05",
-    text:
-      "ClaimIt watches what you buy. The moment the price drops, it prepares the claim for you — your way.",
-  },
-  {
-    id: "vo_s06",
-    text:
-      "It keeps monitoring the price long after checkout. The instant it falls, ClaimIt catches the drop automatically.",
-  },
-  { id: "vo_s07", text: "Then it builds your claim, end to end." },
-  {
-    id: "vo_s08",
-    text:
-      "A complete, accurate request — written for you, citing the exact price-match policy, down to the difference owed.",
-  },
-  {
-    id: "vo_s09",
-    text:
-      "With the evidence attached: the price drop captured, the proof, and the matching policy clause.",
-  },
-  {
-    id: "vo_s10",
-    text:
-      "It explains exactly why the claim qualifies — and every step it takes is fully traceable.",
-  },
-  {
-    id: "vo_s11",
-    text: "You review it. You approve it. Nothing is ever sent without you.",
-  },
-  { id: "vo_s12", text: "Still yours." },
-  {
-    id: "vo_s13",
-    text:
-      "Email, chat — whatever the platform actually requires, ClaimIt writes the right claim, in the right format, the right way.",
-  },
-  {
-    id: "vo_s14",
-    text:
-      "In-store, self-service — one agent that matches every platform's real process, and keeps you in control of each one.",
-  },
-  {
-    id: "vo_s15",
-    text:
-      "You approve every claim. Every step is traceable. ClaimIt prepares the claim — it doesn't promise the refund. It makes sure you can ask for it.",
-  },
-  {
-    id: "vo_s16",
-    text: "And just like that — the fifty dollars came back.",
-  },
-  { id: "vo_s17", text: "Your Money. Still Yours." },
-  { id: "vo_s17b", text: "Built on Google Cloud, Gemini, and MongoDB." },
-];
+const BEAT_BUDGET_SECONDS = 5.0;
 
-const apiKey = process.env.ELEVENLABS_API_KEY;
-if (!apiKey || apiKey.trim() === "") {
-  console.error(
-    "ELEVENLABS_API_KEY is empty. Did you save .env after pasting the key, and run with --env-file=.env?",
-  );
-  process.exit(1);
+const dryRun = process.argv.includes("--dry-run");
+
+// Optional --only <id> filter for spot-tests (e.g. --only b01).
+const onlyIdx = process.argv.indexOf("--only");
+const onlyId = onlyIdx >= 0 ? process.argv[onlyIdx + 1] : null;
+
+// ─── Load VO lines ──────────────────────────────────────────────────────
+const allLines = JSON.parse(await readFile(VO_LINES_PATH, "utf8"));
+let spoken = allLines.filter((l) => l.text !== null);
+const silent = allLines.filter((l) => l.text === null);
+
+if (onlyId) {
+  const match = spoken.find((l) => l.id === onlyId);
+  if (!match) {
+    console.error(`--only ${onlyId} did not match any spoken line.`);
+    console.error(`Available IDs: ${spoken.map((l) => l.id).join(", ")}`);
+    process.exit(1);
+  }
+  spoken = [match];
+  console.log(`(--only ${onlyId} → 1 line)`);
 }
 
-await mkdir(OUT_DIR, { recursive: true });
+console.log(`VO lines: ${allLines.length} total · ${spoken.length} to generate · ${silent.length} silent`);
+console.log(`Silent (skipped): ${silent.map((s) => s.id).join(", ")}`);
+console.log("");
 
+if (!dryRun) {
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  if (!apiKey || apiKey.trim() === "") {
+    console.error("ELEVENLABS_API_KEY is empty.");
+    console.error("Provide it via one of:");
+    console.error("  1. Create demo-video/remotion/.env with `ELEVENLABS_API_KEY=sk_...`");
+    console.error("     then run: node --env-file=.env scripts/gen_vo.mjs");
+    console.error("  2. Inline: ELEVENLABS_API_KEY=sk_... node scripts/gen_vo.mjs");
+    console.error("  3. Dry-run (no API calls): node scripts/gen_vo.mjs --dry-run");
+    process.exit(1);
+  }
+  await mkdir(OUT_DIR, { recursive: true });
+}
+
+// ─── Run ────────────────────────────────────────────────────────────────
+const results = [];
 let okCount = 0;
-for (const p of PROMPTS) {
-  const outPath = join(OUT_DIR, `${p.id}.mp3`);
-  process.stdout.write(`[${p.id}] ${p.text.length} chars → `);
+let overBudgetCount = 0;
+
+for (const line of spoken) {
+  const outPath = join(OUT_DIR, `vo_${line.id}.mp3`);
+  process.stdout.write(`[${line.id}] (${line.act}) ${line.text.length} chars `);
+
+  if (dryRun) {
+    process.stdout.write("→ DRY-RUN skip\n");
+    results.push({ id: line.id, status: "dry-run", path: outPath });
+    continue;
+  }
+
+  // POST to ElevenLabs
   const res = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}?output_format=${OUTPUT_FORMAT}`,
     {
       method: "POST",
       headers: {
-        "xi-api-key": apiKey,
+        "xi-api-key": process.env.ELEVENLABS_API_KEY,
         "Content-Type": "application/json",
         Accept: "audio/mpeg",
       },
       body: JSON.stringify({
-        text: p.text,
+        text: line.text,
         model_id: MODEL,
         voice_settings: VOICE_SETTINGS,
       }),
     },
   );
+
   if (!res.ok) {
-    let errBody = "";
+    let body = "";
     try {
-      errBody = await res.text();
+      body = (await res.text()).slice(0, 500);
     } catch {}
     process.stdout.write("FAIL\n");
-    console.error(`HTTP ${res.status} ${res.statusText}`);
-    if (errBody) {
-      // Truncate to avoid dumping anything unexpected.
-      console.error(errBody.slice(0, 500));
-    }
-    console.error(
-      `Stopped at ${p.id}. ${okCount} files written so far. No further calls made.`,
-    );
+    console.error(`  HTTP ${res.status} ${res.statusText}`);
+    if (body) console.error(`  body: ${body}`);
+    console.error(`\nStopped at ${line.id}. ${okCount} files written before failure.`);
     process.exit(2);
   }
+
   const buf = Buffer.from(await res.arrayBuffer());
   await writeFile(outPath, buf);
   okCount += 1;
-  process.stdout.write(`${buf.length} bytes ok\n`);
+
+  // Probe duration
+  const durationS = await probeDuration(outPath);
+  const overBudget = durationS > BEAT_BUDGET_SECONDS;
+  if (overBudget) overBudgetCount += 1;
+  const marker = overBudget ? " ⚠ OVER 5 s" : "";
+  process.stdout.write(`→ ${buf.length} B · ${durationS.toFixed(2)} s${marker}\n`);
+  results.push({ id: line.id, status: "ok", bytes: buf.length, durationS, overBudget, path: outPath });
 }
 
-console.log(`\nDone. ${okCount} mp3 files in ${OUT_DIR}.`);
+// ─── Summary ───────────────────────────────────────────────────────────
+console.log("");
+console.log(`Done. ${okCount}/${spoken.length} spoken files written.`);
+if (overBudgetCount > 0) {
+  console.log(`⚠ ${overBudgetCount} files exceed the 5 s beat budget — review BEAT_SHEET timing.`);
+}
+
+// Write a manifest JSON for the report.
+const manifestPath = join(OUT_DIR, "_vo_manifest.json");
+await writeFile(manifestPath, JSON.stringify(results, null, 2));
+console.log(`Manifest: ${manifestPath}`);
+
+// ─── ffprobe helper ─────────────────────────────────────────────────────
+function probeDuration(path) {
+  return new Promise((resolve) => {
+    if (!commandExists("ffprobe")) {
+      resolve(NaN);
+      return;
+    }
+    const proc = spawn("ffprobe", [
+      "-v",
+      "error",
+      "-show_entries",
+      "format=duration",
+      "-of",
+      "csv=p=0",
+      path,
+    ]);
+    let stdout = "";
+    proc.stdout.on("data", (d) => (stdout += d.toString()));
+    proc.on("close", () => {
+      const s = parseFloat(stdout.trim());
+      resolve(Number.isFinite(s) ? s : NaN);
+    });
+    proc.on("error", () => resolve(NaN));
+  });
+}
+
+function commandExists(_cmd) {
+  // Lightweight: assume ffprobe is on PATH (we confirmed earlier).
+  // If it's not, probeDuration returns NaN and the script logs "—".
+  return true;
+}
