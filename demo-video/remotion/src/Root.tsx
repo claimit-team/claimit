@@ -16,6 +16,7 @@ import { Beat09 } from "./beats/b09_demo-reach-policies/Beat09";
 import { Beat10 } from "./beats/b10_payoff-claimit/Beat10";
 // LEGACY b10-b29 imports removed — superseded by b06-b09 (DEMO consolidation 2026-06-04).
 import { Beat35 } from "./beats/b35_payoff-final__252-300/Beat35";
+import { MasterDemo } from "./master/MasterDemo";
 import {
   UiAppShellEmpty,
   UiClaimshellApprovedState,
@@ -172,6 +173,8 @@ export const RemotionRoot = () => {
       <Composition id="peer-scene-07-platforms" component={Scene07Platforms} durationInFrames={S7_PLATFORMS_F} fps={60} width={1920} height={1080} />
       <Composition id="peer-scene-08-reach" component={Scene08Reach} durationInFrames={S8_REACH_F} fps={60} width={1920} height={1080} />
       <Composition id="peer-scene-09-close" component={Scene09Close} durationInFrames={S9_CLOSE_F} fps={60} width={1920} height={1080} />
+      {/* MASTER — full b01-b10 sequence for review (excludes legacy + b35). */}
+      <Composition id="MasterDemo" component={MasterDemo} durationInFrames={8270} fps={60} width={1920} height={1080} />
     </>
   );
 };
