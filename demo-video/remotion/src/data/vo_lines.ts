@@ -32,8 +32,9 @@ export interface VoLine {
 export const VO_LINES: readonly VoLine[] = raw as readonly VoLine[];
 
 /** Convenience: beats that DO get an mp3. */
-export const SPOKEN_VO_LINES: readonly (VoLine & { text: string })[] =
-  VO_LINES.filter((v): v is VoLine & { text: string } => v.text !== null);
+export const SPOKEN_VO_LINES: readonly (VoLine & { text: string })[] = VO_LINES.filter(
+  (v): v is VoLine & { text: string } => v.text !== null,
+);
 
 /** Convenience map: beatN → VoLine. */
 export const VO_BY_BEAT: Readonly<Record<number, VoLine>> = Object.fromEntries(

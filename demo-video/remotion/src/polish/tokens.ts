@@ -235,12 +235,12 @@ export const SHADOW = {
 export const colors = {
   brand: {
     primary: "#27466E", // navy — apps/web --brand-primary-500
-    accent: "#1D7A3A",  // money green — apps/web --brand-accent-500 (HOOK never uses it)
+    accent: "#1D7A3A", // money green — apps/web --brand-accent-500 (HOOK never uses it)
   },
   semantic: {
     success: "#1D7A3A",
     warning: "#F59E0B",
-    danger:  "#D92626", // apps/web --semantic-danger — used for the "2%" punch in beat 3
+    danger: "#D92626", // apps/web --semantic-danger — used for the "2%" punch in beat 3
   },
   neutral: {
     900: "#101318",
@@ -248,7 +248,7 @@ export const colors = {
     500: "#6B7280",
     300: "#C5CAD3",
     100: "#F0F2F5",
-    0:   "#FFFFFF",
+    0: "#FFFFFF",
   },
   bg: {
     dark: "#000000", // pure black — legacy dark-mode beats only
@@ -263,4 +263,5 @@ export const colors = {
 } as const;
 
 export const FONT_STACK_TEXT = '"Inter", system-ui, -apple-system, "Segoe UI", sans-serif';
-export const FONT_STACK_EMOJI = '"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
+export const FONT_STACK_EMOJI =
+  '"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';

@@ -9,8 +9,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { staticFile } from "remotion";
 
-export const cn = (...a: Array<string | false | null | undefined>) =>
-  a.filter(Boolean).join(" ");
+export const cn = (...a: Array<string | false | null | undefined>) => a.filter(Boolean).join(" ");
 
 // ── Button (apps/web/src/components/ui/button.tsx, verbatim CVA) ───────────
 const BTN_BASE =
@@ -62,11 +61,17 @@ export function Card({ className, children }: { className?: string; children: Re
   );
 }
 export function CardHeader({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cn("grid auto-rows-min items-start gap-1 rounded-t-xl px-4", className)}>{children}</div>;
+  return (
+    <div className={cn("grid auto-rows-min items-start gap-1 rounded-t-xl px-4", className)}>
+      {children}
+    </div>
+  );
 }
 export function CardTitle({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <div className={cn("font-heading text-base leading-snug font-medium", className)}>{children}</div>
+    <div className={cn("font-heading text-base leading-snug font-medium", className)}>
+      {children}
+    </div>
   );
 }
 export function CardContent({ className, children }: { className?: string; children: ReactNode }) {
@@ -105,7 +110,10 @@ const OUTCOME_MAP: Record<string, { label: string; cls: string }> = {
   denied: { label: "Denied", cls: "bg-semantic-danger text-white border-transparent" },
 };
 export function OutcomeBadge({ outcome }: { outcome: string }) {
-  const o = OUTCOME_MAP[outcome] ?? { label: outcome, cls: "bg-neutral-100 text-neutral-600 border-neutral-200" };
+  const o = OUTCOME_MAP[outcome] ?? {
+    label: outcome,
+    cls: "bg-neutral-100 text-neutral-600 border-neutral-200",
+  };
   return <span className={cn(OUTCOME_BASE, o.cls)}>{o.label}</span>;
 }
 
@@ -119,7 +127,6 @@ export function PlatformLogo({ platform, className }: { platform: string; classN
         className,
       )}
     >
-      {/* biome-ignore lint/performance/noImgElement: static brand asset */}
       <img
         src={staticFile(`platformlogo/${platform}.svg`)}
         alt=""

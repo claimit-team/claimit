@@ -13,14 +13,23 @@ const MUTE = "#9AA3B2";
 const FAINT = "#C7CDD8";
 const LINE = "#EAEDF2";
 
-const Row: React.FC<{ left: React.ReactNode; right?: React.ReactNode; bold?: boolean; size?: number; color?: string }> = ({
-  left,
-  right,
-  bold,
-  size = 13,
-  color = INK,
-}) => (
-  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: size, fontWeight: bold ? 700 : 500, color }}>
+const Row: React.FC<{
+  left: React.ReactNode;
+  right?: React.ReactNode;
+  bold?: boolean;
+  size?: number;
+  color?: string;
+}> = ({ left, right, bold, size = 13, color = INK }) => (
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "baseline",
+      fontSize: size,
+      fontWeight: bold ? 700 : 500,
+      color,
+    }}
+  >
     <span>{left}</span>
     {right != null ? <span style={{ fontVariantNumeric: "tabular-nums" }}>{right}</span> : null}
   </div>
@@ -52,7 +61,15 @@ export const ReceiptCard: React.FC = () => (
     <div style={{ borderTop: `1px dashed ${FAINT}`, margin: "18px 0 14px" }} />
 
     {/* Meta */}
-    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: MUTE, fontWeight: 600 }}>
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        fontSize: 11,
+        color: MUTE,
+        fontWeight: 600,
+      }}
+    >
       <span>ORDER 1185402639</span>
       <span>05/22/2026</span>
     </div>

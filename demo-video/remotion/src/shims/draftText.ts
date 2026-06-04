@@ -18,7 +18,4 @@ Warmly,
 Jane Doe`;
 
 // b22 "quick edit yourself" — greeting tweaked by hand.
-export const DRAFT_V2_EDITED = DRAFT_V2.replace(
-  "Hi Costco Member Service,",
-  "Hi Costco team,",
-);
+export const DRAFT_V2_EDITED = DRAFT_V2.replace("Hi Costco Member Service,", "Hi Costco team,");

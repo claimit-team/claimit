@@ -1,10 +1,19 @@
 // Beat 35 — Payoff · final brand · 2:52-3:00 · 480f (8s, longer hold)
 // "ClaimIt. AI does the paperwork. You approve."
-import { AbsoluteFill, Audio, interpolate, Sequence, spring, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
+import {
+  AbsoluteFill,
+  Audio,
+  interpolate,
+  Sequence,
+  spring,
+  staticFile,
+  useCurrentFrame,
+  useVideoConfig,
+} from "remotion";
 
 import { BeatSubtitle } from "../../polish/BeatSubtitle";
-import { HookAtmosphere } from "../../polish/HookAtmosphere";
 import { easings } from "../../polish/easings";
+import { HookAtmosphere } from "../../polish/HookAtmosphere";
 import { colors, FONT_STACK_TEXT } from "../../polish/tokens";
 
 const POWERED = "Powered by Gemini ADK · MongoDB Atlas · Arize Phoenix";
@@ -14,7 +23,10 @@ export const Beat35: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  const poweredChars = Math.max(0, Math.floor(interpolate(frame, [30, 60], [0, POWERED.length], C)));
+  const poweredChars = Math.max(
+    0,
+    Math.floor(interpolate(frame, [30, 60], [0, POWERED.length], C)),
+  );
   const teamIn = interpolate(frame, [60, 90], [0, 1], { ...C, easing: easings.easeOut });
   const logoSpring = spring({ frame: frame - 90, fps, config: { damping: 14, stiffness: 120 } });
   const logoScale = interpolate(logoSpring, [0, 1], [0.85, 1], C);
@@ -22,7 +34,14 @@ export const Beat35: React.FC = () => {
 
   return (
     <HookAtmosphere>
-      <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", flexDirection: "column", fontFamily: FONT_STACK_TEXT }}>
+      <AbsoluteFill
+        style={{
+          alignItems: "center",
+          justifyContent: "center",
+          flexDirection: "column",
+          fontFamily: FONT_STACK_TEXT,
+        }}
+      >
         <div
           style={{
             fontSize: 128,

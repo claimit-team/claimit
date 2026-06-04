@@ -46,7 +46,15 @@ const Inner: React.FC = () => {
   const snap = (start: number) =>
     Math.min(
       1,
-      Math.max(0, spring({ frame: frame - start, fps, config: { damping: 14, mass: 0.5 }, durationInFrames: 18 })),
+      Math.max(
+        0,
+        spring({
+          frame: frame - start,
+          fps,
+          config: { damping: 14, mass: 0.5 },
+          durationInFrames: 18,
+        }),
+      ),
     );
 
   // Kicker (bottom) — three short lines stagger in late.

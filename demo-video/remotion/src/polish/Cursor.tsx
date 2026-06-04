@@ -26,7 +26,11 @@ const EASE = Easing.bezier(0.16, 1, 0.3, 1); // expo-out — "smooth as glass"
 const PULSE_FRAMES = 22;
 const PRESS_FRAMES = 7;
 
-function valueAt(frame: number, kfs: CursorKeyframe[], pick: (k: CursorKeyframe) => number): number {
+function valueAt(
+  frame: number,
+  kfs: CursorKeyframe[],
+  pick: (k: CursorKeyframe) => number,
+): number {
   if (kfs.length === 0) return 0;
   if (frame <= kfs[0].frame) return pick(kfs[0]);
   const last = kfs[kfs.length - 1];
@@ -109,7 +113,7 @@ export const Cursor: React.FC<{
           filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.35))",
           overflow: "visible",
         }}
-        aria-hidden
+        aria-hidden="true"
       >
         <path
           d="M0 0 L0 18 L4.8 13.6 L8 20.6 L10.7 19.3 L7.5 12.4 L13 12.4 Z"

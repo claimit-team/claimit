@@ -12,8 +12,7 @@ export const COSTCO = {
   category: "retail" as const,
   productName: "Apple iPad Air 11-inch (M2, 128GB, Wi-Fi)",
   productId: "1820413",
-  productUrl:
-    "https://www.costco.com/apple-ipad-air-m2-11-inch-128gb-wifi.product.4000236789.html",
+  productUrl: "https://www.costco.com/apple-ipad-air-m2-11-inch-128gb-wifi.product.4000236789.html",
   policyUrl: "https://www.costco.com/price-adjustment.html",
   variant: "Space Gray",
   orderId: "1185402639",
@@ -60,15 +59,19 @@ Costco Executive Member #111 222 333 444`;
 // snapshot; the VM's priceHistory would be 1 point. A faithful monitored
 // series tracks retail flat at $599.99 then drops to $499.99 on the
 // 2026-05-31 sweep — the drop point renders the amber CustomDot).
-export const PRICE_SERIES: { date: string; formattedDate: string; price: number; dropDetected: boolean }[] =
-  [
-    { date: "2026-05-22", formattedDate: "May 22", price: 599.99, dropDetected: false },
-    { date: "2026-05-24", formattedDate: "May 24", price: 599.99, dropDetected: false },
-    { date: "2026-05-26", formattedDate: "May 26", price: 599.99, dropDetected: false },
-    { date: "2026-05-28", formattedDate: "May 28", price: 599.99, dropDetected: false },
-    { date: "2026-05-30", formattedDate: "May 30", price: 599.99, dropDetected: false },
-    { date: "2026-05-31", formattedDate: "May 31", price: 499.99, dropDetected: true },
-  ];
+export const PRICE_SERIES: {
+  date: string;
+  formattedDate: string;
+  price: number;
+  dropDetected: boolean;
+}[] = [
+  { date: "2026-05-22", formattedDate: "May 22", price: 599.99, dropDetected: false },
+  { date: "2026-05-24", formattedDate: "May 24", price: 599.99, dropDetected: false },
+  { date: "2026-05-26", formattedDate: "May 26", price: 599.99, dropDetected: false },
+  { date: "2026-05-28", formattedDate: "May 28", price: 599.99, dropDetected: false },
+  { date: "2026-05-30", formattedDate: "May 30", price: 599.99, dropDetected: false },
+  { date: "2026-05-31", formattedDate: "May 31", price: 499.99, dropDetected: true },
+];
 
 // Assistant exchange shown in surface #5 (claimshell-assistant-active).
 // User asks the verbatim quick action; assistant confirms the v2 redraft.

@@ -18,7 +18,17 @@ export const TechWall: React.FC<{
   revealCount?: number;
   style?: CSSProperties;
 }> = ({ highlight, revealCount, style }) => (
-  <div style={{ display: "flex", gap: 20, flexWrap: "wrap", justifyContent: "center", maxWidth: 920, fontFamily: FONT_STACK_TEXT, ...style }}>
+  <div
+    style={{
+      display: "flex",
+      gap: 20,
+      flexWrap: "wrap",
+      justifyContent: "center",
+      maxWidth: 920,
+      fontFamily: FONT_STACK_TEXT,
+      ...style,
+    }}
+  >
     {TECH.map(([logo, name], i) => {
       const visible = revealCount === undefined ? 1 : i < revealCount ? 1 : 0;
       const hl = highlight === name;
@@ -42,7 +52,10 @@ export const TechWall: React.FC<{
             transform: hl ? "scale(1.04)" : "scale(1)",
           }}
         >
-          <Img src={staticFile(`brandlogos/${logo}`)} style={{ height: 40, maxWidth: 120, objectFit: "contain" }} />
+          <Img
+            src={staticFile(`brandlogos/${logo}`)}
+            style={{ height: 40, maxWidth: 120, objectFit: "contain" }}
+          />
           <span style={{ fontSize: 15, fontWeight: 600, color: colors.text.dark }}>{name}</span>
         </div>
       );

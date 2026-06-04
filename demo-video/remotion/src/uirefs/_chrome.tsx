@@ -55,7 +55,15 @@ const BOTTOM: { label: NavKey; icon: typeof LayoutDashboard }[] = [
   { label: "Help", icon: HelpCircle },
 ];
 
-function NavItem({ label, Icon, active }: { label: string; Icon: typeof LayoutDashboard; active: boolean }) {
+function NavItem({
+  label,
+  Icon,
+  active,
+}: {
+  label: string;
+  Icon: typeof LayoutDashboard;
+  active: boolean;
+}) {
   return (
     <li>
       <span
@@ -78,7 +86,12 @@ function Sidebar({ active }: { active: string }) {
     <div className="flex flex-col h-full bg-neutral-0">
       <div className="h-16 flex items-center px-6 border-b border-neutral-200">
         <div className="flex items-center gap-2">
-          <ShieldCheck className="text-brand-primary-500" size={28} strokeWidth={2.25} aria-hidden="true" />
+          <ShieldCheck
+            className="text-brand-primary-500"
+            size={28}
+            strokeWidth={2.25}
+            aria-hidden="true"
+          />
           <span className="font-semibold text-neutral-900 text-lg">ClaimIt</span>
         </div>
       </div>
@@ -175,7 +188,10 @@ export function AppChrome({
 }) {
   return (
     <AbsoluteFill className="bg-neutral-0" style={{ display: "flex", flexDirection: "row" }}>
-      <aside className="flex w-64 flex-col bg-neutral-0 border-r border-neutral-200" style={{ height: "100%" }}>
+      <aside
+        className="flex w-64 flex-col bg-neutral-0 border-r border-neutral-200"
+        style={{ height: "100%" }}
+      >
         <Sidebar active={active} />
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">

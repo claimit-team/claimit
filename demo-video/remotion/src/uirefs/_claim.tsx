@@ -9,7 +9,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Bot,
-  Check,
   CheckCircle2,
   ChevronDown,
   Clock,
@@ -152,10 +151,14 @@ function EvidencePaneView() {
               <div className="flex items-baseline justify-between">
                 <div className="space-y-1">
                   <div className="text-neutral-500 text-sm tabular-nums">Original: $599.99</div>
-                  <div className="font-semibold text-2xl text-neutral-900 tabular-nums">$499.99</div>
+                  <div className="font-semibold text-2xl text-neutral-900 tabular-nums">
+                    $499.99
+                  </div>
                 </div>
                 <div className="text-right">
-                  <div className="font-semibold text-lg text-semantic-warning tabular-nums">-$100.00</div>
+                  <div className="font-semibold text-lg text-semantic-warning tabular-nums">
+                    -$100.00
+                  </div>
                   <div className="text-neutral-500 text-xs">difference</div>
                 </div>
               </div>
@@ -183,11 +186,13 @@ function EvidencePaneView() {
               <blockquote className="rounded-r-md border-semantic-warning border-l-4 bg-semantic-warning-bg/30 px-3 py-2 text-neutral-700 text-sm italic">
                 {COSTCO.policyClause}
               </blockquote>
-              <a className="inline-flex items-center gap-1 font-medium text-brand-primary-500 text-sm">
+              <span className="inline-flex items-center gap-1 font-medium text-brand-primary-500 text-sm">
                 Read Costco policy
                 <ExternalLink className="h-3 w-3" />
-              </a>
-              <p className="text-neutral-500 text-xs">Policy verified {COSTCO.policyVerifiedLong}</p>
+              </span>
+              <p className="text-neutral-500 text-xs">
+                Policy verified {COSTCO.policyVerifiedLong}
+              </p>
             </CardContent>
           </Card>
 
@@ -219,10 +224,10 @@ function EvidencePaneView() {
                   <span className="font-medium text-neutral-900">$599.99</span>
                 </div>
               </div>
-              <a className="inline-flex items-center gap-1 font-medium text-brand-primary-500 text-sm">
+              <span className="inline-flex items-center gap-1 font-medium text-brand-primary-500 text-sm">
                 View purchase
                 <ArrowRight className="h-4 w-4" />
-              </a>
+              </span>
             </CardContent>
           </Card>
         </div>
@@ -265,10 +270,10 @@ function Bubble({ msg }: { msg: Msg }) {
           </Badge>
         ) : null}
         {msg.trace ? (
-          <a className="mt-1.5 inline-flex items-center gap-1 text-neutral-400 text-xs">
+          <span className="mt-1.5 inline-flex items-center gap-1 text-neutral-400 text-xs">
             <ExternalLink className="h-3 w-3" />
             View trace
-          </a>
+          </span>
         ) : null}
       </div>
       {!isAssistant ? (
@@ -336,7 +341,10 @@ function AssistantPaneView({ messages }: { messages: Msg[] }) {
 function StatusBadge({ status }: { status: ClaimStatus }) {
   if (status === "submitted") {
     return (
-      <Badge variant="outline" className="font-medium bg-neutral-100 text-neutral-700 border-neutral-200">
+      <Badge
+        variant="outline"
+        className="font-medium bg-neutral-100 text-neutral-700 border-neutral-200"
+      >
         Submitted
       </Badge>
     );

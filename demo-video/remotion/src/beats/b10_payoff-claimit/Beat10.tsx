@@ -29,11 +29,49 @@ const ClaimItLockup: React.FC = () => {
   const rt = useReveal(LOCKUP_FROM + 12);
   return (
     <>
-      <div style={{ position: "absolute", left: 0, right: 0, top: 452, display: "flex", alignItems: "center", justifyContent: "center", gap: 18, opacity: r.opacity, transform: `translateY(${r.translateY.toFixed(1)}px) scale(${r.scale.toFixed(4)})`, transformOrigin: "center" }}>
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          top: 452,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 18,
+          opacity: r.opacity,
+          transform: `translateY(${r.translateY.toFixed(1)}px) scale(${r.scale.toFixed(4)})`,
+          transformOrigin: "center",
+        }}
+      >
         <ShieldCheck size={54} color={BRAND_BLUE} strokeWidth={2.2} aria-hidden />
-        <span style={{ fontFamily: FONT_STACK_TEXT, fontSize: 78, fontWeight: 700, letterSpacing: -2, lineHeight: 1, color: BRAND_BLUE }}>ClaimIt</span>
+        <span
+          style={{
+            fontFamily: FONT_STACK_TEXT,
+            fontSize: 78,
+            fontWeight: 700,
+            letterSpacing: -2,
+            lineHeight: 1,
+            color: BRAND_BLUE,
+          }}
+        >
+          ClaimIt
+        </span>
       </div>
-      <div style={{ position: "absolute", left: 0, right: 0, top: 568, textAlign: "center", opacity: rt.opacity, transform: `translateY(${rt.translateY.toFixed(1)}px)`, fontFamily: FONT_STACK_TEXT, fontSize: 22, color: colors.text.muted }}>
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          top: 568,
+          textAlign: "center",
+          opacity: rt.opacity,
+          transform: `translateY(${rt.translateY.toFixed(1)}px)`,
+          fontFamily: FONT_STACK_TEXT,
+          fontSize: 22,
+          color: colors.text.muted,
+        }}
+      >
         Your refund claim, taken care of.
       </div>
     </>

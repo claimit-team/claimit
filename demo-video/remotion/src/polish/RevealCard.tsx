@@ -13,7 +13,15 @@ export function useReveal(fromFrame: number) {
   const { fps } = useVideoConfig();
   const p = Math.min(
     1,
-    Math.max(0, spring({ frame: frame - fromFrame, fps, config: { damping: 14, mass: 0.5 }, durationInFrames: 18 })),
+    Math.max(
+      0,
+      spring({
+        frame: frame - fromFrame,
+        fps,
+        config: { damping: 14, mass: 0.5 },
+        durationInFrames: 18,
+      }),
+    ),
   );
   return { progress: p, opacity: p, scale: 0.95 + 0.05 * p, translateY: (1 - p) * 10 };
 }
@@ -46,7 +54,9 @@ export const RevealCard: React.FC<{
         src={staticFile(`brandlogos/${logo}`)}
         style={{ height: 56, maxWidth: 130, objectFit: "contain" }}
       />
-      <div style={{ fontSize: 24, fontWeight: 700, color: colors.text.dark, letterSpacing: "-0.01em" }}>
+      <div
+        style={{ fontSize: 24, fontWeight: 700, color: colors.text.dark, letterSpacing: "-0.01em" }}
+      >
         {name}
       </div>
       <div style={{ fontSize: 16, color: colors.text.muted, lineHeight: 1.35 }}>{description}</div>

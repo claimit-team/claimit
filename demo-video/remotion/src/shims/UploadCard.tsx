@@ -18,6 +18,7 @@ export const UploadCard: React.FC<{ highlightBadge?: boolean; style?: CSSPropert
       }}
     >
       <svg
+        aria-hidden="true"
         width={44}
         height={44}
         viewBox="0 0 24 24"

@@ -12,18 +12,11 @@
 //   195-225  accent line retracts to center + text fades out (slower exit, ~30f)
 //   225-240  atmosphere only
 
-import {
-  AbsoluteFill,
-  Audio,
-  interpolate,
-  Sequence,
-  staticFile,
-  useCurrentFrame,
-} from "remotion";
+import { Audio, interpolate, Sequence, staticFile, useCurrentFrame } from "remotion";
 
 import { BeatSubtitle } from "../../polish/BeatSubtitle";
-import { HookAtmosphere } from "../../polish/HookAtmosphere";
 import { easings } from "../../polish/easings";
+import { HookAtmosphere } from "../../polish/HookAtmosphere";
 import { colors, FONT_STACK_TEXT } from "../../polish/tokens";
 
 const TEXT = "Every year, money slips through the cracks."; // 43 chars

@@ -48,7 +48,16 @@ export const ClaimsListRow: React.FC<{
         >
           {amount}
         </span>
-        <span style={{ fontSize: 12, fontWeight: 600, color: s.color, backgroundColor: s.bg, padding: "4px 12px", borderRadius: 999 }}>
+        <span
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: s.color,
+            backgroundColor: s.bg,
+            padding: "4px 12px",
+            borderRadius: 999,
+          }}
+        >
           {s.label}
         </span>
       </div>

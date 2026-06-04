@@ -9,7 +9,16 @@ export const MongoNode: React.FC<{ label?: string; sublabel?: string; style?: CS
   sublabel,
   style,
 }) => (
-  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, fontFamily: FONT_STACK_TEXT, ...style }}>
+  <div
+    style={{
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: 10,
+      fontFamily: FONT_STACK_TEXT,
+      ...style,
+    }}
+  >
     <div
       style={{
         width: 72,
@@ -27,7 +36,9 @@ export const MongoNode: React.FC<{ label?: string; sublabel?: string; style?: CS
     </div>
     <div style={{ textAlign: "center" }}>
       <div style={{ fontSize: 14, fontWeight: 600, color: colors.text.dark }}>{label}</div>
-      {sublabel && <div style={{ fontSize: 11, color: colors.text.muted, marginTop: 2 }}>{sublabel}</div>}
+      {sublabel && (
+        <div style={{ fontSize: 11, color: colors.text.muted, marginTop: 2 }}>{sublabel}</div>
+      )}
     </div>
   </div>
 );

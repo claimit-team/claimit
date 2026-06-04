@@ -38,7 +38,18 @@ export const ApproveButton: React.FC<{
         transform: `translateX(${(fillProgress - 1) * 100}%)`,
       }}
     />
-    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" style={{ position: "relative" }}>
+    <svg
+      aria-hidden="true"
+      width={20}
+      height={20}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#FFFFFF"
+      strokeWidth={2.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ position: "relative" }}
+    >
       <path d="M20 6 9 17l-5-5" />
     </svg>
     <span style={{ position: "relative" }}>{label}</span>

@@ -57,7 +57,17 @@ export const OcrFieldsCard: React.FC<{
         <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 15, fontWeight: 500, color: colors.text.dark }}>{val}</span>
           {editable ? (
-            <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke={colors.text.muted} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              aria-hidden="true"
+              width={15}
+              height={15}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke={colors.text.muted}
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="M12 20h9" />
               <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
             </svg>

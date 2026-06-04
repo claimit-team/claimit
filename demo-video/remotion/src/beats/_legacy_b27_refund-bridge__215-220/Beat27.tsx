@@ -20,6 +20,10 @@ export const Beat27: React.FC = () => (
     <Sequence name="vo_b27" from={6}>
       <Audio src={staticFile("audio/vo/vo_b27.mp3")} />
     </Sequence>
-    <BeatSubtitle text="Every claim, tracked from draft to outcome." fromFrame={6} durationFrames={184} />
+    <BeatSubtitle
+      text="Every claim, tracked from draft to outcome."
+      fromFrame={6}
+      durationFrames={184}
+    />
   </HookAtmosphere>
 );

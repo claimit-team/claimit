@@ -54,8 +54,15 @@ export const PriceHistoryChart: React.FC<{
       <div style={{ fontSize: 13, fontWeight: 600, color: colors.text.muted, marginBottom: 8 }}>
         Apple iPad Air 11&quot; M2 · price watch
       </div>
-      <svg width={W - 48} height={H} viewBox={`0 0 ${W} ${H}`}>
-        <line x1={padX} y1={H - padY} x2={W - padX} y2={H - padY} stroke="rgba(15,20,25,0.12)" strokeWidth={1} />
+      <svg aria-hidden="true" width={W - 48} height={H} viewBox={`0 0 ${W} ${H}`}>
+        <line
+          x1={padX}
+          y1={H - padY}
+          x2={W - padX}
+          y2={H - padY}
+          stroke="rgba(15,20,25,0.12)"
+          strokeWidth={1}
+        />
         <path
           d={path}
           fill="none"
@@ -69,18 +76,45 @@ export const PriceHistoryChart: React.FC<{
         />
         {showDrop && (
           <>
-            <circle cx={x(dropIdx)} cy={y(points[dropIdx].price)} r={7} fill={colors.semantic.danger} />
-            <text x={x(dropIdx)} y={y(points[dropIdx].price) - 16} fontSize={16} fontWeight={700} fill={colors.semantic.danger} textAnchor="middle" fontFamily={FONT_STACK_TEXT}>
+            <circle
+              cx={x(dropIdx)}
+              cy={y(points[dropIdx].price)}
+              r={7}
+              fill={colors.semantic.danger}
+            />
+            <text
+              x={x(dropIdx)}
+              y={y(points[dropIdx].price) - 16}
+              fontSize={16}
+              fontWeight={700}
+              fill={colors.semantic.danger}
+              textAnchor="middle"
+              fontFamily={FONT_STACK_TEXT}
+            >
               $499.99
             </text>
           </>
         )}
         {points.map((p, i) => (
-          <text key={p.label} x={x(i)} y={H - padY + 22} fontSize={11} fill={colors.text.muted} textAnchor="middle" fontFamily={FONT_STACK_TEXT}>
+          <text
+            key={p.label}
+            x={x(i)}
+            y={H - padY + 22}
+            fontSize={11}
+            fill={colors.text.muted}
+            textAnchor="middle"
+            fontFamily={FONT_STACK_TEXT}
+          >
             {p.label}
           </text>
         ))}
-        <text x={padX} y={y(max) - 10} fontSize={11} fill={colors.text.muted} fontFamily={FONT_STACK_TEXT}>
+        <text
+          x={padX}
+          y={y(max) - 10}
+          fontSize={11}
+          fill={colors.text.muted}
+          fontFamily={FONT_STACK_TEXT}
+        >
           $599.99
         </text>
       </svg>

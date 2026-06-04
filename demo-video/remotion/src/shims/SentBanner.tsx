@@ -32,7 +32,17 @@ export const SentBanner: React.FC<{ style?: CSSProperties }> = ({ style }) => (
         flexShrink: 0,
       }}
     >
-      <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
+      <svg
+        aria-hidden="true"
+        width={18}
+        height={18}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="#FFFFFF"
+        strokeWidth={3}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
         <path d="M20 6 9 17l-5-5" />
       </svg>
     </div>
@@ -44,6 +54,9 @@ export const SentBanner: React.FC<{ style?: CSSProperties }> = ({ style }) => (
         Claim filed · just now
       </div>
     </div>
-    <Img src={staticFile("brandlogos/gmail.svg")} style={{ width: 22, height: 22, marginLeft: 6 }} />
+    <Img
+      src={staticFile("brandlogos/gmail.svg")}
+      style={{ width: 22, height: 22, marginLeft: 6 }}
+    />
   </div>
 );

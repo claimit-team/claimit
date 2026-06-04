@@ -16,11 +16,32 @@ const REAL: Record<string, string> = {
 
 // 26 mapped retailers (matches seed/policies/*).
 const RETAILERS: [string, string][] = [
-  ["costco", "Costco"], ["best_buy", "Best Buy"], ["target", "Target"], ["macys", "Macy's"], ["dell", "Dell"],
-  ["amazon", "Amazon"], ["walmart", "Walmart"], ["home_depot", "Home Depot"], ["lowes", "Lowe's"], ["nordstrom", "Nordstrom"],
-  ["newegg", "Newegg"], ["crutchfield", "Crutchfield"], ["staples", "Staples"], ["jcpenney", "JCPenney"], ["dicks_sporting_goods", "Dick's"],
-  ["marriott", "Marriott"], ["hilton", "Hilton"], ["hyatt", "Hyatt"], ["ihg", "IHG"], ["wyndham", "Wyndham"],
-  ["delta", "Delta"], ["united", "United"], ["american", "American"], ["southwest", "Southwest"], ["alaska", "Alaska"], ["jetblue", "JetBlue"],
+  ["costco", "Costco"],
+  ["best_buy", "Best Buy"],
+  ["target", "Target"],
+  ["macys", "Macy's"],
+  ["dell", "Dell"],
+  ["amazon", "Amazon"],
+  ["walmart", "Walmart"],
+  ["home_depot", "Home Depot"],
+  ["lowes", "Lowe's"],
+  ["nordstrom", "Nordstrom"],
+  ["newegg", "Newegg"],
+  ["crutchfield", "Crutchfield"],
+  ["staples", "Staples"],
+  ["jcpenney", "JCPenney"],
+  ["dicks_sporting_goods", "Dick's"],
+  ["marriott", "Marriott"],
+  ["hilton", "Hilton"],
+  ["hyatt", "Hyatt"],
+  ["ihg", "IHG"],
+  ["wyndham", "Wyndham"],
+  ["delta", "Delta"],
+  ["united", "United"],
+  ["american", "American"],
+  ["southwest", "Southwest"],
+  ["alaska", "Alaska"],
+  ["jetblue", "JetBlue"],
 ];
 
 const AUTOSEND = new Set(["costco", "macys", "dell"]);
@@ -31,7 +52,15 @@ export const RetailerLogoGrid: React.FC<{
   showChannelPills?: boolean;
   style?: CSSProperties;
 }> = ({ revealCount, showChannelPills = false, style }) => (
-  <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 150px)", gap: 14, fontFamily: FONT_STACK_TEXT, ...style }}>
+  <div
+    style={{
+      display: "grid",
+      gridTemplateColumns: "repeat(6, 150px)",
+      gap: 14,
+      fontFamily: FONT_STACK_TEXT,
+      ...style,
+    }}
+  >
     {RETAILERS.map(([key, name], i) => {
       const visible = revealCount === undefined ? 1 : i < revealCount ? 1 : 0;
       const logo = REAL[key];
@@ -54,9 +83,21 @@ export const RetailerLogoGrid: React.FC<{
           }}
         >
           {logo ? (
-            <Img src={staticFile(`brandlogos/${logo}`)} style={{ height: 22, maxWidth: 112, objectFit: "contain" }} />
+            <Img
+              src={staticFile(`brandlogos/${logo}`)}
+              style={{ height: 22, maxWidth: 112, objectFit: "contain" }}
+            />
           ) : (
-            <span style={{ fontSize: 13, fontWeight: 600, color: colors.text.muted, textAlign: "center" }}>{name}</span>
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: colors.text.muted,
+                textAlign: "center",
+              }}
+            >
+              {name}
+            </span>
           )}
           {showChannelPills && pill && (
             <span

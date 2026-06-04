@@ -24,8 +24,8 @@ import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
 
 import { BeatSubtitle } from "../../polish/BeatSubtitle";
 import { Cursor } from "../../polish/Cursor";
-import { HookAtmosphere } from "../../polish/HookAtmosphere";
 import { easings } from "../../polish/easings";
+import { HookAtmosphere } from "../../polish/HookAtmosphere";
 import { DRAFT_V1, DRAFT_V2 } from "../../uirefs/_data";
 import { type ChatMsg, ClaimShellClean } from "./ClaimShellClean";
 
@@ -37,7 +37,8 @@ const REPLY = "Sure — I'll soften the tone and resend.";
 const V1_END = 470 + Math.ceil(DRAFT_V1.length / 2.2);
 const V2_END = 862 + Math.ceil(DRAFT_V2.length / 3.2);
 
-const iv = (frame: number, r: number[], o: number[], easing?: (n: number) => number) => interpolate(frame, r, o, easing ? { ...C, easing } : C);
+const iv = (frame: number, r: number[], o: number[], easing?: (n: number) => number) =>
+  interpolate(frame, r, o, easing ? { ...C, easing } : C);
 
 export const Beat08: React.FC = () => {
   const frame = useCurrentFrame();
@@ -50,9 +51,21 @@ export const Beat08: React.FC = () => {
 
   // Per-pane focus (1 = sharp, low = blurred). Walks during the intro, then
   // tracks the active pane through draft / chat / redraft.
-  const draftF = iv(frame, [90, 200, 230, 450, 470, 630, 655, 845, 862, 1150], [1, 1, 0.22, 0.22, 1, 1, 0.45, 0.45, 1, 1]);
-  const eviF = iv(frame, [88, 110, 205, 230, 315, 340, 470, 960, 985, 1150], [1, 0.22, 0.22, 1, 1, 0.22, 0.35, 0.3, 1, 1]);
-  const asstF = iv(frame, [88, 110, 320, 345, 450, 475, 640, 660, 845, 865, 960, 985, 1150], [1, 0.22, 0.22, 1, 1, 0.35, 0.35, 1, 1, 0.5, 0.5, 1, 1]);
+  const draftF = iv(
+    frame,
+    [90, 200, 230, 450, 470, 630, 655, 845, 862, 1150],
+    [1, 1, 0.22, 0.22, 1, 1, 0.45, 0.45, 1, 1],
+  );
+  const eviF = iv(
+    frame,
+    [88, 110, 205, 230, 315, 340, 470, 960, 985, 1150],
+    [1, 0.22, 0.22, 1, 1, 0.22, 0.35, 0.3, 1, 1],
+  );
+  const asstF = iv(
+    frame,
+    [88, 110, 320, 345, 450, 475, 640, 660, 845, 865, 960, 985, 1150],
+    [1, 0.22, 0.22, 1, 1, 0.35, 0.35, 1, 1, 0.5, 0.5, 1, 1],
+  );
 
   // Draft body — v1 typewriter (C), then auto-rewrite to v2 (D).
   let draftText: string;
@@ -71,12 +84,19 @@ export const Beat08: React.FC = () => {
 
   // Chat input + thread.
   const chatTyping = frame >= 716 && frame < 778;
-  const chatText = chatTyping ? MAKE_FRIENDLIER.slice(0, Math.floor(iv(frame, [716, 730], [0, MAKE_FRIENDLIER.length]))) : "";
+  const chatText = chatTyping
+    ? MAKE_FRIENDLIER.slice(0, Math.floor(iv(frame, [716, 730], [0, MAKE_FRIENDLIER.length])))
+    : "";
   const messages: ChatMsg[] = [];
   if (frame >= 778) messages.push({ role: "user", text: MAKE_FRIENDLIER });
   if (frame >= 792) {
     const n = Math.floor(iv(frame, [792, 818], [0, REPLY.length]));
-    messages.push({ role: "assistant", text: REPLY.slice(0, n), caret: frame < 826, tool: frame >= 820 ? "request_redraft" : undefined });
+    messages.push({
+      role: "assistant",
+      text: REPLY.slice(0, n),
+      caret: frame < 826,
+      tool: frame >= 820 ? "request_redraft" : undefined,
+    });
   }
 
   const sendActive = frame >= 770 && frame <= 790;
@@ -91,7 +111,13 @@ export const Beat08: React.FC = () => {
 
   return (
     <HookAtmosphere>
-      <AbsoluteFill style={{ opacity, transform: `scale(${scale.toFixed(4)})`, transformOrigin: "center center" }}>
+      <AbsoluteFill
+        style={{
+          opacity,
+          transform: `scale(${scale.toFixed(4)})`,
+          transformOrigin: "center center",
+        }}
+      >
         <ClaimShellClean
           draftText={draftText}
           draftCaret={draftCaret}
@@ -113,12 +139,48 @@ export const Beat08: React.FC = () => {
 
         {/* Sent toast — blue iOS-push feel (matches b07) */}
         {toastP > 0.01 ? (
-          <div style={{ position: "absolute", left: 0, right: 0, bottom: 84, display: "flex", justifyContent: "center", opacity: toastP, transform: `translateY(${((1 - toastP) * 20).toFixed(1)}px)`, pointerEvents: "none" }}>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 12, padding: "12px 20px", borderRadius: 16, background: BRAND_BLUE, color: "#FFFFFF", boxShadow: "0 16px 40px rgba(15,23,42,0.28)", fontFamily: '"Inter", system-ui, sans-serif' }}>
-              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: 999, background: "rgba(255,255,255,0.16)" }}>
+          <div
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 84,
+              display: "flex",
+              justifyContent: "center",
+              opacity: toastP,
+              transform: `translateY(${((1 - toastP) * 20).toFixed(1)}px)`,
+              pointerEvents: "none",
+            }}
+          >
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "12px 20px",
+                borderRadius: 16,
+                background: BRAND_BLUE,
+                color: "#FFFFFF",
+                boxShadow: "0 16px 40px rgba(15,23,42,0.28)",
+                fontFamily: '"Inter", system-ui, sans-serif',
+              }}
+            >
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 30,
+                  height: 30,
+                  borderRadius: 999,
+                  background: "rgba(255,255,255,0.16)",
+                }}
+              >
                 <TrendingDown className="size-4" color="#FFFFFF" />
               </span>
-              <span style={{ fontSize: 16, fontWeight: 600 }}>Sent to Costco — claim submitted</span>
+              <span style={{ fontSize: 16, fontWeight: 600 }}>
+                Sent to Costco — claim submitted
+              </span>
             </div>
           </div>
         ) : null}
@@ -140,16 +202,42 @@ export const Beat08: React.FC = () => {
         />
       ) : null}
 
-      <BeatSubtitle text="Three panels — draft, evidence, and an assistant." fromFrame={110} durationFrames={250} />
+      <BeatSubtitle
+        text="Three panels — draft, evidence, and an assistant."
+        fromFrame={110}
+        durationFrames={250}
+      />
       <BeatSubtitle text="Gemini drafts the first version." fromFrame={470} durationFrames={180} />
-      <BeatSubtitle text="Ask the assistant — it rewrites the draft for you." fromFrame={690} durationFrames={270} />
+      <BeatSubtitle
+        text="Ask the assistant — it rewrites the draft for you."
+        fromFrame={690}
+        durationFrames={270}
+      />
       <BeatSubtitle text="One tap to send." fromFrame={1035} durationFrames={80} />
     </HookAtmosphere>
   );
 };
 
-const Caption: React.FC<{ x: number; y: number; text: string; opacity: number }> = ({ x, y, text, opacity }) => (
-  <div style={{ position: "absolute", left: x, top: y, transform: "translateX(-50%)", opacity, fontFamily: '"Inter", system-ui, sans-serif', fontSize: 22, fontWeight: 700, letterSpacing: -0.3, color: BRAND_BLUE }}>
+const Caption: React.FC<{ x: number; y: number; text: string; opacity: number }> = ({
+  x,
+  y,
+  text,
+  opacity,
+}) => (
+  <div
+    style={{
+      position: "absolute",
+      left: x,
+      top: y,
+      transform: "translateX(-50%)",
+      opacity,
+      fontFamily: '"Inter", system-ui, sans-serif',
+      fontSize: 22,
+      fontWeight: 700,
+      letterSpacing: -0.3,
+      color: BRAND_BLUE,
+    }}
+  >
     {text}
   </div>
 );

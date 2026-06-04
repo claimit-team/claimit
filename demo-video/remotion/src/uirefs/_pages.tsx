@@ -6,7 +6,6 @@
 import {
   ArrowLeft,
   CalendarIcon,
-  Check,
   CheckCircle2,
   ChevronDown,
   CircleDot,
@@ -26,7 +25,17 @@ import type { ReactNode } from "react";
 import { Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
 
 import { COSTCO, LIST_CLAIMS, PRICE_SERIES } from "./_data";
-import { Badge, Btn, Card, CardContent, CardHeader, CardTitle, cn, OutcomeBadge, PlatformLogo } from "./_ui";
+import {
+  Badge,
+  Btn,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  cn,
+  OutcomeBadge,
+  PlatformLogo,
+} from "./_ui";
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
 function PageHeader() {
@@ -71,7 +80,9 @@ function HeroNewUser() {
             </span>
             <p className="text-sm text-neutral-500">PDF, PNG, or JPG up to 10 MB</p>
           </div>
-          <span className="text-sm text-brand-primary-500 mt-4 inline-block">Or connect Gmail →</span>
+          <span className="text-sm text-brand-primary-500 mt-4 inline-block">
+            Or connect Gmail →
+          </span>
         </div>
       </CardContent>
     </Card>
@@ -93,8 +104,16 @@ function HeroActiveUser() {
         </div>
         <div className="grid grid-cols-2 gap-4">
           {[
-            { icon: <FileText className="w-5 h-5 text-brand-primary-600" />, n: "2", label: "Claims in progress" },
-            { icon: <ShoppingBag className="w-5 h-5 text-brand-primary-600" />, n: "1", label: "Purchases monitored" },
+            {
+              icon: <FileText className="w-5 h-5 text-brand-primary-600" />,
+              n: "2",
+              label: "Claims in progress",
+            },
+            {
+              icon: <ShoppingBag className="w-5 h-5 text-brand-primary-600" />,
+              n: "1",
+              label: "Purchases monitored",
+            },
           ].map((t) => (
             <div key={t.label} className="bg-neutral-50 rounded-lg p-4 border border-neutral-200">
               <div className="flex items-center gap-3">
@@ -148,7 +167,9 @@ export function DashboardContent({ mode }: { mode: "empty" | "loaded" }) {
                     <div className="flex items-center gap-3">
                       <PlatformLogo platform="costco" />
                       <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium text-neutral-900">{COSTCO.productName}</div>
+                        <div className="truncate font-medium text-neutral-900">
+                          {COSTCO.productName}
+                        </div>
                         <div className="text-sm text-neutral-500">
                           Draft ready — review and approve your $100.00 price-match claim
                         </div>
@@ -162,20 +183,29 @@ export function DashboardContent({ mode }: { mode: "empty" | "loaded" }) {
               <section>
                 <SectionHeader
                   title="Monitored purchases"
-                  action={<span className="text-sm font-medium text-brand-primary-500">View all →</span>}
+                  action={
+                    <span className="text-sm font-medium text-brand-primary-500">View all →</span>
+                  }
                 />
                 <Card className="border-neutral-200">
                   <CardContent className="p-0">
                     <div className="flex items-center gap-3 px-4 py-3">
                       <PlatformLogo platform="costco" />
                       <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium text-neutral-900">{COSTCO.productName}</div>
+                        <div className="truncate font-medium text-neutral-900">
+                          {COSTCO.productName}
+                        </div>
                         <div className="text-xs text-neutral-500">Costco · Retail</div>
                       </div>
-                      <Badge variant="outline" className="border-blue-200 bg-blue-100 text-blue-700">
+                      <Badge
+                        variant="outline"
+                        className="border-blue-200 bg-blue-100 text-blue-700"
+                      >
                         Eligible drop
                       </Badge>
-                      <span className="flex items-center gap-1 text-sm text-semantic-warning">21 days remaining</span>
+                      <span className="flex items-center gap-1 text-sm text-semantic-warning">
+                        21 days remaining
+                      </span>
                     </div>
                   </CardContent>
                 </Card>
@@ -224,7 +254,9 @@ export function ClaimsContent() {
                   <span
                     className={cn(
                       "inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1 text-xs font-medium",
-                      c.active ? "bg-white/20 text-primary-foreground" : "bg-neutral-100 text-neutral-600",
+                      c.active
+                        ? "bg-white/20 text-primary-foreground"
+                        : "bg-neutral-100 text-neutral-600",
                     )}
                   >
                     {c.count}
@@ -245,19 +277,25 @@ export function ClaimsContent() {
           <table className="w-full caption-bottom text-sm">
             <thead className="[&_tr]:border-b">
               <tr className="border-b">
-                {["Status", "Platform / Product", "Type", "Amount", "Window / Resolved", "Submitted", "Action"].map(
-                  (h, i) => (
-                    <th
-                      key={h}
-                      className={cn(
-                        "h-10 px-2 align-middle font-medium whitespace-nowrap text-foreground",
-                        i === 3 || i === 6 ? "text-right" : "text-left",
-                      )}
-                    >
-                      {h}
-                    </th>
-                  ),
-                )}
+                {[
+                  "Status",
+                  "Platform / Product",
+                  "Type",
+                  "Amount",
+                  "Window / Resolved",
+                  "Submitted",
+                  "Action",
+                ].map((h, i) => (
+                  <th
+                    key={h}
+                    className={cn(
+                      "h-10 px-2 align-middle font-medium whitespace-nowrap text-foreground",
+                      i === 3 || i === 6 ? "text-right" : "text-left",
+                    )}
+                  >
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -312,7 +350,12 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 function InputBox({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn("flex h-9 w-full items-center rounded-md border border-input bg-transparent px-3 text-sm text-neutral-900", className)}>
+    <div
+      className={cn(
+        "flex h-9 w-full items-center rounded-md border border-input bg-transparent px-3 text-sm text-neutral-900",
+        className,
+      )}
+    >
       {children}
     </div>
   );
@@ -336,14 +379,31 @@ export function ConfirmContent() {
               </div>
               <div className="flex h-[420px] items-center justify-center bg-neutral-50">
                 <div className="w-3/4 rounded-md border border-neutral-200 bg-neutral-0 p-5 shadow-sm">
-                  <div className="text-center text-sm font-semibold text-neutral-700">COSTCO WHOLESALE</div>
+                  <div className="text-center text-sm font-semibold text-neutral-700">
+                    COSTCO WHOLESALE
+                  </div>
                   <div className="mt-3 space-y-1.5 text-[11px] text-neutral-500">
-                    <div className="flex justify-between"><span>Apple iPad Air 11" M2</span><span>$599.99</span></div>
-                    <div className="flex justify-between"><span>Item 1820413</span><span /></div>
+                    <div className="flex justify-between">
+                      <span>Apple iPad Air 11" M2</span>
+                      <span>$599.99</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Item 1820413</span>
+                      <span />
+                    </div>
                     <div className="my-2 border-t border-dashed border-neutral-200" />
-                    <div className="flex justify-between font-medium text-neutral-700"><span>Order</span><span>1185402639</span></div>
-                    <div className="flex justify-between"><span>Date</span><span>05/22/2026</span></div>
-                    <div className="flex justify-between font-semibold text-neutral-800"><span>TOTAL</span><span>$599.99</span></div>
+                    <div className="flex justify-between font-medium text-neutral-700">
+                      <span>Order</span>
+                      <span>1185402639</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Date</span>
+                      <span>05/22/2026</span>
+                    </div>
+                    <div className="flex justify-between font-semibold text-neutral-800">
+                      <span>TOTAL</span>
+                      <span>$599.99</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -363,7 +423,9 @@ export function ConfirmContent() {
                 </Field>
                 <Field label="Purchase price">
                   <div className="relative">
-                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">$</span>
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">
+                      $
+                    </span>
                     <InputBox className="pl-7">599.99</InputBox>
                   </div>
                 </Field>
@@ -387,7 +449,9 @@ export function ConfirmContent() {
                             i === 0 ? "border-brand-primary-500" : "border-neutral-300",
                           )}
                         >
-                          {i === 0 ? <span className="h-2 w-2 rounded-full bg-brand-primary-500" /> : null}
+                          {i === 0 ? (
+                            <span className="h-2 w-2 rounded-full bg-brand-primary-500" />
+                          ) : null}
                         </span>
                         <span className="text-sm text-neutral-700">{cat}</span>
                       </div>
@@ -415,7 +479,16 @@ export function ConfirmContent() {
 function PaidDot(props: { cx?: number; cy?: number; payload?: { price: number } }) {
   const { cx, cy, payload } = props;
   if (payload && payload.price < COSTCO.pricePaid) {
-    return <circle cx={cx} cy={cy} r={6} fill="var(--semantic-warning)" stroke="var(--neutral-0)" strokeWidth={2} />;
+    return (
+      <circle
+        cx={cx}
+        cy={cy}
+        r={6}
+        fill="var(--semantic-warning)"
+        stroke="var(--neutral-0)"
+        strokeWidth={2}
+      />
+    );
   }
   return <circle cx={cx} cy={cy} r={0} fill="transparent" />;
 }
@@ -465,7 +538,12 @@ function PriceHistoryChartView() {
                 y={COSTCO.pricePaid}
                 stroke="var(--neutral-200)"
                 strokeDasharray="5 5"
-                label={{ value: "Paid $599.99", fill: "var(--neutral-500)", fontSize: 11, position: "right" }}
+                label={{
+                  value: "Paid $599.99",
+                  fill: "var(--neutral-500)",
+                  fontSize: 11,
+                  position: "right",
+                }}
               />
               <Line
                 type="monotone"
@@ -479,9 +557,21 @@ function PriceHistoryChartView() {
           </div>
           <div className="w-48 shrink-0">
             <div className="flex flex-col gap-3">
-              <StatItem label="Highest seen" value="$599.99" icon={<TrendingUp className="size-4 text-neutral-500" />} />
-              <StatItem label="Lowest seen" value="$499.99" icon={<TrendingDown className="size-4 text-neutral-500" />} />
-              <StatItem label="Current price" value="$499.99" icon={<CircleDot className="size-4 text-neutral-500" />} />
+              <StatItem
+                label="Highest seen"
+                value="$599.99"
+                icon={<TrendingUp className="size-4 text-neutral-500" />}
+              />
+              <StatItem
+                label="Lowest seen"
+                value="$499.99"
+                icon={<TrendingDown className="size-4 text-neutral-500" />}
+              />
+              <StatItem
+                label="Current price"
+                value="$499.99"
+                icon={<CircleDot className="size-4 text-neutral-500" />}
+              />
             </div>
           </div>
         </div>
@@ -499,7 +589,8 @@ function RefundEligibilityView() {
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-neutral-700 text-sm">
-          Active monitoring — <span className="font-medium">21 days remaining</span> in price match window
+          Active monitoring — <span className="font-medium">21 days remaining</span> in price match
+          window
         </p>
         <div className="space-y-2">
           <div className="h-2 w-full overflow-hidden rounded-full bg-neutral-100">
@@ -544,8 +635,13 @@ export function PurchaseContent() {
                 <PlatformLogo platform="costco" />
                 <div className="min-w-0 space-y-2">
                   <div className="flex flex-wrap items-center gap-3">
-                    <h1 className="font-semibold text-2xl text-neutral-900">{COSTCO.productName}</h1>
-                    <Badge variant="outline" className="shrink-0 border-blue-200 bg-blue-100 text-blue-700">
+                    <h1 className="font-semibold text-2xl text-neutral-900">
+                      {COSTCO.productName}
+                    </h1>
+                    <Badge
+                      variant="outline"
+                      className="shrink-0 border-blue-200 bg-blue-100 text-blue-700"
+                    >
                       Eligible drop
                     </Badge>
                   </div>
@@ -584,9 +680,12 @@ export function UploadModal() {
           <X className="size-4" />
         </span>
         <div className="flex flex-col gap-2">
-          <div className="font-heading text-base leading-none font-medium text-neutral-900">Upload a receipt</div>
+          <div className="font-heading text-base leading-none font-medium text-neutral-900">
+            Upload a receipt
+          </div>
           <p className="text-sm text-muted-foreground">
-            ClaimIt extracts the purchase details and starts monitoring the eligible window. PDF, PNG, or JPG up to 10 MB.
+            ClaimIt extracts the purchase details and starts monitoring the eligible window. PDF,
+            PNG, or JPG up to 10 MB.
           </p>
         </div>
         <div className="flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-neutral-300 p-8 text-center">

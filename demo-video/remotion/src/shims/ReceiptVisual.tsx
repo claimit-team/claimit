@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 
 import { colors } from "../polish/tokens";
 
-const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+const MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
 export const ReceiptVisual: React.FC<{ style?: CSSProperties }> = ({ style }) => (
   <div
@@ -32,7 +32,9 @@ export const ReceiptVisual: React.FC<{ style?: CSSProperties }> = ({ style }) =>
       <span>$599.99</span>
     </div>
     <div style={{ borderTop: "1px dashed rgba(15,20,25,0.25)", margin: "18px 0" }} />
-    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 700 }}>
+    <div
+      style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 700 }}
+    >
       <span>TOTAL</span>
       <span>$599.99</span>
     </div>

@@ -27,13 +27,13 @@ import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } fr
 
 import { BeatSubtitle } from "../../polish/BeatSubtitle";
 import { Cursor } from "../../polish/Cursor";
-import { HookAtmosphere } from "../../polish/HookAtmosphere";
 import { easings } from "../../polish/easings";
+import { HookAtmosphere } from "../../polish/HookAtmosphere";
 import { useReveal } from "../../polish/RevealCard";
 import { UiAppShellEmpty } from "../../uirefs";
 import { UploadModal } from "../../uirefs/_pages";
 import { OcrConfirmPanel } from "./OcrConfirmPanel";
-import { ReceiptCard, RECEIPT_H, RECEIPT_W } from "./ReceiptCard";
+import { RECEIPT_H, RECEIPT_W, ReceiptCard } from "./ReceiptCard";
 
 const C = { extrapolateLeft: "clamp" as const, extrapolateRight: "clamp" as const };
 const ORANGE = "#FFA500";
@@ -126,12 +126,22 @@ export const Beat06: React.FC = () => {
   const dashOut = interpolate(frame, DASH_OUT, [1, 0], C);
 
   // Modal open (spring overshoot).
-  const modalSpring = spring({ frame: frame - MODAL_START, fps, config: { damping: 12, mass: 0.7, stiffness: 110 }, durationInFrames: 36 });
+  const modalSpring = spring({
+    frame: frame - MODAL_START,
+    fps,
+    config: { damping: 12, mass: 0.7, stiffness: 110 },
+    durationInFrames: 36,
+  });
   const modalScale = 0.94 + 0.06 * modalSpring;
   const modalOp = interpolate(frame, [MODAL_START + 2, MODAL_START + 30], [0, 1], C) * dashOut;
 
   // Receipt — pop (spring overshoot) → glide + grow to the left column.
-  const popSpring = spring({ frame: frame - POP_START, fps, config: { damping: 10, mass: 0.5, stiffness: 130 }, durationInFrames: 32 });
+  const popSpring = spring({
+    frame: frame - POP_START,
+    fps,
+    config: { damping: 10, mass: 0.5, stiffness: 130 },
+    durationInFrames: 32,
+  });
   const growScale = interpolate(frame, MOVE, [1, 1.12], { ...C, easing: ease });
   const receiptScale = popSpring * growScale;
   const receiptX = interpolate(frame, MOVE, [RX_FROM, RX_TO], { ...C, easing: ease });
@@ -142,7 +152,8 @@ export const Beat06: React.FC = () => {
   const pcP = interpolate(frame, PC_IN, [0, 1], { ...C, easing: ease });
   const scanP = interpolate(frame, SCAN, [0, 1], { ...C, easing: ease });
   const scanOpacity =
-    interpolate(frame, [SCAN[0], SCAN[0] + 14], [0, 1], C) * interpolate(frame, [SCAN[1] - 14, SCAN[1]], [1, 0], C);
+    interpolate(frame, [SCAN[0], SCAN[0] + 14], [0, 1], C) *
+    interpolate(frame, [SCAN[1] - 14, SCAN[1]], [1, 0], C);
   const arrowR = useReveal(ARROW_START);
 
   return (
@@ -154,7 +165,13 @@ export const Beat06: React.FC = () => {
 
       {/* Upload modal (B) — spring-overshoot open over the dashboard. */}
       {frame >= MODAL_START && frame < DASH_OUT[1] + 4 ? (
-        <AbsoluteFill style={{ opacity: modalOp, transform: `scale(${modalScale.toFixed(4)})`, transformOrigin: "center center" }}>
+        <AbsoluteFill
+          style={{
+            opacity: modalOp,
+            transform: `scale(${modalScale.toFixed(4)})`,
+            transformOrigin: "center center",
+          }}
+        >
           <UploadModal />
         </AbsoluteFill>
       ) : null}
@@ -162,16 +179,43 @@ export const Beat06: React.FC = () => {
       {/* Phase C — clean two-column focus view (title + OCR panel + arrow). */}
       {frame >= PC_IN[0] ? (
         <AbsoluteFill style={{ opacity: pcP }}>
-          <div style={{ position: "absolute", left: 0, right: 0, top: 92, textAlign: "center", transform: `translateY(${((1 - pcP) * 12).toFixed(1)}px)` }}>
+          <div
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              top: 92,
+              textAlign: "center",
+              transform: `translateY(${((1 - pcP) * 12).toFixed(1)}px)`,
+            }}
+          >
             <h1 className="text-2xl font-semibold text-neutral-900">Review purchase details</h1>
-            <p className="mt-2 text-sm text-neutral-500">Confirm the extracted information before ClaimIt starts monitoring.</p>
+            <p className="mt-2 text-sm text-neutral-500">
+              Confirm the extracted information before ClaimIt starts monitoring.
+            </p>
           </div>
 
-          <div style={{ position: "absolute", left: 912, top: 250, width: 608, transform: `translateY(${((1 - pcP) * 14).toFixed(1)}px)` }}>
+          <div
+            style={{
+              position: "absolute",
+              left: 912,
+              top: 250,
+              width: 608,
+              transform: `translateY(${((1 - pcP) * 14).toFixed(1)}px)`,
+            }}
+          >
             <OcrConfirmPanel t0={FIELDS_T0} />
           </div>
 
-          <div style={{ position: "absolute", left: 814, top: 526, opacity: arrowR.opacity, transform: `translateY(${arrowR.translateY.toFixed(1)}px) scale(${arrowR.scale.toFixed(3)})` }}>
+          <div
+            style={{
+              position: "absolute",
+              left: 814,
+              top: 526,
+              opacity: arrowR.opacity,
+              transform: `translateY(${arrowR.translateY.toFixed(1)}px) scale(${arrowR.scale.toFixed(3)})`,
+            }}
+          >
             <ArrowRight size={46} color="#27466E" strokeWidth={2.4} aria-hidden />
           </div>
         </AbsoluteFill>
@@ -190,7 +234,9 @@ export const Beat06: React.FC = () => {
         >
           <div style={{ position: "relative", width: RECEIPT_W, height: RECEIPT_H }}>
             <ReceiptCard />
-            {frame >= SCAN[0] && frame <= SCAN[1] + 2 ? <ScanOverlay progress={scanP} opacity={scanOpacity} /> : null}
+            {frame >= SCAN[0] && frame <= SCAN[1] + 2 ? (
+              <ScanOverlay progress={scanP} opacity={scanOpacity} />
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -213,8 +259,16 @@ export const Beat06: React.FC = () => {
 
       <DemoIntro />
 
-      <BeatSubtitle text="Drop your receipt — any photo or PDF." fromFrame={200} durationFrames={210} />
-      <BeatSubtitle text="Gemini reads the merchant, item, date, and price." fromFrame={590} durationFrames={262} />
+      <BeatSubtitle
+        text="Drop your receipt — any photo or PDF."
+        fromFrame={200}
+        durationFrames={210}
+      />
+      <BeatSubtitle
+        text="Gemini reads the merchant, item, date, and price."
+        fromFrame={590}
+        durationFrames={262}
+      />
     </HookAtmosphere>
   );
 };

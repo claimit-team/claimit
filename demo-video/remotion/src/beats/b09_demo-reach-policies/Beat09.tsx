@@ -21,8 +21,8 @@
 import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
 
 import { BeatSubtitle } from "../../polish/BeatSubtitle";
-import { HookAtmosphere } from "../../polish/HookAtmosphere";
 import { easings } from "../../polish/easings";
+import { HookAtmosphere } from "../../polish/HookAtmosphere";
 import { Scene07PlatformFast } from "./Scene07PlatformFast";
 import { Scene08ReachLogosFast } from "./Scene08ReachLogosFast";
 
@@ -37,8 +37,13 @@ export const Beat09: React.FC = () => {
   const frame = useCurrentFrame();
   const ease = easings.easeInOut;
 
-  const scale = interpolate(frame, [0, 40, 860], [0.88, 1.0, 1.035], { ...C, easing: easings.easeOut });
-  const opacity = interpolate(frame, [0, 30], [0, 1], C) * interpolate(frame, [820, 875], [1, 0], { ...C, easing: easings.easeIn });
+  const scale = interpolate(frame, [0, 40, 860], [0.88, 1.0, 1.035], {
+    ...C,
+    easing: easings.easeOut,
+  });
+  const opacity =
+    interpolate(frame, [0, 30], [0, 1], C) *
+    interpolate(frame, [820, 875], [1, 0], { ...C, easing: easings.easeIn });
 
   // Logo wall — holds, then slides up + fades as the grid rises (phase D).
   const logoTy = interpolate(frame, [540, 610], [0, -360], { ...C, easing: ease });
@@ -53,15 +58,48 @@ export const Beat09: React.FC = () => {
 
   return (
     <HookAtmosphere>
-      <AbsoluteFill style={{ opacity, transform: `scale(${scale.toFixed(4)})`, transformOrigin: "center center" }}>
+      <AbsoluteFill
+        style={{
+          opacity,
+          transform: `scale(${scale.toFixed(4)})`,
+          transformOrigin: "center center",
+        }}
+      >
         {/* Reach logo wall */}
-        <div style={{ position: "absolute", inset: 0, opacity: logoOp, transform: `translateY(${logoTy.toFixed(1)}px)` }}>
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            opacity: logoOp,
+            transform: `translateY(${logoTy.toFixed(1)}px)`,
+          }}
+        >
           <Scene08ReachLogosFast />
         </div>
 
         {/* Policy block — title + 4-card grid; rises from the bottom */}
-        <div style={{ position: "absolute", inset: 0, transform: `translateY(${gridTy.toFixed(1)}px)` }}>
-          <div style={{ position: "absolute", left: 0, right: 0, top: GRID_TOP - 58, textAlign: "center", opacity: titleOp, fontFamily: '"Inter", system-ui, sans-serif', fontSize: 36, fontWeight: 700, letterSpacing: -0.5, color: BRAND_BLUE }}>
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            transform: `translateY(${gridTy.toFixed(1)}px)`,
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              top: GRID_TOP - 58,
+              textAlign: "center",
+              opacity: titleOp,
+              fontFamily: '"Inter", system-ui, sans-serif',
+              fontSize: 36,
+              fontWeight: 700,
+              letterSpacing: -0.5,
+              color: BRAND_BLUE,
+            }}
+          >
             Every store, its own policy.
           </div>
           <Scene07PlatformFast gridTop={GRID_TOP} row1From={ROW1_FROM} row2From={ROW2_FROM} />
@@ -69,7 +107,11 @@ export const Beat09: React.FC = () => {
       </AbsoluteFill>
 
       <BeatSubtitle text="26+ retailers, and counting." fromFrame={70} durationFrames={240} />
-      <BeatSubtitle text="Every store has its own rules — we handle them all." fromFrame={380} durationFrames={270} />
+      <BeatSubtitle
+        text="Every store has its own rules — we handle them all."
+        fromFrame={380}
+        durationFrames={270}
+      />
     </HookAtmosphere>
   );
 };

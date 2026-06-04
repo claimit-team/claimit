@@ -28,11 +28,41 @@ export const Scene09CloseFast: React.FC = () => {
   const gScale = iv(frame, MOVE, [1, 0.65]);
 
   return (
-    <AbsoluteFill style={{ transform: `translateY(${gTy.toFixed(1)}px) scale(${gScale.toFixed(4)})`, transformOrigin: "center 388px" }}>
-      <div style={{ position: "absolute", left: 0, right: 0, top: 300, textAlign: "center", ...TYPE.DISPLAY, color: COLOR.INK, letterSpacing: `${trackVal.toFixed(3)}px`, opacity: tagOp, transform: `translateY(${tagY}px)` }}>
+    <AbsoluteFill
+      style={{
+        transform: `translateY(${gTy.toFixed(1)}px) scale(${gScale.toFixed(4)})`,
+        transformOrigin: "center 388px",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          top: 300,
+          textAlign: "center",
+          ...TYPE.DISPLAY,
+          color: COLOR.INK,
+          letterSpacing: `${trackVal.toFixed(3)}px`,
+          opacity: tagOp,
+          transform: `translateY(${tagY}px)`,
+        }}
+      >
         {DP3_TAGLINE}
       </div>
-      <div style={{ position: "absolute", left: 0, right: 0, top: 446, textAlign: "center", ...TYPE.SUB, fontSize: 30, color: COLOR.MUTE, opacity: lineOp }}>
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          top: 446,
+          textAlign: "center",
+          ...TYPE.SUB,
+          fontSize: 30,
+          color: COLOR.MUTE,
+          opacity: lineOp,
+        }}
+      >
         We just make sure you get it.
       </div>
     </AbsoluteFill>

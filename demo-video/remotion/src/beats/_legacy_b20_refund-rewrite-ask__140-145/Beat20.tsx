@@ -20,6 +20,10 @@ export const Beat20: React.FC = () => (
     <Sequence name="vo_b20" from={6}>
       <Audio src={staticFile("audio/vo/vo_b20.mp3")} />
     </Sequence>
-    <BeatSubtitle text="Ask for a warmer tone, and it rewrites it." fromFrame={6} durationFrames={167} />
+    <BeatSubtitle
+      text="Ask for a warmer tone, and it rewrites it."
+      fromFrame={6}
+      durationFrames={167}
+    />
   </HookAtmosphere>
 );

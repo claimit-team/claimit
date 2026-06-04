@@ -2,12 +2,17 @@
 // Production shows the PostApproveBanner + record-outcome actions (NOT a
 // disabled Approve button). Approve primary is the real near-black bg-primary.
 import { AppChrome } from "./_chrome";
-import { ClaimShellFrame, md, type Msg } from "./_claim";
+import { ClaimShellFrame, type Msg, md } from "./_claim";
 import { ASSISTANT_TURN, DRAFT_V1, DRAFT_V2 } from "./_data";
 
 const MESSAGES: Msg[] = [
   { role: "user", text: ASSISTANT_TURN.userText },
-  { role: "assistant", text: md(ASSISTANT_TURN.assistantText), tool: ASSISTANT_TURN.toolName, trace: true },
+  {
+    role: "assistant",
+    text: md(ASSISTANT_TURN.assistantText),
+    tool: ASSISTANT_TURN.toolName,
+    trace: true,
+  },
 ];
 
 export const UiClaimshellApprovedState: React.FC = () => (

@@ -18,20 +18,6 @@ import { Beat10 } from "./beats/b10_payoff-claimit/Beat10";
 import { Beat35 } from "./beats/b35_payoff-final__252-300/Beat35";
 import { MasterDemo } from "./master/MasterDemo";
 import {
-  UiAppShellEmpty,
-  UiClaimshellApprovedState,
-  UiClaimshellAssistantActive,
-  UiClaimshellLoaded,
-  UiClaimsList,
-  UiDashboardLoaded,
-  UiOcrFieldsPopulated,
-  UiPurchaseDetailWithChart,
-  UiSentConfirmation,
-  UiUploadModalOnDashboard,
-} from "./uirefs";
-// ===== PEER — NewVideo + 9 Scenes (for audit preview) =====
-import { NewVideo } from "./new-video/NewVideo";
-import {
   NEW_VIDEO_DURATION_F,
   S1_HOOK_F,
   S2_GAP_F,
@@ -44,6 +30,8 @@ import {
   S9_SPONSORS_F,
   S10_CLOSE_F,
 } from "./new-video/durations";
+// ===== PEER — NewVideo + 9 Scenes (for audit preview) =====
+import { NewVideo } from "./new-video/NewVideo";
 import { Scene01Hook } from "./new-video/scenes/Scene01Hook";
 import { Scene02Gap } from "./new-video/scenes/Scene02Gap";
 import { Scene03Meet } from "./new-video/scenes/Scene03Meet";
@@ -54,6 +42,18 @@ import { Scene07Platforms } from "./new-video/scenes/Scene07Platforms";
 import { Scene08Reach } from "./new-video/scenes/Scene08Reach";
 import { Scene09Sponsors } from "./new-video/scenes/Scene09Sponsors";
 import { Scene10Close } from "./new-video/scenes/Scene10Close";
+import {
+  UiAppShellEmpty,
+  UiClaimshellApprovedState,
+  UiClaimshellAssistantActive,
+  UiClaimshellLoaded,
+  UiClaimsList,
+  UiDashboardLoaded,
+  UiOcrFieldsPopulated,
+  UiPurchaseDetailWithChart,
+  UiSentConfirmation,
+  UiUploadModalOnDashboard,
+} from "./uirefs";
 
 // ============================================================================
 // BATCH 0 LEGACY — Erdun's 18-shot structure, archived 2026-06-03.
@@ -122,62 +122,286 @@ export const RemotionRoot = () => {
         width={1920}
         height={1080}
       />
-      <Composition id="Beat02" component={Beat02} durationInFrames={600} fps={60} width={1920} height={1080} />
-      <Composition id="Beat03" component={Beat03} durationInFrames={540} fps={60} width={1920} height={1080} />
-      <Composition id="Beat04" component={Beat04} durationInFrames={300} fps={60} width={1920} height={1080} />
+      <Composition
+        id="Beat02"
+        component={Beat02}
+        durationInFrames={600}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="Beat03"
+        component={Beat03}
+        durationInFrames={540}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="Beat04"
+        component={Beat04}
+        durationInFrames={300}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
       {/* BATCH D — ARCH (single narrative beat b05; merged b06-b09+b09b 2026-06-04). */}
-      <Composition id="Beat05" component={Beat05} durationInFrames={2280} fps={60} width={1920} height={1080} />
+      <Composition
+        id="Beat05"
+        component={Beat05}
+        durationInFrames={2280}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
       {/* DEMO — new b06 (upload → OCR extract); will consolidate b10-b14 pending review. */}
-      <Composition id="Beat06" component={Beat06} durationInFrames={960} fps={60} width={1920} height={1080} />
+      <Composition
+        id="Beat06"
+        component={Beat06}
+        durationInFrames={960}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
       {/* DEMO — new b07 (monitor → drop detect); will consolidate b15-b17 pending review. */}
-      <Composition id="Beat07" component={Beat07} durationInFrames={760} fps={60} width={1920} height={1080} />
+      <Composition
+        id="Beat07"
+        component={Beat07}
+        durationInFrames={760}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
       {/* DEMO — new b08 (3-panel ClaimShell + chat→redraft); will consolidate b19-b26 pending review. */}
-      <Composition id="Beat08" component={Beat08} durationInFrames={1150} fps={60} width={1920} height={1080} />
+      <Composition
+        id="Beat08"
+        component={Beat08}
+        durationInFrames={1150}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
       {/* DEMO — new b09 (26-retailer reach + 4 platform policies). */}
-      <Composition id="Beat09" component={Beat09} durationInFrames={880} fps={60} width={1920} height={1080} />
+      <Composition
+        id="Beat09"
+        component={Beat09}
+        durationInFrames={880}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
       {/* PAYOFF — new b10 closing ClaimIt lockup (peer Scene09Close base). b35 kept for comparison. */}
-      <Composition id="Beat10" component={Beat10} durationInFrames={560} fps={60} width={1920} height={1080} />
+      <Composition
+        id="Beat10"
+        component={Beat10}
+        durationInFrames={560}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
       {/* =================================================================== */}
       {/* LEGACY b10-b29: superseded by b06-b09 (DEMO consolidation 2026-06-04). */}
       {/* Folder files preserved under src/beats/_legacy_bNN_ folders. Not registered. */}
       {/* =================================================================== */}
       {/* BATCH G — IMPLEMENTATION PROOF (30-34) — REMOVED 2026-06-03 (DEMO_INTERACTION_SPEC_v1 Phase 1). */}
       {/* BATCH H — PAYOFF (35) — 480f. */}
-      <Composition id="Beat35" component={Beat35} durationInFrames={480} fps={60} width={1920} height={1080} />
+      <Composition
+        id="Beat35"
+        component={Beat35}
+        durationInFrames={480}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
       {/* ====================================================================== */}
       {/* UI — apps/web visual reference stills (UI_INTEGRATION_AUDIT_v2).        */}
       {/* Static replicas of production surfaces; rendered at frame 0 to          */}
       {/* out/uirefs/. Not part of the film timeline.                            */}
       {/* ====================================================================== */}
-      <Composition id="ui-app-shell-empty" component={UiAppShellEmpty} durationInFrames={60} fps={60} width={1920} height={1080} />
-      <Composition id="ui-dashboard-loaded" component={UiDashboardLoaded} durationInFrames={60} fps={60} width={1920} height={1080} />
-      <Composition id="ui-claims-list" component={UiClaimsList} durationInFrames={60} fps={60} width={1920} height={1080} />
-      <Composition id="ui-claimshell-loaded" component={UiClaimshellLoaded} durationInFrames={60} fps={60} width={1920} height={1080} />
-      <Composition id="ui-claimshell-assistant-active" component={UiClaimshellAssistantActive} durationInFrames={60} fps={60} width={1920} height={1080} />
-      <Composition id="ui-claimshell-approved-state" component={UiClaimshellApprovedState} durationInFrames={60} fps={60} width={1920} height={1080} />
-      <Composition id="ui-upload-modal-on-dashboard" component={UiUploadModalOnDashboard} durationInFrames={60} fps={60} width={1920} height={1080} />
-      <Composition id="ui-ocr-fields-populated" component={UiOcrFieldsPopulated} durationInFrames={60} fps={60} width={1920} height={1080} />
-      <Composition id="ui-purchase-detail-with-chart" component={UiPurchaseDetailWithChart} durationInFrames={60} fps={60} width={1920} height={1080} />
-      <Composition id="ui-sent-confirmation" component={UiSentConfirmation} durationInFrames={60} fps={60} width={1920} height={1080} />
+      <Composition
+        id="ui-app-shell-empty"
+        component={UiAppShellEmpty}
+        durationInFrames={60}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="ui-dashboard-loaded"
+        component={UiDashboardLoaded}
+        durationInFrames={60}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="ui-claims-list"
+        component={UiClaimsList}
+        durationInFrames={60}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="ui-claimshell-loaded"
+        component={UiClaimshellLoaded}
+        durationInFrames={60}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="ui-claimshell-assistant-active"
+        component={UiClaimshellAssistantActive}
+        durationInFrames={60}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="ui-claimshell-approved-state"
+        component={UiClaimshellApprovedState}
+        durationInFrames={60}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="ui-upload-modal-on-dashboard"
+        component={UiUploadModalOnDashboard}
+        durationInFrames={60}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="ui-ocr-fields-populated"
+        component={UiOcrFieldsPopulated}
+        durationInFrames={60}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="ui-purchase-detail-with-chart"
+        component={UiPurchaseDetailWithChart}
+        durationInFrames={60}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="ui-sent-confirmation"
+        component={UiSentConfirmation}
+        durationInFrames={60}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
       {/* ====================================================================== */}
       {/* PEER — NewVideo + 9 Scenes (for audit preview).                        */}
       {/* Pulled from origin/dev (no merge); shots/_shared restored from archive */}
       {/* (COPY) so peer's Erdun-design-system imports resolve. Each Scene also  */}
       {/* registered standalone for side-by-side preview vs CC's beats.          */}
       {/* ====================================================================== */}
-      <Composition id="NewVideo" component={NewVideo} durationInFrames={NEW_VIDEO_DURATION_F} fps={60} width={1920} height={1080} />
-      <Composition id="peer-scene-01-hook" component={Scene01Hook} durationInFrames={S1_HOOK_F} fps={60} width={1920} height={1080} />
-      <Composition id="peer-scene-02-gap" component={Scene02Gap} durationInFrames={S2_GAP_F} fps={60} width={1920} height={1080} />
-      <Composition id="peer-scene-03-meet" component={Scene03Meet} durationInFrames={S3_MEET_F} fps={60} width={1920} height={1080} />
-      <Composition id="peer-scene-04-ingest" component={Scene04Ingest} durationInFrames={S4_INGEST_F} fps={60} width={1920} height={1080} />
-      <Composition id="peer-scene-05-drop" component={Scene05Drop} durationInFrames={S5_DROP_F} fps={60} width={1920} height={1080} />
-      <Composition id="peer-scene-06-democore" component={Scene06DemoCore} durationInFrames={S6_DEMO_F} fps={60} width={1920} height={1080} />
-      <Composition id="peer-scene-07-platforms" component={Scene07Platforms} durationInFrames={S7_PLATFORMS_F} fps={60} width={1920} height={1080} />
-      <Composition id="peer-scene-08-reach" component={Scene08Reach} durationInFrames={S8_REACH_F} fps={60} width={1920} height={1080} />
-      <Composition id="peer-scene-09-sponsors" component={Scene09Sponsors} durationInFrames={S9_SPONSORS_F} fps={60} width={1920} height={1080} />
-      <Composition id="peer-scene-10-close" component={Scene10Close} durationInFrames={S10_CLOSE_F} fps={60} width={1920} height={1080} />
+      <Composition
+        id="NewVideo"
+        component={NewVideo}
+        durationInFrames={NEW_VIDEO_DURATION_F}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="peer-scene-01-hook"
+        component={Scene01Hook}
+        durationInFrames={S1_HOOK_F}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="peer-scene-02-gap"
+        component={Scene02Gap}
+        durationInFrames={S2_GAP_F}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="peer-scene-03-meet"
+        component={Scene03Meet}
+        durationInFrames={S3_MEET_F}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="peer-scene-04-ingest"
+        component={Scene04Ingest}
+        durationInFrames={S4_INGEST_F}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="peer-scene-05-drop"
+        component={Scene05Drop}
+        durationInFrames={S5_DROP_F}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="peer-scene-06-democore"
+        component={Scene06DemoCore}
+        durationInFrames={S6_DEMO_F}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="peer-scene-07-platforms"
+        component={Scene07Platforms}
+        durationInFrames={S7_PLATFORMS_F}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="peer-scene-08-reach"
+        component={Scene08Reach}
+        durationInFrames={S8_REACH_F}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="peer-scene-09-sponsors"
+        component={Scene09Sponsors}
+        durationInFrames={S9_SPONSORS_F}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="peer-scene-10-close"
+        component={Scene10Close}
+        durationInFrames={S10_CLOSE_F}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
       {/* MASTER — full b01-b10 sequence for review (excludes legacy + b35). */}
-      <Composition id="MasterDemo" component={MasterDemo} durationInFrames={8270} fps={60} width={1920} height={1080} />
+      <Composition
+        id="MasterDemo"
+        component={MasterDemo}
+        durationInFrames={8270}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
     </>
   );
 };

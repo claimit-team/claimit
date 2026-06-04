@@ -17,14 +17,23 @@ const DATE = "May 22, 2026";
 function useTyped(text: string, start: number) {
   const frame = useCurrentFrame();
   const end = start + Math.ceil(text.length / SPEED);
-  const n = Math.max(0, Math.min(text.length, Math.floor(interpolate(frame, [start, end], [0, text.length], CLAMP))));
-  return { str: text.slice(0, n), typing: frame >= start && frame < end + 16, started: frame >= start };
+  const n = Math.max(
+    0,
+    Math.min(text.length, Math.floor(interpolate(frame, [start, end], [0, text.length], CLAMP))),
+  );
+  return {
+    str: text.slice(0, n),
+    typing: frame >= start && frame < end + 16,
+    started: frame >= start,
+  };
 }
 
 const Caret: React.FC<{ on: boolean }> = ({ on }) => {
   const frame = useCurrentFrame();
   const blink = Math.floor(frame / 12) % 2 === 0;
-  return <span style={{ opacity: on && blink ? 0.85 : 0, color: "#27466E", fontWeight: 400 }}>▏</span>;
+  return (
+    <span style={{ opacity: on && blink ? 0.85 : 0, color: "#27466E", fontWeight: 400 }}>▏</span>
+  );
 };
 
 const Label: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -67,7 +76,9 @@ export const OcrConfirmPanel: React.FC<{ t0: number }> = ({ t0 }) => {
         <div className="space-y-2">
           <Label>Purchase price</Label>
           <div className="relative">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">$</span>
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">
+              $
+            </span>
             <div className="flex h-9 w-full items-center rounded-md border border-input bg-transparent pl-7 pr-3 text-sm text-neutral-900">
               <span>
                 {price.str}

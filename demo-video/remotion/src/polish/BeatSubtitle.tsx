@@ -22,23 +22,18 @@ interface BeatSubtitleProps {
 
 const FADE = 6; // 6-frame fade-in / fade-out per LAW
 
-export const BeatSubtitle: React.FC<BeatSubtitleProps> = ({
-  text,
-  fromFrame,
-  durationFrames,
-}) => {
+export const BeatSubtitle: React.FC<BeatSubtitleProps> = ({ text, fromFrame, durationFrames }) => {
   const frame = useCurrentFrame();
   const end = fromFrame + durationFrames;
 
   // Outside the window the subtitle is not mounted at all.
   if (frame < fromFrame || frame >= end) return null;
 
-  const opacity = interpolate(
-    frame,
-    [fromFrame, fromFrame + FADE, end - FADE, end],
-    [0, 1, 1, 0],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: easings.easeOut },
-  );
+  const opacity = interpolate(frame, [fromFrame, fromFrame + FADE, end - FADE, end], [0, 1, 1, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: easings.easeOut,
+  });
 
   // 8px slide-up over the fade-in window only.
   const slideY = interpolate(frame, [fromFrame, fromFrame + FADE], [8, 0], {
