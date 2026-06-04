@@ -10,6 +10,7 @@ import { Beat03 } from "./beats/b03_peer-gap/Beat03";
 import { Beat04 } from "./beats/b04_peer-meet/Beat04";
 import { Beat05 } from "./beats/b05_arch-master/Beat05";
 import { Beat06 } from "./beats/b06_demo-upload-extract/Beat06";
+import { Beat07 } from "./beats/b07_demo-monitor-drop/Beat07";
 import { Beat10 } from "./beats/b10_refund-receipt-intro__050-055/Beat10";
 import { Beat11 } from "./beats/b11_refund-upload__055-060/Beat11";
 import { Beat12 } from "./beats/b12_refund-extract__100-105/Beat12";
@@ -141,6 +142,8 @@ export const RemotionRoot = () => {
       <Composition id="Beat05" component={Beat05} durationInFrames={2280} fps={60} width={1920} height={1080} />
       {/* DEMO — new b06 (upload → OCR extract); will consolidate b10-b14 pending review. */}
       <Composition id="Beat06" component={Beat06} durationInFrames={960} fps={60} width={1920} height={1080} />
+      {/* DEMO — new b07 (monitor → drop detect); will consolidate b15-b17 pending review. */}
+      <Composition id="Beat07" component={Beat07} durationInFrames={780} fps={60} width={1920} height={1080} />
       {/* BATCH E — REFUND DEMO (beats 10-27). */}
       <Composition id="Beat10" component={Beat10} durationInFrames={300} fps={60} width={1920} height={1080} />
       <Composition id="Beat11" component={Beat11} durationInFrames={300} fps={60} width={1920} height={1080} />
