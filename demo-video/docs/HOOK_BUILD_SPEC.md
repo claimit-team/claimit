@@ -200,10 +200,10 @@ VO: `vo_b01.mp3` (2.83s = 170f) "Every year, money slips through the cracks."
   <Audio src={staticFile('audio/vo/vo_b01.mp3')} />
 </Sequence>
 
-<BeatSubtitle 
-  text="Every year, money slips through the cracks." 
-  fromFrame={10} 
-  durationFrames={170} 
+<BeatSubtitle
+  text="Every year, money slips through the cracks."
+  fromFrame={10}
+  durationFrames={170}
 />
 ```
 
@@ -243,7 +243,7 @@ Get the actual SVG `<path d="...">` from `lucide-react` source or copy from http
 
 ### Icon rendering
 
-- Inline `<svg viewBox="0 0 24 24">` with monoline `<path>` 
+- Inline `<svg viewBox="0 0 24 24">` with monoline `<path>`
 - Stroke: `colors.neutral[0]` at opacity 0.94
 - Animate draw-on via `stroke-dasharray` + `stroke-dashoffset`:
   - Estimate pathLength per icon (Lucide icons typically 80-160 — measure empirically or use a fixed conservative value like 200)
@@ -253,7 +253,7 @@ Get the actual SVG `<path d="...">` from `lucide-react` source or copy from http
 
 ### Layout
 
-4 columns evenly spaced horizontally, centered vertically. 
+4 columns evenly spaced horizontally, centered vertically.
 - Total width: ~1200px (icons span 80% of canvas width)
 - Each column: 64×64 icon, 24px gap, label below
 - Label: Inter 28px weight 500, color `colors.neutral[0]` opacity 0.94
@@ -278,10 +278,10 @@ Get the actual SVG `<path d="...">` from `lucide-react` source or copy from http
   <Audio src={staticFile('audio/vo/vo_b02.mp3')} />
 </Sequence>
 
-<BeatSubtitle 
-  text="Refunds. Price protection. Rewards. Rebates." 
-  fromFrame={6} 
-  durationFrames={234} 
+<BeatSubtitle
+  text="Refunds. Price protection. Rewards. Rebates."
+  fromFrame={6}
+  durationFrames={234}
 />
 ```
 
@@ -350,10 +350,10 @@ if (r1 === r2 && c1 === c2) {
   <Audio src={staticFile('audio/vo/vo_b03.mp3')} />
 </Sequence>
 
-<BeatSubtitle 
-  text="Only two out of a hundred ever get it back." 
-  fromFrame={95} 
-  durationFrames={162} 
+<BeatSubtitle
+  text="Only two out of a hundred ever get it back."
+  fromFrame={95}
+  durationFrames={162}
 />
 ```
 
@@ -389,10 +389,10 @@ Dots from Beat03's grid converge into the ClaimIt logo (narrative continuity —
   <Audio src={staticFile('audio/vo/vo_b04.mp3')} />
 </Sequence>
 
-<BeatSubtitle 
-  text="ClaimIt turns that paperwork into an AI workflow." 
-  fromFrame={30} 
-  durationFrames={212} 
+<BeatSubtitle
+  text="ClaimIt turns that paperwork into an AI workflow."
+  fromFrame={30}
+  durationFrames={212}
 />
 ```
 

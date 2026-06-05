@@ -64,7 +64,7 @@
 > 300f→240f, slower enter/exit). The historical b02–b04 VO rows below are kept
 > for reference only (their `vo_b02/03/04.mp3` are preserved but unused).
 
-Goal: Create the feeling that money is being lost quietly, then reposition 
+Goal: Create the feeling that money is being lost quietly, then reposition
 ClaimIt as the workflow that captures it.
 
 | Beat | Time | VO (EN) | VO (中) |
@@ -177,7 +177,7 @@ Don't repeat Architecture content. This is PROOF, not explanation.
 
 ## PAYOFF (2:52–3:00)
 
-Visual: "Powered by Gemini ADK · MongoDB Atlas · Arize Phoenix" + team names + 
+Visual: "Powered by Gemini ADK · MongoDB Atlas · Arize Phoenix" + team names +
 ClaimIt logo.
 
 | Beat | Time | VO (EN) | VO (中) |
@@ -193,11 +193,11 @@ No more ElevenLabs API calls until:
 
 ## Language Discipline
 
-FORBIDDEN: unlock value, seamless, next generation, powerful platform, 
-revolutionize, effortless, guaranteed refund, fully automated for all retailers, 
+FORBIDDEN: unlock value, seamless, next generation, powerful platform,
+revolutionize, effortless, guaranteed refund, fully automated for all retailers,
 cutting-edge, state-of-the-art, industry-leading.
 
-PREFERRED: claim, workflow, approval, policy, window, state, trace, tool call, 
+PREFERRED: claim, workflow, approval, policy, window, state, trace, tool call,
 email-based claim, reviewable, observable.
 
 ## 修订记录

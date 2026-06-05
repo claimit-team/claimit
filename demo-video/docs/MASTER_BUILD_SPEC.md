@@ -306,7 +306,7 @@ This section "proves" the system is real (not a mockup). Show technical depth wi
 
 ```
 src/beats/b30_impl-workflow__152-156/Beat30.tsx
-... 
+...
 src/beats/b34_impl-extend__168-172/Beat34.tsx
 ```
 

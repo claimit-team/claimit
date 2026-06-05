@@ -200,18 +200,18 @@ User feedback format:
 ✅ upload-dropzone
 
 ⚠️ dashboard-loaded — Sidebar active state should be a blue background
-  block (oklch(0.5 0.15 250)), not just bold text. Stats cards have 
+  block (oklch(0.5 0.15 250)), not just bold text. Stats cards have
   border but real ones don't.
 
-⚠️ claimshell-loaded — Right pane (Assistant) is too wide; real is 
+⚠️ claimshell-loaded — Right pane (Assistant) is too wide; real is
   about 30%, you have ~40%. Also the Assistant message bubbles should
   have a subtle gradient background, not flat.
 
-❌ claims-list — This looks like the dashboard, not the claims list 
+❌ claims-list — This looks like the dashboard, not the claims list
   page. Go look at /claims, not /dashboard.
 
-🆕 Need a `claim-detail-no-claim-yet` — when a purchase is being 
-  monitored but no claim has fired yet. b15 needs this. Look at 
+🆕 Need a `claim-detail-no-claim-yet` — when a purchase is being
+  monitored but no claim has fired yet. b15 needs this. Look at
   /purchases/[id].
 ```
 

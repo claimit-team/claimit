@@ -51,19 +51,19 @@ The do-not-modify rule on `tokens.ts` is **lifted for this patch**. Add light-mo
 ```ts
 colors: {
   // ... existing dark tokens stay ...
-  
+
   bg: {
     dark: "#080C14",      // legacy / for future dark-mode beats
     light: "<from Task 1>", // NEW — primary body bg
     surface: "#FFFFFF",   // NEW — card / elevated surface bg
   },
-  
+
   text: {
-    dark: "<from Task 1>",  // NEW — primary dark text 
+    dark: "<from Task 1>",  // NEW — primary dark text
     muted: "#374151",       // NEW — secondary / caption text
     light: "#FAFBFC",       // legacy / for future dark-mode beats
   },
-  
+
   // brand.primary (navy) and semantic.danger (red) stay UNCHANGED.
 }
 ```
