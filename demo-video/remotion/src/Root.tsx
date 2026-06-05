@@ -17,6 +17,7 @@ import { Beat06 } from "./beats/b06_demo-upload-extract/Beat06";
 import { Beat07 } from "./beats/b07_demo-monitor-drop/Beat07";
 import { Beat08 } from "./beats/b08_demo-3panel-claimshell/Beat08";
 import { Beat09 } from "./beats/b09_demo-reach-policies/Beat09";
+import { Beat09New } from "./beats/b09new_reach-spoken/Beat09New";
 import { Beat10 } from "./beats/b10_payoff-claimit/Beat10";
 // LEGACY b10-b29 imports removed — superseded by b06-b09 (DEMO consolidation 2026-06-04).
 import { Beat35 } from "./beats/b35_payoff-final__252-300/Beat35";
@@ -230,6 +231,15 @@ export const RemotionRoot = () => {
       <Composition
         id="Beat09"
         component={Beat09}
+        durationInFrames={880}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      {/* DEMO — b09new: post-swap base + 4 VO-aligned subtitles (legacy burned subs removed). */}
+      <Composition
+        id="Beat09New"
+        component={Beat09New}
         durationInFrames={880}
         fps={60}
         width={1920}
