@@ -23,11 +23,13 @@
 import { Send, UploadCloud } from "lucide-react";
 import { AbsoluteFill, Img, interpolate, staticFile, useCurrentFrame } from "remotion";
 
+import { GEMINI_GRADIENT_TEXT, GeminiSpark, GOOGLE_SANS } from "../../new-video/brand";
 import { BeatSubtitle } from "../../polish/BeatSubtitle";
 import { easings } from "../../polish/easings";
 import { HookAtmosphere } from "../../polish/HookAtmosphere";
 import { useReveal } from "../../polish/RevealCard";
 import { colors, FONT_STACK_TEXT } from "../../polish/tokens";
+import { COLOR, TYPE } from "../../shots/_shared/tokens";
 import { McpCard } from "./McpCard";
 
 const C = { extrapolateLeft: "clamp" as const, extrapolateRight: "clamp" as const };
@@ -421,17 +423,59 @@ const BuiltOnTitle: React.FC<{ fromFrame: number; top?: number }> = ({ fromFrame
         left: 0,
         right: 0,
         top,
-        textAlign: "center",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 12,
         opacity: r.opacity,
         transform: `translateY(${r.translateY.toFixed(1)}px)`,
-        fontFamily: FONT_STACK_TEXT,
-        fontWeight: 700,
+        fontFamily: GOOGLE_SANS,
         fontSize: 32,
-        letterSpacing: -0.5,
-        color: BRAND_BLUE,
+        letterSpacing: "-0.3px",
       }}
     >
-      Built on Google Cloud + Gemini.
+      <span style={{ fontWeight: 600, color: colors.text.dark }}>Built on Google Cloud +</span>
+      <GeminiSpark size={30} />
+      <span style={{ fontWeight: 700, ...GEMINI_GRADIENT_TEXT }}>Gemini</span>
+    </div>
+  );
+};
+
+// ── Pre-MCP section title (forked from peer Scene09Sponsors' header). Reveals
+//    after the camera settles into its zoomed-out position, above where the 3
+//    MCP intro cards appear; rides up with the cards in Phase E.
+const PreMcpTitle: React.FC<{ fromFrame: number }> = ({ fromFrame }) => {
+  const frame = useCurrentFrame();
+  const opacity = interpolate(frame, [fromFrame, fromFrame + 30], [0, 1], {
+    ...C,
+    easing: easings.easeOut,
+  });
+  const slide = interpolate(frame, [fromFrame, fromFrame + 30], [16, 0], {
+    ...C,
+    easing: easings.easeOut,
+  });
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        top: 510,
+        textAlign: "center",
+        opacity,
+        transform: `translateY(${slide.toFixed(1)}px)`,
+      }}
+    >
+      <div style={{ ...TYPE.DISPLAY_S, fontSize: 50, color: COLOR.INK }}>
+        Grounded by open MCP servers
+      </div>
+      <div style={{ ...TYPE.SUB, fontSize: 28, marginTop: 14 }}>
+        <span style={{ color: COLOR.MUTE }}>How our </span>
+        <span style={{ ...GEMINI_GRADIENT_TEXT, fontFamily: GOOGLE_SANS, fontWeight: 600 }}>
+          Gemini
+        </span>
+        <span style={{ color: COLOR.MUTE }}> agents pull real, live context</span>
+      </div>
     </div>
   );
 };
@@ -645,23 +689,18 @@ export const Beat05New3: React.FC = () => {
   const ease = easings.easeInOut;
 
   // ── Rolling camera (transformOrigin = viewport center 960,540). ──────────
-  // 1.4 through the agent build → 1.0 (Phase B, all 4 visible) → 0.85 lifted
-  // into the upper half (Phase C) so the lower half is free for the MCP cards.
-  const camScale = interpolate(frame, [0, 1820, 1920, 2000, 2160], [1.4, 1.4, 1.0, 1.0, 0.85], {
-    ...C,
-    easing: ease,
-  });
+  // 1.4 through the agent build, then ONE continuous eased move (1860–2010f):
+  // horizontal recenter (ASST→center), scale-down (1.4→0.85) and vertical
+  // lift all happen IN PARALLEL, landing the architecture in the upper half.
+  const camScale = interpolate(frame, [0, 1860, 2010], [1.4, 1.4, 0.85], { ...C, easing: ease });
   const focusX = interpolate(
     frame,
-    [0, 240, 460, 720, 760, 940, 980, 1180, 1220, 1440, 1560, 1820, 1920, 2160],
-    [420, 420, ING.x, ING.x, MON.x, MON.x, CLM.x, CLM.x, 1480, 1480, ASST.x, ASST.x, 987, 987],
+    [0, 240, 460, 720, 760, 940, 980, 1180, 1220, 1440, 1560, 1860, 2010],
+    [420, 420, ING.x, ING.x, MON.x, MON.x, CLM.x, CLM.x, 1480, 1480, ASST.x, ASST.x, 987],
     { ...C, easing: ease },
   );
   const camTx = camScale * (960 - focusX);
-  const camTy = interpolate(frame, [0, 1820, 1920, 2000, 2160], [188, 188, -20, -20, -234], {
-    ...C,
-    easing: ease,
-  });
+  const camTy = interpolate(frame, [0, 1860, 2010], [188, 188, -234], { ...C, easing: ease });
 
   // Assistant-sidecar divider (kept). Old dashed connectors + PhoenixBand removed.
   const dividerP = interpolate(frame, [1545, 1575], [0, 1], { ...C, easing: easings.easeOut });
@@ -907,9 +946,11 @@ export const Beat05New3: React.FC = () => {
             transform: `translateY(${cardRiseY.toFixed(1)}px)`,
           }}
         >
+          {/* Section title — lands after the camera settles, before MongoDB. */}
+          <PreMcpTitle fromFrame={2030} />
           <McpCard
             x={180}
-            top={620}
+            top={650}
             w={480}
             fromFrame={D1}
             logoFile="mongodb.svg"
@@ -918,7 +959,7 @@ export const Beat05New3: React.FC = () => {
           />
           <McpCard
             x={1260}
-            top={620}
+            top={650}
             w={480}
             fromFrame={D2}
             logoFile="elasticsearch.svg"
@@ -927,7 +968,7 @@ export const Beat05New3: React.FC = () => {
           />
           <McpCard
             x={720}
-            top={620}
+            top={650}
             w={480}
             fromFrame={D3}
             logoFile="phoenix.png"
