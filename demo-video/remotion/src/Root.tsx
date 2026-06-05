@@ -10,6 +10,7 @@ import { Beat03 } from "./beats/b03_peer-gap/Beat03";
 import { Beat04 } from "./beats/b04_peer-meet/Beat04";
 import { Beat05 } from "./beats/b05_arch-master/Beat05";
 import { Beat05New } from "./beats/b05new_arch-rolling/Beat05New";
+import { Beat05New2 } from "./beats/b05new2_arch-sponsors/Beat05New2";
 import { Beat06 } from "./beats/b06_demo-upload-extract/Beat06";
 import { Beat07 } from "./beats/b07_demo-monitor-drop/Beat07";
 import { Beat08 } from "./beats/b08_demo-3panel-claimshell/Beat08";
@@ -162,6 +163,16 @@ export const RemotionRoot = () => {
         id="Beat05New"
         component={Beat05New}
         durationInFrames={2520}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      {/* ARCH variant — b05new2: synchronized MCP reveal (all 4 agents first) +
+          peer sponsors fork + scrolling techstack. All 3 ARCH variants kept. */}
+      <Composition
+        id="Beat05New2"
+        component={Beat05New2}
+        durationInFrames={3240}
         fps={60}
         width={1920}
         height={1080}
