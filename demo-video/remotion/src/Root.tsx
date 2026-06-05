@@ -19,6 +19,7 @@ import { Beat08 } from "./beats/b08_demo-3panel-claimshell/Beat08";
 import { Beat09 } from "./beats/b09_demo-reach-policies/Beat09";
 import { Beat09New } from "./beats/b09new_reach-spoken/Beat09New";
 import { Beat10 } from "./beats/b10_payoff-claimit/Beat10";
+import { Beat10New } from "./beats/b10new_payoff-spoken/Beat10New";
 // LEGACY b10-b29 imports removed — superseded by b06-b09 (DEMO consolidation 2026-06-04).
 import { Beat35 } from "./beats/b35_payoff-final__252-300/Beat35";
 import { MasterDemo } from "./master/MasterDemo";
@@ -250,6 +251,15 @@ export const RemotionRoot = () => {
         id="Beat10"
         component={Beat10}
         durationInFrames={560}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      {/* PAYOFF — b10new: ClaimIt promoted to hero + animated title hierarchy reveal. */}
+      <Composition
+        id="Beat10New"
+        component={Beat10New}
+        durationInFrames={600}
         fps={60}
         width={1920}
         height={1080}
