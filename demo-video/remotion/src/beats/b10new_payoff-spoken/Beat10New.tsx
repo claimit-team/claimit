@@ -5,7 +5,8 @@
 //
 // Size hierarchy (descending): ClaimIt 110 > "Your Money…" 60 > "We just…" 38 >
 // team 22 > links 18 > footer 14. ClaimIt ≥ "Money" (TYPE.DISPLAY 88) in peer's
-// original headline. Whole composition sits slightly above screen center.
+// original headline. ClaimIt hero sits at TRUE canvas vertical center (y=540),
+// with symmetric breathing room above the titles and below the footer.
 //
 // ─────────────────────────── STORYBOARD (frames @60fps) ───────────────────────
 //  A  TITLES IN CENTER .. 0-90    Line 1 + Line 2 fade in at FINAL smaller size,
@@ -32,21 +33,25 @@ const REPO = "github.com/claimit-team/claimit";
 
 // Apple-keynote-close spacing: 3 distinct groups (titles / hero / credits) with
 // GENEROUS gaps between groups (~110px clear) and tight spacing within each.
-// Final vertical slots (ClaimIt centered ~460 → slightly above screen center 540).
-const LINE1_TOP = 175; // Group A — title pair (tight internal: +82 to line 2)
-const LINE2_TOP = 257;
-const HERO_TOP = 405; // Group B — hero; flex row, visual center ≈ 460
-const TEAM_TOP = 625; // Group C — credits stack (tight internal: +46, +40)
-const LINKS_TOP = 671;
-const FOOTER_TOP = 711;
-const TITLE_RISE = 255; // extra offset that drops the titles to center during A
+// TRUE vertical centering: the ClaimIt hero is anchored at canvas center (y=540
+// via top:50% + translateY(-50%)); the title group sits ~110px above it and the
+// credits group ~110px below, giving symmetric empty space top & bottom.
+const LINE1_TOP = 255; // Group A — title pair (tight internal: +82 to line 2)
+const LINE2_TOP = 337;
+const TEAM_TOP = 705; // Group C — credits stack (tight internal: +46, +40)
+const LINKS_TOP = 751;
+const FOOTER_TOP = 791;
+const TITLE_RISE = 220; // extra offset that drops the titles to center during A
 
 export const Beat10New: React.FC = () => {
   return (
     <LightScene>
       <Inner />
-      {/* Opening line (Phase A). The ClaimIt hero moment stays subtitle-free. */}
+      {/* Opening line (Phase A). */}
       <BeatSubtitle text="Your money should still be yours." fromFrame={0} durationFrames={180} />
+      {/* [VO sync] One-to-one with the deep-voice "ClaimIt" — lands just after the
+          hero logo settles (reveal completes f300). This subtitle IS the VO cue. */}
+      <BeatSubtitle text="ClaimIt." fromFrame={308} durationFrames={80} />
     </LightScene>
   );
 };
@@ -59,10 +64,7 @@ const Inner: React.FC = () => {
   const line2Op = iv(frame, [24, 72], [0, 1]);
   const titleRise = iv(frame, [90, 180], [TITLE_RISE, 0]);
 
-  // C: ClaimIt hero springs into the (now empty) vertical center.
-  // [VO CUE] Deep-voice "ClaimIt" lands here — around f240-300
-  //          (0:04-0:05), as the big ClaimIt logo enters center.
-  //          Intentionally NO subtitle here (the wordmark IS the message).
+  // C: ClaimIt hero springs into the (now empty) vertical center (reveal 240-300).
   const brandOp = iv(frame, [240, 300], [0, 1]);
   const brandY = iv(frame, [240, 300], [18, 0]);
 
@@ -109,19 +111,20 @@ const Inner: React.FC = () => {
         We just make sure you get it.
       </div>
 
-      {/* Hero — shield + ClaimIt wordmark (LARGEST), vertical center */}
+      {/* Hero — shield + ClaimIt wordmark (LARGEST). Anchored at TRUE canvas
+          vertical center (y=540) so the close is symmetric top & bottom. */}
       <div
         style={{
           position: "absolute",
           left: 0,
           right: 0,
-          top: HERO_TOP,
+          top: "50%",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           gap: 20,
           opacity: brandOp,
-          transform: `translateY(${brandY.toFixed(1)}px)`,
+          transform: `translateY(calc(-50% + ${brandY.toFixed(1)}px))`,
         }}
       >
         <ShieldCheck size={76} color={COLOR.NAVY} strokeWidth={2.2} />
