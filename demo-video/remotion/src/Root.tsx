@@ -259,7 +259,7 @@ export const RemotionRoot = () => {
       <Composition
         id="Beat10New"
         component={Beat10New}
-        durationInFrames={600}
+        durationInFrames={540}
         fps={60}
         width={1920}
         height={1080}
