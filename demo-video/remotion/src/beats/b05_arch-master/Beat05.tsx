@@ -1,39 +1,34 @@
-// Beat 05 — ARCHITECTURE (single narrative beat) · 0:20–0:58 · 2280f / 38s.
-// Merges old b05-b09 + b09b into ONE progressive build. Subtitle-only.
-// Reveal primitive: useReveal (spring damping 14, mass 0.5, 18f) — image+text
-// land together. Camera = transform on the arch wrapper (easeInOut, ~42f).
-// ClaimIt brand blue = colors.brand.primary (#27466E, == peer COLOR.NAVY).
+// Beat 05 — ARCHITECTURE (Apple rolling-pan summary) · 2280f / 38s.
+// Plays AFTER the demo (HOOK → DEMO → ARCH → PAYOFF), so the tone is
+// "here's what just powered that" — a confident summary, not a tutorial.
 //
-// ───────────────────────── STORYBOARD (frames @60fps) ─────────────────────────
-//  0  INTRO TITLE ............... 0-240    "How it works?" in brand blue:
-//        fade in big+centered (f0-60) → hold (60-150) → shrink ~40% + rise to
-//        top-center (150-210) → settles as a fixed section header (210+).
-//        No subtitle — the title IS the visual.
-//  A  UPLOAD .................... 240-440  Upload chip springs in (f240).
-//        sub "We start with a receipt — upload it once."         f280-470
-//  B  INGEST + OCR + GEMINI ..... 420-720  arrow(+label "receipt.uploaded")→
-//        ingest(+Gemini)→ field chips (8f stagger) + "Gemini read it (OCR)".
-//        sub "Gemini extracts the merchant, item, date, and price."  f490-720
-//  C  MONITOR + 15min .......... 700-940   arrow(+"purchase.ingested")→monitor
-//        (+Gemini)→ "every 15 min" pill above with down-arrow INTO monitor.
-//        sub "Every 15 minutes, it checks the current price."   f740-940
-//  D  CLAIM + DRAFT + SENT ...... 920-1180 arrow(+"price.dropped")→claim(+Gemini);
-//        arrow(+"claim.sent")→ Sent card (to Costco); typewriter draft snippet.
-//        sub "When the price drops, claim-agent drafts and sends your email." f960-1190
-//  E  MONGO + PHOENIX (no cam) .. 1180-1480 dashed lines→MongoDB Atlas (in place);
-//        single Mongo→Phoenix trace connector + Phoenix tracing band. NO camera move.
-//        sub "Every state and tool call is stored — and fully traced."  f1210-1480
-//  F  SHRINK + LEFT (parallel) .. 1480-1790 ONE motion: scale 0.74 + tx -90
-//        (f1490-1532); then center-out divider + assistant-agent sidecar.
-//        sub "And the assistant is always there when you need it."  f1590-1790
-//  G  SHIFT UP + TECHSTACK ...... 1790-2160 camera up 150 + drift back to center
-//        (f1790-1832, no further shrink) frees bottom ~40% & aligns the techstack
-//        under the diagram. Blue title "Built on Google Cloud + Gemini."
-//        reveals FIRST (f1845), THEN logos one-by-one below it (f1905+, 6f stagger).
-//        No bottom subtitle — the blue title carries it.
-//  H  Soft outro ............... 2160-2280 whole composition → 85% opacity.
-// ──────────────────────────────────────────────────────────────────────────────
-import { Send, UploadCloud } from "lucide-react";
+// Camera = a single transform on the arch wrapper. transformOrigin is the
+// viewport center (960,540), so to center any canvas point P at scale s:
+//   camTx = s * (960 - P.x)        camTy keyframed to anchor P.y on screen.
+// Multi-stop interpolate eases EACH segment (Remotion behaviour), giving the
+// slow-start / slow-end keynote dollies. Reveal primitive: useReveal (shared).
+//
+// ───────────────────────── STORYBOARD (frames @60fps) ─────────────────────
+//  A  OPEN ............ 0-180     scale 1.5, framed on the left (Upload+Ingest).
+//        "Powered by four agents." fades in top-center, then yields to Ingest.
+//  B  ROLLING PAN ..... 180-1380  scale 1.5, translateX walks RIGHT, one agent
+//        at a time (~300f each). As the pan reaches an agent its card lands and
+//        a large light keynote CALLOUT appears top-center, holds ~3s, then the
+//        pan resumes. Each agent carries a badge stack (the Gemini-corner badge
+//        signature, extended): Gemini · MongoDB MCP · Phoenix (+ Elasticsearch
+//        on Assistant).
+//          Ingest   180-470   "Gemini reads the receipt."
+//          Monitor  490-770   "Gemini watches the price."
+//          Claim    790-1080  "Gemini drafts the email."
+//          Assistant 1090-1370 "Gemini redrafts on request."
+//  C  REVEAL ......... 1380-1800 scale back to 1.0, recenter the whole canvas.
+//        Connection lines draw ON, staggered: MongoDB MCP → all 4 (solid blue,
+//        data), Phoenix → all 4 (dashed lavender, observability), Elasticsearch
+//        → Assistant only (amber, policy search). Hold on the full form.
+//  D  BUILT-ON ........ 1800-2280 architecture lifts up; "Built on Google Cloud
+//        + Gemini." then the techstack logos reveal one-by-one (MongoDB MCP).
+// ────────────────────────────────────────────────────────────────────────────
+import { LineChart, Mail, ScanLine, Sparkles, UploadCloud } from "lucide-react";
 import { AbsoluteFill, Img, interpolate, staticFile, useCurrentFrame } from "remotion";
 
 import { BeatSubtitle } from "../../polish/BeatSubtitle";
@@ -43,127 +38,208 @@ import { useReveal } from "../../polish/RevealCard";
 import { colors, FONT_STACK_TEXT } from "../../polish/tokens";
 
 const C = { extrapolateLeft: "clamp" as const, extrapolateRight: "clamp" as const };
-const NW = 170;
-const NH = 100;
-const UP = { x: 185, y: 380 };
-const ING = { x: 545, y: 380 };
-const MON = { x: 925, y: 380 };
-const CLM = { x: 1305, y: 380 };
-const SCHED = { x: 925, y: 255 };
-const SENT = { x: 1530, y: 380 };
-const MONGO = { x: 925, y: 650 };
-const ASST = { x: 1790, y: 380 };
-const DIV_X = 1640;
-const PHX_Y = 838;
+const BRAND_BLUE = colors.brand.primary; // #27466E — ClaimIt navy
+const AMBER = colors.semantic.warning; // #F59E0B — Elasticsearch accent
+const LAVENDER = "#8B83B0"; // muted "observability, not data" line color
 const BORDER = "1px solid rgba(15,20,25,0.10)";
-const SHADOW = "0 6px 18px rgba(15,20,25,0.08)";
-const cardBase = {
-  position: "absolute" as const,
-  backgroundColor: colors.bg.surface,
-  border: BORDER,
-  boxShadow: SHADOW,
-  borderRadius: 16,
-  fontFamily: FONT_STACK_TEXT,
-};
-const GEM = staticFile("brandlogos/googlegemini.svg");
-const BRAND_BLUE = colors.brand.primary; // #27466E — same blue as the ClaimIt logo (b04)
 
-// ── Intro section title: "How it works?" — big+centered, then shrinks to a
-//    fixed top-center section header. NOT camera-transformed.
-const IntroTitle: React.FC = () => {
+// ── Layout (canvas coords inside a 1920×1080 stage) ─────────────────────────
+const AGENT_Y = 440;
+const CARD_W = 220;
+const CARD_H = 150;
+const UPLOAD = { x: 200, y: AGENT_Y };
+const ING = 540;
+const MON = 880;
+const CLM = 1220;
+const ASST = 1560;
+const MONGO = { x: 880, y: 792 };
+const PHX = { x: 1300, y: 838 };
+const ES = { x: 1790, y: 618 };
+const FULL_CX = 995; // horizontal center of the whole diagram (Phase C/D)
+
+// ── Brand chips for the badge stacks (the visual signature) ─────────────────
+const BADGE_SRC: Record<string, string> = {
+  gemini: "brandlogos/googlegemini.svg",
+  mongo: "brandlogos/mongodb.svg",
+  phoenix: "brandlogos/phoenix.png",
+  elastic: "brandlogos/elasticsearch.svg",
+};
+
+type AgentDef = {
+  key: string;
+  x: number;
+  title: string;
+  role: string;
+  icon: React.ReactNode;
+  reveal: number;
+  focus: [number, number];
+  badges: string[];
+};
+
+const ICON = { size: 26, color: BRAND_BLUE, strokeWidth: 1.75 } as const;
+const AGENTS: AgentDef[] = [
+  {
+    key: "ingest",
+    x: ING,
+    title: "Ingest",
+    role: "reads the receipt",
+    icon: <ScanLine {...ICON} aria-hidden="true" />,
+    reveal: 30,
+    focus: [180, 470],
+    badges: ["gemini", "mongo", "phoenix"],
+  },
+  {
+    key: "monitor",
+    x: MON,
+    title: "Monitor",
+    role: "watches the price",
+    icon: <LineChart {...ICON} aria-hidden="true" />,
+    reveal: 470,
+    focus: [490, 770],
+    badges: ["gemini", "mongo", "phoenix"],
+  },
+  {
+    key: "claim",
+    x: CLM,
+    title: "Claim",
+    role: "drafts the email",
+    icon: <Mail {...ICON} aria-hidden="true" />,
+    reveal: 770,
+    focus: [790, 1080],
+    badges: ["gemini", "mongo", "phoenix"],
+  },
+  {
+    key: "assistant",
+    x: ASST,
+    title: "Assistant",
+    role: "redrafts on request",
+    icon: <Sparkles {...ICON} aria-hidden="true" />,
+    reveal: 1070,
+    focus: [1090, 1370],
+    badges: ["gemini", "mongo", "phoenix", "elastic"],
+  },
+];
+
+// ── Small brand chip — the Gemini-corner badge style, generalized. ──────────
+const BadgeChip: React.FC<{ kind: string }> = ({ kind }) => (
+  <div
+    style={{
+      width: 28,
+      height: 28,
+      borderRadius: 8,
+      backgroundColor: colors.bg.surface,
+      border: BORDER,
+      boxShadow: "0 1px 3px rgba(15,20,25,0.06)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+    }}
+  >
+    <Img
+      src={staticFile(BADGE_SRC[kind])}
+      style={{ width: 17, height: 17, objectFit: "contain" }}
+    />
+  </div>
+);
+
+// ── Agent card. Reveals with useReveal; a soft outer glow + tiny lift while it
+//    is the focused agent (focus window). Badge stack along the bottom edge.
+const AgentCard: React.FC<{ def: AgentDef }> = ({ def }) => {
   const frame = useCurrentFrame();
-  const opacity = interpolate(frame, [0, 50], [0, 1], { ...C });
-  const top = interpolate(frame, [150, 210], [486, 28], { ...C, easing: easings.easeInOut });
-  const fsEnter = interpolate(frame, [0, 60], [64, 104], { ...C, easing: easings.sharpOut });
-  const fsShrink = interpolate(frame, [150, 210], [104, 34], { ...C, easing: easings.easeInOut });
-  const fontSize = Math.min(fsEnter, fsShrink);
+  const r = useReveal(def.reveal);
+  const focusAmt = interpolate(
+    frame,
+    [def.focus[0] - 34, def.focus[0], def.focus[1], def.focus[1] + 34],
+    [0, 1, 1, 0],
+    C,
+  );
+  const lift = -6 * focusAmt;
+  const glow = 0.06 + 0.16 * focusAmt;
   return (
     <div
       style={{
         position: "absolute",
-        left: 0,
-        right: 0,
-        top,
-        textAlign: "center",
-        opacity,
-        fontFamily: FONT_STACK_TEXT,
-        fontWeight: 700,
-        fontSize,
-        letterSpacing: -1.5,
-        lineHeight: 1,
-        color: BRAND_BLUE,
-      }}
-    >
-      How it works?
-    </div>
-  );
-};
-
-const Node: React.FC<{
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  fromFrame: number;
-  title: string;
-  sub?: string;
-  topIcon?: React.ReactNode;
-  gemini?: boolean;
-}> = ({ x, y, w, h, fromFrame, title, sub, topIcon, gemini }) => {
-  const r = useReveal(fromFrame);
-  return (
-    <div
-      style={{
-        ...cardBase,
-        left: x - w / 2,
-        top: y - h / 2,
-        width: w,
-        height: h,
-        padding: 12,
+        left: def.x - CARD_W / 2,
+        top: AGENT_Y - CARD_H / 2,
+        width: CARD_W,
+        height: CARD_H,
+        padding: "18px 16px 14px",
         boxSizing: "border-box",
+        backgroundColor: colors.bg.surface,
+        border: BORDER,
+        borderRadius: 20,
+        boxShadow: `0 10px 30px rgba(15,20,25,${glow.toFixed(3)}), 0 2px 6px rgba(15,20,25,0.05)`,
         display: "flex",
         flexDirection: "column",
-        justifyContent: "center",
         alignItems: "center",
-        gap: 5,
+        gap: 6,
         textAlign: "center",
+        fontFamily: FONT_STACK_TEXT,
         opacity: r.opacity,
-        transform: `translateY(${r.translateY.toFixed(1)}px) scale(${r.scale.toFixed(4)})`,
+        transform: `translateY(${(r.translateY + lift).toFixed(1)}px) scale(${(r.scale + 0.02 * focusAmt).toFixed(4)})`,
         transformOrigin: "center",
       }}
     >
-      {gemini && (
-        <Img
-          src={GEM}
-          style={{ position: "absolute", top: 8, right: 8, width: 20, height: 20, opacity: 0.78 }}
-        />
-      )}
-      {topIcon}
+      {def.icon}
       <span
-        style={{
-          fontSize: topIcon ? 12 : 16,
-          fontWeight: topIcon ? 600 : 700,
-          color: topIcon ? colors.text.muted : colors.text.dark,
-          lineHeight: 1.25,
-        }}
+        style={{ fontSize: 26, fontWeight: 600, color: colors.text.dark, letterSpacing: "-0.02em" }}
       >
-        {title}
+        {def.title}
       </span>
-      {sub ? (
-        <span style={{ fontSize: 12, color: colors.text.muted, lineHeight: 1.3 }}>{sub}</span>
-      ) : null}
+      <span style={{ fontSize: 13, fontWeight: 500, color: colors.text.muted, letterSpacing: "0" }}>
+        {def.role}
+      </span>
+      <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
+        {def.badges.map((b) => (
+          <BadgeChip key={b} kind={b} />
+        ))}
+      </div>
     </div>
   );
 };
 
-const HArrow: React.FC<{ x1: number; x2: number; y: number; fromFrame: number }> = ({
+// ── Upload origin chip (left edge). ─────────────────────────────────────────
+const UploadChip: React.FC = () => {
+  const r = useReveal(10);
+  const w = 124;
+  const h = 124;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: UPLOAD.x - w / 2,
+        top: UPLOAD.y - h / 2,
+        width: w,
+        height: h,
+        backgroundColor: colors.bg.surface,
+        border: BORDER,
+        borderRadius: 20,
+        boxShadow: "0 8px 22px rgba(15,20,25,0.07)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        fontFamily: FONT_STACK_TEXT,
+        opacity: r.opacity,
+        transform: `translateY(${r.translateY.toFixed(1)}px) scale(${r.scale.toFixed(4)})`,
+      }}
+    >
+      <UploadCloud size={34} color={BRAND_BLUE} strokeWidth={1.75} aria-hidden="true" />
+      <span style={{ fontSize: 16, fontWeight: 600, color: colors.text.dark }}>Upload</span>
+    </div>
+  );
+};
+
+// ── Thin pipeline connector between two consecutive nodes (draws on width). ──
+const FlowConnector: React.FC<{ x1: number; x2: number; y: number; fromFrame: number }> = ({
   x1,
   x2,
   y,
   fromFrame,
 }) => {
   const frame = useCurrentFrame();
-  const p = interpolate(frame, [fromFrame, fromFrame + 14], [0, 1], {
+  const p = interpolate(frame, [fromFrame, fromFrame + 16], [0, 1], {
     ...C,
     easing: easings.easeOut,
   });
@@ -175,165 +251,140 @@ const HArrow: React.FC<{ x1: number; x2: number; y: number; fromFrame: number }>
         top: y - 1,
         width: (x2 - x1) * p,
         height: 2,
-        backgroundColor: colors.text.muted,
-        opacity: 0.55 * Math.min(1, p * 3),
+        backgroundColor: colors.neutral[300],
+        opacity: 0.9 * Math.min(1, p * 3),
       }}
-    >
-      {p > 0.92 && (
-        <div
-          style={{
-            position: "absolute",
-            right: -1,
-            top: -3,
-            width: 0,
-            height: 0,
-            borderTop: "4px solid transparent",
-            borderBottom: "4px solid transparent",
-            borderLeft: `6px solid ${colors.text.muted}`,
-          }}
-        />
-      )}
-    </div>
+    />
   );
 };
 
-// ── Small event label sitting just above an arrow's line center. Same style
-//    across all 4 agent-to-agent arrows. Reveals with its arrow.
-const ArrowLabel: React.FC<{
-  x1: number;
-  x2: number;
-  y: number;
-  label: string;
-  fromFrame: number;
-}> = ({ x1, x2, y, label, fromFrame }) => {
-  const r = useReveal(fromFrame);
-  return (
-    <div
-      style={{
-        position: "absolute",
-        left: (x1 + x2) / 2,
-        top: y - 16,
-        transform: `translate(-50%, -50%) translateY(${r.translateY.toFixed(1)}px)`,
-        opacity: r.opacity,
-        backgroundColor: colors.bg.surface,
-        border: BORDER,
-        borderRadius: 999,
-        padding: "2px 9px",
-        fontFamily: FONT_STACK_TEXT,
-        fontSize: 11,
-        fontWeight: 600,
-        color: BRAND_BLUE,
-        whiteSpace: "nowrap",
-        boxShadow: "0 2px 6px rgba(15,20,25,0.05)",
-      }}
-    >
-      {label}
-    </div>
-  );
-};
-
-const Pill: React.FC<{
+// ── Service node (MongoDB MCP / Phoenix / Elasticsearch) revealed in Phase C. ─
+const ServiceNode: React.FC<{
   x: number;
   y: number;
-  label: string;
+  logo: string;
+  title: string;
+  sub: string;
   fromFrame: number;
-  withIcon?: boolean;
-}> = ({ x, y, label, fromFrame, withIcon }) => {
+  accent: string;
+}> = ({ x, y, logo, title, sub, fromFrame, accent }) => {
   const r = useReveal(fromFrame);
+  const w = 250;
   return (
     <div
       style={{
         position: "absolute",
-        left: x,
-        top: y,
-        transform: `translate(-50%, -50%) translateY(${r.translateY.toFixed(1)}px) scale(${r.scale.toFixed(4)})`,
-        opacity: r.opacity,
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        backgroundColor: colors.bg.surface,
-        border: BORDER,
-        borderRadius: 999,
-        padding: "4px 12px",
-        fontFamily: FONT_STACK_TEXT,
-        fontSize: 12,
-        fontWeight: 600,
-        color: colors.brand.primary,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {withIcon && (
-        <Img src={staticFile("brandlogos/googlepubsub.svg")} style={{ width: 13, height: 13 }} />
-      )}
-      {label}
-    </div>
-  );
-};
-
-const FieldChip: React.FC<{ x: number; y: number; label: string; fromFrame: number }> = ({
-  x,
-  y,
-  label,
-  fromFrame,
-}) => {
-  const r = useReveal(fromFrame);
-  return (
-    <div
-      style={{
-        position: "absolute",
-        left: x,
-        top: y,
-        transform: `translate(-50%, 0) translateY(${r.translateY.toFixed(1)}px)`,
-        opacity: r.opacity,
-        fontFamily: FONT_STACK_TEXT,
-        fontSize: 13,
-        fontWeight: 500,
-        color: colors.text.dark,
-        backgroundColor: colors.bg.surface,
-        border: BORDER,
-        borderRadius: 999,
-        padding: "4px 14px",
-        boxShadow: "0 3px 10px rgba(15,20,25,0.06)",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {label}
-    </div>
-  );
-};
-
-// ── "Sent" destination at the end of the claim arrow (email to the retailer).
-const SentCard: React.FC<{ x: number; y: number; fromFrame: number }> = ({ x, y, fromFrame }) => {
-  const r = useReveal(fromFrame);
-  const w = 120;
-  const h = 98;
-  return (
-    <div
-      style={{
-        ...cardBase,
         left: x - w / 2,
-        top: y - h / 2,
+        top: y - 40,
         width: w,
-        height: h,
-        padding: 10,
+        padding: "12px 18px",
         boxSizing: "border-box",
+        backgroundColor: colors.bg.surface,
+        border: BORDER,
+        borderRadius: 16,
+        boxShadow: "0 8px 24px rgba(15,20,25,0.07)",
         display: "flex",
-        flexDirection: "column",
-        justifyContent: "center",
         alignItems: "center",
-        gap: 6,
-        textAlign: "center",
+        gap: 12,
+        fontFamily: FONT_STACK_TEXT,
         opacity: r.opacity,
         transform: `translateY(${r.translateY.toFixed(1)}px) scale(${r.scale.toFixed(4)})`,
-        transformOrigin: "center",
       }}
     >
-      <Send size={26} color={BRAND_BLUE} strokeWidth={2} aria-hidden="true" />
-      <span style={{ fontSize: 14, fontWeight: 700, color: colors.text.dark }}>Sent</span>
-      <span style={{ fontSize: 11, color: colors.text.muted }}>to Costco</span>
+      <Img src={staticFile(logo)} style={{ width: 30, height: 30, objectFit: "contain" }} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, textAlign: "left" }}>
+        <span style={{ fontSize: 17, fontWeight: 600, color: colors.text.dark }}>{title}</span>
+        <span style={{ fontSize: 12, fontWeight: 500, color: accent }}>{sub}</span>
+      </div>
     </div>
   );
 };
+
+// ── A single draw-on connection line (animates its end-point). Works for both
+//    solid and dashed strokes (we animate geometry, not dashoffset).
+const Wire: React.FC<{
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color: string;
+  width: number;
+  dashed?: boolean;
+  fromFrame: number;
+}> = ({ x1, y1, x2, y2, color, width, dashed, fromFrame }) => {
+  const frame = useCurrentFrame();
+  const p = interpolate(frame, [fromFrame, fromFrame + 40], [0, 1], {
+    ...C,
+    easing: easings.sharpOut,
+  });
+  if (p <= 0) return null;
+  return (
+    <line
+      x1={x1}
+      y1={y1}
+      x2={x1 + (x2 - x1) * p}
+      y2={y1 + (y2 - y1) * p}
+      stroke={color}
+      strokeWidth={width}
+      strokeLinecap="round"
+      strokeDasharray={dashed ? "4 7" : undefined}
+      opacity={dashed ? 0.6 : 0.85}
+    />
+  );
+};
+
+// ── Top-center keynote caption (screen-fixed). One line at a time. ──────────
+const Callout: React.FC<{ text: string; fromFrame: number; toFrame: number }> = ({
+  text,
+  fromFrame,
+  toFrame,
+}) => {
+  const frame = useCurrentFrame();
+  const opacity = interpolate(
+    frame,
+    [fromFrame, fromFrame + 18, toFrame - 18, toFrame],
+    [0, 1, 1, 0],
+    { ...C, easing: easings.easeInOut },
+  );
+  const y = interpolate(frame, [fromFrame, fromFrame + 22], [14, 0], {
+    ...C,
+    easing: easings.easeOut,
+  });
+  if (frame < fromFrame || frame > toFrame) return null;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        top: 196,
+        textAlign: "center",
+        opacity,
+        transform: `translateY(${y.toFixed(1)}px)`,
+        fontFamily: FONT_STACK_TEXT,
+        fontSize: 56,
+        fontWeight: 400,
+        letterSpacing: "-0.015em",
+        color: colors.text.dark,
+        pointerEvents: "none",
+      }}
+    >
+      {text}
+    </div>
+  );
+};
+
+const TECH: { logo: string; name: string }[] = [
+  { logo: "googlegemini.svg", name: "Gemini" },
+  { logo: "googlecloud.svg", name: "Google ADK" },
+  { logo: "googlepubsub.svg", name: "Pub/Sub" },
+  { logo: "googlecloud.svg", name: "Cloud Run" },
+  { logo: "googlecloud.svg", name: "Cloud Scheduler" },
+  { logo: "mongodb.svg", name: "MongoDB MCP" },
+  { logo: "elasticsearch.svg", name: "Elasticsearch" },
+  { logo: "phoenix.png", name: "Arize Phoenix" },
+  { logo: "gmail.svg", name: "Gmail" },
+];
 
 const TechItem: React.FC<{ logo: string; name: string; fromFrame: number }> = ({
   logo,
@@ -372,7 +423,6 @@ const TechItem: React.FC<{ logo: string; name: string; fromFrame: number }> = ({
   );
 };
 
-// ── Blue sub-section header above the techstack logos (Stage G hierarchy).
 const BuiltOnTitle: React.FC<{ fromFrame: number }> = ({ fromFrame }) => {
   const r = useReveal(fromFrame);
   return (
@@ -381,14 +431,14 @@ const BuiltOnTitle: React.FC<{ fromFrame: number }> = ({ fromFrame }) => {
         position: "absolute",
         left: 0,
         right: 0,
-        top: 645,
+        top: 648,
         textAlign: "center",
         opacity: r.opacity,
         transform: `translateY(${r.translateY.toFixed(1)}px)`,
         fontFamily: FONT_STACK_TEXT,
-        fontWeight: 700,
-        fontSize: 32,
-        letterSpacing: -0.5,
+        fontWeight: 600,
+        fontSize: 38,
+        letterSpacing: "-0.02em",
         color: BRAND_BLUE,
       }}
     >
@@ -397,157 +447,31 @@ const BuiltOnTitle: React.FC<{ fromFrame: number }> = ({ fromFrame }) => {
   );
 };
 
-const FIELDS = ["Merchant", "Item", "Date", "Price"];
-const TECH: { logo: string; name: string }[] = [
-  { logo: "googlegemini.svg", name: "Gemini" },
-  { logo: "googlecloud.svg", name: "Google ADK" },
-  { logo: "googlepubsub.svg", name: "Pub/Sub" },
-  { logo: "googlecloud.svg", name: "Cloud Run" },
-  { logo: "googlecloud.svg", name: "Cloud Scheduler" },
-  { logo: "mongodb.svg", name: "MongoDB Atlas" },
-  { logo: "elasticsearch.svg", name: "Elasticsearch" },
-  { logo: "phoenix.png", name: "Arize Phoenix" },
-  { logo: "gmail.svg", name: "Gmail" },
-];
-
-const ScheduleArrow: React.FC<{ fromFrame: number }> = ({ fromFrame }) => {
+// ── Opening line (Phase A) — confident, screen-fixed, then yields. ──────────
+const OpeningLine: React.FC = () => {
   const frame = useCurrentFrame();
-  const p = interpolate(frame, [fromFrame, fromFrame + 14], [0, 1], {
+  const opacity = interpolate(frame, [10, 40, 150, 178], [0, 1, 1, 0], {
     ...C,
-    easing: easings.easeOut,
+    easing: easings.easeInOut,
   });
-  const y1 = SCHED.y + 16;
-  const y2 = MON.y - NH / 2 - 4;
-  return (
-    <div
-      style={{
-        position: "absolute",
-        left: SCHED.x - 1,
-        top: y1,
-        width: 2,
-        height: (y2 - y1) * p,
-        backgroundColor: colors.text.muted,
-        opacity: 0.55 * Math.min(1, p * 3),
-      }}
-    >
-      {p > 0.92 && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: -1,
-            left: -3,
-            width: 0,
-            height: 0,
-            borderLeft: "4px solid transparent",
-            borderRight: "4px solid transparent",
-            borderTop: `6px solid ${colors.text.muted}`,
-          }}
-        />
-      )}
-    </div>
-  );
-};
-
-const GeminiOcrLabel: React.FC<{ x: number; y: number; fromFrame: number }> = ({
-  x,
-  y,
-  fromFrame,
-}) => {
-  const r = useReveal(fromFrame);
-  return (
-    <div
-      style={{
-        position: "absolute",
-        left: x,
-        top: y,
-        transform: `translate(-50%, 0) translateY(${r.translateY.toFixed(1)}px)`,
-        opacity: r.opacity,
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        fontFamily: FONT_STACK_TEXT,
-        fontSize: 12,
-        color: colors.text.muted,
-        whiteSpace: "nowrap",
-      }}
-    >
-      <Img src={GEM} style={{ width: 13, height: 13, opacity: 0.8 }} />
-      Gemini read it (OCR)
-    </div>
-  );
-};
-
-const DRAFT = "Hello Costco, I purchased this item…";
-const DraftSnippet: React.FC<{ x: number; y: number; fromFrame: number }> = ({
-  x,
-  y,
-  fromFrame,
-}) => {
-  const frame = useCurrentFrame();
-  const r = useReveal(fromFrame);
-  const typeStart = fromFrame + 4;
-  const typeEnd = typeStart + Math.ceil(DRAFT.length / 1.5); // ~1.5 chars/frame
-  const chars = Math.max(
-    0,
-    Math.floor(interpolate(frame, [typeStart, typeEnd], [0, DRAFT.length], C)),
-  );
-  const typing = frame >= typeStart && frame < typeEnd + 22;
-  const cursorOn = Math.floor(frame / 12) % 2 === 0;
-  return (
-    <div
-      style={{
-        position: "absolute",
-        left: x - 115,
-        top: y,
-        width: 230,
-        opacity: r.opacity,
-        transform: `translateY(${r.translateY.toFixed(1)}px)`,
-        fontFamily: FONT_STACK_TEXT,
-        fontSize: 11,
-        lineHeight: 1.45,
-        color: colors.text.muted,
-        backgroundColor: colors.bg.surface,
-        border: BORDER,
-        borderRadius: 10,
-        padding: 10,
-        boxShadow: "0 4px 12px rgba(15,20,25,0.06)",
-        minHeight: 36,
-      }}
-    >
-      {DRAFT.slice(0, chars)}
-      {typing && <span style={{ opacity: cursorOn ? 0.9 : 0, color: BRAND_BLUE }}>▌</span>}
-    </div>
-  );
-};
-
-const PhoenixBand: React.FC<{ y: number; fromFrame: number }> = ({ y, fromFrame }) => {
-  const r = useReveal(fromFrame);
+  if (frame > 178) return null;
   return (
     <div
       style={{
         position: "absolute",
         left: 0,
         right: 0,
-        top: y,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 12,
-        opacity: r.opacity,
-        transform: `translateY(${r.translateY.toFixed(1)}px)`,
+        top: 188,
+        textAlign: "center",
+        opacity,
         fontFamily: FONT_STACK_TEXT,
+        fontSize: 64,
+        fontWeight: 600,
+        letterSpacing: "-0.025em",
+        color: BRAND_BLUE,
       }}
     >
-      <Img
-        src={staticFile("brandlogos/phoenix.png")}
-        style={{ width: 26, height: 26, objectFit: "contain" }}
-      />
-      <span style={{ fontSize: 15, fontWeight: 700, color: colors.text.dark }}>
-        Phoenix tracing
-      </span>
-      <span style={{ fontSize: 12, color: colors.text.muted }}>
-        — every decision, tool call &amp; Gemini draft
-      </span>
+      Powered by four agents.
     </div>
   );
 };
@@ -556,198 +480,155 @@ export const Beat05: React.FC = () => {
   const frame = useCurrentFrame();
   const ease = easings.easeInOut;
 
-  // Camera. E: identity (no move). F: parallel shrink + shift-left (ONE motion).
-  // G: shift up only (no further shrink) to free the bottom for the techstack.
-  const camScale = interpolate(frame, [1490, 1532], [1, 0.74], { ...C, easing: ease });
-  // F: shift left (reveal the assistant on the right). G: drift back toward
-  // center as it rises, so the techstack lands aligned under the diagram.
-  const camTx =
-    interpolate(frame, [1490, 1532], [0, -90], { ...C, easing: ease }) +
-    interpolate(frame, [1790, 1832], [0, 70], { ...C, easing: ease });
-  const camTy = interpolate(frame, [1790, 1832], [0, -150], { ...C, easing: ease });
-  const globalFade = interpolate(frame, [2160, 2280], [1, 0.85], { ...C });
+  // ── Camera (transformOrigin = viewport center 960,540) ───────────────────
+  const camScale = interpolate(frame, [0, 1380, 1560, 1800, 1860], [1.5, 1.5, 1.0, 1.0, 0.9], {
+    ...C,
+    easing: ease,
+  });
+  // focusX = the canvas x we want centered. Holds on each agent, eases between.
+  const focusX = interpolate(
+    frame,
+    [0, 460, 500, 770, 810, 1080, 1120, 1370, 1560],
+    [ING, ING, MON, MON, CLM, CLM, ASST, ASST, FULL_CX],
+    { ...C, easing: ease },
+  );
+  const camTx = camScale * (960 - focusX);
+  // Vertical anchor: agents sit low-center during A/B (room for top callout),
+  // then recenter for the full reveal, then lift for the techstack.
+  const camTy = interpolate(frame, [0, 1380, 1560, 1800, 1860], [200, 200, -82, -82, -232], {
+    ...C,
+    easing: ease,
+  });
+  const globalFade = interpolate(frame, [2210, 2280], [1, 0.9], { ...C });
 
-  const mongoLineOp = interpolate(frame, [1195, 1240], [0, 0.3], { ...C });
-  const phxLineOp = interpolate(frame, [1240, 1280], [0, 0.4], { ...C });
-  const dividerP = interpolate(frame, [1545, 1575], [0, 1], { ...C, easing: easings.easeOut });
+  // Agent bottom anchor for wires.
+  const agentBottom = AGENT_Y + CARD_H / 2 - 6;
 
   return (
     <HookAtmosphere>
       <AbsoluteFill style={{ opacity: globalFade }}>
-        {/* Section header — "How it works?" persists top-center (NOT transformed). */}
-        <IntroTitle />
+        {/* Soft centered depth wash over the flat backdrop. */}
+        <AbsoluteFill
+          style={{
+            background:
+              "radial-gradient(60% 50% at 50% 46%, rgba(39,70,110,0.06) 0%, rgba(39,70,110,0) 70%)",
+          }}
+        />
 
         {/* ═════ ARCH GROUP (camera-transformed) ═════ */}
         <AbsoluteFill
           style={{
             transform: `translate(${camTx.toFixed(1)}px, ${camTy.toFixed(1)}px) scale(${camScale.toFixed(4)})`,
-            transformOrigin: "830px 460px",
+            transformOrigin: "960px 540px",
           }}
         >
+          {/* Connection network (Phase C) — drawn UNDER the cards. */}
           <svg
             aria-hidden="true"
             width={1920}
             height={1080}
             style={{ position: "absolute", inset: 0 }}
           >
-            {[ING, MON, CLM].map((a) => (
-              <line
-                key={`m-${a.x}`}
-                x1={a.x}
-                y1={a.y + NH / 2}
-                x2={MONGO.x}
-                y2={MONGO.y - 42}
-                stroke={colors.brand.primary}
-                strokeWidth={1.5}
-                strokeDasharray="5 5"
-                opacity={mongoLineOp}
+            {/* MongoDB MCP → every agent (solid blue, the data layer). */}
+            {[ING, MON, CLM, ASST].map((ax, i) => (
+              <Wire
+                key={`mongo-${ax}`}
+                x1={MONGO.x}
+                y1={MONGO.y - 40}
+                x2={ax}
+                y2={agentBottom}
+                color={BRAND_BLUE}
+                width={2.5}
+                fromFrame={1400 + i * 10}
               />
             ))}
-            {/* subtle MongoDB → Phoenix trace connector */}
-            <line
-              x1={MONGO.x}
-              y1={MONGO.y + 42}
-              x2={MONGO.x}
-              y2={PHX_Y - 2}
-              stroke={colors.semantic.warning}
-              strokeWidth={1.5}
-              strokeDasharray="3 5"
-              opacity={phxLineOp}
-            />
-            <line
-              x1={DIV_X}
-              y1={455 - 305 * dividerP}
-              x2={DIV_X}
-              y2={455 + 305 * dividerP}
-              stroke={colors.text.muted}
-              strokeWidth={1}
-              strokeDasharray="2 6"
-              opacity={0.4 * Math.min(1, dividerP * 3)}
+            {/* Phoenix → every agent (dashed lavender, observability). */}
+            {[ING, MON, CLM, ASST].map((ax, i) => (
+              <Wire
+                key={`phx-${ax}`}
+                x1={PHX.x}
+                y1={PHX.y - 40}
+                x2={ax}
+                y2={agentBottom}
+                color={LAVENDER}
+                width={1.5}
+                dashed
+                fromFrame={1500 + i * 10}
+              />
+            ))}
+            {/* Elasticsearch → Assistant only (amber, policy search). */}
+            <Wire
+              x1={ES.x}
+              y1={ES.y - 24}
+              x2={ASST}
+              y2={agentBottom}
+              color={AMBER}
+              width={2}
+              fromFrame={1590}
             />
           </svg>
 
-          <HArrow x1={UP.x + 55} x2={ING.x - NW / 2} y={UP.y} fromFrame={420} />
-          <HArrow x1={ING.x + NW / 2} x2={MON.x - NW / 2} y={ING.y} fromFrame={700} />
-          <HArrow x1={MON.x + NW / 2} x2={CLM.x - NW / 2} y={MON.y} fromFrame={920} />
-          <HArrow x1={CLM.x + NW / 2} x2={SENT.x - 60} y={CLM.y} fromFrame={940} />
-          <ScheduleArrow fromFrame={710} />
-
-          <ArrowLabel
-            x1={UP.x + 55}
-            x2={ING.x - NW / 2}
-            y={UP.y}
-            label="receipt.uploaded"
-            fromFrame={426}
-          />
-          <ArrowLabel
-            x1={ING.x + NW / 2}
-            x2={MON.x - NW / 2}
-            y={ING.y}
-            label="purchase.ingested"
-            fromFrame={706}
-          />
-          <ArrowLabel
-            x1={MON.x + NW / 2}
-            x2={CLM.x - NW / 2}
-            y={MON.y}
-            label="price.dropped"
-            fromFrame={926}
-          />
-          <ArrowLabel
-            x1={CLM.x + NW / 2}
-            x2={SENT.x - 60}
-            y={CLM.y}
-            label="claim.sent"
-            fromFrame={946}
+          {/* Pipeline flow connectors between consecutive nodes. */}
+          <FlowConnector x1={UPLOAD.x + 62} x2={ING - CARD_W / 2} y={AGENT_Y} fromFrame={40} />
+          <FlowConnector x1={ING + CARD_W / 2} x2={MON - CARD_W / 2} y={AGENT_Y} fromFrame={472} />
+          <FlowConnector x1={MON + CARD_W / 2} x2={CLM - CARD_W / 2} y={AGENT_Y} fromFrame={772} />
+          <FlowConnector
+            x1={CLM + CARD_W / 2}
+            x2={ASST - CARD_W / 2}
+            y={AGENT_Y}
+            fromFrame={1072}
           />
 
-          <Node
-            x={UP.x}
-            y={UP.y}
-            w={110}
-            h={110}
-            fromFrame={240}
-            title="Upload"
-            topIcon={
-              <UploadCloud
-                size={30}
-                color={colors.brand.primary}
-                strokeWidth={2}
-                aria-hidden="true"
-              />
-            }
-          />
-          <Node
-            x={ING.x}
-            y={ING.y}
-            w={NW}
-            h={NH}
-            fromFrame={430}
-            title="ingest-agent"
-            sub="extract"
-            gemini
-          />
-          <Node
-            x={MON.x}
-            y={MON.y}
-            w={NW}
-            h={NH}
-            fromFrame={710}
-            title="monitor-agent"
-            sub="watch price"
-            gemini
-          />
-          <Node
-            x={CLM.x}
-            y={CLM.y}
-            w={NW}
-            h={NH}
-            fromFrame={930}
-            title="claim-agent"
-            sub="draft claim"
-            gemini
-          />
-          <SentCard x={SENT.x} y={SENT.y} fromFrame={948} />
-          <Node
-            x={ASST.x}
-            y={ASST.y}
-            w={250}
-            h={150}
-            fromFrame={1585}
-            title="assistant-agent"
-            sub="answers your questions — not in the claim workflow"
-            gemini
-          />
-
-          {FIELDS.map((f, j) => (
-            <FieldChip key={f} x={ING.x} y={478 + j * 40} label={f} fromFrame={450 + j * 8} />
+          <UploadChip />
+          {AGENTS.map((a) => (
+            <AgentCard key={a.key} def={a} />
           ))}
-          <GeminiOcrLabel x={ING.x} y={478 + 4 * 40 + 6} fromFrame={490} />
 
-          <Pill x={SCHED.x} y={SCHED.y} label="every 15 min" fromFrame={725} />
-
-          <DraftSnippet x={CLM.x} y={CLM.y + 78} fromFrame={955} />
-
-          <Node
+          {/* Service nodes (revealed as the network draws in). */}
+          <ServiceNode
             x={MONGO.x}
             y={MONGO.y}
-            w={300}
-            h={84}
-            fromFrame={1190}
-            title="MongoDB Atlas"
-            sub="purchases · claims · policies"
+            logo="brandlogos/mongodb.svg"
+            title="MongoDB MCP"
+            sub="shared memory · purchases · claims"
+            fromFrame={1390}
+            accent={BRAND_BLUE}
           />
-          <PhoenixBand y={PHX_Y} fromFrame={1215} />
+          <ServiceNode
+            x={PHX.x}
+            y={PHX.y}
+            logo="brandlogos/phoenix.png"
+            title="Arize Phoenix"
+            sub="traces every decision"
+            fromFrame={1440}
+            accent={LAVENDER}
+          />
+          <ServiceNode
+            x={ES.x}
+            y={ES.y}
+            logo="brandlogos/elasticsearch.svg"
+            title="Elasticsearch"
+            sub="policy search"
+            fromFrame={1490}
+            accent={AMBER}
+          />
         </AbsoluteFill>
 
-        {/* ═════ TECHSTACK (Stage G — fixed; fills freed bottom; title → logos) ═════ */}
-        <BuiltOnTitle fromFrame={1845} />
+        {/* ═════ SCREEN-FIXED CAPTIONS ═════ */}
+        <OpeningLine />
+        <Callout text="Gemini reads the receipt." fromFrame={196} toFrame={470} />
+        <Callout text="Gemini watches the price." fromFrame={500} toFrame={770} />
+        <Callout text="Gemini drafts the email." fromFrame={800} toFrame={1080} />
+        <Callout text="Gemini redrafts on request." fromFrame={1100} toFrame={1370} />
+
+        {/* ═════ TECHSTACK (Phase D — fixed; fills the freed bottom) ═════ */}
+        <BuiltOnTitle fromFrame={1850} />
         <div
           style={{
             position: "absolute",
             left: 60,
             right: 60,
-            top: 728,
+            top: 730,
             display: "flex",
             justifyContent: "center",
             flexWrap: "wrap",
@@ -756,40 +637,37 @@ export const Beat05: React.FC = () => {
           }}
         >
           {TECH.map((t, i) => (
-            <TechItem key={t.name} logo={t.logo} name={t.name} fromFrame={1905 + i * 6} />
+            <TechItem key={t.name} logo={t.logo} name={t.name} fromFrame={1910 + i * 6} />
           ))}
         </div>
       </AbsoluteFill>
 
+      {/* Burned-in narration (PROJECT LAW: subtitles always). Re-mapped to the
+          new 4-phase arc + the reveal. */}
       <BeatSubtitle
-        text="We start with a receipt — upload it once."
-        fromFrame={280}
-        durationFrames={190}
+        text="Gemini reads every receipt the moment you upload it."
+        fromFrame={196}
+        durationFrames={274}
       />
       <BeatSubtitle
-        text="Gemini extracts the merchant, item, date, and price."
-        fromFrame={490}
-        durationFrames={230}
-      />
-      <BeatSubtitle
-        text="Every 15 minutes, it checks the current price."
-        fromFrame={740}
-        durationFrames={200}
-      />
-      <BeatSubtitle
-        text="When the price drops, claim-agent drafts and sends your email."
-        fromFrame={960}
-        durationFrames={230}
-      />
-      <BeatSubtitle
-        text="Every state and tool call is stored — and fully traced."
-        fromFrame={1210}
+        text="It watches the price for you — every fifteen minutes."
+        fromFrame={500}
         durationFrames={270}
       />
       <BeatSubtitle
-        text="And the assistant is always there when you need it."
-        fromFrame={1590}
-        durationFrames={200}
+        text="When the price drops, it drafts your claim automatically."
+        fromFrame={800}
+        durationFrames={280}
+      />
+      <BeatSubtitle
+        text="And the assistant redrafts it the instant you ask."
+        fromFrame={1100}
+        durationFrames={270}
+      />
+      <BeatSubtitle
+        text="Four agents, one shared memory — all on MongoDB MCP."
+        fromFrame={1420}
+        durationFrames={360}
       />
     </HookAtmosphere>
   );
