@@ -11,6 +11,7 @@ import { Beat04 } from "./beats/b04_peer-meet/Beat04";
 import { Beat05 } from "./beats/b05_arch-master/Beat05";
 import { Beat05New } from "./beats/b05new_arch-rolling/Beat05New";
 import { Beat05New2 } from "./beats/b05new2_arch-sponsors/Beat05New2";
+import { Beat05New3 } from "./beats/b05new3_arch-synced/Beat05New3";
 import { Beat06 } from "./beats/b06_demo-upload-extract/Beat06";
 import { Beat07 } from "./beats/b07_demo-monitor-drop/Beat07";
 import { Beat08 } from "./beats/b08_demo-3panel-claimshell/Beat08";
@@ -173,6 +174,16 @@ export const RemotionRoot = () => {
         id="Beat05New2"
         component={Beat05New2}
         durationInFrames={3240}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      {/* ARCH variant — b05new3: one-at-a-time MCP reveal (card+node+lines synced)
+          + arch-fade / cards-rise / techstack endgame. All 4 ARCH variants kept. */}
+      <Composition
+        id="Beat05New3"
+        component={Beat05New3}
+        durationInFrames={3380}
         fps={60}
         width={1920}
         height={1080}
