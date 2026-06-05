@@ -9,11 +9,15 @@ import { COLOR, EASE_UI, TYPE } from "../../shots/_shared/tokens";
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: EASE_UI } as const;
 const iv = (f: number, range: number[], out: number[]) => interpolate(f, range, out, clamp);
 
+// Order = reveal order (index 0 reveals first / lands top-left = most prominent).
+// Best Buy leads (strongest documented post-purchase price-adjustment policy),
+// Target second (14-day own-price adjustment). Amazon is kept for coverage
+// breadth but moved to a middle position — it has no formal price-adjustment
+// program, so it should not headline a price-back demo.
 const PLATFORMS = [
-  "amazon",
-  "walmart",
   "best_buy",
   "target",
+  "walmart",
   "costco",
   "home_depot",
   "lowes",
@@ -24,6 +28,7 @@ const PLATFORMS = [
   "newegg",
   "staples",
   "crutchfield",
+  "amazon",
   "dell",
   "alaska",
   "american",
