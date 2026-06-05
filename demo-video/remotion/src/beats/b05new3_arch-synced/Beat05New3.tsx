@@ -603,9 +603,15 @@ const DraftSnippet: React.FC<{ x: number; y: number; fromFrame: number }> = ({
   );
 };
 
+// ── "Gemini" rendered in the purple→blue brand gradient (matches the section
+//    titles). Used inline inside the keynote callouts.
+const GradientGemini: React.FC = () => (
+  <span style={{ ...GEMINI_GRADIENT_TEXT, fontFamily: GOOGLE_SANS, fontWeight: 600 }}>Gemini</span>
+);
+
 // ── Overlay keynote caption (screen-fixed, top-center). One per agent moment.
-const Callout: React.FC<{ text: string; fromFrame: number; toFrame: number }> = ({
-  text,
+const Callout: React.FC<{ children: React.ReactNode; fromFrame: number; toFrame: number }> = ({
+  children,
   fromFrame,
   toFrame,
 }) => {
@@ -639,7 +645,7 @@ const Callout: React.FC<{ text: string; fromFrame: number; toFrame: number }> = 
         pointerEvents: "none",
       }}
     >
-      {text}
+      {children}
     </div>
   );
 };
@@ -709,7 +715,9 @@ export const Beat05New3: React.FC = () => {
   // its place; then the techstack reveals below.
   const archOpacity = interpolate(frame, [2820, 2960], [1, 0], { ...C, easing: easings.easeIn });
   const archDriftY = interpolate(frame, [2840, 3020], [0, -80], { ...C, easing: ease });
-  const cardRiseY = interpolate(frame, [2840, 3040], [0, -470], { ...C, easing: ease });
+  // Cards + title rise to sit BELOW the architecture's old spot (not all the
+  // way up), so the final [cards + techstack] block stays vertically centered.
+  const cardRiseY = interpolate(frame, [2840, 3040], [0, -310], { ...C, easing: ease });
   const globalFade = interpolate(frame, [3280, 3380], [1, 0], { ...C });
 
   return (
@@ -933,10 +941,18 @@ export const Beat05New3: React.FC = () => {
         </AbsoluteFill>
 
         {/* ═════ OVERLAY KEYNOTE CALLOUTS (screen-fixed, agent build) ═════ */}
-        <Callout text="Gemini reads the receipt." fromFrame={480} toFrame={740} />
-        <Callout text="Gemini watches the price." fromFrame={770} toFrame={960} />
-        <Callout text="Gemini drafts the email." fromFrame={990} toFrame={1200} />
-        <Callout text="Gemini redrafts on request." fromFrame={1600} toFrame={1820} />
+        <Callout fromFrame={480} toFrame={740}>
+          <GradientGemini /> reads the receipt.
+        </Callout>
+        <Callout fromFrame={770} toFrame={960}>
+          <GradientGemini /> watches the price.
+        </Callout>
+        <Callout fromFrame={990} toFrame={1200}>
+          <GradientGemini /> drafts the email.
+        </Callout>
+        <Callout fromFrame={1600} toFrame={1820}>
+          <GradientGemini /> answers your questions.
+        </Callout>
 
         {/* ═════ MCP INTRO CARDS (lower half; rise into upper half in Phase E) ═════ */}
         <div
@@ -978,13 +994,13 @@ export const Beat05New3: React.FC = () => {
         </div>
 
         {/* ═════ TECHSTACK (Phase E — reveals in the vacated lower half) ═════ */}
-        <BuiltOnTitle fromFrame={2980} top={560} />
+        <BuiltOnTitle fromFrame={3030} top={690} />
         <div
           style={{
             position: "absolute",
             left: 60,
             right: 60,
-            top: 650,
+            top: 780,
             display: "flex",
             justifyContent: "center",
             flexWrap: "wrap",
@@ -993,7 +1009,7 @@ export const Beat05New3: React.FC = () => {
           }}
         >
           {TECH.map((t, i) => (
-            <TechItem key={t.name} logo={t.logo} name={t.name} fromFrame={3020 + i * 6} />
+            <TechItem key={t.name} logo={t.logo} name={t.name} fromFrame={3070 + i * 6} />
           ))}
         </div>
       </AbsoluteFill>
