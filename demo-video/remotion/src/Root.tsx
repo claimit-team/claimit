@@ -12,6 +12,7 @@ import { Beat05 } from "./beats/b05_arch-master/Beat05";
 import { Beat05New } from "./beats/b05new_arch-rolling/Beat05New";
 import { Beat05New2 } from "./beats/b05new2_arch-sponsors/Beat05New2";
 import { Beat05New3 } from "./beats/b05new3_arch-synced/Beat05New3";
+import { Beat05New4 } from "./beats/b05new4_arch-spoken/Beat05New4";
 import { Beat06 } from "./beats/b06_demo-upload-extract/Beat06";
 import { Beat07 } from "./beats/b07_demo-monitor-drop/Beat07";
 import { Beat08 } from "./beats/b08_demo-3panel-claimshell/Beat08";
@@ -184,6 +185,16 @@ export const RemotionRoot = () => {
         id="Beat05New3"
         component={Beat05New3}
         durationInFrames={3380}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      {/* ARCH variant — b05new4: production cut, accelerated to ~49s + "The System
+          Behind It" title + 13 VO-aligned spoken subtitles. All 5 variants kept. */}
+      <Composition
+        id="Beat05New4"
+        component={Beat05New4}
+        durationInFrames={2940}
         fps={60}
         width={1920}
         height={1080}
