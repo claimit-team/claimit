@@ -1,0 +1,15 @@
+{
+  "_id": "c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c3",
+  "updated_at": "2026-05-31T16:00:00Z",
+  "purchase_id": "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1",
+  "platform": "costco",
+  "product_id": "1820413",
+  "price_member": 499.99,
+  "price_non_member": null,
+  "member_tier_required": null,
+  "currency": "USD",
+  "checked_at": "2026-05-31T16:00:00Z",
+  "source": "seeded",
+  "evidence_screenshot_url": "gs://claimit-evidence/c3c3c3c3-screenshot.png",
+  "raw_response_hash": "sha256:f2a7d1..."
+}

@@ -1,0 +1,177 @@
+[
+  { "id": "b01", "beatN": 1, "act": "HOOK", "text": "Every year, money slips through the cracks." },
+  {
+    "id": "b02",
+    "beatN": 2,
+    "act": "HOOK",
+    "text": "Refunds. Price protection. Rewards. Rebates."
+  },
+  { "id": "b03", "beatN": 3, "act": "HOOK", "text": "Only two out of a hundred ever get it back." },
+  {
+    "id": "b04",
+    "beatN": 4,
+    "act": "HOOK",
+    "text": "ClaimIt turns that paperwork into an AI workflow."
+  },
+  {
+    "id": "b05",
+    "beatN": 5,
+    "act": "ARCHITECTURE",
+    "text": "A receipt reaches ClaimIt — forwarded from your inbox, or uploaded by hand."
+  },
+  {
+    "id": "b06",
+    "beatN": 6,
+    "act": "ARCHITECTURE",
+    "text": "Gemini reads it and pulls out the merchant, item, date, and price."
+  },
+  {
+    "id": "b07",
+    "beatN": 7,
+    "act": "ARCHITECTURE",
+    "text": "It's stored in MongoDB, and an agent watches the price and the claim window."
+  },
+  {
+    "id": "b08",
+    "beatN": 8,
+    "act": "ARCHITECTURE",
+    "text": "When a drop clears the policy, the agent drafts the claim for you."
+  },
+  {
+    "id": "b09",
+    "beatN": 9,
+    "act": "ARCHITECTURE",
+    "text": "You approve it — and every decision, tool call, and draft is traced."
+  },
+  { "id": "b10", "beatN": 10, "act": "REFUND", "text": "It starts with a receipt." },
+  {
+    "id": "b11",
+    "beatN": 11,
+    "act": "REFUND",
+    "text": "Upload a photo or a PDF — or let ClaimIt read it from your inbox."
+  },
+  { "id": "b12", "beatN": 12, "act": "REFUND", "text": "ClaimIt pulls out the details for you." },
+  {
+    "id": "b13",
+    "beatN": 13,
+    "act": "REFUND",
+    "text": "The merchant, the item, the date, and the price."
+  },
+  {
+    "id": "b14",
+    "beatN": 14,
+    "act": "REFUND",
+    "text": "Each value lifted from the receipt — yours to check and correct."
+  },
+  {
+    "id": "b15",
+    "beatN": 15,
+    "act": "REFUND",
+    "text": "Then it watches the claim window in the background."
+  },
+  {
+    "id": "b16",
+    "beatN": 16,
+    "act": "REFUND",
+    "text": "Days pass, and it keeps checking the price for you."
+  },
+  {
+    "id": "b17",
+    "beatN": 17,
+    "act": "REFUND",
+    "text": "When Costco drops the price, ClaimIt catches it."
+  },
+  {
+    "id": "b18",
+    "beatN": 18,
+    "act": "REFUND",
+    "text": "It checks the policy, so you do not have to."
+  },
+  {
+    "id": "b19",
+    "beatN": 19,
+    "act": "REFUND",
+    "text": "Then Gemini drafts the email with the right context."
+  },
+  {
+    "id": "b20",
+    "beatN": 20,
+    "act": "REFUND",
+    "text": "Ask for a warmer tone, and it rewrites it."
+  },
+  {
+    "id": "b21",
+    "beatN": 21,
+    "act": "REFUND",
+    "text": "Seconds later, the new version is ready to review."
+  },
+  { "id": "b22", "beatN": 22, "act": "REFUND", "text": "Or make a quick edit yourself." },
+  { "id": "b23", "beatN": 23, "act": "REFUND", "text": "Your wording, saved as a fresh draft." },
+  { "id": "b24", "beatN": 24, "act": "REFUND", "text": "Review it once, then approve." },
+  {
+    "id": "b25",
+    "beatN": 25,
+    "act": "REFUND",
+    "text": "ClaimIt sends the claim. You stay focused."
+  },
+  {
+    "id": "b26",
+    "beatN": 26,
+    "act": "REFUND",
+    "text": "A banner confirms it — sent from your own Gmail."
+  },
+  {
+    "id": "b27",
+    "beatN": 27,
+    "act": "REFUND",
+    "text": "Every claim, tracked from draft to outcome."
+  },
+  {
+    "id": "b28",
+    "beatN": 28,
+    "act": "CREDIBILITY",
+    "text": "We mapped refund policies across twenty-six retailers."
+  },
+  {
+    "id": "b29",
+    "beatN": 29,
+    "act": "CREDIBILITY",
+    "text": "Costco, Macy's, Dell and others run on auto-send. Best Buy and Target run on a chat script today."
+  },
+  {
+    "id": "b30",
+    "beatN": 30,
+    "act": "IMPLEMENTATION_PROOF",
+    "text": "Under the hood, each claim is an agent workflow."
+  },
+  {
+    "id": "b31",
+    "beatN": 31,
+    "act": "IMPLEMENTATION_PROOF",
+    "text": "Gemini ADK handles reasoning, tools, and draft generation."
+  },
+  {
+    "id": "b32",
+    "beatN": 32,
+    "act": "IMPLEMENTATION_PROOF",
+    "text": "MongoDB Atlas holds every claim state, queried through MCP."
+  },
+  {
+    "id": "b33",
+    "beatN": 33,
+    "act": "IMPLEMENTATION_PROOF",
+    "text": "Phoenix traces each decision, tool call, and draft."
+  },
+  {
+    "id": "b34",
+    "beatN": 34,
+    "act": "IMPLEMENTATION_PROOF",
+    "text": "So the workflow is visible, reviewable, and ready to extend."
+  },
+  {
+    "id": "b35",
+    "beatN": 35,
+    "act": "PAYOFF",
+    "text": "ClaimIt. AI does the paperwork. You approve."
+  }
+]

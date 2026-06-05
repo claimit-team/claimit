@@ -1,0 +1,36 @@
+{
+  "_id": "c5c5c5c5-c5c5-4c5c-8c5c-c5c5c5c5c5c5",
+  "updated_at": "2026-05-31T16:09:30Z",
+  "purchase_id": "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1",
+  "user_id": "11111111-1111-4111-8111-111111111111",
+  "platform": "costco",
+  "claim_amount": 100.0,
+  "currency": "USD",
+  "claim_type": "email",
+  "draft_content": "Hello Costco Member Service,\n\nI hope you're well. I placed order 1185402639 on May 22, 2026 for the Apple iPad Air 11-inch (M2, 128GB, Wi-Fi), item 1820413, at $599.99. As of May 31, 2026, the same item is listed at Costco for $499.99 — a $100.00 drop, well within the 30-day price-adjustment window.\n\nWould you please apply a one-time price adjustment of $100.00 as member account credit? I'd really appreciate your help.\n\nWarm regards,\nJane Doe\nCostco Executive Member #111 222 333 444",
+  "draft_versions": [
+    {
+      "version": 1,
+      "content": "Hello Costco Member Service,\n\nI placed order 1185402639 on 2026-05-22 for the Apple iPad Air 11-inch (M2, 128GB, Wi-Fi), item 1820413, at $599.99. As of 2026-05-31 the same item is listed at Costco for $499.99 — a $100.00 reduction within the 30-day price-adjustment window.\n\nPlease apply a price adjustment of $100.00 as member account credit.\n\nThank you,\nJane Doe\nCostco Executive Member #111 222 333 444",
+      "generated_by": "agent",
+      "at": "2026-05-31T16:05:00Z"
+    },
+    {
+      "version": 2,
+      "content": "Hello Costco Member Service,\n\nI hope you're well. I placed order 1185402639 on May 22, 2026 for the Apple iPad Air 11-inch (M2, 128GB, Wi-Fi), item 1820413, at $599.99. As of May 31, 2026, the same item is listed at Costco for $499.99 — a $100.00 drop, well within the 30-day price-adjustment window.\n\nWould you please apply a one-time price adjustment of $100.00 as member account credit? I'd really appreciate your help.\n\nWarm regards,\nJane Doe\nCostco Executive Member #111 222 333 444",
+      "generated_by": "assistant_redraft",
+      "at": "2026-05-31T16:09:30Z"
+    }
+  ],
+  "redraft_count": 1,
+  "policy_clause_cited": "Members can request a price adjustment within 30 days if the price of an item drops at Costco; refund is issued as member account credit.",
+  "evidence_screenshot_url": "gs://claimit-evidence/c3c3c3c3-screenshot.png",
+  "send_override": null,
+  "submitted_at": null,
+  "submitted_via": null,
+  "outcome": "draft_pending",
+  "outcome_note": null,
+  "denial_reason_extracted": null,
+  "resolved_at": null,
+  "trace_id": "trace-c0a1b2c3"
+}

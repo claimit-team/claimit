@@ -228,3 +228,40 @@ export const SHADOW = {
   ].join(", "),
   rimLight: "inset 0 1px 0 rgba(255,255,255,0.08), 0 0 24px rgba(255,255,255,0.04)",
 } as const;
+
+// ── Bible §V.1 colors schema ────────────────────────────────────────────
+// Single referenced palette for new beat components. Values reuse the
+// apps/web globals.css tokens so the film matches the product UI.
+export const colors = {
+  brand: {
+    primary: "#27466E", // navy — apps/web --brand-primary-500
+    accent: "#1D7A3A", // money green — apps/web --brand-accent-500 (HOOK never uses it)
+  },
+  semantic: {
+    success: "#1D7A3A",
+    warning: "#F59E0B",
+    danger: "#D92626", // apps/web --semantic-danger — used for the "2%" punch in beat 3
+  },
+  neutral: {
+    900: "#101318",
+    700: "#303845",
+    500: "#6B7280",
+    300: "#C5CAD3",
+    100: "#F0F2F5",
+    0: "#FFFFFF",
+  },
+  bg: {
+    dark: "#000000", // pure black — legacy dark-mode beats only
+    light: "#FAFBFC", // light-mode page bg (≈ apps/web body)
+    surface: "#FFFFFF", // card surface on top of page bg
+  },
+  text: {
+    dark: "#0F1419", // near-black body text (≈ apps/web foreground)
+    muted: "#374151", // muted captions / secondary text
+    light: "#FAFBFC", // legacy: text on dark-mode beats
+  },
+} as const;
+
+export const FONT_STACK_TEXT = '"Inter", system-ui, -apple-system, "Segoe UI", sans-serif';
+export const FONT_STACK_EMOJI =
+  '"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
