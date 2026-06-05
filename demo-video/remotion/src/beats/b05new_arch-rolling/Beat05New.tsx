@@ -1,38 +1,25 @@
-// Beat 05 — ARCHITECTURE (single narrative beat) · 0:20–0:58 · 2280f / 38s.
-// Merges old b05-b09 + b09b into ONE progressive build. Subtitle-only.
-// Reveal primitive: useReveal (spring damping 14, mass 0.5, 18f) — image+text
-// land together. Camera = transform on the arch wrapper (easeInOut, ~42f).
-// ClaimIt brand blue = colors.brand.primary (#27466E, == peer COLOR.NAVY).
+// Beat 05 NEW — ARCHITECTURE (rolling-pan variant) · 2520f / 42s.
+// LAYERS the redesign features ON TOP of the original Beat05 content — nothing
+// from the old beat is removed. The full pipeline (Upload → Ingest → Monitor →
+// Claim → Sent-to-Costco), all four event arrow-labels (receipt.uploaded /
+// purchase.ingested / price.dropped / claim.sent), the OCR field chips, the
+// "every 15 min" pill, the typewriter draft, the MongoDB + Phoenix layer and
+// the "Built on…" techstack all stay exactly where they were.
 //
-// ───────────────────────── STORYBOARD (frames @60fps) ─────────────────────────
-//  0  INTRO TITLE ............... 0-240    "How it works?" in brand blue:
-//        fade in big+centered (f0-60) → hold (60-150) → shrink ~40% + rise to
-//        top-center (150-210) → settles as a fixed section header (210+).
-//        No subtitle — the title IS the visual.
-//  A  UPLOAD .................... 240-440  Upload chip springs in (f240).
-//        sub "We start with a receipt — upload it once."         f280-470
-//  B  INGEST + OCR + GEMINI ..... 420-720  arrow(+label "receipt.uploaded")→
-//        ingest(+Gemini)→ field chips (8f stagger) + "Gemini read it (OCR)".
-//        sub "Gemini extracts the merchant, item, date, and price."  f490-720
-//  C  MONITOR + 15min .......... 700-940   arrow(+"purchase.ingested")→monitor
-//        (+Gemini)→ "every 15 min" pill above with down-arrow INTO monitor.
-//        sub "Every 15 minutes, it checks the current price."   f740-940
-//  D  CLAIM + DRAFT + SENT ...... 920-1180 arrow(+"price.dropped")→claim(+Gemini);
-//        arrow(+"claim.sent")→ Sent card (to Costco); typewriter draft snippet.
-//        sub "When the price drops, claim-agent drafts and sends your email." f960-1190
-//  E  MONGO + PHOENIX (no cam) .. 1180-1480 dashed lines→MongoDB Atlas (in place);
-//        single Mongo→Phoenix trace connector + Phoenix tracing band. NO camera move.
-//        sub "Every state and tool call is stored — and fully traced."  f1210-1480
-//  F  SHRINK + LEFT (parallel) .. 1480-1790 ONE motion: scale 0.74 + tx -90
-//        (f1490-1532); then center-out divider + assistant-agent sidecar.
-//        sub "And the assistant is always there when you need it."  f1590-1790
-//  G  SHIFT UP + TECHSTACK ...... 1790-2160 camera up 150 + drift back to center
-//        (f1790-1832, no further shrink) frees bottom ~40% & aligns the techstack
-//        under the diagram. Blue title "Built on Google Cloud + Gemini."
-//        reveals FIRST (f1845), THEN logos one-by-one below it (f1905+, 6f stagger).
-//        No bottom subtitle — the blue title carries it.
-//  H  Soft outro ............... 2160-2280 whole composition → 85% opacity.
-// ──────────────────────────────────────────────────────────────────────────────
+// What's ADDED (the new design):
+//   • a rolling close-up camera (~1.4×) that pans RIGHT, framing each agent;
+//   • per-agent overlay callouts (Apple keynote captions) at each moment;
+//   • per-agent badge stacks — the existing Gemini corner chip PLUS MongoDB
+//     MCP + Phoenix chips (Assistant also gets Elasticsearch);
+//   • a final zoom-out to 1.0 where the MCP connection lines draw on
+//     (MongoDB MCP → all 4 solid blue, Phoenix → all 4 dashed lavender,
+//      Elasticsearch → Assistant only, amber), then the techstack outro;
+//   • "MongoDB Atlas" renamed to "MongoDB MCP" everywhere in this beat.
+//
+// Camera = transform on the arch wrapper, transformOrigin = viewport center
+// (960,540): camTx = scale·(960 − focusX); camTy/scale keyframed (eased per
+// segment) for the rolling pan, the zoom-out reveal and the techstack lift.
+// ──────────────────────────────────────────────────────────────────────────
 import { Send, UploadCloud } from "lucide-react";
 import { AbsoluteFill, Img, interpolate, staticFile, useCurrentFrame } from "remotion";
 
@@ -55,6 +42,9 @@ const MONGO = { x: 925, y: 650 };
 const ASST = { x: 1790, y: 380 };
 const DIV_X = 1640;
 const PHX_Y = 838;
+// New MCP-layer source anchors (added for the connection-line reveal).
+const PHX_NODE = { x: 1300, y: 720 };
+const ES_NODE = { x: 1720, y: 560 };
 const BORDER = "1px solid rgba(15,20,25,0.10)";
 const SHADOW = "0 6px 18px rgba(15,20,25,0.08)";
 const cardBase = {
@@ -67,6 +57,35 @@ const cardBase = {
 };
 const GEM = staticFile("brandlogos/googlegemini.svg");
 const BRAND_BLUE = colors.brand.primary; // #27466E — same blue as the ClaimIt logo (b04)
+const AMBER = colors.semantic.warning; // #F59E0B — Elasticsearch accent
+const LAVENDER = "#8B83B0"; // muted "observability, not data" line color
+
+// Badge chips — same visual family as the existing Gemini corner badge.
+const BADGE_SRC: Record<string, string> = {
+  mongo: "brandlogos/mongodb.svg",
+  phoenix: "brandlogos/phoenix.png",
+  elastic: "brandlogos/elasticsearch.svg",
+};
+const BadgeChip: React.FC<{ kind: string }> = ({ kind }) => (
+  <div
+    style={{
+      width: 22,
+      height: 22,
+      borderRadius: 6,
+      backgroundColor: colors.bg.surface,
+      border: BORDER,
+      boxShadow: "0 1px 3px rgba(15,20,25,0.06)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+    }}
+  >
+    <Img
+      src={staticFile(BADGE_SRC[kind])}
+      style={{ width: 13, height: 13, objectFit: "contain" }}
+    />
+  </div>
+);
 
 // ── Intro section title: "How it works?" — big+centered, then shrinks to a
 //    fixed top-center section header. NOT camera-transformed.
@@ -109,7 +128,8 @@ const Node: React.FC<{
   sub?: string;
   topIcon?: React.ReactNode;
   gemini?: boolean;
-}> = ({ x, y, w, h, fromFrame, title, sub, topIcon, gemini }) => {
+  badges?: string[];
+}> = ({ x, y, w, h, fromFrame, title, sub, topIcon, gemini, badges }) => {
   const r = useReveal(fromFrame);
   return (
     <div
@@ -151,6 +171,23 @@ const Node: React.FC<{
       </span>
       {sub ? (
         <span style={{ fontSize: 12, color: colors.text.muted, lineHeight: 1.3 }}>{sub}</span>
+      ) : null}
+      {badges ? (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 7,
+            left: 0,
+            right: 0,
+            display: "flex",
+            justifyContent: "center",
+            gap: 4,
+          }}
+        >
+          {badges.map((b) => (
+            <BadgeChip key={b} kind={b} />
+          ))}
+        </div>
       ) : null}
     </div>
   );
@@ -404,7 +441,7 @@ const TECH: { logo: string; name: string }[] = [
   { logo: "googlepubsub.svg", name: "Pub/Sub" },
   { logo: "googlecloud.svg", name: "Cloud Run" },
   { logo: "googlecloud.svg", name: "Cloud Scheduler" },
-  { logo: "mongodb.svg", name: "MongoDB Atlas" },
+  { logo: "mongodb.svg", name: "MongoDB MCP" },
   { logo: "elasticsearch.svg", name: "Elasticsearch" },
   { logo: "phoenix.png", name: "Arize Phoenix" },
   { logo: "gmail.svg", name: "Gmail" },
@@ -552,21 +589,117 @@ const PhoenixBand: React.FC<{ y: number; fromFrame: number }> = ({ y, fromFrame 
   );
 };
 
-export const Beat05: React.FC = () => {
+// ── Overlay keynote caption (screen-fixed, top-center). One per agent moment.
+//    Sits BELOW the persistent "How it works?" header; it never occludes the
+//    arrow labels (which live lower, inside the camera-framed arch).
+const Callout: React.FC<{ text: string; fromFrame: number; toFrame: number }> = ({
+  text,
+  fromFrame,
+  toFrame,
+}) => {
+  const frame = useCurrentFrame();
+  if (frame < fromFrame || frame > toFrame) return null;
+  const opacity = interpolate(
+    frame,
+    [fromFrame, fromFrame + 16, toFrame - 16, toFrame],
+    [0, 1, 1, 0],
+    { ...C, easing: easings.easeInOut },
+  );
+  const y = interpolate(frame, [fromFrame, fromFrame + 20], [12, 0], {
+    ...C,
+    easing: easings.easeOut,
+  });
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        top: 150,
+        textAlign: "center",
+        opacity,
+        transform: `translateY(${y.toFixed(1)}px)`,
+        fontFamily: FONT_STACK_TEXT,
+        fontSize: 46,
+        fontWeight: 400,
+        letterSpacing: "-0.012em",
+        color: colors.text.dark,
+        pointerEvents: "none",
+      }}
+    >
+      {text}
+    </div>
+  );
+};
+
+// ── A single draw-on connection line (animates its end-point so it works for
+//    both solid and dashed strokes). Used for the MCP-layer reveal.
+const Wire: React.FC<{
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color: string;
+  width: number;
+  dashed?: boolean;
+  fromFrame: number;
+}> = ({ x1, y1, x2, y2, color, width, dashed, fromFrame }) => {
+  const frame = useCurrentFrame();
+  const p = interpolate(frame, [fromFrame, fromFrame + 40], [0, 1], {
+    ...C,
+    easing: easings.sharpOut,
+  });
+  if (p <= 0) return null;
+  return (
+    <line
+      x1={x1}
+      y1={y1}
+      x2={x1 + (x2 - x1) * p}
+      y2={y1 + (y2 - y1) * p}
+      stroke={color}
+      strokeWidth={width}
+      strokeLinecap="round"
+      strokeDasharray={dashed ? "4 7" : undefined}
+      opacity={dashed ? 0.55 : 0.85}
+    />
+  );
+};
+
+// Agent bottom anchor points for the MCP wires (card bottom edge).
+const AGENT_WIRES: { x: number; y: number }[] = [
+  { x: ING.x, y: ING.y + NH / 2 },
+  { x: MON.x, y: MON.y + NH / 2 },
+  { x: CLM.x, y: CLM.y + NH / 2 },
+  { x: ASST.x, y: ASST.y + 75 },
+];
+
+export const Beat05New: React.FC = () => {
   const frame = useCurrentFrame();
   const ease = easings.easeInOut;
 
-  // Camera. E: identity (no move). F: parallel shrink + shift-left (ONE motion).
-  // G: shift up only (no further shrink) to free the bottom for the techstack.
-  const camScale = interpolate(frame, [1490, 1532], [1, 0.74], { ...C, easing: ease });
-  // F: shift left (reveal the assistant on the right). G: drift back toward
-  // center as it rises, so the techstack lands aligned under the diagram.
-  const camTx =
-    interpolate(frame, [1490, 1532], [0, -90], { ...C, easing: ease }) +
-    interpolate(frame, [1790, 1832], [0, 70], { ...C, easing: ease });
-  const camTy = interpolate(frame, [1790, 1832], [0, -150], { ...C, easing: ease });
-  const globalFade = interpolate(frame, [2160, 2280], [1, 0.85], { ...C });
+  // ── Rolling camera (transformOrigin = viewport center 960,540). ──────────
+  // scale 1.4 through the build, then zoom out to 1.0 for the MCP reveal,
+  // then settle smaller + lift to free the bottom for the techstack.
+  const camScale = interpolate(frame, [0, 1800, 2020, 2160, 2220], [1.4, 1.4, 1.0, 1.0, 0.68], {
+    ...C,
+    easing: ease,
+  });
+  // focusX = canvas x we want centered. Holds on each agent, eases between,
+  // then recenters on the whole diagram for the zoom-out.
+  const focusX = interpolate(
+    frame,
+    [0, 240, 460, 720, 760, 940, 980, 1180, 1220, 1440, 1560, 1800, 1820, 2020],
+    [420, 420, ING.x, ING.x, MON.x, MON.x, CLM.x, CLM.x, 1480, 1480, ASST.x, ASST.x, 987, 987],
+    { ...C, easing: ease },
+  );
+  const camTx = camScale * (960 - focusX);
+  const camTy = interpolate(frame, [0, 1800, 2020, 2160, 2220], [188, 188, -20, -20, -190], {
+    ...C,
+    easing: ease,
+  });
+  const globalFade = interpolate(frame, [2440, 2520], [1, 0.9], { ...C });
 
+  // Old data-layer connectors (kept). New MCP wires draw in at the zoom-out.
   const mongoLineOp = interpolate(frame, [1195, 1240], [0, 0.3], { ...C });
   const phxLineOp = interpolate(frame, [1240, 1280], [0, 0.4], { ...C });
   const dividerP = interpolate(frame, [1545, 1575], [0, 1], { ...C, easing: easings.easeOut });
@@ -577,11 +710,11 @@ export const Beat05: React.FC = () => {
         {/* Section header — "How it works?" persists top-center (NOT transformed). */}
         <IntroTitle />
 
-        {/* ═════ ARCH GROUP (camera-transformed) ═════ */}
+        {/* ═════ ARCH GROUP (rolling camera) ═════ */}
         <AbsoluteFill
           style={{
             transform: `translate(${camTx.toFixed(1)}px, ${camTy.toFixed(1)}px) scale(${camScale.toFixed(4)})`,
-            transformOrigin: "830px 460px",
+            transformOrigin: "960px 540px",
           }}
         >
           <svg
@@ -590,6 +723,7 @@ export const Beat05: React.FC = () => {
             height={1080}
             style={{ position: "absolute", inset: 0 }}
           >
+            {/* OLD subtle data-layer connectors (preserved). */}
             {[ING, MON, CLM].map((a) => (
               <line
                 key={`m-${a.x}`}
@@ -603,7 +737,6 @@ export const Beat05: React.FC = () => {
                 opacity={mongoLineOp}
               />
             ))}
-            {/* subtle MongoDB → Phoenix trace connector */}
             <line
               x1={MONGO.x}
               y1={MONGO.y + 42}
@@ -623,6 +756,42 @@ export const Beat05: React.FC = () => {
               strokeWidth={1}
               strokeDasharray="2 6"
               opacity={0.4 * Math.min(1, dividerP * 3)}
+            />
+
+            {/* NEW MCP-layer reveal — draws on during the zoom-out. */}
+            {AGENT_WIRES.map((a, i) => (
+              <Wire
+                key={`mcp-mongo-${a.x}`}
+                x1={MONGO.x}
+                y1={MONGO.y - 42}
+                x2={a.x}
+                y2={a.y}
+                color={BRAND_BLUE}
+                width={2.5}
+                fromFrame={1880 + i * 8}
+              />
+            ))}
+            {AGENT_WIRES.map((a, i) => (
+              <Wire
+                key={`mcp-phx-${a.x}`}
+                x1={PHX_NODE.x}
+                y1={PHX_NODE.y - 34}
+                x2={a.x}
+                y2={a.y}
+                color={LAVENDER}
+                width={1.5}
+                dashed
+                fromFrame={1980 + i * 8}
+              />
+            ))}
+            <Wire
+              x1={ES_NODE.x}
+              y1={ES_NODE.y - 30}
+              x2={ASST.x}
+              y2={ASST.y + 75}
+              color={AMBER}
+              width={2}
+              fromFrame={2060}
             />
           </svg>
 
@@ -686,6 +855,7 @@ export const Beat05: React.FC = () => {
             title="ingest-agent"
             sub="extract"
             gemini
+            badges={["mongo", "phoenix"]}
           />
           <Node
             x={MON.x}
@@ -696,6 +866,7 @@ export const Beat05: React.FC = () => {
             title="monitor-agent"
             sub="watch price"
             gemini
+            badges={["mongo", "phoenix"]}
           />
           <Node
             x={CLM.x}
@@ -706,6 +877,7 @@ export const Beat05: React.FC = () => {
             title="claim-agent"
             sub="draft claim"
             gemini
+            badges={["mongo", "phoenix"]}
           />
           <SentCard x={SENT.x} y={SENT.y} fromFrame={948} />
           <Node
@@ -717,6 +889,7 @@ export const Beat05: React.FC = () => {
             title="assistant-agent"
             sub="answers your questions — not in the claim workflow"
             gemini
+            badges={["mongo", "phoenix", "elastic"]}
           />
 
           {FIELDS.map((f, j) => (
@@ -734,14 +907,51 @@ export const Beat05: React.FC = () => {
             w={300}
             h={84}
             fromFrame={1190}
-            title="MongoDB Atlas"
+            title="MongoDB MCP"
             sub="purchases · claims · policies"
+          />
+          {/* New MCP-layer source nodes (Phoenix / Elasticsearch). */}
+          <Node
+            x={PHX_NODE.x}
+            y={PHX_NODE.y}
+            w={210}
+            h={70}
+            fromFrame={1850}
+            title="Arize Phoenix"
+            sub="traces every step"
+            topIcon={
+              <Img
+                src={staticFile("brandlogos/phoenix.png")}
+                style={{ width: 20, height: 20, objectFit: "contain" }}
+              />
+            }
+          />
+          <Node
+            x={ES_NODE.x}
+            y={ES_NODE.y}
+            w={200}
+            h={66}
+            fromFrame={1890}
+            title="Elasticsearch"
+            sub="policy search"
+            topIcon={
+              <Img
+                src={staticFile("brandlogos/elasticsearch.svg")}
+                style={{ width: 20, height: 20, objectFit: "contain" }}
+              />
+            }
           />
           <PhoenixBand y={PHX_Y} fromFrame={1215} />
         </AbsoluteFill>
 
-        {/* ═════ TECHSTACK (Stage G — fixed; fills freed bottom; title → logos) ═════ */}
-        <BuiltOnTitle fromFrame={1845} />
+        {/* ═════ OVERLAY KEYNOTE CALLOUTS (screen-fixed) ═════ */}
+        <Callout text="Gemini reads the receipt." fromFrame={480} toFrame={740} />
+        <Callout text="Gemini watches the price." fromFrame={770} toFrame={960} />
+        <Callout text="Gemini drafts the email." fromFrame={990} toFrame={1200} />
+        <Callout text="Gemini redrafts on request." fromFrame={1600} toFrame={1820} />
+
+        {/* ═════ TECHSTACK (fixed; fills the freed bottom; title → logos) ═════ */}
+        <BuiltOnTitle fromFrame={2240} />
         <div
           style={{
             position: "absolute",
@@ -756,7 +966,7 @@ export const Beat05: React.FC = () => {
           }}
         >
           {TECH.map((t, i) => (
-            <TechItem key={t.name} logo={t.logo} name={t.name} fromFrame={1905 + i * 6} />
+            <TechItem key={t.name} logo={t.logo} name={t.name} fromFrame={2300 + i * 6} />
           ))}
         </div>
       </AbsoluteFill>
@@ -782,14 +992,14 @@ export const Beat05: React.FC = () => {
         durationFrames={230}
       />
       <BeatSubtitle
-        text="Every state and tool call is stored — and fully traced."
-        fromFrame={1210}
-        durationFrames={270}
-      />
-      <BeatSubtitle
         text="And the assistant is always there when you need it."
         fromFrame={1590}
         durationFrames={200}
+      />
+      <BeatSubtitle
+        text="Every state and tool call is stored on MongoDB MCP — and fully traced."
+        fromFrame={1880}
+        durationFrames={300}
       />
     </HookAtmosphere>
   );
