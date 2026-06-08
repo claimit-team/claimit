@@ -9,16 +9,14 @@ import { Beat02 } from "./beats/b02_peer-hook/Beat02";
 import { Beat03 } from "./beats/b03_peer-gap/Beat03";
 import { Beat04 } from "./beats/b04_peer-meet/Beat04";
 import { Beat05 } from "./beats/b05_arch-master/Beat05";
-import { Beat05New } from "./beats/b05new_arch-rolling/Beat05New";
-import { Beat05New2 } from "./beats/b05new2_arch-sponsors/Beat05New2";
-import { Beat05New3 } from "./beats/b05new3_arch-synced/Beat05New3";
-import { Beat05New4 } from "./beats/b05new4_arch-spoken/Beat05New4";
 import { Beat06 } from "./beats/b06_demo-upload-extract/Beat06";
 import { Beat07 } from "./beats/b07_demo-monitor-drop/Beat07";
 import { Beat08 } from "./beats/b08_demo-3panel-claimshell/Beat08";
 import { Beat09 } from "./beats/b09_demo-reach-policies/Beat09";
-import { Beat09New } from "./beats/b09new_reach-spoken/Beat09New";
 import { Beat10 } from "./beats/b10_payoff-claimit/Beat10";
+// Our 3 production "spoken" beat variants (kept through the dev sync 2026-06-08).
+import { Beat05New4 } from "./beats/b05new4_arch-spoken/Beat05New4";
+import { Beat09New } from "./beats/b09new_reach-spoken/Beat09New";
 import { Beat10New } from "./beats/b10new_payoff-spoken/Beat10New";
 // LEGACY b10-b29 imports removed — superseded by b06-b09 (DEMO consolidation 2026-06-04).
 import { Beat35 } from "./beats/b35_payoff-final__252-300/Beat35";
@@ -161,46 +159,6 @@ export const RemotionRoot = () => {
         width={1920}
         height={1080}
       />
-      {/* ARCH variant — b05new: rolling-pan camera + agent badges + MCP/Phoenix/ES
-          connection lines layered ON TOP of the full b05 pipeline (both kept for review). */}
-      <Composition
-        id="Beat05New"
-        component={Beat05New}
-        durationInFrames={2520}
-        fps={60}
-        width={1920}
-        height={1080}
-      />
-      {/* ARCH variant — b05new2: synchronized MCP reveal (all 4 agents first) +
-          peer sponsors fork + scrolling techstack. All 3 ARCH variants kept. */}
-      <Composition
-        id="Beat05New2"
-        component={Beat05New2}
-        durationInFrames={3240}
-        fps={60}
-        width={1920}
-        height={1080}
-      />
-      {/* ARCH variant — b05new3: one-at-a-time MCP reveal (card+node+lines synced)
-          + arch-fade / cards-rise / techstack endgame. All 4 ARCH variants kept. */}
-      <Composition
-        id="Beat05New3"
-        component={Beat05New3}
-        durationInFrames={3380}
-        fps={60}
-        width={1920}
-        height={1080}
-      />
-      {/* ARCH variant — b05new4: production cut, accelerated to ~49s + "The System
-          Behind It" title + 13 VO-aligned spoken subtitles. All 5 variants kept. */}
-      <Composition
-        id="Beat05New4"
-        component={Beat05New4}
-        durationInFrames={2940}
-        fps={60}
-        width={1920}
-        height={1080}
-      />
       {/* DEMO — new b06 (upload → OCR extract); will consolidate b10-b14 pending review. */}
       <Composition
         id="Beat06"
@@ -237,29 +195,11 @@ export const RemotionRoot = () => {
         width={1920}
         height={1080}
       />
-      {/* DEMO — b09new: post-swap base + 4 VO-aligned subtitles (legacy burned subs removed). */}
-      <Composition
-        id="Beat09New"
-        component={Beat09New}
-        durationInFrames={880}
-        fps={60}
-        width={1920}
-        height={1080}
-      />
       {/* PAYOFF — new b10 closing ClaimIt lockup (peer Scene09Close base). b35 kept for comparison. */}
       <Composition
         id="Beat10"
         component={Beat10}
         durationInFrames={560}
-        fps={60}
-        width={1920}
-        height={1080}
-      />
-      {/* PAYOFF — b10new: ClaimIt promoted to hero + animated title hierarchy reveal. */}
-      <Composition
-        id="Beat10New"
-        component={Beat10New}
-        durationInFrames={540}
         fps={60}
         width={1920}
         height={1080}
@@ -457,11 +397,36 @@ export const RemotionRoot = () => {
         width={1920}
         height={1080}
       />
-      {/* MASTER — full b01-b10 sequence for review (excludes legacy + b35). */}
+      {/* MASTER — full b02-b10 sequence for review (b01 removed; excludes legacy + b35). */}
       <Composition
         id="MasterDemo"
         component={MasterDemo}
-        durationInFrames={8270}
+        durationInFrames={8030}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      {/* ===== Our production "spoken" beat variants (restored after dev sync). ===== */}
+      <Composition
+        id="Beat05New4"
+        component={Beat05New4}
+        durationInFrames={2940}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="Beat09New"
+        component={Beat09New}
+        durationInFrames={880}
+        fps={60}
+        width={1920}
+        height={1080}
+      />
+      <Composition
+        id="Beat10New"
+        component={Beat10New}
+        durationInFrames={540}
         fps={60}
         width={1920}
         height={1080}

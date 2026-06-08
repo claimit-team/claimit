@@ -142,8 +142,12 @@ function Sidebar({ active }: { active: string }) {
 }
 
 function TopHeader() {
+  // NB: the real app uses `sticky top-0`, but this composition is a fixed,
+  // non-scrolling 1920×1080 viewport — `sticky` makes the header float to the
+  // middle of the Studio preview's scroll area. Static keeps it pinned to the
+  // top of the content column (where it belongs).
   return (
-    <header className="sticky top-0 z-40 h-16 bg-neutral-0 border-b border-neutral-200 flex items-center justify-between px-8">
+    <header className="z-40 h-16 shrink-0 bg-neutral-0 border-b border-neutral-200 flex items-center justify-between px-8">
       <div />
       <div className="flex items-center gap-3">
         <span className="inline-flex size-8 items-center justify-center rounded-md text-neutral-500">

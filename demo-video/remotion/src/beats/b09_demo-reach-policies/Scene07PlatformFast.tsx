@@ -137,7 +137,7 @@ const CELLS: { id: CellId; platform: string; type: string; render: () => React.R
   },
   {
     id: "chat_script",
-    platform: "Macy's",
+    platform: "Amazon",
     type: "Chat Script",
     render: () => {
       const lines = DP12_CHAT.body
