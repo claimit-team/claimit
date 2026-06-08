@@ -1,11 +1,11 @@
-// Master composition — chains Beat01..Beat10 end-to-end (HOOK → ARCH → DEMO →
+// Master composition — chains Beat02..Beat10 end-to-end (HOOK → ARCH → DEMO →
 // PAYOFF) into one continuous film for review. No new visual work: each beat is
 // wrapped in a <Series.Sequence> with its EXACT duration copied verbatim from
 // Root.tsx (the source of truth). Excludes the _legacy_ beats and b35.
-//   240 + 600 + 540 + 300 + 2280 + 960 + 760 + 1150 + 880 + 560 = 8270f (≈ 2:18 @ 60fps)
+//   b01 ("money slips through the cracks") removed from the intro per review.
+//   600 + 540 + 300 + 2280 + 960 + 760 + 1150 + 880 + 560 = 8030f (≈ 2:14 @ 60fps)
 import { Series } from "remotion";
 
-import { Beat01 } from "../beats/b01_hook-cracks__000-005/Beat01";
 import { Beat02 } from "../beats/b02_peer-hook/Beat02";
 import { Beat03 } from "../beats/b03_peer-gap/Beat03";
 import { Beat04 } from "../beats/b04_peer-meet/Beat04";
@@ -18,9 +18,6 @@ import { Beat10 } from "../beats/b10_payoff-claimit/Beat10";
 
 export const MasterDemo: React.FC = () => (
   <Series>
-    <Series.Sequence durationInFrames={240}>
-      <Beat01 />
-    </Series.Sequence>
     <Series.Sequence durationInFrames={600}>
       <Beat02 />
     </Series.Sequence>

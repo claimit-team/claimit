@@ -23,6 +23,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
 
+import { AgentBadge } from "../../new-video/brand";
 import { BeatSubtitle } from "../../polish/BeatSubtitle";
 import { easings } from "../../polish/easings";
 import { HookAtmosphere } from "../../polish/HookAtmosphere";
@@ -109,6 +110,11 @@ export const Beat07: React.FC = () => {
     easing: easings.easeOut,
   });
 
+  // Monitor Agent badge (names who's watching the price).
+  const monitorBadgeOp =
+    interpolate(frame, [70, 110], [0, 1], C) *
+    interpolate(frame, [660, 740], [1, 0], { ...C, easing: easings.easeIn });
+
   return (
     <HookAtmosphere>
       <AbsoluteFill
@@ -127,6 +133,9 @@ export const Beat07: React.FC = () => {
           toastP={toastP}
         />
       </AbsoluteFill>
+
+      {/* Monitor Agent — large + conspicuous (lots of free real estate here). */}
+      <AgentBadge name="Monitor Agent" opacity={monitorBadgeOp} scale={1.5} top={40} />
 
       <BeatSubtitle
         text="After you confirm, we monitor the price in the background."

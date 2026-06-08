@@ -53,11 +53,12 @@ export const GeminiSpark: React.FC<{ size?: number }> = ({ size = 28 }) => {
  * "✦ Ingest Agent · powered by Gemini". Lives in 1920×1080 canvas space
  * (sits in the top margin above the product window).
  */
-export const AgentBadge: React.FC<{ name: string; opacity?: number; top?: number }> = ({
-  name,
-  opacity = 1,
-  top = 22,
-}) => (
+export const AgentBadge: React.FC<{
+  name: string;
+  opacity?: number;
+  top?: number;
+  scale?: number;
+}> = ({ name, opacity = 1, top = 22, scale = 1 }) => (
   <div
     style={{
       position: "absolute",
@@ -79,7 +80,9 @@ export const AgentBadge: React.FC<{ name: string; opacity?: number; top?: number
         borderRadius: 999,
         background: COLOR.WHITE,
         border: `1px solid ${COLOR.LINE}`,
-        boxShadow: "0 10px 30px rgba(20,30,50,0.10)",
+        boxShadow: "0 12px 34px rgba(20,30,50,0.14)",
+        transform: `scale(${scale})`,
+        transformOrigin: "top center",
       }}
     >
       <GeminiSpark size={24} />

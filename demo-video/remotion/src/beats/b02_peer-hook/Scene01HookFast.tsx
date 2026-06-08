@@ -1,228 +1,356 @@
-// Scene 1 — Hook · 0:00–0:12 · 720f · upbeat light open.
-// Montage of real purchases (DP-1 chips) rises in; the hero Sony chip's
-// price drops $399.99 → $349.99 (amber), then an "owed $50" badge pops.
-// Punchy kicker lands late so the hook works muted.
+// Scene 1 — HOOK (rebuilt) · 600f · single-product, sense-of-time open.
+// Two squarish cards side by side: LEFT = the Sony WH-1000XM5 purchase (product
+// tile + price), RIGHT = a real month calendar whose days fill in one by one
+// (sense of time passing). Then the price drops $399.99 → $349.99 (amber) and an
+// "owed $50" badge pops. Per review: two squarish cards, headphones image left,
+// actual calendar right.
+import { getDay, getDaysInMonth } from "date-fns";
+import { Headphones } from "lucide-react";
+import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
 
-import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { Camera } from "../../shots/_shared/Camera";
-import { DP1_PURCHASE_CHIPS } from "../../shots/_shared/data";
 import { LightScene } from "../../shots/_shared/LightScene";
 import { COLOR, EASE_UI, TYPE } from "../../shots/_shared/tokens";
 
-// Beat-local COMPRESSED fork of peer's Scene01Hook (src/new-video untouched).
-// 720f → 600f: the kicker ("Prices drop. / Stores owe you. / You never find
-// out.") was stranded at f470 after a ~230f dead hold; pulled to f340 and
-// snapped in with a spring (no content cut, no crop).
-const HOOK_F = 600; // was S1_HOOK_F (720)
+const HOOK_F = 600; // unchanged (keeps b02's slot in MasterDemo)
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: EASE_UI } as const;
+
+const PAID = 399.99;
+const DROPPED = 349.99;
+
+// Calendar — May 2026 price-match window. Bought on the 11th, drop on the 25th.
+const YEAR = 2026;
+const MONTH = 4; // May (0-indexed)
+const PURCHASE_DAY = 11;
+const DROP_DAY = 25;
+const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 
 const fmt = (n: number) =>
   `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-// 3 cols × 2 rows, centered on the 1920×1080 canvas.
-const CARD_W = 460;
-const CARD_H = 150;
-const GAP = 40;
-const COLS = 3;
-const GRID_W = COLS * CARD_W + (COLS - 1) * GAP; // 1460
-const GRID_X = (1920 - GRID_W) / 2; // 230
-const GRID_Y = 392;
+// ── Timeline ──
+const CARD_IN = [0, 40] as const;
+const DAYS_FILL = [80, 300] as const; // calendar fills day-by-day
+const DROP_F = 332; // price drops after the window has run
+const BADGE_F = 394; // "owed $50" pops
 
-export const Scene01HookFast: React.FC = () => {
-  return (
-    <LightScene>
-      <Camera from={1.0} to={1.03} startF={0} endF={HOOK_F}>
-        <Inner />
-      </Camera>
-    </LightScene>
-  );
-};
+// ── Layout — two upright (taller-than-wide) cards, centred ──
+const CARD_W = 452;
+const CARD_H = 568;
+const GAP = 60;
+const LX = (1920 - (2 * CARD_W + GAP)) / 2; // 482
+const RX = LX + CARD_W + GAP; // 994
+const CY = (1080 - CARD_H) / 2; // 256
+
+export const Scene01HookFast: React.FC = () => (
+  <LightScene>
+    <Camera from={1.0} to={1.03} startF={0} endF={HOOK_F}>
+      <Inner />
+    </Camera>
+  </LightScene>
+);
 
 const Inner: React.FC = () => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  // Snappy spring arrival (0→1, clamped) — Apple-style quick settle.
-  const snap = (start: number) =>
-    Math.min(
-      1,
-      Math.max(
-        0,
-        spring({
-          frame: frame - start,
-          fps,
-          config: { damping: 14, mass: 0.5 },
-          durationInFrames: 18,
-        }),
-      ),
-    );
 
-  // Kicker (bottom) — three short lines stagger in late.
-  const kickerLines = ["Prices drop.", "Stores owe you.", "You never find out."];
+  // Card entrances (left slightly before right).
+  const lOp = interpolate(frame, CARD_IN, [0, 1], clamp);
+  const lTy = interpolate(frame, CARD_IN, [26, 0], clamp);
+  const rOp = interpolate(frame, [16, 56], [0, 1], clamp);
+  const rTy = interpolate(frame, [16, 56], [26, 0], clamp);
+
+  // Drop state.
+  const dropped = frame >= DROP_F;
+  const newOp = interpolate(frame, [DROP_F, DROP_F + 26], [0, 1], clamp);
+  const strike = interpolate(frame, [DROP_F, DROP_F + 26], [0, 1], clamp);
+  const lift = interpolate(frame, [DROP_F, DROP_F + 30], [0, -10], clamp);
+  const badgeOp = interpolate(frame, [BADGE_F, BADGE_F + 30], [0, 1], clamp);
+  const badgeY = interpolate(frame, [BADGE_F, BADGE_F + 30], [12, 0], clamp);
+
+  // Calendar fill — the "today" marker advances purchase → drop day.
+  const fillT = interpolate(frame, DAYS_FILL, [0, 1], clamp);
+  const currentDay = dropped
+    ? DROP_DAY
+    : PURCHASE_DAY + Math.round(fillT * (DROP_DAY - PURCHASE_DAY));
 
   return (
     <AbsoluteFill>
-      {DP1_PURCHASE_CHIPS.map((chip, i) => {
-        const col = i % COLS;
-        const row = Math.floor(i / COLS);
-        const x = GRID_X + col * (CARD_W + GAP);
-        const y = GRID_Y + row * (CARD_H + GAP);
-        const inAt = 6 + i * 9;
-        const op = interpolate(frame, [inAt, inAt + 30], [0, chip.hero ? 1 : 0.96], clamp);
-        const ty = interpolate(frame, [inAt, inAt + 30], [22, 0], clamp);
-        // Non-hero chips dim slightly once the hero drop happens (focus).
-        const dim = chip.hero ? 1 : interpolate(frame, [150, 200], [0.96, 0.5], clamp);
-        return (
-          <Chip
-            key={chip.title}
-            chip={chip}
-            x={x}
-            y={y}
-            frame={frame}
-            style={{ opacity: Math.min(op, dim), transform: `translateY(${ty}px)` }}
-          />
-        );
-      })}
+      {/* LEFT — Sony product card */}
+      <div
+        style={{
+          position: "absolute",
+          left: LX,
+          top: CY,
+          width: CARD_W,
+          height: CARD_H,
+          opacity: lOp,
+          transform: `translateY(${(lTy + lift).toFixed(1)}px)`,
+        }}
+      >
+        <div
+          style={{
+            position: "relative",
+            width: "100%",
+            height: "100%",
+            boxSizing: "border-box",
+            background: COLOR.WHITE,
+            borderRadius: 24,
+            border: `1px solid ${COLOR.NAVY}`,
+            boxShadow: "0 30px 70px rgba(20,30,50,0.16)",
+            padding: 34,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 20,
+            textAlign: "center",
+          }}
+        >
+          {/* Product image tile */}
+          <div
+            style={{
+              width: 220,
+              height: 156,
+              borderRadius: 18,
+              background: COLOR.N50,
+              border: `1px solid ${COLOR.LINE}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Headphones size={86} color={COLOR.NAVY} strokeWidth={1.6} aria-label="headphones" />
+          </div>
 
-      {/* Kicker */}
-      <div style={{ position: "absolute", left: 0, right: 0, top: 858, textAlign: "center" }}>
-        {kickerLines.map((line, i) => {
-          // Pulled forward (was 470 + i*70) and spring-snapped: the muted-hook
-          // payoff now lands ~f340-456 instead of f470-636, then holds to read.
-          const at = 340 + i * 52;
-          const s = snap(at);
-          const op = s;
-          const ty = (1 - s) * 14;
-          const last = i === kickerLines.length - 1;
-          return (
+          <div>
+            <div style={{ ...TYPE.DISPLAY_S, fontSize: 36, color: COLOR.INK }}>Sony WH-1000XM5</div>
+            <div style={{ ...TYPE.MICRO, fontSize: 19, color: COLOR.MUTE, marginTop: 6 }}>
+              Wireless headphones
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
             <span
-              key={line}
               style={{
-                ...TYPE.DISPLAY_S,
-                fontSize: 40,
-                color: last ? COLOR.NAVY : COLOR.INK,
-                opacity: op,
-                transform: `translateY(${ty}px)`,
-                display: "inline-block",
-                margin: "0 14px",
+                ...TYPE.SUB,
+                fontSize: 38,
+                fontWeight: 600,
+                color: dropped ? COLOR.MUTE : COLOR.INK,
+                textDecoration: strike > 0.5 ? "line-through" : "none",
+                opacity: dropped ? 0.7 : 1,
               }}
             >
-              {line}
+              {fmt(PAID)}
             </span>
-          );
-        })}
+            {dropped ? (
+              <span
+                style={{
+                  ...TYPE.SUB,
+                  fontSize: 44,
+                  fontWeight: 700,
+                  color: COLOR.AMBER,
+                  opacity: newOp,
+                }}
+              >
+                {fmt(DROPPED)}
+              </span>
+            ) : null}
+          </div>
+
+          {/* "owed $50" badge */}
+          {frame >= BADGE_F ? (
+            <div
+              style={{
+                position: "absolute",
+                right: 22,
+                top: -20,
+                padding: "8px 18px",
+                borderRadius: 999,
+                background: COLOR.AMBER_BG,
+                border: `1px solid ${COLOR.AMBER}`,
+                color: "#9A6700",
+                ...TYPE.MICRO,
+                fontSize: 20,
+                fontWeight: 700,
+                opacity: badgeOp,
+                transform: `translateY(${badgeY.toFixed(1)}px)`,
+                whiteSpace: "nowrap",
+              }}
+            >
+              You're owed $50
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {/* RIGHT — real calendar; days fill in (time passing) */}
+      <div
+        style={{
+          position: "absolute",
+          left: RX,
+          top: CY,
+          width: CARD_W,
+          height: CARD_H,
+          opacity: rOp,
+          transform: `translateY(${rTy.toFixed(1)}px)`,
+        }}
+      >
+        <CalendarCard currentDay={currentDay} dropped={dropped} />
       </div>
     </AbsoluteFill>
   );
 };
 
-const Chip: React.FC<{
-  chip: (typeof DP1_PURCHASE_CHIPS)[number];
-  x: number;
-  y: number;
-  frame: number;
-  style?: React.CSSProperties;
-}> = ({ chip, x, y, frame, style }) => {
-  const isHero = !!chip.hero;
-  const dropF = 150;
-  const dropped = isHero && chip.current !== undefined;
-  const newOp = dropped ? interpolate(frame, [dropF, dropF + 24], [0, 1], clamp) : 0;
-  const oldStrike = dropped ? interpolate(frame, [dropF, dropF + 24], [0, 1], clamp) : 0;
-  const badgeOp = dropped ? interpolate(frame, [dropF + 60, dropF + 90], [0, 1], clamp) : 0;
-  const badgeY = dropped ? interpolate(frame, [dropF + 60, dropF + 90], [10, 0], clamp) : 0;
-  const lift = dropped ? interpolate(frame, [dropF, dropF + 30], [0, -6], clamp) : 0;
+const CalendarCard: React.FC<{ currentDay: number; dropped: boolean }> = ({
+  currentDay,
+  dropped,
+}) => {
+  const first = new Date(YEAR, MONTH, 1);
+  const startDow = getDay(first); // 0=Sun
+  const daysInMonth = getDaysInMonth(first);
+  // Pad leading blanks so the 1st lands under the right weekday.
+  const cells: (number | null)[] = [
+    ...Array.from({ length: startDow }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
 
   return (
     <div
       style={{
-        position: "absolute",
-        left: x,
-        top: y,
-        width: CARD_W,
-        height: CARD_H,
-        borderRadius: 16,
-        background: COLOR.WHITE,
-        border: `1px solid ${isHero ? COLOR.NAVY : COLOR.LINE}`,
-        boxShadow: isHero ? "0 24px 60px rgba(20,30,50,0.14)" : "0 12px 30px rgba(20,30,50,0.06)",
-        padding: "22px 26px",
+        width: "100%",
+        height: "100%",
         boxSizing: "border-box",
+        background: COLOR.WHITE,
+        borderRadius: 24,
+        border: `1px solid ${COLOR.LINE}`,
+        boxShadow: "0 30px 70px rgba(20,30,50,0.10)",
+        padding: "26px 28px",
         display: "flex",
         flexDirection: "column",
-        justifyContent: "center",
-        gap: 10,
-        transform: `translateY(${lift}px)`,
-        ...style,
       }}
     >
-      <div
-        style={{
-          ...TYPE.SUB,
-          fontSize: 24,
-          fontWeight: 600,
-          color: COLOR.INK,
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-      >
-        {chip.title}
-      </div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
-        {dropped ? (
-          <>
-            <span
-              style={{
-                ...TYPE.SUB,
-                fontSize: 26,
-                fontWeight: 600,
-                color: COLOR.MUTE,
-                textDecoration: oldStrike > 0.5 ? "line-through" : "none",
-                opacity: 0.7,
-              }}
-            >
-              {fmt(chip.paid)}
-            </span>
-            <span
-              style={{
-                ...TYPE.SUB,
-                fontSize: 30,
-                fontWeight: 700,
-                color: COLOR.AMBER,
-                opacity: newOp,
-              }}
-            >
-              {fmt(chip.current as number)}
-            </span>
-          </>
-        ) : (
-          <span style={{ ...TYPE.SUB, fontSize: 26, fontWeight: 600, color: COLOR.BODY }}>
-            {fmt(chip.paid)}
-          </span>
-        )}
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+        <span style={{ ...TYPE.DISPLAY_S, fontSize: 26, color: COLOR.INK }}>May 2026</span>
+        <span style={{ ...TYPE.MICRO, fontSize: 16, color: COLOR.MUTE }}>Price-match window</span>
       </div>
 
-      {/* "owed $50" badge on the hero */}
-      {dropped && (
-        <div
+      {/* Weekday row */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(7, 1fr)",
+          marginTop: 16,
+          marginBottom: 6,
+        }}
+      >
+        {WEEKDAYS.map((d, i) => (
+          <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: fixed weekday header
+            key={i}
+            style={{
+              textAlign: "center",
+              ...TYPE.MICRO,
+              fontSize: 13,
+              fontWeight: 600,
+              color: COLOR.MUTE,
+            }}
+          >
+            {d}
+          </div>
+        ))}
+      </div>
+
+      {/* Day grid */}
+      <div
+        style={{
+          flex: 1,
+          display: "grid",
+          gridTemplateColumns: "repeat(7, 1fr)",
+          gridAutoRows: "1fr",
+          gap: 4,
+        }}
+      >
+        {cells.map((day, i) => {
+          if (day === null)
+            return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: fixed blank pad cell
+              <div key={`b${i}`} />
+            );
+          const elapsed = day >= PURCHASE_DAY && day <= currentDay;
+          const isPurchase = day === PURCHASE_DAY;
+          const isCurrent = day === currentDay && !dropped;
+          const isDrop = day === DROP_DAY && dropped;
+
+          let bg = "transparent";
+          let color: string = COLOR.BODY;
+          let border = "1px solid transparent";
+          let shadow = "none";
+          if (isDrop) {
+            bg = COLOR.AMBER;
+            color = COLOR.WHITE;
+          } else if (isPurchase) {
+            bg = COLOR.NAVY;
+            color = COLOR.WHITE;
+          } else if (elapsed) {
+            bg = "rgba(39,70,110,0.12)";
+            color = COLOR.NAVY;
+          } else {
+            color = "#9AA3B2";
+          }
+          if (isCurrent) {
+            border = `1px solid ${COLOR.NAVY}`;
+            shadow = "0 0 0 2px rgba(39,70,110,0.25)";
+          }
+
+          return (
+            <div
+              key={day}
+              style={{
+                borderRadius: 9,
+                background: bg,
+                border,
+                boxShadow: shadow,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                ...TYPE.MICRO,
+                fontSize: 16,
+                fontWeight: isPurchase || isDrop ? 700 : 500,
+                color,
+              }}
+            >
+              {day}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Status line */}
+      <div
+        style={{
+          marginTop: 14,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+          ...TYPE.MICRO,
+          fontSize: 18,
+          fontWeight: 600,
+          color: dropped ? COLOR.AMBER : COLOR.MUTE,
+        }}
+      >
+        <span
           style={{
-            position: "absolute",
-            right: 18,
-            top: -16,
-            padding: "6px 14px",
+            width: 9,
+            height: 9,
             borderRadius: 999,
-            background: COLOR.AMBER_BG,
-            border: `1px solid ${COLOR.AMBER}`,
-            color: "#9A6700",
-            ...TYPE.MICRO,
-            fontWeight: 700,
-            opacity: badgeOp,
-            transform: `translateY(${badgeY}px)`,
-            whiteSpace: "nowrap",
+            background: dropped ? COLOR.AMBER : COLOR.NAVY,
           }}
-        >
-          You're owed $50
-        </div>
-      )}
+        />
+        {dropped ? "Price dropped · May 25" : `Watching the price · May ${currentDay}`}
+      </div>
     </div>
   );
 };

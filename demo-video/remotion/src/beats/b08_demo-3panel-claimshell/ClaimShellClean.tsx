@@ -227,7 +227,8 @@ const AssistantPane: React.FC<{
   chatText: string;
   chatCaret: boolean;
   sendActive: boolean;
-}> = ({ messages, chatText, chatCaret, sendActive }) => (
+  chipActive: boolean;
+}> = ({ messages, chatText, chatCaret, sendActive, chipActive }) => (
   <div className="flex h-full flex-col bg-neutral-0">
     <div className="flex w-full items-center justify-between gap-2 border-neutral-200 border-b bg-neutral-0 px-4 py-3">
       <div className="flex items-center gap-2">
@@ -254,14 +255,31 @@ const AssistantPane: React.FC<{
     </div>
     <div className="border-neutral-200 border-t px-4 py-2">
       <div className="flex flex-wrap gap-2">
-        {QUICK_ACTIONS.map((a) => (
-          <span
-            key={a}
-            className="rounded-full border border-neutral-200 bg-neutral-0 px-3 py-1 text-neutral-700 text-xs"
-          >
-            {a}
-          </span>
-        ))}
+        {QUICK_ACTIONS.map((a, i) => {
+          const pressed = chipActive && i === 0; // "Make it friendlier"
+          return (
+            <span
+              key={a}
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs",
+                pressed
+                  ? "border-brand-primary-500 bg-brand-primary-50 text-brand-primary-600"
+                  : "border-neutral-200 bg-neutral-0 text-neutral-700",
+              )}
+              style={
+                pressed
+                  ? {
+                      transform: "scale(0.96)",
+                      boxShadow: "0 0 0 3px rgba(39,70,110,0.22)",
+                      transition: "none",
+                    }
+                  : undefined
+              }
+            >
+              {a}
+            </span>
+          );
+        })}
       </div>
     </div>
     <div className="border-neutral-200 border-t p-4">
@@ -371,6 +389,7 @@ export type ShellState = {
   chatText: string;
   chatCaret: boolean;
   sendActive: boolean;
+  chipActive: boolean;
   status: "awaiting_approval" | "submitted";
   approveActive: boolean;
 };
@@ -425,6 +444,7 @@ export const ClaimShellClean: React.FC<ShellState> = (s) => (
                 chatText={s.chatText}
                 chatCaret={s.chatCaret}
                 sendActive={s.sendActive}
+                chipActive={s.chipActive}
               />
             </div>
           </div>
