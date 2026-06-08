@@ -223,18 +223,18 @@ export const PriceChartClean: React.FC<ChartState> = ({
           </CardContent>
         </Card>
 
-        {/* Drop notification toast — iOS-push feel, lower-center over the chart */}
+        {/* Drop notification toast — iOS-push feel, BELOW the card (clear of it) */}
         {toastP > 0.01 ? (
           <div
             style={{
               position: "absolute",
               left: 0,
               right: 0,
-              bottom: 36,
+              top: "calc(100% + 28px)",
               display: "flex",
               justifyContent: "center",
               opacity: toastP,
-              transform: `translateY(${((1 - toastP) * 20).toFixed(1)}px)`,
+              transform: `translateY(${((1 - toastP) * 22).toFixed(1)}px)`,
               pointerEvents: "none",
             }}
           >
@@ -242,12 +242,12 @@ export const PriceChartClean: React.FC<ChartState> = ({
               style={{
                 display: "inline-flex",
                 alignItems: "center",
-                gap: 12,
-                padding: "12px 20px",
-                borderRadius: 16,
+                gap: 16,
+                padding: "18px 32px",
+                borderRadius: 20,
                 background: BRAND_BLUE,
                 color: "#FFFFFF",
-                boxShadow: "0 16px 40px rgba(15,23,42,0.28)",
+                boxShadow: "0 20px 48px rgba(15,23,42,0.30)",
                 fontFamily: '"Inter", system-ui, sans-serif',
               }}
             >
@@ -256,15 +256,15 @@ export const PriceChartClean: React.FC<ChartState> = ({
                   display: "inline-flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  width: 30,
-                  height: 30,
+                  width: 42,
+                  height: 42,
                   borderRadius: 999,
                   background: "rgba(255,255,255,0.16)",
                 }}
               >
-                <TrendingDown className="size-4" color="#FFFFFF" />
+                <TrendingDown size={24} color="#FFFFFF" />
               </span>
-              <span style={{ fontSize: 16, fontWeight: 600 }}>
+              <span style={{ fontSize: 23, fontWeight: 600, letterSpacing: -0.2 }}>
                 Price dropped — $100 off at Costco
               </span>
             </div>

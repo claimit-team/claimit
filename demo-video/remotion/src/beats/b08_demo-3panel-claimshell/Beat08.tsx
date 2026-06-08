@@ -22,6 +22,7 @@
 import { TrendingDown } from "lucide-react";
 import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
 
+import { AgentBadge } from "../../new-video/brand";
 import { BeatSubtitle } from "../../polish/BeatSubtitle";
 import { Cursor } from "../../polish/Cursor";
 import { easings } from "../../polish/easings";
@@ -82,11 +83,10 @@ export const Beat08: React.FC = () => {
   }
   const draftBodyOpacity = iv(frame, [848, 856, 866], [1, 0.2, 1]);
 
-  // Chat input + thread.
-  const chatTyping = frame >= 716 && frame < 778;
-  const chatText = chatTyping
-    ? MAKE_FRIENDLIER.slice(0, Math.floor(iv(frame, [716, 730], [0, MAKE_FRIENDLIER.length])))
-    : "";
+  // D — click the "Make it friendlier" quick-action chip → the input fills with
+  // it → click send. (Cleaner than typing; both clicks land on labelled targets.)
+  const chipActive = frame >= 706 && frame <= 728; // chip press feedback
+  const chatText = frame >= 716 && frame < 782 ? MAKE_FRIENDLIER : "";
   const messages: ChatMsg[] = [];
   if (frame >= 778) messages.push({ role: "user", text: MAKE_FRIENDLIER });
   if (frame >= 792) {
@@ -109,12 +109,19 @@ export const Beat08: React.FC = () => {
   const capEvi = iv(frame, [214, 230], [0, 1]) * iv(frame, [320, 334], [1, 0]);
   const capAsst = iv(frame, [334, 350], [0, 1]) * iv(frame, [440, 454], [1, 0]);
 
+  // Agent badges — Claim Agent drafts (C), then Assistant Agent takes the chat
+  // + redraft (D). Crossfade so only one shows at a time.
+  const claimBadgeOp = iv(frame, [440, 468], [0, 1]) * iv(frame, [678, 700], [1, 0]);
+  const asstBadgeOp = iv(frame, [702, 726], [0, 1]) * iv(frame, [978, 1000], [1, 0]);
+
   return (
     <HookAtmosphere>
       <AbsoluteFill
         style={{
           opacity,
-          transform: `scale(${scale.toFixed(4)})`,
+          // Lift the shell ~34px so the assistant input + send button clear the
+          // bottom subtitle band (the chat interaction stays fully visible).
+          transform: `translateY(-34px) scale(${scale.toFixed(4)})`,
           transformOrigin: "center center",
         }}
       >
@@ -126,8 +133,9 @@ export const Beat08: React.FC = () => {
           focus={{ draft: draftF, evidence: eviF, assistant: asstF }}
           messages={messages}
           chatText={chatText}
-          chatCaret={chatTyping}
+          chatCaret={false}
           sendActive={sendActive}
+          chipActive={chipActive}
           status={status}
           approveActive={approveActive}
         />
@@ -135,7 +143,7 @@ export const Beat08: React.FC = () => {
         {/* Intro captions */}
         <Caption x={440} y={86} text="Draft" opacity={capDraft} />
         <Caption x={1270} y={86} text="Evidence" opacity={capEvi} />
-        <Caption x={1270} y={988} text="Assistant" opacity={capAsst} />
+        <Caption x={1270} y={946} text="Assistant" opacity={capAsst} />
 
         {/* Sent toast — blue iOS-push feel (matches b07) */}
         {toastP > 0.01 ? (
@@ -184,23 +192,30 @@ export const Beat08: React.FC = () => {
             </div>
           </div>
         ) : null}
+
+        {/* Cursor — INSIDE the scaled/lifted group so it tracks the shell UI
+            exactly: clicks the "Make it friendlier" chip, the send button, then
+            "Approve and send". */}
+        {frame >= 635 && frame < 1080 ? (
+          <Cursor
+            keyframes={[
+              { frame: 635, x: 1700, y: 1010 }, // enter
+              { frame: 700, x: 876, y: 865 }, // → "Make it friendlier" chip
+              { frame: 730, x: 876, y: 865 }, // hold through click (712)
+              { frame: 770, x: 1707, y: 929 }, // → send button
+              { frame: 985, x: 1707, y: 929 }, // hold through reply + redraft
+              { frame: 1038, x: 1606, y: 200 }, // → "Approve and send"
+              { frame: 1075, x: 1606, y: 200 },
+            ]}
+            clicks={[{ frame: 712 }, { frame: 776 }, { frame: 1045 }]}
+          />
+        ) : null}
       </AbsoluteFill>
 
-      {/* Cursor — chat input click, send click, approve click (D + E only). */}
-      {frame >= 630 && frame < 1080 ? (
-        <Cursor
-          keyframes={[
-            { frame: 635, x: 1840, y: 1020 },
-            { frame: 700, x: 1180, y: 902 }, // chat input
-            { frame: 752, x: 1180, y: 902 },
-            { frame: 776, x: 1690, y: 902 }, // send
-            { frame: 985, x: 1690, y: 902 }, // hold through reply + redraft
-            { frame: 1038, x: 1640, y: 168 }, // approve
-            { frame: 1075, x: 1640, y: 168 },
-          ]}
-          clicks={[{ frame: 712 }, { frame: 776 }, { frame: 1045 }]}
-        />
-      ) : null}
+      {/* Agent badges — Claim Agent for the draft, Assistant Agent for the chat
+          + redraft. A touch bigger; slight overlap with the shell top is fine. */}
+      <AgentBadge name="Claim Agent" opacity={claimBadgeOp} scale={1.28} top={14} />
+      <AgentBadge name="Assistant Agent" opacity={asstBadgeOp} scale={1.28} top={14} />
 
       <BeatSubtitle
         text="Three panels — draft, evidence, and an assistant."

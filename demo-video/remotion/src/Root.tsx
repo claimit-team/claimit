@@ -393,11 +393,11 @@ export const RemotionRoot = () => {
         width={1920}
         height={1080}
       />
-      {/* MASTER — full b01-b10 sequence for review (excludes legacy + b35). */}
+      {/* MASTER — full b02-b10 sequence for review (b01 removed; excludes legacy + b35). */}
       <Composition
         id="MasterDemo"
         component={MasterDemo}
-        durationInFrames={8270}
+        durationInFrames={8030}
         fps={60}
         width={1920}
         height={1080}
