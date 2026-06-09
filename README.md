@@ -7,50 +7,172 @@
 [![Slack Notifications](https://github.com/claimit-team/claimit/actions/workflows/slack-notify.yml/badge.svg)](https://github.com/claimit-team/claimit/actions/workflows/slack-notify.yml)
 [![Terraform Plan](https://github.com/claimit-team/claimit/actions/workflows/terraform-plan.yml/badge.svg)](https://github.com/claimit-team/claimit/actions/workflows/terraform-plan.yml)
 
-AI agent that monitors post-purchase prices and auto-generates refund claims across multiple platforms.
 
-Built for the Google Cloud Rapid Agent Hackathon.
+**You bought something. The price dropped. You deserve a refund.**
 
-## Documentation
+ClaimIt is a multi-agent AI system that automates post-purchase price-match refunds. It monitors prices across retail, airline, and hotel platforms, detects refund eligibility under each platform's own policy, and generates the exact claim material the platform requires — email, chat script, in-store guide, or self-service walkthrough. For email claims, it can send directly from your Gmail after approval.
 
-All product, technical, and planning docs live in Notion:
+**→** [Demo Video](https://youtu.be/nIhkDO9LUsA)
 
-- [Master Document (V2 ClaimIt Proposal)](https://www.notion.so/V2-ClaimIt-Proposal-35c134f951b580eea33bd19bef043417)
-- [Implementation Plan](https://www.notion.so/ClaimIt-Implementation-Plan-35d134f951b58053aeb2dccb98b61c11)
-- [Kanban Board (Tickets)](https://www.notion.so/ClaimIt-Kanban-35e134f951b580a487c1f97c8fac6c97)
+> **Current submission**: [Google Cloud Rapid Agent Hackathon](https://rapid-agent.devpost.com/?ref_feature=challenge&ref_medium=discover) — Agent Builder + Gemini track, MongoDB MCP partner integration.
+>
 
-## Tech Stack
+---
 
-- Frontend: Next.js 15, TypeScript, Tailwind CSS, shadcn/ui, Zustand
-- Backend: Python 3.12, FastAPI, Pydantic v2, Motor
-- LLM: Gemini 2.5 Flash via Google Cloud Agent Builder
-- Data: MongoDB Atlas, Elasticsearch
-- Observability: Arize Phoenix (OpenTelemetry)
-- Infra: Google Cloud (Cloud Run, Pub/Sub, Cloud Scheduler, Secret Manager)
-- IaC: Terraform
-- CI/CD: GitHub Actions
+## Why ClaimIt Exists
 
-## Live Demo
+Nearly every major retailer, airline, and hotel will refund you when the price drops after you buy, but almost no one ever claims it. Industry estimates put unclaimed price-protection refunds in the U.S. at **$10B+ a year**. The refunds are legitimate; the process is just too fragmented to run by hand — claim windows run from ~14 days (retail) to as little as 24 hours (hotels), and every platform demands a different submission format.
 
-- **Frontend:** https://claimitai.vercel.app (Vercel default — custom domain intentionally deferred)
-- **Cloud Run APIs:** see infra/terraform/main.tf for service URLs
+ClaimIt automates the watching, the policy interpretation, and the writing — and handles submission where the platform allows it.
 
-## Partner Tracks
+---
 
-- MongoDB (primary)
-- Elastic (secondary)
-- Arize Phoenix (observability)
+## How It Works
 
-## Team
+1. **Ingest** — Gemini parses purchase receipts from Gmail or uploads into structured data
+2. **Monitor** — Prices tracked on a cadence-aware schedule (6h → 1h → 15min as windows close), with screenshot evidence at every check. Product URLs are auto-resolved from receipt data when missing
+3. **Draft** — Claim materials generated in the format each platform actually accepts, self-evaluated by Gemini before surfacing to the user
+4. **Approve** — Three-pane review UI: draft + evidence + AI assistant. Edit if needed, then approve
+5. **Submit** — Email claims sent from your Gmail after approval. Other types provide copy-ready scripts, printable guides, or step-by-step walkthroughs
 
-- Erdun
-- Will (Wan Qingyuan)
-- Raj Kavathekar
-- Chris
+| Output Type | On Approve | Example Platforms |
+| --- | --- | --- |
+| **Email** | Sent from your Gmail after approval | Best Buy, Delta, Hilton |
+| **Chat Script** | Copy messages into live chat | Amazon, Target |
+| **In-Store Guide** | Print and bring to the store | Target, Home Depot |
+| **Self-Service Walkthrough** | Follow step-by-step instructions | Southwest, United |
 
-## Repository Structure
+→ [Claim Output Types](docs/reference/claim_output_types.md)
 
-See [Implementation Plan Attachment 3 §8](https://www.notion.so/ClaimIt-Implementation-Plan-35d134f951b58053aeb2dccb98b61c11) for the full repo structure and tooling decisions.
+---
+
+## Tech Stack & MCP Integrations
+
+### Core Technologies
+
+| Layer | Technologies |
+| --- | --- |
+| **AI** | Google Cloud Agent Builder · Gemini · Vertex AI |
+| **Data** | MongoDB Atlas · Elasticsearch |
+| **Events** | Google Cloud Pub/Sub · Cloud Scheduler |
+| **Compute** | Google Cloud Run (8 services) |
+| **Frontend** | Next.js · TypeScript · Tailwind CSS · shadcn/ui |
+| **Backend** | Python · FastAPI · Pydantic v2 |
+| **Auth** | Firebase Authentication · Gmail OAuth 2.0 |
+| **Observability** | Arize Phoenix · OpenTelemetry |
+| **Infra** | Terraform · GitHub Actions |
+
+→ [Tech Stack Details](docs/reference/tech_stack_details.md)
+
+### Three MCP Integrations
+
+Agents access external systems through the Model Context Protocol. Each MCP is fronted by Gemini-safe `FunctionTool` wrappers — raw MCP schemas use `const`/`oneOf` constructs that Gemini rejects, so each tool is wrapped with a simple, parseable signature. Auth is injected via httpx request event hooks (Agent Engine silently drops client-level auth).
+
+| MCP | Purpose | Transport | Agents |
+| --- | --- | --- | --- |
+| **MongoDB** | Exact-match policy lookup by platform name | Streamable HTTP → Cloud Run (OIDC) | All four agents |
+| **Phoenix** | Read OTel traces and spans — explain claim reasoning, surface self-eval scores | stdio→HTTP bridge → Cloud Run (OIDC) | All four (claim reasoning: Assistant + Claim) |
+| **Elastic** | Full-text policy search across all platforms | Streamable HTTP → Kibana (ApiKey) | Assistant only |
+
+MongoDB MCP handles precise, named-platform lookups (`search_platform_policy("best_buy")`). Elastic MCP complements it with broad, natural-language search (`search_policies_fulltext("return window electronics")`). Phoenix MCP lets the Assistant explain *why* a claim was drafted the way it was by reading the Gemini call traces.
+
+Tenancy is enforced in the wrapper layer — collection/filter constraints are hard-coded, not model-controlled. Secrets are read from environment at request time, never baked into cloudpickle or Terraform state.
+
+→ [MCP Integrations](docs/reference/mcp_integrations.md)
+
+---
+
+## Architecture
+
+Four AI agents collaborate through a Google Cloud Pub/Sub event bus. Each agent has a single responsibility. No agent calls another directly — they communicate exclusively through events.
+
+![8e684d0da65fbd8cfa9ed4fa602c0089.png](docs/reference/images/architecture.png)
+
+| Agent | Responsibility |
+| --- | --- |
+| **Ingest** | Receipt parsing via Gemini; Gmail watch integration; low-confidence extractions trigger human confirmation |
+| **Monitor** | Cadence-aware price surveillance with screenshot evidence capture; auto-resolves product URLs from receipt data via ScraperAPI when missing |
+| **Claim** | Four output types; Gemini self-critique on clarity, tone, accuracy, completeness; Gmail Send API for email claims |
+| **Assistant** | **Mode A**: general help · **Mode B**: claim-scoped with full context, tool access, and reasoning trace visibility. Invoked through the API Gateway and grounded in claim context plus trace metadata |
+
+→ *[Architecture](docs/reference/architecture.md)*
+
+---
+
+## MongoDB Atlas as Shared Context Layer
+
+MongoDB Atlas stores the full claim lifecycle across six collections, accessed by agents through MCP tool calls:
+
+| Collection | Purpose |
+| --- | --- |
+| `users` | Accounts, Gmail OAuth state, send-mode preferences |
+| `purchases` | Extracted purchase records with confidence scores and resolved product URLs |
+| `price_history` | Timestamped price observations with evidence references |
+| `policies` | Platform refund policies — windows, exclusions, submission channels |
+| `claims` | Draft versions, approval history, submission state, outcomes |
+| `conversations` | Assistant chat threads and agent session references |
+
+→ [Data Model Reference](docs/reference/data_model_reference.md)
+
+---
+
+## Technical Highlights
+
+- **Event-driven multi-agent orchestration** on Google Cloud Agent Builder with Pub/Sub — agents scale and fail independently
+- **Three MCP integrations** (MongoDB, Phoenix, Elastic) with Gemini-safe wrappers, event-hook auth, and wrapper-level tenancy enforcement
+- **Four distinct claim output types** matched to real platform submission processes, not generic templates
+- **Gemini self-evaluation loop** grades drafts on a rubric before surfacing them to users
+- **Recursive observability** via Arize Phoenix — the Assistant queries Phoenix to explain claim decisions, and that query is itself traced
+- **Gmail integration** for both inbound receipt detection and outbound claim sending from the user's own mailbox
+
+---
+
+## Platform Coverage
+
+**26 platforms** across three categories (24 with active price-protection policies):
+
+| Category | Platforms |
+| --- | --- |
+| **Retail** (15) | Best Buy · Target · Dick's · JCPenney · Staples · Macy's · Nordstrom · Newegg · Costco · Dell · Home Depot · Lowe's · Crutchfield · ~~Amazon~~ · ~~Walmart~~ |
+| **Airlines** (6) | Southwest · Delta · United · JetBlue · Alaska · American |
+| **Hotels** (5) | Hilton · Marriott · Hyatt · IHG · Wyndham |
+
+Two platform (Best Buy and Target) run fully live end-to-end. Amazon and Walmart are tracked but currently inactive (no post-purchase price-match program). The remaining use source-linked policy fixtures and seeded data to demonstrate scalable coverage. Adding a new platform requires only a policy document and a price-check adapter.
+
+→ [Platform Coverage](docs/reference/platform_coverage.md)
+
+---
+
+## Security & Privacy
+
+- Gmail OAuth is configured to request only the scopes needed for receipt detection and claim sending — see [Security Model](docs/reference/security_model.md)  for the full scope list
+- OAuth tokens stored in Google Cloud Secret Manager, not in application databases
+- No email is ever sent without explicit user approval (or a user-configured auto-send with 5-minute cancellation window)
+- MCP tool wrappers enforce tenancy at the code level — the model cannot pivot queries to other users' data
+- Current deployment is single-tenant; multi-tenant isolation is planned
+
+→ [Security Model](docs/reference/security_model.md)
+
+---
+
+## Limitations
+
+- **2 of 26 platforms** run live end-to-end; the remaining 24 use source-linked policy fixtures with simulated price monitoring
+- **Outcome tracking** is manual — users report whether the merchant approved or denied the claim
+- **Per-user quotas** for Gemini calls and scraper requests are designed but not yet enforced
+- **Gmail connection is invite-only.** ClaimIt's Google OAuth app is still in Google's "Testing" status (sensitive Gmail scopes require Google verification before public release), so only allowlisted test users can link their mailbox up to Google's 100-test-user cap. To try the Gmail receipt-detection and claim-sending features, contact the ClaimIt team to be added as a test user first.
+
+---
+
+## Future Plans
+
+**Full live coverage** — extend real end-to-end monitoring from Best Buy to all 24 platforms
+
+- **Open Gmail to everyone** — complete Google OAuth verification to remove the invite-only test-user limit
+- **Close the loop** — auto-redraft on low self-eval scores and automate outcome tracking (today it's manual)
+- **Scale out** — multi-tenant isolation, then a browser extension and mobile app for receipt capture
+
+---
 
 ## Getting Started
 
@@ -180,32 +302,27 @@ running api-gateway locally, point the frontend at it:
 
 Use `--force` to overwrite an existing `.env.local`.
 
-**Known limitations (v1)**
+---
 
-- **Gmail OAuth from a local api-gateway won't complete.** The OAuth redirect
-  URI is registered against the deployed Cloud Run callback. The flow will
-  start from localhost but Google redirects back to the prod URL.
-- **Pub/Sub push subscriptions can't deliver to localhost.** Handlers under
-  `/pubsub/*` won't fire automatically. To exercise them, POST a synthetic
-  envelope manually, or tunnel localhost with ngrok and temporarily repoint
-  the subscription. `PUBSUB_AUTH_DISABLED=1` is set in the generated
-  `.env.local` so manual POSTs aren't rejected by OIDC verification.
-- **Backend changes still require running THAT service locally.** The
-  deployed BFF only talks to the deployed agents — mixing local FE +
-  deployed BFF + local agent doesn't work.
+## Team
 
-### Linting & formatting
+| Name | Role | Focus |
+| --- | --- | --- |
+| **Erdun E** | PM · Frontend | Product direction, Next.js UI, demo production |
+| **Raj Kavathekar** | Agent AI Engineer | Ingest Agent, Monitor Agent, Assistant Agent, data pipelines |
+| **Kewen Chen** | Agent AI Engineer | Claim Agent, prompt engineering |
+| **Qingyuan Wan** | Backend · Infrastructure | API Gateway, shared packages, Terraform, CI/CD, MCP integrations |
 
-Hooks run automatically on commit. Manual:
+---
 
-```bash
-# TypeScript / JSON (Biome)
-pnpm exec biome check .
-pnpm exec biome check --write .
+## Links
 
-# Python (Ruff, per agent)
-cd apps/ingest-agent && uv run ruff check . && uv run ruff format .
-```
+- **Live app** — [claimitai.vercel.app](https://claimitai.vercel.app/)
+- **Demo video** — [YouTube](https://youtu.be/nIhkDO9LUsA)
+- **LinkedIn** — [linkedin.com/company/claimitai](https://www.linkedin.com/company/claimitai)
+- **X** — [@claimitbeta](https://x.com/claimitbeta)
+
+---
 
 ## License
 
