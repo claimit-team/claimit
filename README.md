@@ -3,16 +3,24 @@
 <img src="docs/assets/readme-hero.png" alt="ClaimIt — Your Money, Still Yours." width="100%">
 
 <p>
-  <img src="https://img.shields.io/badge/Built_with-Gemini-2C4F7C?style=for-the-badge&logo=googlegemini&logoColor=white" alt="Built with Gemini">
-  <img src="https://img.shields.io/badge/MongoDB-Atlas-1D7A3A?style=for-the-badge&logo=mongodb&logoColor=white" alt="MongoDB Atlas">
-  <img src="https://img.shields.io/badge/Google_Cloud-Run-2C4F7C?style=for-the-badge&logo=googlecloud&logoColor=white" alt="Google Cloud Run">
-  <img src="https://img.shields.io/badge/License-Proprietary-555555?style=for-the-badge" alt="License">
+  <img src="https://cdn.simpleicons.org/googlegemini/886FBF" height="42" alt="Gemini">&nbsp;&nbsp;
+  <img src="https://cdn.simpleicons.org/googlecloud/4285F4" height="42" alt="Google Cloud">&nbsp;&nbsp;
+  <img src="https://cdn.simpleicons.org/mongodb/47A248" height="42" alt="MongoDB">&nbsp;&nbsp;
+  <img src="https://cdn.simpleicons.org/elasticsearch/00BFB3" height="42" alt="Elasticsearch">&nbsp;&nbsp;
+  <img src="https://cdn.simpleicons.org/nextdotjs/8B949E" height="42" alt="Next.js">&nbsp;&nbsp;
+  <img src="https://cdn.simpleicons.org/typescript/3178C6" height="42" alt="TypeScript">&nbsp;&nbsp;
+  <img src="https://cdn.simpleicons.org/tailwindcss/06B6D4" height="42" alt="Tailwind CSS">&nbsp;&nbsp;
+  <img src="https://cdn.simpleicons.org/python/3776AB" height="42" alt="Python">&nbsp;&nbsp;
+  <img src="https://cdn.simpleicons.org/fastapi/009688" height="42" alt="FastAPI">&nbsp;&nbsp;
+  <img src="https://cdn.simpleicons.org/vercel/8B949E" height="42" alt="Vercel">
 </p>
 
 <p>
-  <a href="https://youtu.be/nIhkDO9LUsA"><img src="https://img.shields.io/badge/Watch_the_demo-2C4F7C?style=for-the-badge&logo=youtube&logoColor=white" height="40" alt="Watch the demo"></a>
-  <a href="https://claimitai.vercel.app/"><img src="https://img.shields.io/badge/Live_app-1D7A3A?style=for-the-badge&logo=vercel&logoColor=white" height="40" alt="Live app"></a>
-  <a href="docs/"><img src="https://img.shields.io/badge/Docs-555555?style=for-the-badge&logo=readthedocs&logoColor=white" height="40" alt="Docs"></a>
+  <a href="https://youtu.be/nIhkDO9LUsA"><img src="https://img.shields.io/badge/Watch_the_demo-2C4F7C?style=flat-square&logo=youtube&logoColor=white" height="34" alt="Watch the demo"></a>
+  &nbsp;
+  <a href="https://claimitai.vercel.app/"><img src="https://img.shields.io/badge/Live_app-1D7A3A?style=flat-square&logo=vercel&logoColor=white" height="34" alt="Live app"></a>
+  &nbsp;
+  <a href="docs/"><img src="https://img.shields.io/badge/Docs-555555?style=flat-square&logo=readthedocs&logoColor=white" height="34" alt="Docs"></a>
 </p>
 
 </div>
