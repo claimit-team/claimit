@@ -1,21 +1,27 @@
-# ClaimIt
+<div align="center">
 
-[![CI](https://github.com/claimit-team/claimit/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/claimit-team/claimit/actions/workflows/ci.yml)
-[![Deploy Agents](https://github.com/claimit-team/claimit/actions/workflows/deploy-agents.yml/badge.svg)](https://github.com/claimit-team/claimit/actions/workflows/deploy-agents.yml)
-[![Deploy Prod](https://github.com/claimit-team/claimit/actions/workflows/deploy-prod.yml/badge.svg)](https://github.com/claimit-team/claimit/actions/workflows/deploy-prod.yml)
-[![Keepalive](https://github.com/claimit-team/claimit/actions/workflows/keepalive.yml/badge.svg)](https://github.com/claimit-team/claimit/actions/workflows/keepalive.yml)
-[![Slack Notifications](https://github.com/claimit-team/claimit/actions/workflows/slack-notify.yml/badge.svg)](https://github.com/claimit-team/claimit/actions/workflows/slack-notify.yml)
-[![Terraform Plan](https://github.com/claimit-team/claimit/actions/workflows/terraform-plan.yml/badge.svg)](https://github.com/claimit-team/claimit/actions/workflows/terraform-plan.yml)
+<img src="docs/assets/readme-hero.png" alt="ClaimIt — Your Money, Still Yours." width="100%">
 
+<p>
+  <img src="https://img.shields.io/badge/Built_with-Gemini-2C4F7C?style=for-the-badge&logo=googlegemini&logoColor=white" alt="Built with Gemini">
+  <img src="https://img.shields.io/badge/MongoDB-Atlas-1D7A3A?style=for-the-badge&logo=mongodb&logoColor=white" alt="MongoDB Atlas">
+  <img src="https://img.shields.io/badge/Google_Cloud-Run-2C4F7C?style=for-the-badge&logo=googlecloud&logoColor=white" alt="Google Cloud Run">
+  <img src="https://img.shields.io/badge/License-Proprietary-555555?style=for-the-badge" alt="License">
+</p>
+
+<p>
+  <a href="https://youtu.be/nIhkDO9LUsA"><img src="https://img.shields.io/badge/Watch_the_demo-2C4F7C?style=for-the-badge&logo=youtube&logoColor=white" height="40" alt="Watch the demo"></a>
+  <a href="https://claimitai.vercel.app/"><img src="https://img.shields.io/badge/Live_app-1D7A3A?style=for-the-badge&logo=vercel&logoColor=white" height="40" alt="Live app"></a>
+  <a href="docs/"><img src="https://img.shields.io/badge/Docs-555555?style=for-the-badge&logo=readthedocs&logoColor=white" height="40" alt="Docs"></a>
+</p>
+
+</div>
 
 **You bought something. The price dropped. You deserve a refund.**
 
 ClaimIt is a multi-agent AI system that automates post-purchase price-match refunds. It monitors prices across retail, airline, and hotel platforms, detects refund eligibility under each platform's own policy, and generates the exact claim material the platform requires — email, chat script, in-store guide, or self-service walkthrough. For email claims, it can send directly from your Gmail after approval.
 
-**→** [Demo Video](https://youtu.be/nIhkDO9LUsA)
-
 > **Current submission**: [Google Cloud Rapid Agent Hackathon](https://rapid-agent.devpost.com/?ref_feature=challenge&ref_medium=discover) — Agent Builder + Gemini track, MongoDB MCP partner integration.
->
 
 ---
 
