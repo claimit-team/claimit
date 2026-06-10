@@ -63,7 +63,7 @@ A single read-only Cloud Run MCP service (`mongodb-mcp-server`) serves all four 
 
 ### Why a Bridge?
 
-`@arizeai/phoenix-mcp` is a Node.js stdio-only server. Agent Engine has no Node runtime. The solution: a [supergateway](https://github.com/nicholasgasior/supergateway) wrapper that bridges stdio→Streamable HTTP, deployed as a Cloud Run service. The `PHOENIX_API_KEY` is expanded from environment at runtime inside the bridge entrypoint, keeping the key out of process arguments and Terraform state.
+`@arizeai/phoenix-mcp` is a Node.js stdio-only server. Agent Engine has no Node runtime. The solution: a supergateway wrapper that bridges stdio→Streamable HTTP, deployed as a Cloud Run service. The `PHOENIX_API_KEY` is expanded from environment at runtime inside the bridge entrypoint, keeping the key out of process arguments and Terraform state.
 
 ### Tools
 
