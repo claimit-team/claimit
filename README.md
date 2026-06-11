@@ -338,6 +338,17 @@ Use `--force` to overwrite an existing `.env.local`.
 
 ---
 
+## Credits
+
+Background music sourced from [Pixabay Music](https://pixabay.com/music/):
+- "Corporate" by Sigmamusicart ([track #537730](https://pixabay.com/music/search/537730/))
+- "Upbeat Happy Corporate" by Kornevmusic ([track #487426](https://pixabay.com/music/search/487426/))
+
+Both used under [Pixabay Content License](https://pixabay.com/service/license-summary/).
+
+---
+
+
 ## License
 
 Proprietary License
