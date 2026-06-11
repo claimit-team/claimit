@@ -351,4 +351,4 @@ Both used under [Pixabay Content License](https://pixabay.com/service/license-su
 
 ## License
 
-Proprietary License
+MIT License
